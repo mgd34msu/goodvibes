@@ -554,7 +554,7 @@ describe(`compiled interactive TUI native ${command === '/workstream start' ? 'w
       const retained = readFileSync(join(f.home.home, '.goodvibes/tui/native-work-submission.json.intake'), 'utf8');
       expect(retained).toContain(JSON.stringify(original));
       const again = session.command(`${command} Repair the second fixture without replacing retained original input`);
-      await session.find('original source remains unresolved', text => text.includes('An original input is unresolved'), again);
+      await session.find('original source remains unresolved', text => text.includes('This new message was not sent'), again);
       expect(f.nativeCaptures).toHaveLength(1);
       expect(readFileSync(join(f.home.home, '.goodvibes/tui/native-work-submission.json.intake'), 'utf8')).toBe(retained);
       expect(session.child.exitCode).toBeNull();

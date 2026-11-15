@@ -6,6 +6,7 @@ import {
   type NativeLedgerHost,
 } from '@goodvibes-jev/engine/terminal-shell/native/bound-work-ledger-host';
 import type { NativeWorkLedgerView } from '@goodvibes-jev/engine/terminal-shell/native/work-ledger-view';
+import { TUI_NATIVE_INTAKE_POLICY } from '@goodvibes-jev/engine/terminal-shell/native-intake';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from './client/native-host-credential.ts';
 import { pairLocalTuiHostAutomatically } from './tui-host-pairing.ts';
@@ -57,7 +58,7 @@ export function createNativeWorkLedgerHost(
     () => listener(),
     {
       identityFormat: 'credential',
-      intake: { allowHosted: false, allowSelectedDiff: true },
+      intake: TUI_NATIVE_INTAKE_POLICY,
       // The owner's own machine needs no pairing step: the first native action
       // creates this terminal's device credential (one request).
       prepare: async () => {

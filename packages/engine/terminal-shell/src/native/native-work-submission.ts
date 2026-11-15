@@ -2,7 +2,7 @@ import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/plat
 import type { OperatorNativeWorkSubmissionClient, NativeWorkSubmissionRequest, NativeWorkSubmissionReceipt } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 import { NATIVE_SUBMISSION_MAX_BYTES, NativeWorkSourceError, readNativeWorkSourceFile, validateNativeWorkSource, type NativeWorkSource } from './native-work-submission-source.js';
 import type { NativeSubmissionJournalBinding, NativeSubmissionJournalRecord, NativeWorkSubmissionJournal } from './native-work-submission-journal.js';
-import { NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS, sameNativeSubmissionBinding as sameBinding, sameNativeSubmissionCommand as sameCommand } from './native-work-submission-journal.js';
+import { sameNativeSubmissionBinding as sameBinding, sameNativeSubmissionCommand as sameCommand } from './native-work-submission-journal.js';
 
 export interface NativeWorkSubmissionBinding {
   readonly client: OperatorNativeWorkSubmissionClient;
@@ -14,9 +14,9 @@ export interface NativeWorkSubmissionBinding {
 export type NativeWorkSubmissionSelection =
   | { readonly available: false; readonly identity: string; readonly reason: string }
   | { readonly available: true; readonly identity: string; readonly endpoint: string; readonly projectId: string; readonly workspace: string;
-      readonly journal: Pick<NativeWorkSubmissionJournal, 'read' | 'save' | 'confirm'> & Partial<Pick<NativeWorkSubmissionJournal, 'remove' | 'path'>>; readonly bind: () => NativeWorkSubmissionBinding };
+      readonly journal: Pick<NativeWorkSubmissionJournal, 'read' | 'save' | 'confirm'> & Partial<Pick<NativeWorkSubmissionJournal, 'remove' | 'path' | 'list'>>; readonly bind: () => NativeWorkSubmissionBinding };
 export interface NativeWorkSubmissionState {
-  readonly status: 'pending' | 'submitted' | 'not-found' | 'unknown' | 'conflict' | 'invalid' | 'unavailable';
+  readonly status: 'pending' | 'submitted' | 'not-found' | 'discarded' | 'unknown' | 'conflict' | 'invalid' | 'unavailable';
   readonly message: string;
   readonly request?: Readonly<Pick<NativeWorkSubmissionRequest, 'requestId' | 'inputId' | 'expectedRevision'>> | undefined;
   readonly receipt?: NativeWorkSubmissionReceipt;
@@ -26,6 +26,12 @@ export interface NativeWorkSubmissionActions {
   submitFile(path: string): Promise<NativeWorkSubmissionState | undefined>;
   status(): Promise<NativeWorkSubmissionState | undefined>;
   retry(): Promise<NativeWorkSubmissionState | undefined>;
+  /**
+   * Drop this workspace's unresolved submission: one lookup first. When the host has it, its
+   * receipt is reported and the record released as by status; otherwise the record is removed
+   * and nothing is sent.
+   */
+  discard(): Promise<NativeWorkSubmissionState | undefined>;
   close(): void;
 }
 const requestIdentity = (command: NativeWorkSubmissionRequest): Pick<NativeWorkSubmissionRequest, 'requestId' | 'inputId' | 'expectedRevision'> => ({
@@ -38,11 +44,11 @@ interface Draft extends NativeSubmissionJournalRecord {
   readonly identity: string;
   outcome: 'unknown' | 'submitted' | 'conflict';
 }
-type Mode = 'submit' | 'status' | 'retry';
+type Mode = 'submit' | 'status' | 'retry' | 'discard';
 /** The step a run is in; error classification reads it, so a typo here must not compile. */
-type Phase = 'source' | 'principal' | 'journal-read' | 'snapshot' | 'journal-save' | 'lookup' | 'journal-confirm' | 'submit';
+type Phase = 'source' | 'principal' | 'journal-read' | 'snapshot' | 'journal-save' | 'lookup' | 'journal-confirm' | 'journal-remove' | 'submit';
 type JournalPhase = Extract<Phase, `journal-${string}`>;
-const isJournalPhase = (phase: Phase): phase is JournalPhase => phase === 'journal-read' || phase === 'journal-save' || phase === 'journal-confirm';
+const isJournalPhase = (phase: Phase): phase is JournalPhase => phase === 'journal-read' || phase === 'journal-save' || phase === 'journal-confirm' || phase === 'journal-remove';
 
 /** Durable source/identity first; lookup before any replay; execution is a separate capability. */
 export class NativeWorkSubmissionControls {
@@ -70,6 +76,7 @@ export class NativeWorkSubmissionControls {
   }
   status(): Promise<NativeWorkSubmissionState | undefined> { return this.run('status'); }
   retry(): Promise<NativeWorkSubmissionState | undefined> { return this.run('retry'); }
+  discard(): Promise<NativeWorkSubmissionState | undefined> { return this.run('discard'); }
 
   private async run(mode: Mode, load?: (selection: Extract<NativeWorkSubmissionSelection, { available: true }>, signal: AbortSignal) => Promise<NativeWorkSource>): Promise<NativeWorkSubmissionState | undefined> {
     const selected = this.selection();
@@ -89,14 +96,12 @@ export class NativeWorkSubmissionControls {
       if (epoch !== this.epoch || controller.signal.aborted) return false;
       const now = this.selection(); return now.available && now.identity === selected.identity;
     };
-    let timer: ReturnType<typeof setInterval> | undefined;
     const detach = (): void => {
-      controller.abort(); if (timer) clearInterval(timer); timer = undefined;
+      controller.abort();
       if (operationDraft) operationDraft.outcome = 'unknown'; dispose();
     };
+    // Selection is checked after every await below; nothing polls it in between.
     this.active = { identity: selected.identity, detach };
-    timer = setInterval(() => { if (!current()) { detach(); if (epoch === this.epoch) this.last = undefined; } }, 100);
-    timer.unref?.();
     try {
       publish({ status: 'pending', message: mode === 'submit' ? 'Validating exact source before native submission…' : 'Recovering the original submission journal and live principal…' });
       const source = mode === 'submit' ? validateNativeWorkSource(await load!(selected, controller.signal)) : undefined;
@@ -118,7 +123,7 @@ export class NativeWorkSubmissionControls {
       }
       this.draft = operationDraft;
       if (mode === 'submit' && operationDraft?.outcome === 'unknown') {
-        result = publish({ status: 'unknown', message: 'A previous submission is unresolved or was recovered after restart. Use /work submission-status or /work submission-retry; its exact persisted identity/source will be used.', request: requestIdentity(operationDraft.command) });
+        result = publish({ status: 'unknown', message: 'A previous submission from this workspace is unresolved, so this one was not sent. Check it with /work submission-status, send it again with /work submission-retry, or drop it with /work submission-discard.', request: requestIdentity(operationDraft.command) });
       } else if (mode !== 'submit' && !operationDraft) {
         result = publish({ status: 'unavailable', message: 'No retained submission exists for this verified host, project, workspace and principal. Use /work submit-file <path>.' });
       } else if (mode === 'submit') {
@@ -138,7 +143,13 @@ export class NativeWorkSubmissionControls {
         if (found.kind === 'found') {
           this.validateReceipt(found.receipt, draft); draft.outcome = 'submitted';
           await this.release(selected, scope, draft);
-          result = publish({ status: 'submitted', message: 'Original submission found. No execution was started.', request: requestIdentity(draft.command), receipt: found.receipt, replayed: true });
+          result = publish({ status: 'submitted', message: mode === 'discard' ? 'The host already has this submission, so it was not discarded: its work exists. No execution was started.' : 'Original submission found. No execution was started.', request: requestIdentity(draft.command), receipt: found.receipt, replayed: true });
+        } else if (mode === 'discard') {
+          phase = 'journal-remove';
+          if (!selected.journal.remove) throw new Error('This journal cannot remove records');
+          await selected.journal.remove(scope, draft.command.requestId); if (!current()) return;
+          if (this.draft === draft) this.draft = undefined;
+          result = publish({ status: 'discarded', message: 'The host has no record of this submission, so it was removed from the journal and nothing was sent. If a lost delivery still arrives, its work appears in /work. A new /work submit-file may be sent now.', request: requestIdentity(draft.command) });
         } else if (mode === 'status' || draft.outcome !== 'unknown') {
           result = publish({ status: 'not-found', message: draft.outcome === 'conflict'
             ? 'The stale submission was not found. An explicitly new submit-file command may capture a fresh revision and identity.'
@@ -173,7 +184,7 @@ export class NativeWorkSubmissionControls {
       // At the snapshot step the draft is only the earlier, already settled request; nothing was created for this run.
       const request = operationDraft && !(mode === 'submit' && phase === 'snapshot') ? requestIdentity(operationDraft.command) : undefined;
       if (error instanceof NativeWorkSourceError) result = publish({ status: 'invalid', message: error.message });
-      else if (phase === 'journal-save' && code === 'journal_limit') result = publish({ status: 'unavailable', message: `The submission journal is full (${NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS} retained submissions across hosts, projects and workspaces). No submission was sent. /work submission-status releases only this workspace's record once its receipt is found; ${selected.journal.path ? `records for other workspaces stay in ${selected.journal.path}. Delete that file only after confirming none of them is an unresolved submission you still need to inspect` : 'records for other workspaces stay in the journal file until it is cleared'}, then retry.`, request });
+      else if (phase === 'journal-save' && code === 'journal_limit') result = publish({ status: 'unavailable', message: await this.fullJournalMessage(selected), request });
       else if (isJournalPhase(phase)) result = publish({ status: 'unavailable', message: 'The durable submission journal could not be confirmed. No submission was sent. The visible record was preserved; repair storage, then inspect the same request before retrying.', request });
       else if (code === 'NATIVE_SUBMISSION_CONFLICT' || code === 'CONFLICT') {
         if (operationDraft) operationDraft.outcome = 'conflict';
@@ -186,7 +197,7 @@ export class NativeWorkSubmissionControls {
         ? 'Submission outcome is unknown. Durable source, requestId, inputId and expectedRevision are retained. Inspect status before retrying.'
         : 'Source or native host could not be read. Check the source file, journal and selected host.', request });
     } finally {
-      if (timer) clearInterval(timer); dispose();
+      dispose();
       if (epoch === this.epoch) this.active = undefined;
       // Every early `if (!current()) return` lands here with nothing settled. The
       // pending line this run published must not outlive it: nothing is working
@@ -195,6 +206,15 @@ export class NativeWorkSubmissionControls {
     }
     if (!current()) { if (operationDraft) operationDraft.outcome = 'unknown'; return; }
     return result;
+  }
+  /** What a full journal holds, by workspace and age, so the person can choose what to discard. */
+  private async fullJournalMessage(selected: Extract<NativeWorkSubmissionSelection, { available: true }>): Promise<string> {
+    let records: readonly NativeSubmissionJournalRecord[] = [];
+    try { records = (await selected.journal.list?.()) ?? []; } catch { /* the message below still names the step */ }
+    const now = Date.now();
+    const rows = records.map(record => `  ${record.binding.workspace} · project ${record.binding.projectId} · ${record.savedAt === undefined ? 'saved by an earlier version' : `saved ${Math.max(0, Math.round((now - record.savedAt) / 60_000))} min ago`}`);
+    return ['The submission journal is full, so no submission was sent. It holds one unresolved submission per workspace; from each workspace listed, run /work submission-status to settle it or /work submission-discard to drop it, then submit again.',
+      ...rows].join('\n');
   }
   /** A settled submission no longer needs its journal slot; a failed release leaves the record, which is harmless. */
   private async release(selected: Extract<NativeWorkSubmissionSelection, { available: true }>, scope: NativeSubmissionJournalBinding | undefined, draft: Draft): Promise<void> {

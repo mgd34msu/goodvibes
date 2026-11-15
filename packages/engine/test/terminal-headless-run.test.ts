@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { createHeadlessPermissionInput, extractHeadlessRunFlags, headlessRunFlagErrors, observeHeadlessTurn } from '../terminal-shell/src/native/headless-turn-events.ts';
 import { executeNativeHeadless, nativeHeadlessFailureCause, runWithHeadlessTimeout, writeNativeHeadlessResult } from '../terminal-shell/src/native/native-headless.ts';
 import { NativeIntakeJournalError } from '../terminal-shell/src/native/native-conversation-intake-journal.ts';
+import { NativeIntakeFailure } from '../terminal-shell/src/native/native-conversation-intake.ts';
+import { NativeHostSelectionChangedError } from '../terminal-shell/src/native/native-host-fetch.ts';
 
 type Listener = (envelope: { payload: Record<string, unknown>; source: string }) => void;
 function fakeBus() {
@@ -233,8 +235,9 @@ describe('headless failure cause', () => {
   test('known failures map to non-secret cause codes', () => {
     expect(nativeHeadlessFailureCause(new NativeIntakeJournalError('conflict'))).toBe('journal_conflict');
     expect(nativeHeadlessFailureCause(new NativeIntakeJournalError('invalid_journal'))).toBe('journal');
-    expect(nativeHeadlessFailureCause(new Error('Native intake requires an existing paired principal'))).toBe('principal');
-    expect(nativeHeadlessFailureCause(new Error('Native intake host selection changed'))).toBe('host_changed');
+    expect(nativeHeadlessFailureCause(new NativeIntakeFailure('principal', 'Native intake requires an existing paired principal'))).toBe('principal');
+    expect(nativeHeadlessFailureCause(Object.assign(new Error('refused'), { code: 'PAIRED_OWNER_REQUIRED' }))).toBe('principal');
+    expect(nativeHeadlessFailureCause(new NativeHostSelectionChangedError())).toBe('host_changed');
     expect(nativeHeadlessFailureCause(new TypeError('fetch failed'))).toBe('network');
     expect(nativeHeadlessFailureCause(Object.assign(new Error('bad'), { name: 'ZodError' }))).toBe('schema');
     expect(nativeHeadlessFailureCause('opaque')).toBe('unknown');

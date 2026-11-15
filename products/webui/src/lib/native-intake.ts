@@ -44,8 +44,9 @@ export interface NativeIntakeScope {
 export type NativeIntakeJournal = ReturnType<typeof createNativeIntakeBrowserJournal>;
 const terminal = (result: NativeIntakeResult) =>
   ["work", "turn", "blocked", "refused", "cancelled"].includes(result.kind);
+/** The owner of a saved request: daemon, project and paired principal. The route it was sent over is not part of it. */
 const sameBinding = (left: NativeIntakeBrowserBinding, right: NativeIntakeBrowserBinding) =>
-  JSON.stringify(left) === JSON.stringify(right);
+  left.endpoint === right.endpoint && left.projectId === right.projectId && left.principalId === right.principalId;
 
 /** A selected browser identity is a fence, never a native authority grant. */
 export async function openNativeIntake(
@@ -154,44 +155,36 @@ export async function openNativeIntake(
     };
   };
   try {
+    // The binding is read once, when the form opens. After that the daemon's answer to each
+    // real call is the authority check (it refuses another principal or project with a typed
+    // code), and a changed sign-in closes this form through the client-lifetime subscription.
     const binding = await readBinding(undefined, continuation ? "turn" : "intake");
-    const authorize = async (
-      operation?: AbortSignal,
-      authority: "intake" | "execution" | "turn" = "intake"
-    ) => {
-      const current = await readBinding(
-        operation,
-        continuation && authority === "intake" ? "turn" : authority
-      );
-      if (!sameBinding(binding, current))
-        throw new Error("The native project or paired owner changed. Reopen Native request.");
-      check();
-    };
     const invoke = (async (
       method: string,
       input?: Record<string, unknown>,
       options?: { signal?: AbortSignal }
     ) => {
-      await authorize(
-        options?.signal,
-        method.startsWith("workLedger.turn.")
-          ? "turn"
-          : method.startsWith("workLedger.execution.")
-            ? "execution"
-            : "intake"
-      );
+      check();
       const result = await platformClient.operator.invoke(method, input, combined(options?.signal));
       check();
       return result;
     }) as OperatorRemoteClient["invoke"];
     const client = createOperatorNativeConversationIntakeClient({ invoke }, binding.projectId);
     const executionClient = createOperatorNativeWorkExecutionClient({ invoke }, binding.projectId);
-    const confirm = async (record: NativeIntakeBrowserRecord) => {
+    const owned = (record: NativeIntakeBrowserRecord) => {
       check();
       if (!sameBinding(binding, record.binding))
         throw new Error("This request belongs to a different native owner.");
-      if (record.command.continuation?.sessionId !== continuationSessionId ||
-        (selectedDiff && JSON.stringify(record.command.continuation?.selectedDiff) !== JSON.stringify(selectedDiff)))
+    };
+    const inScope = (record: NativeIntakeBrowserRecord) =>
+      record.command.continuation?.sessionId === continuationSessionId &&
+      (!selectedDiff ||
+        JSON.stringify(record.command.continuation?.selectedDiff) === JSON.stringify(selectedDiff));
+    // The saved original is confirmed against the journal once per action, at its start;
+    // later steps of the same action use the copy that was confirmed.
+    const confirm = async (record: NativeIntakeBrowserRecord) => {
+      owned(record);
+      if (!inScope(record))
         throw new Error("This saved request belongs to a different session scope or selected change.");
       await journal.confirm(record);
       check();
@@ -199,31 +192,26 @@ export async function openNativeIntake(
     // Releasing must work from any form: the journal's capacity counts every saved original
     // for this owner, including those saved under other sessions or selected changes.
     const confirmOwned = async (record: NativeIntakeBrowserRecord) => {
-      check();
-      if (!sameBinding(binding, record.binding))
-        throw new Error("This request belongs to a different native owner.");
+      owned(record);
       await journal.confirm(record);
       check();
     };
-    const inScope = (record: NativeIntakeBrowserRecord) =>
-      record.command.continuation?.sessionId === continuationSessionId &&
-      (!selectedDiff ||
-        JSON.stringify(record.command.continuation?.selectedDiff) === JSON.stringify(selectedDiff));
-    const validate = (
-      record: NativeIntakeBrowserRecord,
-      result: NativeIntakeResult
-    ): NativeIntakeResult => {
+    /**
+     * The daemon's record of a saved original, checked against the saved copy. The engine
+     * client checks later answers against what it has seen; a lookup is the first answer
+     * after a reload, so this is where the saved copy is compared.
+     */
+    const lookup = async (record: NativeIntakeBrowserRecord, operation?: AbortSignal) => {
+      const result = await client.get({ inputId: record.command.inputId }, { signal: combined(operation) });
       if (
         result.kind !== "not-found" &&
         (result.requestId !== record.command.requestId ||
-          result.projectId !== binding.projectId ||
-          result.sourceRef.inputId !== record.command.inputId ||
           result.sourceRef.continuation?.sessionId !== record.command.continuation?.sessionId ||
           JSON.stringify(result.sourceRef.continuation?.selectedDiff) !== JSON.stringify(record.command.continuation?.selectedDiff) ||
           (result.kind === "turn" &&
-            (result.continuation?.sessionId !== record.command.continuation?.sessionId ||
+            (result.text !== record.command.text ||
+              result.continuation?.sessionId !== record.command.continuation?.sessionId ||
               result.continuation?.revision !== result.sourceRef.continuation?.revision)) ||
-          (result.kind === "turn" && result.text !== record.command.text) ||
           (result.kind === "work" && result.receipt.goal !== record.command.text))
       ) {
         throw new Error(
@@ -234,59 +222,35 @@ export async function openNativeIntake(
     };
     const inspect = async (record: NativeIntakeBrowserRecord, operation?: AbortSignal) => {
       await confirm(record);
-      return validate(
-        record,
-        await client.get({ inputId: record.command.inputId }, { signal: combined(operation) })
-      );
+      return lookup(record, operation);
     };
     const inspectOwned = async (record: NativeIntakeBrowserRecord, operation?: AbortSignal) => {
       await confirmOwned(record);
-      return validate(
-        record,
-        await client.get({ inputId: record.command.inputId }, { signal: combined(operation) })
-      );
+      return lookup(record, operation);
+    };
+    const active = (operation?: AbortSignal) => {
+      check();
+      combined(operation).throwIfAborted();
     };
     const releaseExecution = createNativeIntakeExecution({
-      binding,
-      client: executionClient,
-      journal: executionJournal,
-      confirm: confirmOwned,
-      inspect: inspectOwned,
-      active(operation) {
-        check();
-        combined(operation).throwIfAborted();
-      },
+      binding, client: executionClient, journal: executionJournal, confirm: confirmOwned, inspect: lookup, active,
     });
     const releaseTurn = createNativeIntakeTurn({
       binding,
       invoke: (method, input, operation) => invoke(method, input, { signal: combined(operation) }),
       confirm: confirmOwned,
-      inspect: inspectOwned,
-      active(operation) {
-        check();
-        combined(operation).throwIfAborted();
-      },
+      inspect: lookup,
+      active,
     });
     const execution = createNativeIntakeExecution({
-      binding,
-      client: executionClient,
-      journal: executionJournal,
-      confirm,
-      inspect,
-      active(operation) {
-        check();
-        combined(operation).throwIfAborted();
-      },
+      binding, client: executionClient, journal: executionJournal, confirm, inspect: lookup, active,
     });
     const turn = createNativeIntakeTurn({
       binding,
       invoke: (method, input, operation) => invoke(method, input, { signal: combined(operation) }),
       confirm,
-      inspect,
-      active(operation) {
-        check();
-        combined(operation).throwIfAborted();
-      },
+      inspect: lookup,
+      active,
     });
     const continueSubmission = async (
       record: NativeIntakeBrowserRecord,
@@ -294,23 +258,14 @@ export async function openNativeIntake(
       operation?: AbortSignal
     ): Promise<NativeIntakeResult> => {
       let result = found;
-      if (result.kind === "not-found") {
-        await confirm(record);
-        result = validate(
-          record,
-          await client.capture(record.command, { signal: combined(operation) })
+      if (result.kind === "not-found")
+        result = await client.capture(record.command, { signal: combined(operation) });
+      if (result.kind === "captured")
+        result = await client.admit(
+          { inputId: record.command.inputId, sourceRevision: result.sourceRef.sourceRevision },
+          { signal: combined(operation) }
         );
-      }
-      if (result.kind === "captured") {
-        await confirm(record);
-        result = validate(
-          record,
-          await client.admit(
-            { inputId: record.command.inputId, sourceRevision: result.sourceRef.sourceRevision },
-            { signal: combined(operation) }
-          )
-        );
-      }
+      check();
       return result;
     };
     return {
@@ -318,18 +273,46 @@ export async function openNativeIntake(
       execution,
       turn,
       async list() {
-        await authorize();
+        check();
         const records = await journal.list(binding);
         check();
         return records.filter(inScope);
       },
       /** Saved originals for this owner that belong to other sessions or selected changes. They count toward the journal's capacity. */
       async listOtherScopes() {
-        await authorize();
+        check();
         const records = await journal.list(binding);
         check();
         return records.filter((record) => !inScope(record));
       },
+      /**
+       * Saved originals of this daemon and project from an earlier pairing of this browser. The
+       * daemon answers only their own owner, so they are shown read-only and can be discarded.
+       */
+      async listOtherOwners() {
+        check();
+        const records = await journal.listOthers(binding);
+        check();
+        return records;
+      },
+      /** Remove a saved original of an earlier pairing (see `listOtherOwners`). Nothing is sent. */
+      async discardOtherOwner(record: NativeIntakeBrowserRecord) {
+        check();
+        if (
+          record.binding.endpoint !== binding.endpoint ||
+          record.binding.projectId !== binding.projectId ||
+          record.binding.principalId === binding.principalId
+        )
+          throw new Error("Only a request saved under an earlier pairing of this browser can be discarded here.");
+        const target = await executionJournal.get(record.binding, record.command.inputId);
+        if (target) await executionJournal.remove(target);
+        await journal.remove(record);
+        check();
+      },
+      /** How many saved records this build cannot read. */
+      unreadable: () => journal.unreadable(),
+      /** Delete the saved records this build cannot read; they cannot be inspected or sent. */
+      discardUnreadable: () => journal.discardUnreadable(),
       async submit(
         source: NativeIntakeSource,
         saved: (record: NativeIntakeBrowserRecord) => void,
@@ -342,7 +325,7 @@ export async function openNativeIntake(
           ...source,
           ...(continuation ? { continuation } : {}),
         });
-        await authorize(operation);
+        check();
         const record = {
           binding,
           command: nativeConversationIntakeCaptureRequestSchema.parse({
@@ -367,25 +350,17 @@ export async function openNativeIntake(
       async resume(record: NativeIntakeBrowserRecord, operation?: AbortSignal) {
         const found = await inspect(record, operation);
         if (found.kind !== "processing" || found.recovery !== "required") return found;
-        await confirm(record);
-        return validate(
-          record,
-          await client.resume(
-            { inputId: record.command.inputId, sourceRevision: found.sourceRef.sourceRevision },
-            { signal: combined(operation) }
-          )
+        return client.resume(
+          { inputId: record.command.inputId, sourceRevision: found.sourceRef.sourceRevision },
+          { signal: combined(operation) }
         );
       },
       async cancel(record: NativeIntakeBrowserRecord, operation?: AbortSignal) {
         const found = await inspect(record, operation);
         if (found.kind === "not-found" || terminal(found)) return found;
-        await confirm(record);
-        return validate(
-          record,
-          await client.cancel(
-            { inputId: record.command.inputId, sourceRevision: found.sourceRef.sourceRevision },
-            { signal: combined(operation) }
-          )
+        return client.cancel(
+          { inputId: record.command.inputId, sourceRevision: found.sourceRef.sourceRevision },
+          { signal: combined(operation) }
         );
       },
       /**
@@ -412,7 +387,6 @@ export async function openNativeIntake(
             !nativeExecutionCanResume(observed.snapshot);
         }
         if (!settled) return { released: false as const, result: found };
-        await confirmOwned(record);
         // The execution target goes first: if retiring the original then fails, the
         // original is still there and the target is re-derived from the daemon.
         const target = await executionJournal.get(binding, record.command.inputId);

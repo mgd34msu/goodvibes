@@ -31,7 +31,7 @@ import {
   HOSTED_SESSION_LIMIT_REACHED,
   HOSTED_SESSION_METHOD_IDS,
   SESSION_NOT_FOUND,
-  HOSTED_SESSION_UNAVAILABLE,
+  HOSTED_SESSION_TERMINATED,
 } from '../../testing/hosted-session-failures.ts';
 import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.js';
 
@@ -112,7 +112,7 @@ describe('the three refusals a client has to handle', () => {
     expect(refusal!.status).toBe(SESSION_NOT_FOUND.status);
   });
 
-  test('HOSTED_SESSION_UNAVAILABLE: a real session that has terminated', async () => {
+  test('HOSTED_SESSION_TERMINATED: a real session that has terminated', async () => {
     const created = await fixture.invoke<{ session: { id: string } }>('sessions.hosted.create', {
       workspaceRoot: workspace,
       title: 'terminated-under-test',
@@ -120,12 +120,12 @@ describe('the three refusals a client has to handle', () => {
     const sessionId = created.session.id;
     await fixture.invoke('sessions.hosted.kill', { sessionId });
 
-    const refusal = await refusalOf(HOSTED_SESSION_UNAVAILABLE.methodId, { sessionId, clientId: 'client-1' });
+    const refusal = await refusalOf(HOSTED_SESSION_TERMINATED.methodId, { sessionId, clientId: 'client-1' });
     expect(refusal, 'attaching to a terminated session answered instead of refusing').not.toBeNull();
     // 409 and not 404 is the whole distinction: the id is real, so a client must
     // not be told to go look it up again.
-    expect(refusal!.code).toBe(HOSTED_SESSION_UNAVAILABLE.code);
-    expect(refusal!.status).toBe(HOSTED_SESSION_UNAVAILABLE.status);
+    expect(refusal!.code).toBe(HOSTED_SESSION_TERMINATED.code);
+    expect(refusal!.status).toBe(HOSTED_SESSION_TERMINATED.status);
     // The reason travels with the refusal, that is what a client shows.
     expect(refusal!.message.length).toBeGreaterThan(0);
   });
@@ -164,6 +164,7 @@ describe('the three refusals a client has to handle', () => {
     // the engine and left out of what consumers are handed.
     expect(HOSTED_SESSION_FAILURE_FIXTURES.map((entry) => entry.code).sort()).toEqual([
       'HOSTED_SESSION_LIMIT_REACHED',
+      'HOSTED_SESSION_TERMINATED',
       'HOSTED_SESSION_UNAVAILABLE',
       'SESSION_NOT_FOUND',
     ]);

@@ -1,7 +1,7 @@
 import { migrateOperatorTriggers, triggerOperatorStatus, TriggerOperatorError, type TriggerOperatorSupervisor } from '@goodvibes-jev/engine/platform/platform/triggers';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { readTriggerOperatorStatus, readTriggerMigrationResult, TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
-import { RetainedOperatorConnection } from './retained-operator-connection.js';
+import { describeRetainedConnectionFailure, RetainedOperatorConnection } from './retained-operator-connection.js';
 import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
@@ -78,7 +78,7 @@ export function registerRemoteTriggerSupervisorCommand<Context extends PaymentWi
       try { connection = new RetainedOperatorConnection({ owner: () => policy.owner(context), home: () => policy.home(context),
         read: observation => policy.read(context, observation), files: policy.files,
         environment: policy.environment, fetchImpl: policy.fetchImpl, signal: abort.signal }); }
-      catch { context.print('[triggers] Check the selected daemon and its paired administrative credential, then reopen /triggers status.'); return; }
+      catch (error) { context.print(`[triggers] ${describeRetainedConnectionFailure(error, `run /triggers ${mode} again`)}`); return; }
       let closed = false, principal: string | undefined;
       const finish = () => { if (closed) return; closed = true; abort.abort(); void connection.close(); };
       const report = (message: string) => { if (!closed) { context.print(message); context.renderRequest(); } };

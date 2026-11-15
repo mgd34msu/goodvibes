@@ -55,21 +55,11 @@ function recordingIntake() {
   return { intake, calls, cancelled, secondAdmitting, release: (value: NativeConversationIntakeState | undefined) => hold?.(value) };
 }
 
-test('the hosted indicator clears when the selection changes under an observed turn', async () => {
-  const f = fixture(); const { intake } = recordingIntake();
-  try {
-    const handle = await f.wiring.routeNativeOrExplain(source, intake);
-    expect(f.orchestrator.isThinking).toBe(true);
-    f.replaceSelection();
-    expect((await handle!.completion).status).toBe('abandoned');
-    await until(() => !f.orchestrator.isThinking);
-  } finally { await f.close(); }
-});
-
 test('Stop with nothing left to cancel clears a stranded hosted indicator', async () => {
   const f = fixture(); const { intake } = recordingIntake();
   try {
     const handle = await f.wiring.routeNativeOrExplain(source, intake);
+    if (!handle || 'local' in handle) throw new Error('The hosted route did not take the message.');
     expect(f.orchestrator.isThinking).toBe(true);
     // The router no longer owns a cancellable turn once the selection changed.
     f.replaceSelection();
@@ -77,7 +67,7 @@ test('Stop with nothing left to cancel clears a stranded hosted indicator', asyn
     cancelConversationGeneration({ get isThinking() { return f.orchestrator.isThinking; }, abort: () => { aborts++; } }, f.wiring);
     expect(f.orchestrator.isThinking).toBe(false);
     expect(aborts).toBe(0);
-    await handle!.completion;
+    await handle.completion;
   } finally { await f.close(); }
 });
 

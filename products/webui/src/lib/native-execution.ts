@@ -14,7 +14,6 @@ import type {
   NativeExecutionBrowserRecord,
 } from "./native-execution-journal";
 import { errorCode } from "./errors";
-import { exclusiveOperation } from "./exclusive-operation";
 
 export type NativeExecutionObservation =
   | { kind: "not-requested" }
@@ -30,6 +29,10 @@ function failure(error: unknown): Error {
   const messages: Record<string, string> = {
     NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY:
       "Native execution requires current paired admin authority with read:work-ledger and write:fleet.",
+    PAIRED_OWNER_REQUIRED:
+      "Native execution runs only for a paired device with owner access. Pair this browser (Settings, Devices and pairing), then retry.",
+    FORBIDDEN:
+      "This pairing lacks the access native execution needs (read:work-ledger and write:fleet). Pair this browser again with that access (Settings, Devices and pairing), then retry.",
     NATIVE_EXECUTION_REFUSED:
       "Jev refused native execution. No automatic retry or legacy execution was requested.",
     NATIVE_EXECUTION_STALE:
@@ -76,7 +79,9 @@ export function createNativeIntakeExecution(options: {
   binding: NativeIntakeBrowserBinding;
   client: OperatorNativeWorkExecutionClient;
   journal: NativeExecutionBrowserJournal;
+  /** Confirm the saved original against the journal; called once per action, at its start. */
   confirm(record: NativeIntakeBrowserRecord): Promise<void>;
+  /** The daemon's record of the original, already checked against the saved copy. */
   inspect(
     record: NativeIntakeBrowserRecord,
     signal?: AbortSignal
@@ -90,7 +95,7 @@ export function createNativeIntakeExecution(options: {
   async function target(
     original: NativeIntakeBrowserRecord,
     signal?: AbortSignal
-  ): Promise<NativeExecutionBrowserRecord | null> {
+  ): Promise<{ saved: NativeExecutionBrowserRecord; stored: boolean } | null> {
     current(signal);
     await options.confirm(original);
     current(signal);
@@ -99,13 +104,13 @@ export function createNativeIntakeExecution(options: {
     if (saved) {
       if (saved.requestId !== original.command.requestId)
         throw new Error("The saved execution target belongs to a different original request.");
-      return saved;
+      return { saved, stored: true };
     }
     const found = await options.inspect(original, signal);
     current(signal);
     if (found.kind !== "work") return null;
     // Copy only the canonical host identity, never source/proof/actor fields.
-    return {
+    return { stored: false, saved: {
       binding: { ...options.binding },
       inputId: original.command.inputId,
       requestId: original.command.requestId,
@@ -114,18 +119,7 @@ export function createNativeIntakeExecution(options: {
         attemptId: found.receipt.attemptId,
         expectedRevision: found.receipt.expectedRevision,
       }),
-    };
-  }
-  async function confirm(
-    original: NativeIntakeBrowserRecord,
-    saved: NativeExecutionBrowserRecord,
-    signal?: AbortSignal
-  ) {
-    current(signal);
-    await options.confirm(original);
-    current(signal);
-    await options.journal.confirm(saved);
-    current(signal);
+    } };
   }
   async function status(
     saved: NativeExecutionBrowserRecord,
@@ -148,29 +142,26 @@ export function createNativeIntakeExecution(options: {
     record: NativeIntakeBrowserRecord,
     signal?: AbortSignal
   ): Promise<NativeExecutionObservation> {
-    // Detach before the first asynchronous journal or network boundary.
-    const original = structuredClone(record);
-    if (action === "inspect") return perform(action, original, signal);
-    // Status-then-start reads "absent" and then sends: two tabs, or a double click, must
-    // not both act on the same absence.
-    const { endpoint, projectId, principalId, transport } = options.binding;
-    return exclusiveOperation(
-      JSON.stringify(["goodvibes.native-execution", endpoint, projectId, principalId, transport, original.command.inputId]),
-      () => perform(action, original, signal)
-    );
+    // Detach before the first asynchronous journal or network boundary. Two tabs or a double
+    // click that both read "absent" and both start get one execution: the host joins a start
+    // of the same attempt to the delivery in flight and answers a later one from its record.
+    return perform(action, structuredClone(record), signal);
   }
   async function perform(
     action: "inspect" | "request" | "resume" | "cancel",
     original: NativeIntakeBrowserRecord,
     signal?: AbortSignal
   ): Promise<NativeExecutionObservation> {
-    const saved = await target(original, signal);
-    if (!saved) return { kind: "not-requested" };
+    const found = await target(original, signal);
+    if (!found) return { kind: "not-requested" };
+    const { saved, stored } = found;
     if (action === "inspect") return status(saved, signal);
-    current(signal);
-    await options.journal.save(saved);
-    current(signal);
-    await confirm(original, saved, signal);
+    // Saved once, when the target is first derived from the daemon; the write is durable when it returns.
+    if (!stored) {
+      current(signal);
+      await options.journal.save(saved);
+      current(signal);
+    }
     let operation: "start" | "resume" | "cancel";
     if (action === "cancel") operation = "cancel";
     else {
@@ -190,7 +181,6 @@ export function createNativeIntakeExecution(options: {
         operation = "resume";
       }
     }
-    await confirm(original, saved, signal);
     try {
       const snapshot = await options.client[operation](saved.target, { signal });
       current(signal);

@@ -64,40 +64,10 @@ import { bindRestoreTurnAnchorsToSurface, recordCompletedTurnAnchor, startAnchor
 import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
 import { watchOccasionAnnouncements } from './client/occasion-announcements.ts';
-import '../tools/agent-audit-tool.ts';
 import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
 import { recordComposedPromptUsage } from './prompt-usage-record.ts';
 import { createMemorySpineRecheck, resolveMemorySpineRecheckMs } from './memory-spine-recheck.ts';
-import '../tools/agent-mcp-call-route.ts';
 import { capabilitySnapshot, refreshCapabilityIndex } from '../capabilities/capability-snapshot.ts';
-import './bootstrap-capability-wiring.ts';
-import '../tools/agent-capability-tool.ts';
-import '../tools/agent-autonomy-tool.ts';
-import '../tools/agent-channels-tool.ts';
-import '../tools/agent-computer-tool.ts';
-import '../tools/agent-context-tool.ts';
-import '../tools/agent-delegation-tool.ts';
-import '../tools/agent-device-tool.ts';
-import '../tools/agent-execution-tool.ts';
-import '../tools/agent-harness-tool.ts';
-import '../tools/agent-host-tool.ts';
-import '../tools/agent-memory-tool.ts';
-import '../tools/agent-models-tool.ts';
-import '../tools/agent-personal-ops-tool.ts';
-import '../tools/agent-profile-tool.ts';
-import '../agent/owner-profile-gateway.ts';
-import '../tools/agent-research-tool.ts';
-import '../tools/agent-route-tool.ts';
-import '../tools/agent-security-tool.ts';
-import '../tools/agent-sessions-tool.ts';
-import '../tools/agent-setup-tool.ts';
-import '../tools/agent-settings-import-tool.ts';
-import '../tools/agent-settings-tool.ts';
-import '../tools/agent-support-tool.ts';
-import '../tools/agent-terminal-process-tools.ts';
-import '../tools/agent-vibe-tool.ts';
-import '../tools/agent-workspace-tool.ts';
-import '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_OPERATOR_POLICY } from './agent-operator-policy.ts';
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
@@ -463,9 +433,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     orchestrator,
     requestRender,
     permissionPromptRef,
-    onSessionIdChanged: (sessionId) => {
-      runtimeSessionIdRef.value = sessionId;
-    },
     writeLastSessionPointer: writeLastSessionPointerForSurface,
     restoreTurnAnchors: restoreTurnAnchorsForSurface,
     announceSessionResumed: (resumedSessionId, turnCount) => {

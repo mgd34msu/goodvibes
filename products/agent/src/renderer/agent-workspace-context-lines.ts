@@ -609,7 +609,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
       { text: 'Scheduling requires a confirmed action.', fg: PALETTE.warn },
     );
   } else if (category.id === 'work') {
-    base.push(...nativeWorkLedgerLines(workspace.nativeWorkLedgerState).map(text => ({ text, fg: PALETTE.info })));
+    for (const text of nativeWorkLedgerLines(workspace.nativeWorkLedgerState)) base.push({ text, fg: PALETTE.info });
     base.push({ text: 'Legacy operator work and approvals', fg: PALETTE.title, bold: true });
     const processSupervision = snapshot.processSupervision;
     base.push(

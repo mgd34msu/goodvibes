@@ -1,5 +1,5 @@
 import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
-import { RetainedOperatorConnection } from './retained-operator-connection.js';
+import { describeRetainedConnectionFailure, RetainedOperatorConnection } from './retained-operator-connection.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
 import type { SelectionItem, SelectionResult } from './selection-modal.js';
 import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
@@ -17,7 +17,7 @@ export function createTelegramCursorCommand<Context extends PaymentWindowCommand
     try { connection = new RetainedOperatorConnection({ owner: () => policy.owner(context), home: () => policy.home(context),
       read: observation => policy.read(context, observation), files: policy.files,
       environment: policy.environment, fetchImpl: policy.fetchImpl, signal: abort.signal }); }
-    catch { context.print('[telegram] Check the selected host and paired administrative credential, then reopen cursor recovery.'); return; }
+    catch (error) { context.print(`[telegram] ${describeRetainedConnectionFailure(error, 'reopen /channels telegram-cursor')}`); return; }
     let closed = false, replacing = false, committing = false, picker: AbortController | undefined, principal: string | undefined;
     const finish = () => { if (closed) return; closed = true; abort.abort(); picker?.abort(); void connection.close(); };
     const report = (message: string) => { if (!closed) { context.print(message); context.renderRequest(); } };

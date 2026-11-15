@@ -40,6 +40,12 @@ function harness(admitted: Admitted, turnState: "running" | "completed") {
     async unreadable() {
       return 0;
     },
+    async listOthers() {
+      return [];
+    },
+    async discardUnreadable() {
+      return 0;
+    },
   };
   const executionJournal: NativeExecutionBrowserJournal = {
     async get() {

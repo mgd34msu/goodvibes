@@ -419,7 +419,7 @@ describe('hosted handoff: one conversation survives a restart and overlapping me
     const { verbs } = recorder({
       answer: (methodId, input) => {
         if (methodId === 'sessions.steer' && (input as { sessionId: string }).sessionId === 'hosted-old') {
-          return new ConnectedHostVerbError('Hosted session hosted-old is unavailable: it is terminated (killed).', 409);
+          return new ConnectedHostVerbError('Hosted session hosted-old is unavailable: it is terminated (killed).', 409, 'HOSTED_SESSION_TERMINATED');
         }
         if (methodId === 'sessions.hosted.create') return { session: { id: 'hosted-2' } };
         return {};
@@ -440,7 +440,7 @@ describe('hosted handoff: one conversation survives a restart and overlapping me
   test('a 409 that names a terminated session starts the conversation again', async () => {
     const { verbs, calls } = recorder({
       answer: (methodId) => {
-        if (methodId === 'sessions.steer') return new ConnectedHostVerbError("'sessions.steer' failed: Hosted session hosted-1 is unavailable: it is terminated (killed).", 409);
+        if (methodId === 'sessions.steer') return new ConnectedHostVerbError("'sessions.steer' failed: Hosted session hosted-1 is unavailable: it is terminated (killed).", 409, 'HOSTED_SESSION_TERMINATED');
         if (methodId === 'sessions.hosted.create') return { session: { id: 'hosted-2' } };
         return {};
       },
@@ -455,7 +455,7 @@ describe('hosted handoff: one conversation survives a restart and overlapping me
   test('a 409 on a session that may still be live does not fork the conversation', async () => {
     const { verbs, calls } = recorder({
       answer: (methodId) => {
-        if (methodId === 'sessions.steer') return new ConnectedHostVerbError("'sessions.steer' failed: Hosted session hosted-1 is unavailable: its loop could not be composed.", 409);
+        if (methodId === 'sessions.steer') return new ConnectedHostVerbError("'sessions.steer' failed: Hosted session hosted-1 is unavailable: its loop could not be composed.", 409, 'HOSTED_SESSION_UNAVAILABLE');
         if (methodId === 'sessions.hosted.create') return { session: { id: 'hosted-1' } };
         return {};
       },

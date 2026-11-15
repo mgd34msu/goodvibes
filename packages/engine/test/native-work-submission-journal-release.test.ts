@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeWorkSubmissionControls, type NativeWorkSubmissionSelection } from '../terminal-shell/src/native/native-work-submission.js';
 import {
-  NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS,
   NativeWorkSubmissionJournal,
   type NativeSubmissionJournalBinding,
 } from '../terminal-shell/src/native/native-work-submission-journal.js';
@@ -22,24 +21,21 @@ const receipt = (request: NativeWorkSubmissionRequest): NativeWorkSubmissionRece
   source: { version: 1, sourceId: 's', sourceRevision: 'r', sessionId: 'x' }, goal: request.goal, criteria: [...request.criteria],
 });
 
-describe('native submission journal capacity', () => {
+describe('native submission journal release', () => {
   function journal(): NativeWorkSubmissionJournal {
     const directory = mkdtempSync(join(tmpdir(), 'native-journal-release-'));
     directories.push(directory);
     return new NativeWorkSubmissionJournal(join(directory, 'journal.json'));
   }
 
-  test('removing a settled record frees its slot for a new binding, and only the exact request is removed', async () => {
+  test('only the exact request is removed, and other workspaces keep their records', async () => {
     const j = journal();
-    for (let index = 0; index < NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS; index++) await j.save(bindingFor(`/w${index}`), command(String(index)), null);
-    await expect(j.save(bindingFor('/extra'), command('extra'), null)).rejects.toMatchObject({ code: 'journal_limit' });
+    await j.save(bindingFor('/w0'), command('0'), null);
+    await j.save(bindingFor('/w1'), command('1'), null);
     await expect(j.remove(bindingFor('/w0'), 'request-other')).rejects.toMatchObject({ code: 'conflict' });
     expect(await j.read(bindingFor('/w0'))).toBeDefined();
     await j.remove(bindingFor('/w0'), 'request-0');
     expect(await j.read(bindingFor('/w0'))).toBeUndefined();
-    await j.save(bindingFor('/extra'), command('extra'), null);
-    expect(await j.read(bindingFor('/extra'))).toBeDefined();
-    // Unresolved records are never evicted to make room.
     expect(await j.read(bindingFor('/w1'))).toBeDefined();
   });
 });
@@ -77,17 +73,6 @@ describe('native submission controls', () => {
     const result = await controls.submitSource(source);
     expect(result?.status).toBe('submitted');
     expect(await journal.read({ endpoint: 'http://127.0.0.1:7777', projectId: 'p', workspace: '/fixture', principalId: 'principal' })).toBeUndefined();
-  });
-
-  test('a full journal of other workspaces names the file that holds them instead of pointing at status', async () => {
-    const { controls, journal } = setup();
-    for (let i = 0; i < NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS; i += 1) {
-      await journal.save(bindingFor(`/other-${i}`), command(`other-${i}`), null);
-    }
-    const result = await controls.submitSource(source);
-    expect(result?.status).toBe('unavailable');
-    expect(result?.message).toContain(journal.path);
-    expect(result?.message).toContain('No submission was sent');
   });
 
   test('a failed snapshot for a new submission does not blame the earlier request that already completed', async () => {

@@ -9,7 +9,6 @@ import type {
   NativeIntakeBrowserBinding,
   NativeIntakeBrowserRecord,
 } from "./native-intake-journal";
-import { exclusiveOperation } from "./exclusive-operation";
 
 export type NativeTurnObservation =
   | { kind: "not-requested" }
@@ -32,7 +31,9 @@ export function createNativeIntakeTurn(options: {
     input: NativeHostedTurnRequest,
     signal?: AbortSignal
   ): Promise<unknown>;
+  /** Confirm the saved original against the journal; called once per action, at its start. */
   confirm(record: NativeIntakeBrowserRecord): Promise<void>;
+  /** The daemon's record of the original, already checked against the saved copy. */
   inspect(
     record: NativeIntakeBrowserRecord,
     signal?: AbortSignal
@@ -48,16 +49,10 @@ export function createNativeIntakeTurn(options: {
     record: NativeIntakeBrowserRecord,
     signal?: AbortSignal
   ): Promise<NativeTurnObservation> {
-    // Caller mutation or navigation cannot substitute the saved original.
-    const original = structuredClone(record);
-    if (action === "inspect") return perform(action, original, signal);
-    // Status-then-start reads "absent" and then sends: two tabs, or a double click, must
-    // not both act on the same absence.
-    const { endpoint, projectId, principalId, transport } = options.binding;
-    return exclusiveOperation(
-      JSON.stringify(["goodvibes.native-turn", endpoint, projectId, principalId, transport, original.command.inputId]),
-      () => perform(action, original, signal)
-    );
+    // Caller mutation or navigation cannot substitute the saved original. Two tabs or a double
+    // click that both read "absent" and both start get the same turn: the host joins a start of
+    // the same input to the one in flight and answers a later one with the recorded turn.
+    return perform(action, structuredClone(record), signal);
   }
   async function perform(
     action: "inspect" | "request" | "cancel",
@@ -70,18 +65,6 @@ export function createNativeIntakeTurn(options: {
     const source = await options.inspect(original, signal);
     current(signal);
     if (source.kind !== "turn") return { kind: "not-requested" };
-    if (
-      source.projectId !== options.binding.projectId ||
-      source.requestId !== original.command.requestId ||
-      source.sourceRef.inputId !== original.command.inputId ||
-      source.sourceRef.continuation?.sessionId !== original.command.continuation?.sessionId ||
-      source.continuation?.sessionId !== original.command.continuation?.sessionId ||
-      source.continuation?.revision !== source.sourceRef.continuation?.revision ||
-      source.text !== original.command.text
-    )
-      throw new Error(
-        "The conversation source differs from the saved original. Inspect the original request."
-      );
     const target = nativeHostedTurnRequestSchema.parse({
       projectId: source.projectId,
       inputId: original.command.inputId,
@@ -114,8 +97,6 @@ export function createNativeIntakeTurn(options: {
       // here. No polling, implicit recovery, replay or legacy fallback.
       if (action === "inspect" || observed.kind !== "not-found") return observed;
     }
-    await options.confirm(original);
-    current(signal);
     return observe(action === "cancel" ? "workLedger.turn.cancel" : "workLedger.turn.start");
   }
   return Object.freeze({

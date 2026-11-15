@@ -2,6 +2,7 @@ import type { Orchestrator, OrchestratorUserInputOptions } from '@goodvibes-jev/
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { NativeConversationInput } from './native-conversation-input.js';
 import {
+  nativeConversationIntakeAccepted,
   nativeConversationIntakeLines,
   nativeIntakeFailureCause,
   type NativeConversationIntakeActions,
@@ -35,16 +36,42 @@ export async function describeFailedNativeDispatch(state: NativeConversationInta
   return (await releaseUnstartedNativeTurn(state, error)) ?? keptClaimMessage;
 }
 
+/**
+ * True when the host could not take the input and nothing was saved or sent for it: no host is
+ * selected or reachable, or this terminal is not paired with it. A product that runs turns itself
+ * may run this one in its own process. A local journal failure is not this: it is reported as is.
+ */
+export function nativeIntakeUnreachable(state: NativeConversationIntakeState | undefined): boolean {
+  return state?.status === 'unavailable' && state.request === undefined && state.notSent === undefined
+    && state.cause !== 'journal' && state.cause !== 'journal_conflict';
+}
+
 /** Only a fresh durable dispatch claim can enter the ordinary turn loop. */
 export async function routeNativeConversationInput(deps: {
   readonly intake: NativeConversationIntakeActions | undefined;
   readonly source: NativeConversationInput;
+  /** Lines the person must see (a refusal, a step to take). */
   readonly notify: (message: string) => void;
+  /**
+   * Bookkeeping of an accepted turn (identifiers, the recorded decision): the activity feed.
+   * Without it those lines go to `notify` too.
+   */
+  readonly record?: ((message: string) => void) | undefined;
   readonly dispatch: (state: NativeConversationIntakeState) => Promise<void>;
+  /**
+   * Run the turn in this process when the intake cannot be reached and nothing was sent for it.
+   * `reason` is the one line that says why; the caller shows it (once while it stays the same).
+   * Without it such an input is refused and the text handed back.
+   */
+  readonly runLocal?: ((reason: string) => Promise<void>) | undefined;
   readonly preparationFailureMessage?: string | undefined;
 }): Promise<NativeConversationIntakeState | undefined> {
   if (!deps.intake) {
     const state = { status: 'unavailable' as const, message: 'Native conversation intake is unavailable. No ordinary turn was started.' };
+    if (deps.runLocal) {
+      await deps.runLocal('No connected host is set up for this terminal, so messages run in this process.');
+      return { status: 'recorded', message: 'Ran in this process.' };
+    }
     deps.notify(state.message);
     return state;
   }
@@ -61,7 +88,12 @@ export async function routeNativeConversationInput(deps: {
     deps.notify(failed.message);
     return failed;
   }
-  for (const line of nativeConversationIntakeLines(state)) deps.notify(line);
+  if (deps.runLocal && nativeIntakeUnreachable(state)) {
+    await deps.runLocal(`${state!.message} Messages run in this process until it can.`);
+    return { status: 'recorded', message: 'Ran in this process.' };
+  }
+  const quiet = deps.record !== undefined && nativeConversationIntakeAccepted(state);
+  for (const line of nativeConversationIntakeLines(state)) (quiet ? deps.record! : deps.notify)(line);
   if (isNativeConversationTurnReady(state)) {
     try {
       await deps.dispatch(state);

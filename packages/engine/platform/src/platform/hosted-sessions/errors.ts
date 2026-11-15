@@ -24,6 +24,19 @@ export class HostedSessionUnavailableError extends Error {
 }
 
 /**
+ * The session exists and has ended for good; nothing sent to it can run. A
+ * caller that keeps a mapping to it creates a new session instead. Still an
+ * unavailable session for every existing check; `code` is what a remote caller reads.
+ */
+export class HostedSessionTerminatedError extends HostedSessionUnavailableError {
+  readonly code = 'HOSTED_SESSION_TERMINATED';
+  constructor(sessionId: string, terminatedReason: string | undefined) {
+    super(sessionId, `it is terminated (${terminatedReason ?? 'no reason recorded'})`);
+    this.name = 'HostedSessionTerminatedError';
+  }
+}
+
+/**
  * A live hosted session whose loop cannot be built yet: its workspace floor is
  * still being acquired or its provider registry is not ready. Nothing ran, so
  * the same request can be sent again shortly.

@@ -71,8 +71,8 @@ import {
   clampAttachmentLease,
 } from './attachments.js';
 export type { HostedSessionSpine } from './spine-intake.js';
-import { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionUnavailableError } from './errors.js';
-export { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionUnavailableError } from './errors.js';
+import { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionTerminatedError, HostedSessionUnavailableError } from './errors.js';
+export { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionTerminatedError, HostedSessionUnavailableError } from './errors.js';
 import type { HostedContractWorkAdapter } from './contract-work-adapter.js';
 import { isTerminalContractStatus } from '../contract/types.js';
 import type {
@@ -1293,7 +1293,7 @@ export class HostedSessionManager {
   private requireLive(sessionId: string): LiveSession {
     const live = this.requireKnown(sessionId);
     if (live.record.status === 'terminated') {
-      throw new HostedSessionUnavailableError(sessionId, `it is terminated (${live.record.terminatedReason ?? 'no reason recorded'})`);
+      throw new HostedSessionTerminatedError(sessionId, live.record.terminatedReason);
     }
     return live;
   }

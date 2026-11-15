@@ -50,7 +50,6 @@ export interface BootstrapShellOptions {
   readonly orchestrator: Orchestrator;
   readonly requestRender: () => void;
   readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
-  readonly onSessionIdChanged: (sessionId: string) => void;
   readonly writeLastSessionPointer: (sessionId: string) => void;
   readonly restoreTurnAnchors: (sessionId: string) => number;
   readonly announceSessionResumed: (resumedSessionId: string, turnCount: number) => void;

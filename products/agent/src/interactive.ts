@@ -546,6 +546,7 @@ async function main() {
   const remoteConversation = installRemoteConversationRouting(ctx, {
     render: () => render(),
     notify: (message) => systemMessageRouter.userAction(message),
+    record: (message) => systemMessageRouter.activity(message),
     restoreDraft: (text) => restoreDraft(text),
   });
   unsubs.push(() => remoteConversation.dispose());
@@ -688,6 +689,8 @@ async function main() {
     sendTurn(text, options);
   };
 
+  /** The reason last shown for running turns in this process; cleared once the host takes a message. */
+  let localTurnReason: string | undefined;
   /**
    * The owner-input path: native intake, the routing decision (the connected
    * host's loop or this process) and the turn-finished signal. Typed, spoken,
@@ -705,9 +708,29 @@ async function main() {
       return;
     }
     const source: NativeConversationInput = { text, unsupportedSources: [] };
+    // The host cannot take this message and nothing was sent for it: the turn runs here (the
+    // documented behaviour of hostedSessions.routeConversationTurns). The reason is shown once
+    // while it stays the same, not before every message.
+    const runLocal = (reason: string): Promise<void> => {
+      if (reason !== localTurnReason) {
+        localTurnReason = reason;
+        systemMessageRouter.userAction(reason);
+        render();
+      }
+      return orchestrator.handleUserInput(source.text, undefined,
+        options.spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions);
+    };
     void (async () => {
       try {
-        if (await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake)) return;
+        const routed = await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake);
+        if (routed && 'local' in routed) {
+          await runLocal(routed.reason);
+          return;
+        }
+        if (routed) {
+          localTurnReason = undefined;
+          return;
+        }
         const state = await routeNativeConversationInput({
           intake: commandContext.nativeConversationIntake,
           source,
@@ -715,10 +738,14 @@ async function main() {
             systemMessageRouter.userAction(message);
             render();
           },
+          record: (message) => systemMessageRouter.activity(message),
           dispatch: (state) => dispatchNativeTurn(state, options.spokenOutput, turnOptions),
+          runLocal,
         });
-        // Refused (another input still being admitted, no intake, input not acceptable): nothing was sent.
-        if (state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') notSent(source.text);
+        // The host answered for this message: a later fallback states its reason again.
+        if (state?.result) localTurnReason = undefined;
+        // Refused (another input still being admitted or unresolved, input not acceptable): nothing was sent.
+        if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') notSent(source.text);
       } catch (error) {
         // Routing failed before the input was admitted: give back the draft.
         notSent(source.text);

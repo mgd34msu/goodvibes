@@ -204,8 +204,8 @@ export function hostedSessionTitle(request: HostedHandoffRequest): string {
  * Whether a steer failure means "that hosted session is not there any more"
  * rather than "the daemon could not do this right now".
  *
- * 404 is the engine's own not-found. 409 is the engine's "the session exists
- * and here is why it cannot serve you": only the terminated reason is permanent.
+ * 404 is the engine's own not-found. Of the 409s ("the session exists and here
+ * is why it cannot serve you") only `HOSTED_SESSION_TERMINATED` is permanent.
  * Other 409s (its loop could not be composed, it was shut down mid-delivery)
  * describe a session that may still be live, and re-creating would fork the
  * conversation into a second session. Those, a 429 (the cap) and any 5xx are
@@ -213,7 +213,7 @@ export function hostedSessionTitle(request: HostedHandoffRequest): string {
  */
 function isStaleHostedSession(error: unknown): boolean {
   if (!(error instanceof ConnectedHostVerbError)) return false;
-  return error.status === 404 || (error.status === 409 && /\bit is terminated\b/.test(error.message));
+  return error.status === 404 || error.code === 'HOSTED_SESSION_TERMINATED';
 }
 
 /**

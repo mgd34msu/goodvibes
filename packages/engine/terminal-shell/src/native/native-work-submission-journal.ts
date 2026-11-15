@@ -7,7 +7,6 @@ import {
   type NativeWorkSubmissionRequest,
 } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 
-export const NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS = 16;
 export const NATIVE_SUBMISSION_JOURNAL_MAX_BYTES = 2 * 1024 * 1024;
 
 /** The principal must come from this connection's live verified auth.current. */
@@ -21,6 +20,8 @@ export interface NativeSubmissionJournalBinding {
 export interface NativeSubmissionJournalRecord {
   readonly binding: NativeSubmissionJournalBinding;
   readonly command: NativeWorkSubmissionRequest;
+  /** When the record was saved (epoch ms); absent on records written by an earlier build. */
+  readonly savedAt?: number | undefined;
 }
 
 export type NativeSubmissionJournalIO = BoundedJsonFileIO;
@@ -75,12 +76,13 @@ function validateFile(value: unknown): JournalFile {
   if (!ownKeys(value, ['version', 'records']) || value.version !== 1 || !Array.isArray(value.records)) {
     throw new NativeSubmissionJournalError('invalid_journal');
   }
-  if (value.records.length > NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS) throw new NativeSubmissionJournalError('journal_limit');
   const records: NativeSubmissionJournalRecord[] = [];
   for (const record of value.records) {
-    if (!ownKeys(record, ['binding', 'command'])) throw new NativeSubmissionJournalError('invalid_journal');
+    const timed = ownKeys(record, ['binding', 'command', 'savedAt']);
+    if (!timed && !ownKeys(record, ['binding', 'command'])) throw new NativeSubmissionJournalError('invalid_journal');
+    if (timed && (typeof record.savedAt !== 'number' || !Number.isSafeInteger(record.savedAt) || record.savedAt < 0)) throw new NativeSubmissionJournalError('invalid_journal');
     let parsed: NativeSubmissionJournalRecord;
-    try { parsed = { binding: copyBinding(record.binding), command: copyCommand(record.command) }; }
+    try { parsed = { binding: copyBinding(record.binding), command: copyCommand(record.command), ...(timed ? { savedAt: record.savedAt as number } : {}) }; }
     catch { throw new NativeSubmissionJournalError('invalid_journal'); }
     if (records.some(existing => sameNativeSubmissionBinding(existing.binding, parsed.binding))) throw new NativeSubmissionJournalError('invalid_journal');
     records.push(parsed);
@@ -89,12 +91,15 @@ function validateFile(value: unknown): JournalFile {
 }
 
 /**
- * Product-owned, bounded restart journal. Every mutation requires a strict lock
+ * Product-owned restart journal: one record per host, project, workspace and
+ * principal, for a submission in flight. Every mutation requires a strict lock
  * and durable publication. An AtomicWriteDurabilityError is deliberately allowed
  * to escape unchanged: published-indeterminate bytes must never be rolled back,
  * deleted, treated as absent or used for a POST without explicit confirmation.
- * There is no expiry or eviction of unresolved identities; a record leaves only
- * through `remove`, once its submission has a validated receipt.
+ * A record leaves through `remove`: once its submission has a validated receipt,
+ * or when the person discards it (`/work submission-discard`) after the host
+ * reported it does not have it. There is no record cap; the file's byte limit is
+ * the only bound.
  */
 export class NativeWorkSubmissionJournal {
   readonly path: string;
@@ -115,7 +120,7 @@ export class NativeWorkSubmissionJournal {
 
   /** null means absent, never an unconditional overwrite. The write is durable when this returns. */
   async save(binding: NativeSubmissionJournalBinding, command: NativeWorkSubmissionRequest, expectedRequestId: string | null): Promise<void> {
-    const record = { binding: copyBinding(binding), command: copyCommand(command) };
+    const record = { binding: copyBinding(binding), command: copyCommand(command), savedAt: Date.now() };
     if (expectedRequestId !== null && (typeof expectedRequestId !== 'string' || !expectedRequestId.length)) {
       throw new NativeSubmissionJournalError('conflict');
     }
@@ -127,12 +132,16 @@ export class NativeWorkSubmissionJournal {
         throw new NativeSubmissionJournalError('conflict');
       }
       if (index < 0) file.records.push(record); else file.records[index] = record;
-      if (file.records.length > NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS) throw new NativeSubmissionJournalError('journal_limit');
       return { next: file, value: undefined };
     });
   }
 
-  /** Release a settled record so its slot can serve another binding. Only the exact requestId is removed. */
+  /** Every record, for every host, project and workspace: what the person sees when the file is full. */
+  async list(): Promise<readonly NativeSubmissionJournalRecord[]> {
+    return (await this.file.read()).records;
+  }
+
+  /** Release a settled or discarded record. Only the exact requestId is removed. */
   async remove(binding: NativeSubmissionJournalBinding, requestId: string): Promise<void> {
     const selected = copyBinding(binding);
     if (typeof requestId !== 'string' || !requestId.length) throw new NativeSubmissionJournalError('conflict');

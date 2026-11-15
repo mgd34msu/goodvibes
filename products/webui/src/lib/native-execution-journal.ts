@@ -135,12 +135,16 @@ function recordSnapshot(value: unknown): NativeExecutionBrowserRecord {
   };
 }
 
+/**
+ * Who owns a saved target: the daemon, its project and the paired principal. The transport is
+ * how the daemon was reached (direct or through the relay), not who owns the request, so a
+ * request saved on the local network stays visible and actionable after a switch to the relay.
+ */
 function sameBinding(left: NativeIntakeBrowserBinding, right: NativeIntakeBrowserBinding): boolean {
   return (
     left.endpoint === right.endpoint &&
     left.projectId === right.projectId &&
-    left.principalId === right.principalId &&
-    left.transport === right.transport
+    left.principalId === right.principalId
   );
 }
 
@@ -367,9 +371,10 @@ export function createNativeExecutionBrowserJournal(
         // Only the exact target that was shown may be retired.
         if (JSON.stringify(existing) !== JSON.stringify(snapshot))
           throw new NativeExecutionBrowserJournalError("conflict");
+        // The stored key carries the transport the target was saved under.
         store.delete([
-          ...BINDING_KEYS.map((key) => snapshot.binding[key as keyof NativeIntakeBrowserBinding]),
-          snapshot.inputId,
+          ...BINDING_KEYS.map((key) => existing.binding[key as keyof NativeIntakeBrowserBinding]),
+          existing.inputId,
         ]);
       });
     },

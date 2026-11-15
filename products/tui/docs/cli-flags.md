@@ -333,7 +333,7 @@ The GitHub Action passes `--timeout 30m --max-turns 50` to a prompt run unless i
 | `schemaVersion` | yes | Frame shape version, currently `1`. |
 | `ok` | yes | `true` exactly when the exit code is `0`. |
 | `response` | yes | The answer, or the native status message. |
-| `stopReason` | yes | Why the run ended, for example `completed`, `empty_response`, `max_turns`, `timeout`, `cancelled`, `native-unknown`, `native-unavailable`. |
+| `stopReason` | yes | Why the run ended. Model turn: `completed`, `empty_response`, `max_turns`, `timeout`, `cancelled` (Ctrl-C, SIGTERM, or work the run delegated was cancelled by the run itself), `contract-failed` or `agent-failed` (delegated work ended without a result; `error` says why), `awaiting-owner` (delegated work stopped for an owner decision: open the session interactively, answer it, and the work continues), `turn-unsettled` (the turn ended without a final event), `invalid-input`. Native intake: `native-<kind>` for the recorded outcome (for example `native-turn`, `native-work`, `native-blocked`, `native-refused`, `native-cancelled`), `native-unknown`, `native-unavailable`. |
 | `sessionId` | yes | The conversation session, or `null` when no model turn ran. |
 | `usage` | yes | `{ modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsdCents? }` summed over the run, or `null` when no model turn ran. `costUsdCents` is present only when every response was priced. |
 | `error` | no | What went wrong. |

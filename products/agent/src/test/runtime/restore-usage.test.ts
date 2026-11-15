@@ -33,7 +33,7 @@ async function fixture() {
     configManager: services.configManager, runtimeBus, runtimeStore, services, conversation,
     runtime: runtime as never, orchestrator: orchestrator as unknown as Orchestrator,
     requestRender: () => {}, permissionPromptRef: { requestPermission: async () => ({ approved: false }) },
-    onSessionIdChanged: () => {}, writeLastSessionPointer: () => {},
+    writeLastSessionPointer: () => {},
     getControlPlaneRecentEvents: () => [], toolRegistry: new ToolRegistry(),
     forensicsRegistry: new ForensicsRegistry(), policyRuntimeState: services.policyRuntimeState,
     uiServices: createUiRuntimeServices(services),

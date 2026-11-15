@@ -53,13 +53,22 @@ export const SESSION_NOT_FOUND: HostedSessionFailureFixture = {
 /**
  * The session is real and cannot serve this request. 409, deliberately not 404:
  * a 404 would invite a retry against an id that is perfectly valid. The message
- * carries the reason (terminated, loop not composable) so a client can say why.
+ * carries the reason (loop not composable, shut down mid-delivery) so a client can say why.
  */
 export const HOSTED_SESSION_UNAVAILABLE: HostedSessionFailureFixture = {
   methodId: 'sessions.hosted.attach',
   code: 'HOSTED_SESSION_UNAVAILABLE',
   status: 409,
-  when: 'the session exists but has terminated, or its loop could not be composed',
+  when: 'the session exists but its loop could not be composed or it was shut down mid-delivery',
+  clientAction: 'Show the reason. The session may still be live: do not create a second one for the same conversation.',
+};
+
+/** The session is real and has ended for good. A client that maps a conversation to it creates a new session. */
+export const HOSTED_SESSION_TERMINATED: HostedSessionFailureFixture = {
+  methodId: 'sessions.hosted.attach',
+  code: 'HOSTED_SESSION_TERMINATED',
+  status: 409,
+  when: 'the session exists but has terminated',
   clientAction: 'Show the reason. Offer a new session, never a retry of this one.',
 };
 
@@ -79,6 +88,7 @@ export const HOSTED_SESSION_LIMIT_REACHED: HostedSessionFailureFixture = {
 export const HOSTED_SESSION_FAILURE_FIXTURES: readonly HostedSessionFailureFixture[] = [
   SESSION_NOT_FOUND,
   HOSTED_SESSION_UNAVAILABLE,
+  HOSTED_SESSION_TERMINATED,
   HOSTED_SESSION_LIMIT_REACHED,
 ];
 

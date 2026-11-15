@@ -33,6 +33,23 @@ Branching rules that hold for every program:
 - Standard 128+signal codes are not used except `130`.
 - `goodvibes-agent doctor` exits `1` for a must-fix (`risk`) finding and `0` otherwise; `--strict` makes any finding exit `1`.
 
+`run --output json|stream-json` also names why it stopped in `stopReason`:
+
+| `stopReason` | Exit | Next step |
+| --- | --- | --- |
+| `completed` | `0` | None. |
+| `empty_response` | `1` | The model answered with nothing; run again or change the model. |
+| `max_turns` | `1` | Raise `--max-turns`, or narrow the prompt. |
+| `timeout` | `124` | Raise `--timeout`; work the run delegated was cancelled with it. |
+| `cancelled` | `130` | The run was cancelled (Ctrl-C, SIGTERM), including work it delegated. |
+| `contract-failed`, `agent-failed` | `1` | Delegated work ended without a result; `error` says why. |
+| `awaiting-owner` | `1` | Delegated work stopped for an owner decision: open the session interactively, answer it, and the work continues. |
+| `turn-unsettled` | `1` | The turn ended without a final event; inspect the session before running again. |
+| `invalid-input` | `2` | Fix the command line. |
+| `native-<kind>` | by kind | The recorded intake outcome (`native-turn`, `native-work`, `native-blocked`, `native-refused`, `native-cancelled`). |
+| `native-unknown` | `3` | Run `run --intake-status` before retrying. |
+| `native-unavailable` | `1` | Nothing was sent; `cause` says why (`principal`: pair this terminal with the host). |
+
 Details: [headless `run` (TUI)](../products/tui/docs/cli-flags.md#headless-run),
 [headless `run` (Agent)](../products/agent/docs/headless-run.md#exit-codes),
 [daemon commands](../products/daemon/docs/commands-reference.md#exit-codes).

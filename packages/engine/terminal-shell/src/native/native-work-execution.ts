@@ -1,4 +1,4 @@
-import type { WorkLedgerReadClient, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionIdentity, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 
 export type NativeWorkExecutionAction = 'start' | 'status' | 'cancel' | 'resume';
@@ -18,6 +18,8 @@ function failureMessage(error: unknown, action: NativeWorkExecutionAction): stri
     NATIVE_EXECUTION_STALE: 'Native work, attempt or authority changed. Inspect status before choosing a new action.',
     NATIVE_EXECUTION_CONFLICT: 'Native execution conflicts with the recorded admission. Inspect status before choosing a new action.',
     NATIVE_EXECUTION_RECOVERY_REQUIRED: 'Host recovery is required. Inspect status, then use explicit resume only if still appropriate.',
+    PAIRED_OWNER_REQUIRED: 'Native execution runs only for a paired device with owner access. Pair this terminal with the host (/pair), then try again.',
+    FORBIDDEN: 'This pairing lacks the access native execution needs (read:work-ledger and write:fleet). Pair this terminal again with that access, then try again.',
   };
   try {
     const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
@@ -44,14 +46,20 @@ function resultMessage(snapshot: NativeWorkExecutionSnapshot): string {
 /** Explicit controls over existing native work. No intake, criteria editing or automatic recovery. */
 export class NativeWorkExecutionControls {
   state: NativeWorkExecutionState | undefined;
-  private binding: { client: OperatorNativeWorkExecutionClient; reader: WorkLedgerReadClient; current: () => boolean } | undefined;
+  private binding: { client: OperatorNativeWorkExecutionClient; projectId: string; snapshot: () => WorkLedgerReadSnapshot | undefined; read: () => Promise<WorkLedgerReadSnapshot>; current: () => boolean } | undefined;
   private readonly observed = new Map<string, NativeWorkExecutionIdentity>();
   private generation = 0;
   private request = 0;
   private pending: AbortController | undefined;
   constructor(private readonly changed: () => void) {}
-  bind(client: OperatorNativeWorkExecutionClient, reader: WorkLedgerReadClient, current: () => boolean): void {
-    this.clear(); this.binding = { client, reader, current };
+  /**
+   * `snapshot` is the ledger the view shows: an action reads its attempt from it, never from a
+   * fetch of its own. The host's revision check (`NATIVE_EXECUTION_STALE`) refuses a button
+   * pressed on rows that moved since. `read` serves only a command typed before the view has
+   * read its first snapshot.
+   */
+  bind(client: OperatorNativeWorkExecutionClient, projectId: string, snapshot: () => WorkLedgerReadSnapshot | undefined, read: () => Promise<WorkLedgerReadSnapshot>, current: () => boolean): void {
+    this.clear(); this.binding = { client, projectId, snapshot, read, current };
   }
   clear(): void {
     ++this.generation; ++this.request;
@@ -61,7 +69,7 @@ export class NativeWorkExecutionControls {
     try { binding?.client.dispose(); } catch { /* local cleanup cannot retain an old host */ }
   }
   observe(snapshot: WorkLedgerReadSnapshot): void {
-    if (!this.binding || snapshot.projectId !== this.binding.reader.projectId) return;
+    if (!this.binding || snapshot.projectId !== this.binding.projectId) return;
     // Remember authenticated rows before their first action. A newly fetched
     // handoff must not silently retarget an explicitly displayed cancellation.
     for (const { work, attempt } of snapshot.works) {
@@ -82,12 +90,14 @@ export class NativeWorkExecutionControls {
     const request = ++this.request;
     const current = (): boolean => binding.current() && generation === this.generation && request === this.request && !controller.signal.aborted;
     if (!current()) { if (this.pending === controller) this.pending = undefined; controller.abort(); return; }
-    this.state = { workId, action, busy: true, message: `Reading current native attempt for ${action}…` }; this.changed();
     try {
-      if (!current()) return;
-      const snapshot = await binding.reader.readSnapshot();
-      if (!current()) return;
-      if (snapshot.projectId !== binding.reader.projectId) throw new Error('project changed');
+      let snapshot = binding.snapshot();
+      if (!snapshot) {
+        this.state = { workId, action, busy: true, message: `Reading current native attempt for ${action}…` }; this.changed();
+        snapshot = await binding.read();
+        if (!current()) return;
+      }
+      if (snapshot.projectId !== binding.projectId) throw new Error('project changed');
       const view = snapshot.works.find(item => item.work.id === workId);
       const retained = action === 'status' || action === 'cancel' ? this.observed.get(workId) : undefined;
       if (!retained && (!view?.attempt || view.work.currentAttemptId !== view.attempt.id || view.attempt.workId !== view.work.id)) {

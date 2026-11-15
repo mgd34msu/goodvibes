@@ -14,7 +14,8 @@ import { bindActiveExecutionMode } from '../permissions/execution-mode.ts';
  */
 
 import type { NativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
-import { nativeConversationIntakeLines, type NativeConversationIntakeActions, type NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
+import { nativeIntakeUnreachable } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
+import { nativeConversationIntakeAccepted, nativeConversationIntakeLines, type NativeConversationIntakeActions, type NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 import { createRemoteConversationRouter, sameNativeRemoteConnection, type ConnectedHostResolution } from '../runtime/client/remote-conversation.ts';
 import { mirrorHostedSessionToStore, recoverUnmirroredHostedSessions, type HostedAttachReply } from '../runtime/client/hosted-session-mirror.ts';
 import { persistConversation, readLastSessionPointer, saveSession } from '@/runtime/index.ts';
@@ -33,6 +34,11 @@ export interface RemoteConversationWiringOptions {
    * already uses for the lines it must not bury.
    */
   readonly notify: (message: string) => void;
+  /**
+   * Where the bookkeeping of an accepted message goes (its identifiers and recorded decision):
+   * the activity feed. Without it those lines go to `notify`.
+   */
+  readonly record?: ((message: string) => void) | undefined;
   /** Hand refused, unsent text back to the composer so a refusal never costs the person their typing. */
   readonly restoreDraft?: ((text: string) => void) | undefined;
 }
@@ -69,9 +75,11 @@ export interface NativeRemoteConversationWiring extends RemoteConversationWiring
    * precedes delivery. Returns a HANDLE when the connected host has the turn:
    * an interactive caller discards it, because the turn renders itself from
    * the hosted session's event stream; a caller that must wait for one answer
-   * awaits `completion`. Returns `null` only when local routing was chosen.
+   * awaits `completion`. Returns `null` when local routing was chosen, and a
+   * {@link NativeLocalFallback} when the host cannot take the message and nothing
+   * was sent for it: the caller runs the turn in this process and shows the reason.
    * `onNotSent` runs when the message is refused before anything was submitted, so the caller can give back what it took for it. */
-  routeNativeOrExplain(source: NativeConversationInput, intake: NativeConversationIntakeActions | undefined, onNotSent?: () => void): Promise<RoutedTurnHandle | null>;
+  routeNativeOrExplain(source: NativeConversationInput, intake: NativeConversationIntakeActions | undefined, onNotSent?: () => void): Promise<RoutedTurnHandle | NativeLocalFallback | null>;
   /** Explicit recovery observes the exact saved original without submitting it again. */
   observeNative(state: NativeConversationIntakeState, intake: NativeConversationIntakeActions): Promise<RoutedTurnHandle>;
   /** The same intake, reporting explicit recovery results (/work intake-*) back to this owner. */
@@ -82,6 +90,12 @@ export interface NativeRemoteConversationWiring extends RemoteConversationWiring
 const UNCONFIRMED_NATIVE_OWNER_MODE_REASON = 'The native input sent from this surface is not yet confirmed by its host, so its '
   + 'execution mode has no confirmed owner. Nothing was changed here or on the host. Inspect it with /work intake-status; '
   + 'once the host reports it settled, or after /work intake-cancel, change the mode again.';
+
+/** The host could not take this message and nothing was sent: run it here, and say why in one line. */
+export interface NativeLocalFallback {
+  readonly local: true;
+  readonly reason: string;
+}
 
 /** A turn the daemon accepted, and the way to wait for how it ended. */
 export interface RoutedTurnHandle {
@@ -282,7 +296,9 @@ export function installRemoteConversationRouting(
   };
   const report = (state: NativeConversationIntakeState | undefined): void => {
     settleOwnerLatch(state);
-    for (const line of nativeConversationIntakeLines(state)) options.notify(line);
+    // An accepted turn needs nothing from the person; its identifiers stay in the activity feed and /work intake-status.
+    const quiet = options.record !== undefined && nativeConversationIntakeAccepted(state);
+    for (const line of nativeConversationIntakeLines(state)) (quiet ? options.record! : options.notify)(line);
     options.render();
   };
   const observeNative = async (state: NativeConversationIntakeState, intake: NativeConversationIntakeActions): Promise<RoutedTurnHandle> => {
@@ -347,12 +363,7 @@ export function installRemoteConversationRouting(
         onNotSent?.();
         return detachedHandle();
       }
-      if (!intake) {
-        options.notify('Native conversation intake is unavailable. No legacy turn was started; your text is back in the composer.');
-        options.restoreDraft?.(source.text);
-        onNotSent?.();
-        return detachedHandle();
-      }
+      if (!intake) return { local: true, reason: 'No connected host is set up for this terminal, so messages run in this process.' };
       const sequence = ++routeSequence;
       const pending: PendingNativeAdmission = { intake, sequence };
       nativePending = pending;
@@ -367,14 +378,21 @@ export function installRemoteConversationRouting(
         // composer. The host alone captures a continuation's actual history.
         const state = await intake.submit(source, { delivery: 'hosted' });
         if (disposed || sequence !== routeSequence) return detachedHandle();
-        if (state?.request) pending.request = { ...state.request };
+        if (nativeIntakeUnreachable(state)) {
+          settleOwnerLatch(state);
+          activity.end();
+          return { local: true, reason: `${state!.message} Messages run in this process until it can.` };
+        }
+        if (state?.request && !state.notSent) pending.request = { ...state.request };
         report(state);
         if (disposed || sequence !== routeSequence) return detachedHandle();
+        // Refused before anything was saved for it (an earlier message is unresolved): the text goes back.
+        if (state?.notSent) { options.restoreDraft?.(source.text); onNotSent?.(); }
         if (state?.hostedTurn) return await observeNative(state, intake);
         // A refusal by the intake itself created no request, so the message was
         // not sent: give back the draft and what was taken for it. 'unknown'
         // may have been delivered and stays with the intake status.
-        if (!state || state.status === 'pending' || state.status === 'unavailable' || state.status === 'invalid') {
+        if (!state || (!state.notSent && (state.status === 'pending' || state.status === 'unavailable' || state.status === 'invalid'))) {
           options.restoreDraft?.(source.text);
           onNotSent?.();
         }

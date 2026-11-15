@@ -22,6 +22,7 @@ import {
   HostedSessionLimitError,
   HostedSessionNotFoundError,
   HostedSessionNotReadyError,
+  HostedSessionTerminatedError,
   HostedSessionUnavailableError,
 } from '../../hosted-sessions/manager.js';
 import type { HostedSessionAttachment } from '../../hosted-sessions/manager.js';
@@ -94,6 +95,10 @@ export function toGatewayVerbError(error: unknown): never {
   if (error instanceof HostedSessionNotReadyError) {
     // 503: the session is real and nothing ran; the same call can be sent again shortly.
     throw new GatewayVerbError(error.message, 'HOSTED_SESSION_NOT_READY', 503);
+  }
+  if (error instanceof HostedSessionTerminatedError) {
+    // Permanent: a caller that maps a conversation to this session starts a new one.
+    throw new GatewayVerbError(error.message, error.code, 409);
   }
   if (error instanceof HostedSessionUnavailableError) {
     // 409, not 404: the session exists and the caller can read why it cannot

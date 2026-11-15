@@ -34,9 +34,11 @@ export function nativeWorkLedgerLines(state: NativeWorkLedgerState): string[] {
       for (const result of evidence.criteriaResults) lines.push(`  Criterion ${plain(result.criterionIndex + 1)}: ${plain(result.status)} · ${result.references.map(safe).join(', ')}`);
     }
   }
-  lines.push(...nativeWorkExecutionLines(state.execution).map(safe));
+  for (const line of nativeWorkExecutionLines(state.execution)) lines.push(safe(line));
   lines.push('Controls: /work start|status|cancel|resume <work-id>. Status/cancel retain the observed attempt; resume is explicit. Closing only detaches local requests.');
   lines.push('Durable history (read only; no execution authority)');
+  const earlier = state.earlierEvents ?? 0;
+  if (earlier > 0) lines.push(`${plain(earlier)} earlier events are not shown; the newest ${plain(state.history.length)} follow.`);
   for (const event of state.history) {
     if (event.type === 'import_legacy') {
       lines.push(`#${plain(event.sequence)} import_legacy · ${plain(event.works.length)} work records · ${event.manifest ? `${plain(event.manifest.sources.length)} preserved sources` : 'protected source provenance'}`,

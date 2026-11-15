@@ -1,4 +1,5 @@
 import { createBoundNativeWorkLedgerView } from '@goodvibes-jev/engine/terminal-shell/native/bound-work-ledger-host';
+import { AGENT_NATIVE_INTAKE_POLICY } from '@goodvibes-jev/engine/terminal-shell/native-intake';
 export {
   createNativeLedgerBinding,
   discoverNativeLedgerProject,
@@ -21,7 +22,7 @@ export const createNativeWorkLedgerView = (
   createBoundNativeWorkLedgerView(
     resolve,
     changed,
-    { identityFormat: 'paired', intake: { allowHosted: true, allowSelectedDiff: false }, prepare },
+    { identityFormat: 'paired', intake: AGENT_NATIVE_INTAKE_POLICY, prepare },
     bind,
     discover,
     bindSubmission,

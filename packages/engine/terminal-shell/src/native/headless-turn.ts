@@ -100,8 +100,10 @@ export async function executeHeadlessTurn(
           await runner.join(contract.id);
           if (current.answer) answers.push(current.answer);
         } else {
-          state.exitCode = signal.aborted || current?.status === 'cancelled' ? 130 : 1;
-          state.stopReason = current?.status === 'awaiting-owner' ? 'awaiting-owner' : 'contract-failed';
+          const cancelled = signal.aborted || current?.status === 'cancelled';
+          state.exitCode = cancelled ? 130 : 1;
+          // A cancellation this run issued (Ctrl-C, --timeout) is reported as one, not as the delegate's failure.
+          state.stopReason = cancelled ? 'cancelled' : current?.status === 'awaiting-owner' ? 'awaiting-owner' : 'contract-failed';
           state.error = current?.error ?? current?.statusLine ?? 'Delegated work did not complete.';
         }
       }
@@ -111,8 +113,9 @@ export async function executeHeadlessTurn(
         const current = agents.getStatus(agent.id);
         if (current?.status === 'completed' && current.fullOutput?.trim()) answers.push(current.fullOutput);
         else {
-          state.exitCode = signal.aborted || current?.status === 'cancelled' ? 130 : 1;
-          state.stopReason = 'agent-failed';
+          const cancelled = signal.aborted || current?.status === 'cancelled';
+          state.exitCode = cancelled ? 130 : 1;
+          state.stopReason = cancelled ? 'cancelled' : 'agent-failed';
           state.error = current?.error ?? `Delegated agent ${agent.id} did not return a completed report.`;
         }
       }
@@ -175,7 +178,12 @@ export async function settleHeadlessTurn(
       problems.push(`session pointer not written: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  if (turnFailure) throw turnFailure.error;
+  if (turnFailure) {
+    // The turn's own error stays the error; a cleanup failure is added to it, never dropped.
+    if (problems.length > 0 && turnFailure.error instanceof Error) turnFailure.error.message = `${turnFailure.error.message}; ${problems.join('; ')}`;
+    else if (problems.length > 0) throw new Error(`${String(turnFailure.error)}; ${problems.join('; ')}`, { cause: turnFailure.error });
+    throw turnFailure.error;
+  }
   if (!result) throw new Error('Headless turn produced no result.');
   if (problems.length === 0) return result;
   const detail = problems.join('; ');

@@ -255,20 +255,29 @@ test('pending or lost native start acknowledgement never turns a session-mode ed
   } finally { release.resolve(); await f.close(); }
 });
 
-test('a message refused because native intake is unavailable reports it was not sent, so what was taken for it can be given back', async () => {
+test('with no connected host the message runs in this process, with the reason for the caller to show', async () => {
   const f = fixture(); let notSent = 0;
   try {
-    await f.wiring.routeNativeOrExplain(source, undefined, () => { notSent++; });
-    expect(notSent).toBe(1);
-    expect(f.notices.join('\n')).toContain('intake is unavailable');
+    const routed = await f.wiring.routeNativeOrExplain(source, undefined, () => { notSent++; });
+    expect(routed && 'local' in routed ? routed.reason : undefined).toContain('run in this process');
+    expect(notSent).toBe(0);
   } finally { await f.close(); }
 });
 
-test.each(['invalid', 'unavailable', 'pending'] as const)('a hosted intake that refuses with %s reports the message was not sent', async status => {
+test.each(['invalid', 'pending'] as const)('a hosted intake that refuses with %s reports the message was not sent', async status => {
   const f = fixture(); let notSent = 0;
   try {
     await f.wiring.routeNativeOrExplain(source, intake({ submit: async () => ({ status, message: 'Refused.' }) }), () => { notSent++; });
     expect(notSent).toBe(1);
+  } finally { await f.close(); }
+});
+
+test('a host that cannot be reached hands the message back to run in this process', async () => {
+  const f = fixture(); let notSent = 0;
+  try {
+    const routed = await f.wiring.routeNativeOrExplain(source, intake({ submit: async () => ({ status: 'unavailable', cause: 'network', message: 'The connected host could not be reached, so nothing was sent to it.' }) }), () => { notSent++; });
+    expect(routed && 'local' in routed ? routed.reason : undefined).toContain('could not be reached');
+    expect(notSent).toBe(0);
   } finally { await f.close(); }
 });
 

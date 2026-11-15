@@ -155,7 +155,10 @@ and [store](../../../packages/engine/platform/src/platform/hosted-sessions/store
 own these transitions.
 
 Hosted handlers distinguish `INVALID_ARGUMENT` with status 400,
-`SESSION_NOT_FOUND` with 404, `HOSTED_SESSION_UNAVAILABLE` with 409, and
+`SESSION_NOT_FOUND` with 404, `HOSTED_SESSION_TERMINATED` with 409 (the
+session ended for good: start a new one), `HOSTED_SESSION_UNAVAILABLE` with 409
+(the session exists but cannot serve this request now: do not start a second
+one for the same conversation), `HOSTED_SESSION_NOT_READY` with 503, and
 `HOSTED_SESSION_LIMIT_REACHED` with 429. Authentication failure is separate.
 A host without hosted-session composition refuses the capability; its method
 catalog alone does not prove that a session can run.

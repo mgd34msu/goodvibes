@@ -28,8 +28,16 @@ export interface NativeIntakeBrowserJournal {
    * `release` in native-intake.ts); the journal itself never decides that and never evicts.
    */
   remove(record: NativeIntakeBrowserRecord): Promise<void>;
-  /** How many stored records could not be read (damaged, or written by another build). They are kept untouched. */
+  /** How many stored records could not be read (damaged, or written by another build). They are kept until discarded. */
   unreadable(): Promise<number>;
+  /**
+   * Records of the same daemon and project saved under another paired principal (this browser
+   * paired again). The daemon answers only their own owner, so they can be shown and discarded,
+   * not inspected or continued.
+   */
+  listOthers(binding: NativeIntakeBrowserBinding): Promise<NativeIntakeBrowserRecord[]>;
+  /** Delete every record that cannot be read. Returns how many were deleted. */
+  discardUnreadable(): Promise<number>;
 }
 
 export const NATIVE_INTAKE_BROWSER_JOURNAL_DATABASE = "goodvibes.native-intake.v1";
@@ -159,12 +167,16 @@ function recordSnapshot(value: unknown): NativeIntakeBrowserRecord {
   };
 }
 
+/**
+ * Who owns a saved record: the daemon, its project and the paired principal. The transport is
+ * how the daemon was reached (direct or through the relay), not who owns the request, so a
+ * request saved on the local network stays visible and actionable after a switch to the relay.
+ */
 function sameBinding(left: NativeIntakeBrowserBinding, right: NativeIntakeBrowserBinding): boolean {
   return (
     left.endpoint === right.endpoint &&
     left.projectId === right.projectId &&
-    left.principalId === right.principalId &&
-    left.transport === right.transport
+    left.principalId === right.principalId
   );
 }
 
@@ -374,6 +386,36 @@ export function createNativeIntakeBrowserJournal(
     async unreadable() {
       return transaction((_records, _store, unreadable) => unreadable);
     },
+    async listOthers(binding) {
+      const snapshot = bindingSnapshot(binding);
+      return transaction((records) =>
+        records
+          .filter(
+            (record) =>
+              record.binding.endpoint === snapshot.endpoint &&
+              record.binding.projectId === snapshot.projectId &&
+              record.binding.principalId !== snapshot.principalId
+          )
+          .sort((left, right) => left.createdAt - right.createdAt)
+      );
+    },
+    async discardUnreadable() {
+      return transaction((_records, store, unreadable) => {
+        if (unreadable === 0) return 0;
+        const cursor = store.openCursor();
+        cursor.onsuccess = () => {
+          const at = cursor.result;
+          if (!at) return;
+          try {
+            recordSnapshot(at.value);
+          } catch {
+            at.delete();
+          }
+          at.continue();
+        };
+        return unreadable;
+      });
+    },
     async remove(record) {
       const snapshot = recordSnapshot(record);
       await transaction((records, store) => {
@@ -386,9 +428,10 @@ export function createNativeIntakeBrowserJournal(
         // Only the exact original that was shown may be retired.
         if (JSON.stringify(existing) !== JSON.stringify(snapshot))
           throw new NativeIntakeBrowserJournalError("conflict");
+        // The stored key carries the transport the record was saved under.
         store.delete([
-          ...BINDING_KEYS.map((key) => snapshot.binding[key as keyof NativeIntakeBrowserBinding]),
-          snapshot.command.inputId,
+          ...BINDING_KEYS.map((key) => existing.binding[key as keyof NativeIntakeBrowserBinding]),
+          existing.command.inputId,
         ]);
       });
     },

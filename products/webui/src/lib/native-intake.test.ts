@@ -80,6 +80,12 @@ function harness() {
     async unreadable() {
       return 0;
     },
+    async listOthers() {
+      return [];
+    },
+    async discardUnreadable() {
+      return 0;
+    },
   };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname;

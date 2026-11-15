@@ -6,11 +6,19 @@ import { nativeConversationExecutionIntent, sameNativeExecutionIntent, inspectNa
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema, sameNativeConversationSource, type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeResult, type NativeConversationIntakeSourceRef, type OperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeConversationInput } from './native-conversation-input.js';
 import { NativeIntakeJournalError, type NativeIntakeJournalBinding, type NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
+import { NativeHostSelectionChangedError } from './native-host-fetch.js';
 /** Construction-owned product capabilities, never selected by a decision or tool argument. */
 export interface NativeConversationIntakePolicy {
     readonly allowHosted: boolean;
     readonly allowSelectedDiff: boolean;
 }
+/**
+ * The terminal app (`goodvibes`): selected-diff input, never hosted turns. One object for the
+ * controls, the journal and headless runs, so a record one writes the others can always read.
+ */
+export const TUI_NATIVE_INTAKE_POLICY: NativeConversationIntakePolicy = Object.freeze({ allowHosted: false, allowSelectedDiff: true });
+/** The Agent (`goodvibes-agent`): hosted turns, never selected-diff input. */
+export const AGENT_NATIVE_INTAKE_POLICY: NativeConversationIntakePolicy = Object.freeze({ allowHosted: true, allowSelectedDiff: false });
 export interface NativeConversationIntakeBinding {
     readonly client: OperatorNativeConversationIntakeClient;
     readonly execution: OperatorNativeWorkExecutionClient;
@@ -33,28 +41,48 @@ export type NativeConversationIntakeSelection = {
 };
 /** Non-secret reason a native operation failed, for scripts to branch on. */
 export type NativeIntakeFailureCause = 'journal_conflict' | 'journal' | 'principal' | 'network' | 'schema' | 'host_changed' | 'unknown';
+/** A failure whose cause the intake knows where it raised it; nothing reads its wording. */
+export class NativeIntakeFailure extends Error {
+    constructor(readonly failure: NativeIntakeFailureCause, message: string) {
+        super(message);
+        this.name = 'NativeIntakeFailure';
+    }
+}
+/** Codes the host answers with when this credential is not a paired owner with the scopes the call needs. */
+const PRINCIPAL_CODES: ReadonlySet<unknown> = new Set(['PAIRED_OWNER_REQUIRED', 'FORBIDDEN', 'UNAUTHORIZED']);
 export function nativeIntakeFailureCause(error: unknown): NativeIntakeFailureCause {
+    if (error instanceof NativeIntakeFailure)
+        return error.failure;
     if (error instanceof NativeIntakeJournalError)
         return error.code === 'conflict' ? 'journal_conflict' : 'journal';
+    if (error instanceof NativeHostSelectionChangedError)
+        return 'host_changed';
     if (!(error instanceof Error))
         return 'unknown';
     const code = (error as { readonly code?: unknown }).code;
     const kind = (error as { readonly kind?: unknown }).kind;
     if (error.name === 'ZodError' || code === 'invalid_response' || kind === 'contract' || kind === 'protocol' || kind === 'validation')
         return 'schema';
-    if (kind === 'auth' || /principal|authority/i.test(error.message))
+    if (kind === 'auth' || PRINCIPAL_CODES.has(code))
         return 'principal';
-    if (/selection changed|project changed/i.test(error.message))
-        return 'host_changed';
     if (kind === 'network' || code === 'aborted' || error instanceof TypeError || error.name === 'TimeoutError' || error.name === 'AbortError')
         return 'network';
     return 'unknown';
 }
+/** The one step that moves an earlier, unresolved input forward, decided from its recorded state. */
+export type NativeIntakeNextStep = 'retry' | 'resume' | 'inspect' | 'cancel';
 export interface NativeConversationIntakeState {
     readonly status: 'pending' | 'recorded' | 'unknown' | 'invalid' | 'unavailable';
     readonly message: string;
     /** Why a failed operation failed, as a code a script can branch on; set on `unknown`/`unavailable` states from a thrown error. */
     readonly cause?: NativeIntakeFailureCause | undefined;
+    /** The one command that moves the earlier input forward (`/work intake-<step>`, `--intake-<step>`). */
+    readonly nextStep?: NativeIntakeNextStep | undefined;
+    /**
+     * Set when a submit was refused before this call saved or sent anything: the submitted text was not
+     * sent and may be handed back to the person. `request` then names the earlier input, not this one.
+     */
+    readonly notSent?: true | undefined;
     readonly request?: Readonly<Pick<NativeConversationIntakeCaptureRequest, 'requestId' | 'inputId'>> | undefined;
     readonly result?: NativeConversationIntakeResult | undefined;
     /** Durable local dispatch claim acquired by this call only, never get/status. */
@@ -219,7 +247,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
             if (!current())
                 return;
             if (!principalId || principalId === 'shared-token' || principalId.length > 200)
-                throw new Error('Unsupported native principal');
+                throw new NativeIntakeFailure('principal', 'Unsupported native principal');
             const scope: NativeIntakeJournalBinding = { endpoint: selected.endpoint, projectId: selected.projectId, workspace: selected.workspace, principalId };
             phase = 'journal-read';
             const stored = await selected.journal.read(scope);
@@ -269,17 +297,17 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 kind: 'turn';
             }>): Promise<NativeHostedTurnLookup> => {
                 if (!binding?.hostedTurn || delivery !== 'hosted' || !command)
-                    throw new Error('Native hosted delivery is unavailable');
+                    throw new NativeIntakeFailure('unknown', 'Native hosted delivery is unavailable');
                 validate(source);
                 const original = command;
                 const target = { projectId: selected.projectId, inputId: original.inputId, sourceRevision: source.sourceRef.sourceRevision };
                 const observe = async (operation: 'status' | 'start' | 'cancel') => {
                     if (!current())
-                        throw new Error('Native hosted intake detached');
+                        throw new NativeIntakeFailure('host_changed', 'Native hosted intake detached');
                     phase = `hosted-${operation}`;
                     const found = nativeHostedTurnLookupSchema.parse(await binding!.hostedTurn![operation](target, { signal: controller.signal }));
                     if (!current())
-                        throw new Error('Native hosted intake detached');
+                        throw new NativeIntakeFailure('host_changed', 'Native hosted intake detached');
                     if (!('kind' in found) && (found.projectId !== target.projectId || found.requestId !== original.requestId
                         || found.inputId !== target.inputId || found.sourceRevision !== target.sourceRevision
                         || (original.continuation && found.sessionId !== null && found.sessionId !== original.continuation.sessionId)))
@@ -293,10 +321,10 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 }
                 await preserveHostedSource();
                 if (!current())
-                    throw new Error('Native hosted intake detached');
+                    throw new NativeIntakeFailure('host_changed', 'Native hosted intake detached');
                 await confirm();
                 if (!current())
-                    throw new Error('Native hosted intake detached');
+                    throw new NativeIntakeFailure('host_changed', 'Native hosted intake detached');
                 return observe(action === 'cancel' ? 'cancel' : 'start');
             };
             let result: NativeConversationIntakeResult | undefined;
@@ -316,12 +344,12 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     if (!current())
                         return;
                     if ('kind' in hostedTurn || !['completed', 'cancelled'].includes(hostedTurn.state))
-                        return { status: 'recorded', message: 'The original hosted turn is unresolved. Inspect or cancel it before submitting another input.', request: request(), result, hostedTurn, hostedCurrent };
+                        return { status: 'recorded', message: 'Your previous message is still running on the host. Check it with /work intake-status, or stop it with /work intake-cancel. This new message was not sent.', request: request(), result, hostedTurn, hostedCurrent, nextStep: 'inspect', notSent: true };
                     if (options?.delivery === 'hosted' && nextContinuation === undefined && hostedTurn.sessionId)
                         nextContinuation = hostedTurn.sessionId;
                 }
                 else if (options?.delivery === 'hosted')
-                    return { status: 'unknown', message: 'The original local turn has no confirmed completion. Hosted delivery cannot replace an unresolved local dispatch.', request: request(), result };
+                    return { status: 'unknown', message: 'Your previous message ran in this process and its end was never confirmed, so the host cannot take the next one. Check it with /work intake-status. This new message was not sent.', request: request(), result, nextStep: 'inspect', notSent: true };
             }
             if (mode === 'submit' && command && result?.kind === 'work') {
                 const intent = nativeConversationExecutionIntent(result.receipt);
@@ -332,16 +360,18 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 if (!current())
                     return;
                 if (delivery !== options?.delivery && execution.snapshot && !['terminal', 'cancelled'].includes(execution.snapshot.recovery))
-                    return { status: 'recorded', message: 'The original work dispatch is unresolved. Delivery mode cannot change until native execution is terminal.', request: request(), result, execution };
+                    return { status: 'recorded', message: 'Your previous message became work that is still running. Follow it in /work; the next message can be sent once that work has ended. This new message was not sent.', request: request(), result, execution, nextStep: 'inspect', notSent: true };
                 if (!execution.snapshot)
-                    return { status: 'recorded', message: 'The original admitted work has an unresolved dispatch. Inspect status or use /work intake-retry before submitting another input.', request: request(), result, execution };
+                    return { status: 'recorded', message: 'Your previous message became work whose start was never confirmed. Start it with /work intake-retry. This new message was not sent.', request: request(), result, execution, nextStep: 'retry', notSent: true };
             }
             const unsaved = !result && command !== undefined && retained !== undefined && !retained.persisted && sameCommand(command, retained.command) && stored?.command.requestId !== command.requestId;
             if (mode === 'submit') {
-                if (command && (!result || !terminal(result)))
+                if (command && (!result || !terminal(result))) {
+                    const next = unresolvedNextStep(result);
                     return { status: 'unknown', message: unsaved
-                            ? 'An earlier input was never saved to the intake journal and the host has no record of it. Use /work intake-retry to save and send it, or /work intake-cancel to discard it, before submitting another input.'
-                            : 'An original input is unresolved. Use /work intake-status, intake-retry, intake-resume or intake-cancel before submitting another input.', request: request(), ...(result ? { result } : {}) };
+                            ? 'Your previous message was never saved and the host has no record of it. Send it with /work intake-retry, or drop it with /work intake-cancel. This new message was not sent.'
+                            : unresolvedMessage(next), request: request(), ...(result ? { result } : {}), nextStep: next, notSent: true };
+                }
                 command = nativeConversationIntakeCaptureRequestSchema.parse({ requestId: this.newId(), inputId: this.newId(), text: source!.text, unsupportedSources: source!.unsupportedSources, ...(nextContinuation !== undefined ? { continuation: { sessionId: nextContinuation } } : {}) });
                 delivery = options?.delivery;
                 observedSource = undefined;
@@ -533,11 +563,19 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
         catch (error) {
             if (!current())
                 return;
-            return { status: command ? 'unknown' : 'unavailable', cause: nativeIntakeFailureCause(error), request: request(), message: phase === 'journal-remove'
+            const cause = nativeIntakeFailureCause(error);
+            return { status: command ? 'unknown' : 'unavailable', cause, request: request(), message: phase === 'journal-remove'
                     ? 'The input is settled on the host, but its journal record could not be removed now. Nothing else was sent; the next input replaces it.'
                     : isJournalPhase(phase)
                     ? 'The durable intake journal could not be confirmed. No further request or ordinary turn was sent. The visible original input and dispatch claim are preserved.'
-                    : 'Native intake outcome is unknown or unavailable. Inspect /work intake-status before retrying the same input; an interrupted request may already have taken effect.' };
+                    : !command && cause === 'principal'
+                    ? 'This terminal is not paired with the connected host, so nothing was sent to it. Pair it (/setup pair in the Agent, /host pair in the terminal app) to use it.'
+                    : !command && (cause === 'network' || cause === 'host_changed')
+                    ? 'The connected host could not be reached, so nothing was sent to it.'
+                    : !command
+                    ? `The connected host's answer could not be used (${cause}), so nothing was sent to it.`
+                    : 'Native intake outcome is unknown or unavailable. Inspect /work intake-status before retrying the same input; an interrupted request may already have taken effect.',
+                ...(command ? { nextStep: 'inspect' as const } : {}) };
         }
         finally {
             dispose();
@@ -545,6 +583,35 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 this.active = undefined;
         }
     }
+}
+/** Which one command moves an earlier input forward: the host's record of it decides. */
+function unresolvedNextStep(result: NativeConversationIntakeResult | undefined): NativeIntakeNextStep {
+    if (!result || result.kind === 'captured')
+        return 'retry';
+    if (result.kind === 'processing')
+        return 'resume';
+    return 'inspect';
+}
+function unresolvedMessage(next: NativeIntakeNextStep): string {
+    switch (next) {
+        case 'retry': return 'Your previous message was saved but its admission never finished. Send it with /work intake-retry, or drop it with /work intake-cancel. This new message was not sent.';
+        case 'resume': return 'Your previous message was interrupted while the host was admitting it. Continue it with /work intake-resume, or drop it with /work intake-cancel. This new message was not sent.';
+        case 'cancel': return 'Your previous message cannot continue. Drop it with /work intake-cancel. This new message was not sent.';
+        case 'inspect': return 'Your previous message has not settled. Check it with /work intake-status, or drop it with /work intake-cancel. This new message was not sent.';
+    }
+}
+/**
+ * True for an input the host accepted as a conversation turn (this process runs it, or the host
+ * runs it and this surface shows it): nothing in it needs the person, so its bookkeeping lines
+ * (identifiers, recorded decision) belong in the activity feed, not the conversation.
+ */
+export function nativeConversationIntakeAccepted(state: NativeConversationIntakeState | undefined): boolean {
+    if (!state || state.status !== 'recorded' || state.notSent || state.result?.kind !== 'turn')
+        return false;
+    if (state.turnReady)
+        return true;
+    const hosted = state.hostedTurn;
+    return hosted !== undefined && !('kind' in hosted) && hosted.state !== 'recovery-required' && hosted.state !== 'failed';
 }
 function describeResult(result: NativeConversationIntakeResult, turnReady: boolean, dispatched: boolean): string {
     switch (result.kind) {

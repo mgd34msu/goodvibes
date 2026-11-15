@@ -1,12 +1,12 @@
 import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
-import { createNativeHostFetch } from './native-host-fetch.js';
+import { createNativeHostFetch, NativeHostSelectionChangedError } from './native-host-fetch.js';
 import { createNativeHostedTurnClient } from './native-hosted-turn.js';
 import { isNativePairedPrincipal } from './native-paired-principal.js';
 import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeSubmissionHost } from './native-work-submission-host.js';
-import type { NativeConversationIntakeBinding } from './native-conversation-intake.js';
+import { NativeIntakeFailure, type NativeConversationIntakeBinding } from './native-conversation-intake.js';
 export function createNativeConversationIntakeBinding(host: NativeSubmissionHost, projectId: string, current: () => boolean = () => true, options: {
     readonly allowHosted?: boolean | undefined;
     readonly readMode?: (() => GatePresetName) | undefined;
@@ -19,7 +19,7 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
     const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
         const available = () => current() && (!disposed || args[0] === 'workLedger.intake.get');
         if (!available())
-            throw new Error('Native intake host selection changed');
+            throw new NativeHostSelectionChangedError();
         const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: available }) });
         try {
             // The host authenticates this token on every request, refuses a revoked
@@ -28,7 +28,7 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
             // operation (readPrincipal), so nothing is re-read here.
             const value = await operator.invoke(...args);
             if (!available())
-                throw new Error('Native intake host selection changed');
+                throw new NativeHostSelectionChangedError();
             return value;
         }
         finally {
@@ -40,7 +40,7 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
         // Every hosted request names this project and the host refuses another
         // one, and its owner check covers the principal and write:sessions.
         if (!principalId)
-            throw new Error('Native hosted turn requires the principal read for this operation');
+            throw new NativeIntakeFailure('principal', 'Native hosted turn requires the principal read for this operation');
         return invoke(...args);
     }) as OperatorRemoteClient['invoke'];
     const client = createOperatorNativeConversationIntakeClient({ invoke }, projectId);
@@ -50,7 +50,7 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
         async readPrincipal(signal) {
             const auth = await invoke('control.auth.current', {}, { signal });
             if (!isNativePairedPrincipal(auth, host.expectedPrincipalId)) {
-                throw new Error('Native intake requires an existing paired principal');
+                throw new NativeIntakeFailure('principal', 'Native intake requires an existing paired principal');
             }
             principalId = auth.principalId;
             return principalId;

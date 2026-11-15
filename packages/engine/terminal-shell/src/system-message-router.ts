@@ -111,6 +111,10 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
     this.conversation.addSystemMessage(message);
     this.feed?.push(message, 'high');
   }
+  /** Bookkeeping the person may look up but need not read now: the activity feed only, never the conversation. */
+  activity(message: string): void {
+    this.feed?.push(message, 'low');
+  }
   /** A local receipt bypasses ambient noise and delivery preferences. */
   userReceipt(message: string): void {
     this.conversation.addTypedSystemMessage(message, classifySystemMessageKind(message));

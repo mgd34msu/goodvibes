@@ -175,10 +175,10 @@ export function createOperatorWorkLedgerReadClient(
       // and the subscriber that owns each listener is told both ways.
       const status = statusOf(cause);
       const refused = status === 401 || status === 403 || status === 404 || status === 410;
-      const detail = cause instanceof Error ? cause.message : 'read unavailable';
+      // Fixed sentences: a transport error's text can carry the host address or a credential.
       const reason = refused
-        ? `The host refused the work ledger read (${status}): ${detail}. It is retried every minute; restore access to resume.`
-        : `The work ledger cannot be read right now: ${detail}. It is retried automatically.`;
+        ? `The host refused the work ledger read (HTTP ${status}). It is retried every minute; restore this device's access to the host to resume.`
+        : 'The host did not answer the work ledger read. It is retried automatically.';
       if (reason !== unavailableReason) {
         unavailableReason = reason;
         for (const { onUnavailable } of [...listeners.values()]) {

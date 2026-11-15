@@ -1,5 +1,5 @@
-import { NativeConversationIntakeControls as PlatformIntake, type NativeConversationIntakeSelection } from '@goodvibes-jev/engine/terminal-shell/native-intake';
+import { NativeConversationIntakeControls as PlatformIntake, TUI_NATIVE_INTAKE_POLICY, type NativeConversationIntakeSelection } from '@goodvibes-jev/engine/terminal-shell/native-intake';
 export * from '@goodvibes-jev/engine/terminal-shell/native-intake';
 export class NativeConversationIntakeControls extends PlatformIntake {
-  constructor(select: () => NativeConversationIntakeSelection, newId: () => string = () => crypto.randomUUID()) { super(select, newId, { allowHosted: false, allowSelectedDiff: true }); }
+  constructor(select: () => NativeConversationIntakeSelection, newId: () => string = () => crypto.randomUUID()) { super(select, newId, TUI_NATIVE_INTAKE_POLICY); }
 }

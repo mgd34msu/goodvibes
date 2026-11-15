@@ -3,7 +3,7 @@ import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCo
 import type { ConcealedInputRequest } from './concealed-input.js';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { RetainedOperatorConnection, type RetainedOperatorConnectionPolicy, type SelectedOperatorConnection } from './retained-operator-connection.js';
+import { describeRetainedConnectionFailure, RetainedOperatorConnection, type RetainedOperatorConnectionPolicy, type SelectedOperatorConnection } from './retained-operator-connection.js';
 import type { OpenSelection, SelectionItem, SelectionResult } from './selection-modal.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
@@ -54,8 +54,8 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
         read: observation => policy.read(context, observation), files: policy.files,
         environment: policy.environment, fetchImpl: policy.fetchImpl, signal: ownerAbort.signal,
       });
-    } catch {
-      context.print('[payments] Check the selected daemon and its paired owner credential, then reopen /payments pending.');
+    } catch (error) {
+      context.print(`[payments] ${describeRetainedConnectionFailure(error, 'reopen /payments pending')}`);
       return;
     }
     let closed = false;
@@ -311,8 +311,8 @@ export function createPaymentApproveCommand<Context extends PaymentWindowCommand
         read: observation => policy.read(context, observation), files: policy.files,
         environment: policy.environment, fetchImpl: policy.fetchImpl, signal: ownerAbort.signal,
       });
-    } catch {
-      context.print('[payments] Check the selected daemon and its paired owner credential, then run /payments approve again. Nothing was approved.');
+    } catch (error) {
+      context.print(`[payments] ${describeRetainedConnectionFailure(error, 'run /payments approve again')} Nothing was approved.`);
       return;
     }
     const finish = () => { ownerAbort.abort(); void connection.close(); };

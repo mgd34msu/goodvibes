@@ -180,7 +180,6 @@ export function createRemoteConversationRouter(
     readonly nativeBrokerInputId: string;
     nativeTerminal?: 'completed' | 'cancelled' | undefined;
     readonly connection: Extract<ConnectedHostResolution, { readonly baseUrl: string }>;
-    selectionTimer?: ReturnType<typeof setInterval> | undefined;
   }
   let hostedId: string | null = null;
   let hostedConnection: Extract<ConnectedHostResolution, { readonly baseUrl: string }> | undefined;
@@ -279,7 +278,6 @@ export function createRemoteConversationRouter(
     if (turn.finished) return;
     turn.finished = true;
     if (active === turn) active = null;
-    if (turn.selectionTimer) clearInterval(turn.selectionTimer);
     const close = turn.closeStream;
     turn.closeStream = null;
     try { close?.(); } catch (error) {
@@ -294,10 +292,11 @@ export function createRemoteConversationRouter(
   const owns = (turn: WatchedTurn): boolean => active === turn && !turn.finished && !disposed;
   /**
    * Ownership plus the selection and host the turn was routed through. This
-   * resolves the connected host, so it runs where a change matters: opening the
-   * watch, before a cancellation leaves, and on the turn's selection timer,
-   * which abandons the watch when the selection changes. A streamed frame only
-   * checks ownership; frames come from the host the turn runs on.
+   * resolves the connected host, so it runs only where a change matters:
+   * opening the watch and before a cancellation leaves. Nothing polls it while
+   * the turn streams: frames come from the host the turn runs on, and a
+   * revoked or replaced credential ends the stream itself (its own
+   * authentication failure terminates it, and the watch is abandoned then).
    */
   const isCurrent = (turn: WatchedTurn): boolean => {
     if (!owns(turn) || !turn.nativeCurrent()) return false;
@@ -452,10 +451,6 @@ export function createRemoteConversationRouter(
     hostedConnection = connection;
     startRenewal();
     void refreshExecutionMode().catch(() => undefined);
-    turn.selectionTimer = setInterval(() => {
-      if (!isCurrent(turn) && !turn.finished) abandon(turn, 'Selected host or credentials changed. Detached from this native turn; its remote outcome is unconfirmed.');
-    }, 100);
-    turn.selectionTimer.unref?.();
     try {
       const renderer = await watch(turn, connection.baseUrl, connection.token, snapshot.sessionId);
       const outcome: Extract<RemoteTurnOutcome, { routed: true }> = {

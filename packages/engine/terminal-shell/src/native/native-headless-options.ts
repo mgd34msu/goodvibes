@@ -11,31 +11,62 @@ const recovery = new Map<string, NativeHeadlessMode>([
 // These flags consume only following tokens that do not start with a dash.
 const optionalValueOptions = new Set(['--resume', '-r']);
 
-export function extractNativeHeadlessOptions(argv: readonly string[], grammar: { readonly required?: readonly string[]; readonly optional?: readonly string[] } = {}): { argv: string[]; mode: NativeHeadlessMode; errors: string[] } {
-  // The caller passes every value-taking flag of its own catalog, aliases included.
-  const required = new Set(grammar.required ?? []);
+/** `run`-only flags, parsed before the product's CLI parser sees argv. */
+export interface HeadlessRunFlags {
+  readonly timeoutMs?: number | undefined;
+  readonly maxTurns?: number | undefined;
+  readonly omitAccumulated?: boolean | undefined;
+  /** Read owner answers to permission prompts from stdin (stream-json only). */
+  readonly answerPermissions?: boolean | undefined;
+}
+const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/;
+const UNIT_MS: Readonly<Record<string, number>> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+
+export interface HeadlessInvocation {
+  readonly argv: string[];
+  readonly mode: NativeHeadlessMode;
+  readonly errors: string[];
+  /** Present when any `run` flag was given. */
+  readonly run?: HeadlessRunFlags;
+}
+
+/**
+ * One walk over argv that removes the headless-only options (`--intake-*`, `--timeout`,
+ * `--max-turns`, `--omit-accumulated`, `--answer-permissions`) with one set of rules for
+ * `--`, `=value` and "the previous token takes a value". `valueOptions` are every
+ * value-taking flag of the product's catalog, aliases included; `optional` are flags whose
+ * value is optional.
+ */
+export function extractHeadlessInvocation(
+  argv: readonly string[],
+  grammar: { readonly valueOptions: Iterable<string>; readonly optional?: readonly string[] | undefined; readonly intake?: boolean; readonly run?: boolean },
+): HeadlessInvocation {
+  const required = new Set(grammar.valueOptions);
   const optional = new Set([...optionalValueOptions, ...(grammar.optional ?? [])]);
+  const intake = grammar.intake !== false;
+  const runFlags = grammar.run !== false;
   const result: string[] = [];
   const errors: string[] = [];
   let mode: NativeHeadlessMode = 'submit';
-
+  let timeoutMs: number | undefined;
+  let maxTurns: number | undefined;
+  let omitAccumulated: boolean | undefined;
+  let answerPermissions: boolean | undefined;
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i]!;
     if (token === '--') {
       result.push(...argv.slice(i));
       break;
     }
-    // Even an invalid, option-shaped operand must survive for the main
-    // parser to reject. Stripping it could turn a later positional into the
-    // missing value and silently promote the operand into recovery authority.
-    // Check the original preceding token, so adjacent missing-value flags are
-    // also protected. An inline =value never reserves the following token.
+    // A value of the previous option is kept as it is, even when it looks like an
+    // option: stripping it could turn a later positional into the missing value
+    // (and promote an operand into recovery authority). An inline =value never
+    // reserves the following token.
     if (i > 0 && required.has(argv[i - 1]!)) {
       result.push(token);
       continue;
     }
-
-    const action = recovery.get(token);
+    const action = intake ? recovery.get(token) : undefined;
     if (action) {
       const previous = argv[i - 1];
       const next = argv[i + 1];
@@ -48,61 +79,26 @@ export function extractNativeHeadlessOptions(argv: readonly string[], grammar: {
       }
       if (mode !== 'submit') errors.push('Choose exactly one native intake recovery option.');
       mode = action;
-    } else if ([...recovery.keys()].some(flag => token.startsWith(`${flag}=`))) {
+      continue;
+    }
+    if (intake && [...recovery.keys()].some(flag => token.startsWith(`${flag}=`))) {
       errors.push('Native intake recovery options take no value.');
-    } else {
-      result.push(token);
-    }
-  }
-  return { argv: result, mode, errors };
-}
-
-/** `run`-only flags, parsed before the product's CLI parser sees argv. */
-export interface HeadlessRunFlags {
-  readonly timeoutMs?: number | undefined;
-  readonly maxTurns?: number | undefined;
-  readonly omitAccumulated?: boolean | undefined;
-  /** Read owner answers to permission prompts from stdin (stream-json only). */
-  readonly answerPermissions?: boolean | undefined;
-}
-const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/;
-const UNIT_MS: Readonly<Record<string, number>> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
-/**
- * Remove `--timeout`, `--max-turns`, `--omit-accumulated` and `--answer-permissions` from argv. `valueOptions`
- * are the product's value-taking options, so `-p --timeout` keeps `--timeout` as the
- * prompt; `--` ends option parsing exactly as it does for the main parser.
- */
-export function extractHeadlessRunFlags(argv: readonly string[], valueOptions: ReadonlySet<string>): { argv: string[]; flags: HeadlessRunFlags; errors: string[] } {
-  const rest: string[] = [];
-  const errors: string[] = [];
-  let timeoutMs: number | undefined;
-  let maxTurns: number | undefined;
-  let omitAccumulated: boolean | undefined;
-  let answerPermissions: boolean | undefined;
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i]!;
-    if (token === '--') {
-      rest.push(...argv.slice(i));
-      break;
-    }
-    if (i > 0 && valueOptions.has(argv[i - 1]!)) {
-      rest.push(token);
       continue;
     }
     const eq = token.indexOf('=');
-    const name = token.startsWith('--') && eq !== -1 ? token.slice(0, eq) : token;
-    if (name === '--omit-accumulated') {
+    const name = runFlags && token.startsWith('--') && eq !== -1 ? token.slice(0, eq) : token;
+    if (runFlags && name === '--omit-accumulated') {
       if (eq !== -1) errors.push('--omit-accumulated takes no value.');
       omitAccumulated = true;
       continue;
     }
-    if (name === '--answer-permissions') {
+    if (runFlags && name === '--answer-permissions') {
       if (eq !== -1) errors.push('--answer-permissions takes no value.');
       answerPermissions = true;
       continue;
     }
-    if (name !== '--timeout' && name !== '--max-turns') {
-      rest.push(token);
+    if (!runFlags || (name !== '--timeout' && name !== '--max-turns')) {
+      result.push(token);
       continue;
     }
     const value = eq !== -1 ? token.slice(eq + 1) : argv[++i];
@@ -117,7 +113,20 @@ export function extractHeadlessRunFlags(argv: readonly string[], valueOptions: R
       else errors.push(`--max-turns expects a positive whole number${value === undefined ? '' : `, not "${value}"`}.`);
     }
   }
-  return { argv: rest, flags: { ...(timeoutMs === undefined ? {} : { timeoutMs }), ...(maxTurns === undefined ? {} : { maxTurns }), ...(omitAccumulated ? { omitAccumulated } : {}), ...(answerPermissions ? { answerPermissions } : {}) }, errors };
+  const run: HeadlessRunFlags = { ...(timeoutMs === undefined ? {} : { timeoutMs }), ...(maxTurns === undefined ? {} : { maxTurns }), ...(omitAccumulated ? { omitAccumulated } : {}), ...(answerPermissions ? { answerPermissions } : {}) };
+  return { argv: result, mode, errors, ...(Object.keys(run).length ? { run } : {}) };
+}
+
+/** The `--intake-*` part of {@link extractHeadlessInvocation} alone. */
+export function extractNativeHeadlessOptions(argv: readonly string[], grammar: { readonly required?: readonly string[]; readonly optional?: readonly string[] } = {}): { argv: string[]; mode: NativeHeadlessMode; errors: string[] } {
+  const { argv: rest, mode, errors } = extractHeadlessInvocation(argv, { valueOptions: grammar.required ?? [], optional: grammar.optional, run: false });
+  return { argv: rest, mode, errors };
+}
+
+/** The `run` flags part of {@link extractHeadlessInvocation} alone. */
+export function extractHeadlessRunFlags(argv: readonly string[], valueOptions: ReadonlySet<string>): { argv: string[]; flags: HeadlessRunFlags; errors: string[] } {
+  const { argv: rest, errors, run } = extractHeadlessInvocation(argv, { valueOptions, intake: false });
+  return { argv: rest, flags: run ?? {}, errors };
 }
 /** Options a catalog marks as always taking a value. */
 export function catalogValueOptions(catalog: { readonly globalFlags: readonly { readonly tokens: readonly string[]; readonly kind: string }[];

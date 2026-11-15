@@ -2,20 +2,28 @@ import type { OperatorApiClientOptions } from '@goodvibes-jev/engine/operator-cl
 
 type NativeHostFetch = NonNullable<OperatorApiClientOptions['fetchImpl']>;
 
+/** The host, credential or project this request was bound to is no longer the selected one. */
+export class NativeHostSelectionChangedError extends Error {
+  constructor() {
+    super('Native host selection changed.');
+    this.name = 'NativeHostSelectionChangedError';
+  }
+}
+
 /** Enforce the exact authority at the final network boundary, after asynchronous
  * platform middleware and on every transport retry. Redirects must never forward
  * original source/mutation bodies or substitute another authority's response.
  */
 export function createNativeHostFetch(options: { readonly current: () => boolean; readonly fetchImpl?: NativeHostFetch }): NativeHostFetch {
   return async (input, init) => {
-    if (!options.current()) throw new Error('Native host selection changed.');
+    if (!options.current()) throw new NativeHostSelectionChangedError();
     const response = await (options.fetchImpl ?? fetch)(input, { ...init, redirect: 'error' });
     if (!options.current()) {
       // A borrowed transport may ignore AbortSignal and return a streaming
       // response after retirement. Release its body before the request drains.
       try { await response.body?.cancel(); }
       catch { /* A failed cleanup cannot make the stale response usable. */ }
-      throw new Error('Native host selection changed.');
+      throw new NativeHostSelectionChangedError();
     }
     return response;
   };

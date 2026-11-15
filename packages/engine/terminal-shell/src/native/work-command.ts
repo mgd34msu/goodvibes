@@ -43,17 +43,21 @@ export async function handleNativeIntakeCommand(
 export async function handleNativeSubmissionCommand(
   args: readonly string[],
   print: (text: string) => void,
-  submission: Pick<NativeWorkSubmissionActions, 'submitFile' | 'status' | 'retry'> | undefined,
+  submission: Pick<NativeWorkSubmissionActions, 'submitFile' | 'status' | 'retry'> & Partial<Pick<NativeWorkSubmissionActions, 'discard'>> | undefined,
 ): Promise<boolean> {
   const action = args[0];
-  if (action !== 'submit-file' && action !== 'submission-status' && action !== 'submission-retry') return false;
+  if (action !== 'submit-file' && action !== 'submission-status' && action !== 'submission-retry' && action !== 'submission-discard') return false;
   const path = args[1];
   if (args.length !== (action === 'submit-file' ? 2 : 1) || (action === 'submit-file' && path === undefined)) {
-    print('Usage: /work submit-file <JSON-path> | submission-status | submission-retry');
+    print('Usage: /work submit-file <JSON-path> | submission-status | submission-retry | submission-discard');
     return true;
   }
   if (!submission) {
     print('Native source submission is unavailable in this shell.');
+    return true;
+  }
+  if (action === 'submission-discard' && !submission.discard) {
+    print('Discarding a saved submission is unavailable in this shell.');
     return true;
   }
   const result =
@@ -61,7 +65,9 @@ export async function handleNativeSubmissionCommand(
       ? await submission.submitFile(path)
       : action === 'submission-status'
         ? await submission.status()
-        : await submission.retry();
+        : action === 'submission-discard'
+          ? await submission.discard!()
+          : await submission.retry();
   print(
     nativeWorkSubmissionLines(result)
       .map((line) => line.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' '))

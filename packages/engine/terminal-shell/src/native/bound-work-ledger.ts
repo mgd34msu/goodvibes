@@ -4,12 +4,24 @@ import type { WorkLedgerReadEvent } from '@goodvibes-jev/engine/platform/platfor
 
 import { projectWorkLedgerHistory, nextWorkLedgerCursor, type NativeWorkLedgerBinding } from './work-ledger-projection.js';
 
+/** How many of the most recent history events a view keeps and shows; older ones are counted. */
+export const NATIVE_WORK_LEDGER_HISTORY_TAIL = 20;
+/** Shown while the host does not answer a read; transport errors can carry addresses or credentials. */
+const READ_UNANSWERED = 'The host did not answer the work ledger read. These rows are the last ones read; it is retried automatically.';
+const RETRY_AFTER_FAILED_READ_MS = 5_000;
+
+/** A fact this view established about the ledger itself (a gap, a stale snapshot): reopening is the fix. */
+class LedgerViewError extends Error {}
+
 export type NativeWorkLedgerState =
   | { readonly status: 'closed' | 'loading' | 'unavailable'; readonly reason: string }
   | {
       readonly status: 'ready';
       readonly snapshot: WorkLedgerReadSnapshot;
+      /** The most recent events, at most {@link NATIVE_WORK_LEDGER_HISTORY_TAIL}. */
       readonly history: readonly WorkLedgerReadEvent[];
+      /** How many durable events came before `history` and are not kept here (absent: none). */
+      readonly earlierEvents?: number | undefined;
       readonly cursor: number;
       readonly execution?: NativeWorkExecutionState | undefined;
       /** The host binding offers start/status/cancel/resume for this project. */
@@ -28,6 +40,7 @@ export class BoundWorkLedgerModel {
   private cursor = 0;
   private highestSnapshotCursor = -1;
   private history: WorkLedgerReadEvent[] = [];
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private provenance: WorkLedgerReadSnapshot['provenance'];
   private projectionEpoch = 0;
   private executionBound = false;
@@ -38,6 +51,17 @@ export class BoundWorkLedgerModel {
   private readonly execution = new NativeWorkExecutionControls(() => {
     if (this.state.status === 'ready') this.publish(this.state);
   });
+  /** The snapshot this view shows: execution controls read their attempt from it, never from a fresh fetch. */
+  private shownSnapshot(): WorkLedgerReadSnapshot | undefined {
+    return this.state.status === 'ready' ? this.state.snapshot : undefined;
+  }
+  /** Keep the newest events only; the cursor, not the events, keeps history contiguous. */
+  private keepTail(): void {
+    if (this.history.length > NATIVE_WORK_LEDGER_HISTORY_TAIL) this.history.splice(0, this.history.length - NATIVE_WORK_LEDGER_HISTORY_TAIL);
+  }
+  private earlier(cursor: number): number {
+    return Math.max(0, cursor - this.history.length);
+  }
   constructor(
     private readonly changed: () => void = () => {},
     private readonly current: () => boolean = () => true,
@@ -67,6 +91,8 @@ export class BoundWorkLedgerModel {
     this.highestSnapshotCursor = -1;
     this.history = [];
     this.executionBound = false;
+    if (this.retryTimer !== undefined) clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
     // Revoke local references before any external cleanup can reenter.
     this.execution.clear();
     // Independent cleanup: a throwing observer must not retain the reader.
@@ -115,7 +141,7 @@ export class BoundWorkLedgerModel {
     this.client = client;
     const epoch = this.epoch;
     if (binding.execution) {
-      this.execution.bind(binding.execution, client, () => this.current() && epoch === this.epoch && this.client === client);
+      this.execution.bind(binding.execution, client.projectId, () => this.shownSnapshot(), () => client.readSnapshot(), () => this.current() && epoch === this.epoch && this.client === client);
       this.executionBound = true;
     }
     this.publish({ status: 'loading', reason: 'Reading native work ledger and durable history…' });
@@ -156,18 +182,35 @@ export class BoundWorkLedgerModel {
         },
         (error) => this.fail(error, epoch),
       );
-    } catch (error) {
-      this.fail(error, epoch);
+    } catch {
+      // The reader refused to observe at all (it was disposed): nothing will retry this binding.
+      if (epoch === this.epoch) this.unavailable('The work ledger reader is closed. Reopen /work to read it again.');
     }
   }
-  private fail(error: unknown, epoch: number): void {
+  /**
+   * A read the host did not answer keeps this binding and the rows already read: the reader
+   * keeps polling and the view catches up when a read succeeds. Only a fact about the ledger
+   * itself (a history gap, a snapshot behind history, another project) ends the binding.
+   */
+  private fail(error: unknown, epoch: number, retry?: WorkLedgerReadSnapshot): void {
     if (epoch !== this.epoch) return;
-    this.unavailable(error instanceof Error ? error.message : String(error));
+    if (error instanceof LedgerViewError) {
+      this.unavailable(error.message);
+      return;
+    }
+    this.publish(this.state.status === 'ready' ? { ...this.state, reason: READ_UNANSWERED } : { status: 'unavailable', reason: READ_UNANSWERED });
+    if (!retry || this.retryTimer !== undefined) return;
+    if (!this.pending || this.pending.cursor < retry.cursor) this.pending = retry;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      if (epoch === this.epoch && this.pending && !this.draining) void this.drain(epoch);
+    }, RETRY_AFTER_FAILED_READ_MS);
+    this.retryTimer.unref?.();
   }
   private accept(snapshot: WorkLedgerReadSnapshot, epoch: number): void {
     if (epoch !== this.epoch || !this.client) return;
     if (snapshot.projectId !== this.client.projectId) {
-      this.fail(new Error('Host project binding changed.'), epoch);
+      this.fail(new LedgerViewError('Host project binding changed.'), epoch);
       return;
     }
     if (snapshot.cursor < this.highestSnapshotCursor) return;
@@ -178,7 +221,7 @@ export class BoundWorkLedgerModel {
       if (this.provenance === 'requires_read_knowledge') {
         this.history = this.protect(this.history);
         if (this.state.status === 'ready')
-          this.publish({ ...this.state, snapshot: { ...this.state.snapshot, provenance: this.provenance }, history: [...this.history] });
+          this.publish({ ...this.state, snapshot: { ...this.state.snapshot, provenance: this.provenance }, history: [...this.history], earlierEvents: this.earlier(this.state.cursor) });
       } else if (prior === 'requires_read_knowledge') {
         this.history = [];
         this.cursor = 0;
@@ -195,35 +238,44 @@ export class BoundWorkLedgerModel {
   }
   private async drain(epoch: number): Promise<void> {
     this.draining = true;
+    let reading: WorkLedgerReadSnapshot | undefined;
     try {
       while (epoch === this.epoch && this.pending && this.client) {
         let snapshot = this.pending;
+        reading = snapshot;
         this.pending = undefined;
         const projectionEpoch = this.projectionEpoch;
+        // A view shows only the newest events, so a fresh one reads history from there, not from the
+        // first event: the read stays the same size however old the project is.
+        if (this.cursor === 0 && this.history.length === 0) this.cursor = Math.max(0, snapshot.cursor - NATIVE_WORK_LEDGER_HISTORY_TAIL);
         const events = await this.client.history(this.cursor);
         if (epoch !== this.epoch) return;
         if (projectionEpoch !== this.projectionEpoch) continue;
-        const cursor = nextWorkLedgerCursor(events, this.cursor, 'Native ledger history has a sequence gap. Reopen to reload.');
-        if (cursor < snapshot.cursor) throw new Error('Native ledger history is behind its snapshot. Reopen to reload.');
+        let cursor: number;
+        try { cursor = nextWorkLedgerCursor(events, this.cursor, 'Native ledger history has a sequence gap. Reopen to reload.'); }
+        catch (error) { throw new LedgerViewError(error instanceof Error ? error.message : String(error)); }
+        if (cursor < snapshot.cursor) throw new LedgerViewError('Native ledger history is behind its snapshot. Reopen to reload.');
         // A loop, not push(...page): a very large page would exceed the engine's argument limit and fail the view.
         for (const event of this.protect(events)) this.history.push(event);
+        this.keepTail();
         this.cursor = cursor;
         if (cursor > snapshot.cursor) {
           snapshot = await this.client.readSnapshot();
           if (epoch !== this.epoch) return;
           if (projectionEpoch !== this.projectionEpoch) continue;
           if (snapshot.projectId !== this.client.projectId || snapshot.cursor < cursor)
-            throw new Error('Native ledger snapshot is behind durable history. Reopen to reload.');
+            throw new LedgerViewError('Native ledger snapshot is behind durable history. Reopen to reload.');
           if (snapshot.cursor > cursor) {
             this.enqueue(snapshot);
             continue;
           }
         }
+        reading = undefined;
         this.execution.observe(snapshot);
-        this.publish({ status: 'ready', snapshot, history: [...this.history], cursor, executionAvailable: this.executionBound });
+        this.publish({ status: 'ready', snapshot, history: [...this.history], earlierEvents: this.earlier(cursor), cursor, executionAvailable: this.executionBound });
       }
     } catch (error) {
-      this.fail(error, epoch);
+      this.fail(error, epoch, reading);
     } finally {
       if (epoch === this.epoch) this.draining = false;
     }

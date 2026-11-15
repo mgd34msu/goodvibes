@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect } from 'bun:test';
 import { shellSplit } from '../platform/src/platform/utils/shell-split.js';
-import { fireTriggers, killTriggerActions, type TriggerExecutionOptions } from '../platform/src/platform/workflow/trigger-executor.js';
+import { fireTriggers, type TriggerExecutionOptions } from '../platform/src/platform/workflow/trigger-executor.js';
+import { AutomationCommands } from '../platform/src/platform/workflow/automation-commands.js';
 import type { HookEvent } from '../platform/src/platform/hooks/types.js';
 import type { TriggerDefinition } from '../platform/src/platform/tools/workflow/index.js';
 
@@ -65,7 +66,8 @@ describe('shellSplit in strict mode', () => {
 });
 
 describe('trigger actions are split strictly', () => {
-  afterEach(() => { killTriggerActions(); });
+  const commands = new AutomationCommands();
+  afterEach(() => { commands.stop(); });
 
   const event: HookEvent = {
     path: 'Post:tool:exec', phase: 'Post', category: 'tool', specific: 'exec',
@@ -85,14 +87,14 @@ describe('trigger actions are split strictly', () => {
 
   it('passes an intentional empty argument through in its position', async () => {
     const { spawn, argvs } = fakeSpawn();
-    const [result] = await fireTriggers(event, { list: () => [trigger('notify-send "" \'body\'')] }, { spawn });
+    const [result] = await fireTriggers(event, { list: () => [trigger('notify-send "" \'body\'')], commands }, { spawn });
     expect(result?.executed).toBe(true);
     expect(argvs).toEqual([['notify-send', '', 'body']]);
   });
 
   it('refuses an action with an unterminated quote and says why, without starting it', async () => {
     const { spawn, argvs } = fakeSpawn();
-    const [result] = await fireTriggers(event, { list: () => [trigger('notify-send "build done')] }, { spawn });
+    const [result] = await fireTriggers(event, { list: () => [trigger('notify-send "build done')], commands }, { spawn });
     expect(result?.executed).toBe(false);
     expect(result?.error).toContain('Action could not be parsed');
     expect(result?.error).toContain('Unterminated double quote');

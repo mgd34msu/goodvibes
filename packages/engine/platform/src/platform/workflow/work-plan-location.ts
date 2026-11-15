@@ -1,197 +1,116 @@
-/** Append-only exact project/root filename assignments. Readonly lookup creates
- * neither directories nor IDs; explicit activation uses populated exclusive
- * publication and retains actual parents, source files and temporary descriptor.
+/**
+ * Where a project's work plan lives: `<work-plans>/project-<hash>.json`, the
+ * hash taken over the exact project ID and root. The location is a pure
+ * function of the project, so finding a plan needs no table, no scan and no
+ * slot, and two projects never share a file because their names look alike.
+ *
+ * Earlier builds kept an assignment table (`.project-owners/<slot>.json` rows
+ * pointing at `.native-plans/<slot>.json` or an older top-level file). The first
+ * store opened in a directory that still has that table moves each assigned
+ * plan to its hashed name once, then retires the table.
  */
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fchmodSync, fsyncSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
-import { captureExistingDirectory, confirmFileDurable } from '../utils/atomic-json-store.js';
-import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
-interface Project { readonly projectId: string; readonly projectRoot: string }
-interface Assignment extends Project { readonly version: 1; readonly planId: string; readonly planFile: string; readonly unassignedFiles: readonly string[] }
-export interface WorkPlanLocation {
-  /** A readonly unregistered location is a candidate, not a claimed filename. */
-  readonly path: string;
-  readonly planId: string | null;
-  readonly registered: boolean;
-  readonly unassignedPaths: readonly string[];
-  assertCurrent(): void;
-  assertParentsCurrent(): void;
+import { createHash } from 'node:crypto';
+import { linkSync, lstatSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
+
+export interface WorkPlanProject { readonly projectId: string; readonly projectRoot: string }
+
+const HASHED_PLAN = /^project-[0-9a-f]{32}\.json$/;
+const OWNERS = '.project-owners';
+const NATIVE_PLANS = '.native-plans';
+
+/** The plan file of one project inside `directory`. */
+export function workPlanPath(directory: string, project: WorkPlanProject): string {
+  const hash = createHash('sha256').update(project.projectId).update('\0').update(project.projectRoot).digest('hex').slice(0, 32);
+  return join(directory, `project-${hash}.json`);
 }
-interface LocationOptions { readonly readOnly?: boolean; readonly assertCurrent?: (() => void) | undefined; readonly onEffect?: ((published?: boolean) => void) | undefined }
-const MAX_PROJECTS = 4096;
-const sameProject = (a: Project, b: Project) => a.projectId === b.projectId && a.projectRoot === b.projectRoot;
-const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-const planFilename = (value: unknown): value is string => typeof value === 'string' && value !== '.json' && value.endsWith('.json') && basename(value) === value && !value.includes('\\') && !value.includes('\0');
-const nativePlanFilename = (value: unknown): value is string => typeof value === 'string' && /^\.native-plans\/(0|[1-9]\d*)\.json$/.test(value);
-const stamp = (stat: BigIntStats) => [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink, stat.size, stat.birthtimeNs, stat.mtimeNs, stat.ctimeNs].join(':');
-const sameFile = (a: BigIntStats, b: BigIntStats) => a.dev === b.dev && a.ino === b.ino && a.uid === b.uid && a.gid === b.gid && a.birthtimeNs === b.birthtimeNs;
-function unavailable(): never { throw new Error('Work plan ownership changed or is unreadable; existing plans and assignments were left untouched.'); }
-/** Initial readonly discovery may race an ordinary first activation. This is
- * never a permission to replace an already retained parent, assignment or plan. */
-class InitialDirectoryAppeared extends Error {
-  constructor(readonly assertOriginalParents: () => void) { super('Work plan initial directory appeared during discovery.'); }
+
+const record = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+function readJson(path: string): Record<string, unknown> | null {
+  try { return record(JSON.parse(readFileSync(path, 'utf8'))); } catch { return null; }
 }
-function invoke(callback: (() => void) | undefined): void { const result: unknown = callback?.(); if (result !== undefined) { drainOwned(result); unavailable(); } }
-/** Actual existing configured directory aliases are retained. Missing children
- * are created one level at a time below the already checked original parent.
+
+function names(directory: string): string[] {
+  try { return readdirSync(directory); } catch { return []; }
+}
+
+const absent = (path: string): boolean => lstatSync(path, { throwIfNoEntry: false }) === undefined;
+
+/**
+ * Moves `source` to `target` without replacing a plan already at `target`.
+ * True when the source is gone afterwards (moved here or by another process).
  */
-function directoryOwner(directory: string, create: boolean, options: LocationOptions, internal = false) {
-  if (internal && lstatSync(directory, { throwIfNoEntry: false })?.isSymbolicLink()) unavailable();
-  const absent: string[] = []; let parent = resolve(directory);
-  while (!lstatSync(parent, { throwIfNoEntry: false })) { absent.unshift(parent); const next = dirname(parent); if (next === parent) unavailable(); parent = next; }
-  const held = [captureExistingDirectory(parent)];
-  const physical = () => { for (const selected of held) selected.assertCurrent(); };
-  const current = () => { invoke(options.assertCurrent); physical(); if (!create) for (const path of absent) {
-    const entry = lstatSync(path, { bigint: true, throwIfNoEntry: false }); if (!entry) continue;
-    if (!entry.isDirectory() || entry.isSymbolicLink() || (process.geteuid && entry.uid !== BigInt(process.geteuid()))) unavailable();
-    throw new InitialDirectoryAppeared(physical);
-  } };
-  for (const path of absent) {
-    current(); if (!create) return { exists: false, current, physical };
-    let entry = lstatSync(path, { bigint: true, throwIfNoEntry: false }), created = false;
-    if (!entry) { try { mkdirSync(path, { mode: 0o700 }); created = true; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } entry = lstatSync(path, { bigint: true }); }
-    if (!entry.isDirectory() || entry.isSymbolicLink() || (process.geteuid && entry.uid !== BigInt(process.geteuid()))) unavailable();
-    const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    try {
-      const original = fstatSync(fd, { bigint: true }); if (!sameFile(entry, original)) unavailable();
-      if (created) fchmodSync(fd, 0o700);
-      if (!sameFile(original, lstatSync(path, { bigint: true }))) unavailable();
-      const captured = captureExistingDirectory(path); held.push(captured); physical();
-      if (created) invoke(() => options.onEffect?.(false)); current();
-    } finally { closeSync(fd); }
-  }
-  current(); return { exists: true, current, physical };
-}
-function readDocument(path: string) {
-  const source = readFileObservation(path);
-  const current = () => { if (fileObservationIdentity(path) !== source.physical) unavailable(); };
-  const value: unknown = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(source.bytes)); current();
-  return { value, current };
-}
-/** A populated no-replace link briefly has two names. Wait only for that same
- * private original to finish its transfer; never read/adopt a multi-link row. */
-function readInitialAssignment(path: string, assertParents: (() => void) | undefined, retained: (() => void) | undefined) {
-  const original = lstatSync(path, { bigint: true }); retained?.();
-  if (!original.isFile() || original.nlink !== 2n || (original.mode & 0o777n) !== 0o600n
-    || (process.geteuid && original.uid !== BigInt(process.geteuid()))) return readDocument(path);
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  const sameTransfer = (entry: BigIntStats) => entry.isFile() && !entry.isSymbolicLink() && sameFile(entry, original)
-    && entry.mode === original.mode && entry.size === original.size && entry.mtimeNs === original.mtimeNs;
-  const deadline = performance.now() + 1_000, sleeper = new Int32Array(new SharedArrayBuffer(4));
+function moveWithoutReplacing(source: string, target: string): boolean {
   try {
-    for (;;) {
-      assertParents?.();
-      const descriptor = fstatSync(fd, { bigint: true }), selected = lstatSync(path, { bigint: true });
-      if (!sameTransfer(descriptor) || !sameTransfer(selected)
-        || (descriptor.nlink !== 1n && descriptor.nlink !== 2n) || (selected.nlink !== 1n && selected.nlink !== 2n)) unavailable();
-      if (descriptor.nlink === 1n && selected.nlink === 1n && stamp(descriptor) === stamp(selected)) break;
-      if (performance.now() >= deadline) unavailable();
-      Atomics.wait(sleeper, 0, 0, 2);
-    }
-    const observed = readDocument(path); assertParents?.();
-    const descriptor = fstatSync(fd, { bigint: true }), selected = lstatSync(path, { bigint: true });
-    if (!sameTransfer(descriptor) || !sameTransfer(selected) || descriptor.nlink !== 1n || stamp(descriptor) !== stamp(selected)) unavailable();
-    observed.current(); return observed;
-  } finally { closeSync(fd); }
+    linkSync(source, target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return absent(source);
+    if (code !== 'EEXIST') throw error;
+    // Another process importing at the same moment linked the same file: same inode, safe to drop the old name.
+    const held = lstatSync(source, { throwIfNoEntry: false }), existing = lstatSync(target, { throwIfNoEntry: false });
+    if (!held || !existing || held.ino !== existing.ino || held.dev !== existing.dev) return !held;
+  }
+  try { unlinkSync(source); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  return true;
 }
-function readAssignment(path: string, slot: number, assertParents?: () => void, retained?: () => void): { readonly value: Assignment; current(): void } | undefined {
-  let observed: ReturnType<typeof readDocument>, existed = false;
-  try { observed = readInitialAssignment(path, assertParents, () => { existed = true; retained?.(); }); }
-  catch (error) { if (!existed && (error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw new Error('Work plan project assignment is unreadable; preserve it before repairing the store.'); }
-  const value = observed.value;
-  if (!object(value) || value.version !== 1 || typeof value.projectId !== 'string' || !value.projectId || typeof value.projectRoot !== 'string'
-    || typeof value.planId !== 'string' || !value.planId || (!planFilename(value.planFile) && !nativePlanFilename(value.planFile))
-    || (nativePlanFilename(value.planFile) && value.planFile !== `.native-plans/${slot}.json`)
-    || !Array.isArray(value.unassignedFiles) || !value.unassignedFiles.every(planFilename)) unavailable();
-  return { value: value as unknown as Assignment, current: observed.current };
+
+/** Leaves a leftover directory where the owner can inspect it, out of the way of later starts. */
+function retire(path: string, unassigned: string[]): void {
+  try { rmdirSync(path); return; } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return;
+    if (code !== 'ENOTEMPTY' && code !== 'EEXIST') throw error;
+  }
+  const kept = `${path}.unimported-${Date.now()}`;
+  try { renameSync(path, kept); unassigned.push(kept); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }
-function names(directory: string): string[] { try { return readdirSync(directory); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; } }
-/** Old unattributed/unreadable plans remain visible and untouched. Only exact
- * actual saved project metadata selects an old filename, without recomputing it.
+
+/**
+ * Moves the plans of an earlier build's assignment table to their hashed names,
+ * once. Returns the files and directories it could not attribute to a project;
+ * they are left in place, untouched. Costs two `lstat` calls when there is
+ * nothing to import.
  */
-function findExisting(directory: string, project: Project) {
-  let match: { planFile: string; planId: string } | undefined; const unassignedFiles: string[] = [], retained: Array<() => void> = [];
-  const members = names(directory).filter(planFilename).sort(); if (members.length > MAX_PROJECTS) unavailable();
-  for (const file of members) {
-    const path = join(directory, file), original = lstatSync(path, { bigint: true });
-    retained.push(() => { if (stamp(lstatSync(path, { bigint: true })) !== stamp(original)) unavailable(); });
-    let value: unknown; try { value = readDocument(path).value; } catch { unassignedFiles.push(file); continue; }
-    if (!object(value) || typeof value.projectId !== 'string' || typeof value.projectRoot !== 'string') { unassignedFiles.push(file); continue; }
-    if (!sameProject({ projectId: value.projectId, projectRoot: value.projectRoot }, project)) continue;
-    if (match) throw new Error('More than one saved work plan names this project; preserve both files before combining them.');
-    if (typeof value.id !== 'string' || !value.id) { unassignedFiles.push(file); continue; }
-    match = { planFile: file, planId: value.id };
-  }
-  const current = () => { const actual = names(directory).filter(planFilename).sort(); if (actual.length !== members.length || actual.some((name, index) => name !== members[index])) unavailable(); for (const check of retained) check(); };
-  current(); return { ...match, unassignedFiles, hasOriginals: members.length > 0, current };
-}
-function location(directory: string, assignment: Assignment, assertCurrent: () => void, assertParentsCurrent: () => void): WorkPlanLocation {
-  return Object.freeze({ path: join(directory, assignment.planFile), planId: assignment.planId, registered: true,
-    unassignedPaths: Object.freeze(assignment.unassignedFiles.map(file => join(directory, file))), assertCurrent, assertParentsCurrent });
-}
-export function resolveWorkPlanLocation(directory: string, project: Project, options: LocationOptions = {}): WorkPlanLocation {
-  const readOnly = options.readOnly === true, restriction = options.assertCurrent?.bind(options), notification = options.onEffect?.bind(options);
-  options = Object.freeze({ readOnly, assertCurrent: restriction, onEffect: notification });
-  // At most the configured ancestry plus the two internal directories can
-  // appear during initial discovery. A flapping/retired namespace fails closed.
-  const limit = resolve(directory).split(sep).length + 2;
-  for (let attempt = 0;; attempt++) {
-    const source = { retained: false };
-    try { return resolveLocation(directory, project, options, source); }
-    catch (error) {
-      if (!(error instanceof InitialDirectoryAppeared) || !readOnly || source.retained || attempt >= limit) throw error;
-      error.assertOriginalParents();
-    }
-  }
-}
-function resolveLocation(directory: string, project: Project, options: LocationOptions, source: { retained: boolean }): WorkPlanLocation {
-  const readOnly = options.readOnly === true;
-  const directoryGuard = directoryOwner(directory, !readOnly, options), owners = join(directory, '.project-owners'), nativeDirectory = join(directory, '.native-plans');
-  const ownerGuard = directoryOwner(owners, !readOnly, options, true), selectedRows: Array<() => void> = [];
-  const nativeGuard = directoryOwner(nativeDirectory, !readOnly, options, true);
-  const parentsCurrent = () => { directoryGuard.physical(); ownerGuard.physical(); nativeGuard.physical(); };
-  const current = () => { directoryGuard.current(); ownerGuard.current(); nativeGuard.current(); for (const check of selectedRows) check(); };
-  const selectedLocation = (assignment: Assignment) => {
-    current(); return location(directory, assignment, current, parentsCurrent);
-  };
-  current(); const nativeFiles = names(nativeDirectory), ownerFiles = names(owners); current(); let highest = -1;
-  if (nativeFiles.length > MAX_PROJECTS || ownerFiles.length > MAX_PROJECTS) unavailable();
-  for (const name of [...ownerFiles, ...nativeFiles]) { const numbered = /^(0|[1-9]\d*)\.json$/.exec(name); if (!numbered) continue; const slot = Number(numbered[1]); if (!Number.isSafeInteger(slot) || slot >= MAX_PROJECTS) unavailable(); highest = Math.max(highest, slot); }
-  let existing: ReturnType<typeof findExisting> | undefined;
-  for (let slot = 0; slot < MAX_PROJECTS; slot++) {
-    current(); const path = join(owners, `${slot}.json`), assigned = readAssignment(path, slot, current, () => { source.retained = true; });
-    if (assigned) { source.retained = true; selectedRows.push(assigned.current); if (sameProject(assigned.value, project)) { if (!options.readOnly) { confirmFileDurable(path); current(); } return selectedLocation(assigned.value); } continue; }
-    if (slot <= highest) throw new Error('Work plan project assignment is missing; saved plan files were left untouched.');
-    existing ??= findExisting(directory, project); if (existing.hasOriginals) source.retained = true; existing.current();
-    if (options.readOnly) return Object.freeze({ path: join(directory, existing.planFile ?? `.native-plans/${slot}.json`), planId: existing.planId ?? null, registered: false,
-      unassignedPaths: Object.freeze(existing.unassignedFiles.map(file => join(directory, file))), assertCurrent: () => { current(); existing!.current(); }, assertParentsCurrent: parentsCurrent });
-    const proposed: Assignment = { version: 1, ...project, planId: existing.planId ?? `wp-${randomUUID()}`, planFile: existing.planFile ?? `.native-plans/${slot}.json`, unassignedFiles: existing.unassignedFiles };
-    current(); existing.current();
-    const temporary = join(owners, `.assign-${process.pid}-${randomUUID()}.tmp`);
-    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600), original = fstatSync(fd, { bigint: true });
-    try {
-      fchmodSync(fd, 0o600); writeFileSync(fd, `${JSON.stringify(proposed)}\n`); fsyncSync(fd);
-      const prepared = stamp(fstatSync(fd, { bigint: true }));
-      invoke(() => options.onEffect?.(false)); current(); existing.current();
-      if (stamp(fstatSync(fd, { bigint: true })) !== prepared || stamp(lstatSync(temporary, { bigint: true })) !== prepared) unavailable();
-      try { linkSync(temporary, path); } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        current(); const winner = readAssignment(path, slot, current); if (!winner) unavailable(); selectedRows.push(winner.current);
-        if (sameProject(winner.value, project)) { confirmFileDurable(path); current(); return selectedLocation(winner.value); }
-        continue;
+export function importAssignedWorkPlans(directory: string): readonly string[] {
+  const owners = join(directory, OWNERS), native = join(directory, NATIVE_PLANS);
+  if (absent(owners) && absent(native)) return [];
+  const unassigned: string[] = [];
+  try {
+    for (const row of names(owners).filter(name => name.endsWith('.json')).sort()) {
+      const rowPath = join(owners, row), value = readJson(rowPath);
+      const planFile = value?.['planFile'];
+      if (!value || typeof value['projectId'] !== 'string' || typeof value['projectRoot'] !== 'string' || typeof planFile !== 'string'
+        || planFile.includes('..') || planFile.includes('\0')) continue;
+      const source = join(directory, planFile);
+      if (absent(source) || moveWithoutReplacing(source, workPlanPath(directory, { projectId: value['projectId'], projectRoot: value['projectRoot'] }))) {
+        try { unlinkSync(rowPath); } catch { /* another process retired it */ }
+      } else {
+        logger.warn('Work plan import kept an earlier plan beside a newer one', { source, project: value['projectRoot'] });
+        // A plan left under the table's own directory is listed with that directory when it is retired.
+        if (!source.startsWith(`${native}/`)) unassigned.push(source);
       }
-      if (!sameFile(lstatSync(path, { bigint: true }), original) || !sameFile(lstatSync(temporary, { bigint: true }), original)) unavailable();
-      unlinkSync(temporary); const published = stamp(fstatSync(fd, { bigint: true }));
-      const publicationCurrent = () => { current(); if (stamp(fstatSync(fd, { bigint: true })) !== published || stamp(lstatSync(path, { bigint: true })) !== published) unavailable(); };
-      publicationCurrent(); invoke(() => options.onEffect?.(false)); publicationCurrent(); confirmFileDurable(path); publicationCurrent();
-      const actual = readAssignment(path, slot, current); if (!actual || !sameProject(actual.value, project) || actual.value.planId !== proposed.planId) unavailable(); selectedRows.push(actual.current);
-      return selectedLocation(actual.value);
-    } finally {
-      try { directoryGuard.physical(); ownerGuard.physical(); const actual = lstatSync(temporary, { bigint: true, throwIfNoEntry: false }); if (actual && sameFile(actual, original)) { unlinkSync(temporary); invoke(() => options.onEffect?.(false)); } }
-      finally { closeSync(fd); }
     }
+    // Top-level plans from before the table name their project inside the file.
+    for (const name of names(directory)) {
+      if (!name.endsWith('.json') || HASHED_PLAN.test(name)) continue;
+      const path = join(directory, name), value = readJson(path);
+      if (value && typeof value['projectId'] === 'string' && typeof value['projectRoot'] === 'string'
+        && moveWithoutReplacing(path, workPlanPath(directory, { projectId: value['projectId'], projectRoot: value['projectRoot'] }))) continue;
+      unassigned.push(path);
+    }
+    retire(owners, unassigned);
+    retire(native, unassigned);
+  } catch (error) {
+    logger.warn('Work plan import from the earlier assignment table did not finish; the remaining files were left in place', {
+      directory: basename(directory), error: summarizeError(error),
+    });
   }
-  throw new Error('Work plan project assignment space is exhausted.');
+  return Object.freeze([...new Set(unassigned)]);
 }

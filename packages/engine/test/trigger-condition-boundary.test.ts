@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { fireTriggers } from '../platform/src/platform/workflow/trigger-executor.ts';
+import { AutomationCommands } from '../platform/src/platform/workflow/automation-commands.ts';
 import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
 import type { TriggerDefinition } from '../platform/src/platform/tools/workflow/index.ts';
 
@@ -11,7 +12,7 @@ async function runCondition(condition: string, payload: Record<string, unknown> 
     specific: 'exec', sessionId: 'synthetic-condition', timestamp: 0, payload };
   const trigger = { id: 'synthetic-condition', enabled: true, event: event.path, condition, action: 'true' } as TriggerDefinition;
   let reached = false;
-  const [result] = await fireTriggers(event, { list: () => [trigger] }, {
+  const [result] = await fireTriggers(event, { list: () => [trigger], commands: new AutomationCommands() }, {
     guardCommand: async () => { reached = true; return 'stopped by test'; },
   });
   expect(result?.executed).toBe(false);

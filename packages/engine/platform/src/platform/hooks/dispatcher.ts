@@ -18,7 +18,7 @@ import * as agentRunner from './runners/agent.js';
 import * as httpRunner from './runners/http.js';
 import * as tsRunner from './runners/typescript.js';
 import { ChainEngine } from './chain-engine.js';
-import { fireTriggers, killTriggerActions } from '../workflow/trigger-executor.js';
+import { fireTriggers } from '../workflow/trigger-executor.js';
 import { guardExecCommand } from '../tools/exec/ast-guard.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { TriggerManagerLike } from '../workflow/trigger-executor.js';
@@ -172,14 +172,15 @@ export class HookDispatcher {
    * Attach a TriggerManager so hook events automatically fire matching triggers.
    * Trigger commands go through the same command guard as the exec tool, using
    * `featureFlags` for its AST setting. Returns a disposer that detaches the
-   * manager and kills any trigger action still running.
+   * manager and kills that manager's trigger actions still running; other
+   * runtimes' actions are left alone.
    */
   setTriggerManager(tm: TriggerManagerLike | null, featureFlags?: Pick<FeatureFlagManager, 'isEnabled'>): () => void {
     this.triggerManager = tm;
     this.triggerFlags = featureFlags ?? null;
     return () => {
-      this.triggerManager = null;
-      killTriggerActions();
+      if (this.triggerManager === tm) this.triggerManager = null;
+      tm?.commands.stop('trigger');
     };
   }
 

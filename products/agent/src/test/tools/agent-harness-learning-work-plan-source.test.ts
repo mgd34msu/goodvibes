@@ -29,18 +29,6 @@ test('the original native location getter supports readonly candidates and a fre
   expect(after.source.workItems).toHaveLength(1); after.assertCurrent();
 });
 
-for (const replacement of ['own-getter', 'prototype-getter', 'backing-getter'] as const) test(`native work plan ${replacement} is refused without invoking it`, () => {
-  const f = fixture(), original = Object.getOwnPropertyDescriptor(WorkPlanStore.prototype, 'filePath')!;
-  let touched = 0;
-  try {
-    const descriptor = { configurable: true, get() { touched++; return join(f.home, 'foreign-plan'); } };
-    if (replacement === 'prototype-getter') Object.defineProperty(WorkPlanStore.prototype, 'filePath', descriptor);
-    else Object.defineProperty(f.work, replacement === 'own-getter' ? 'filePath' : 'selectedPath', descriptor);
-    expect(() => acquireLearningCuratorSource(f.context, {})).toThrow(ToolInputProjectionError);
-    expect(touched).toBe(0);
-  } finally { Object.defineProperty(WorkPlanStore.prototype, 'filePath', original); }
-});
-
 test('a changed native path after an await is held even when the temporary getter is restored', async () => {
   const f = fixture(), source = acquireLearningCuratorSource(f.context, {});
   let touched = 0;
@@ -70,14 +58,13 @@ test('a learning source reuses the actual native item read while retaining every
   expect(readFileSync(f.work.filePath)).toEqual(bytes);
 });
 
-test.each(['contents', 'same-byte-file', 'same-byte-assignment', 'method'] as const)('a retained learning source refuses actual native %s changes before reusing work', async change => {
+test.each(['contents', 'same-byte-file', 'method'] as const)('a retained learning source refuses actual native %s changes before reusing work', async change => {
   const f = fixture(); f.work.addItem('Original authored source');
   const source = acquireLearningCuratorSource(f.context, {});
   if (change === 'contents') f.work.addItem('Later independent source');
   else if (change === 'method') Object.defineProperty(f.work, 'listItems', { value: () => [] });
   else {
-    const path = change === 'same-byte-assignment'
-      ? join(f.home, '.goodvibes', 'agent', 'work-plans', '.project-owners', '0.json') : f.work.filePath;
+    const path = f.work.filePath;
     const bytes = readFileSync(path); renameSync(path, `${path}.retained`); writeFileSync(path, bytes);
   }
   await Promise.resolve(); expect(source.assertCurrent).toThrow();

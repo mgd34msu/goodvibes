@@ -1,5 +1,5 @@
-/** A plan file this version can only read in part is preserved before it is rewritten, and the export honours the retained location. */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+/** A plan file this version can only read in part is preserved before it is rewritten. */
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { WorkPlanStore } from '../platform/src/platform/workflow/work-plan-store.ts';
@@ -51,18 +51,3 @@ describe('work plan with items this version cannot fully read', () => {
   });
 });
 
-describe('work plan markdown export', () => {
-  test('a work-plan directory replaced after the plan was read does not receive the export', () => {
-    const store = makeStore();
-    store.addItem('one');
-    const directory = dirname(store.filePath);
-    const toMarkdown = store.toMarkdown.bind(store);
-    store.toMarkdown = (plan) => {
-      renameSync(directory, `${directory}.retained`);
-      mkdirSync(directory);
-      return toMarkdown(plan);
-    };
-    expect(() => store.exportMarkdown()).toThrow();
-    expect(existsSync(store.filePath.replace(/\.json$/, '.md'))).toBe(false);
-  });
-});

@@ -1,0 +1,132 @@
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
+import {
+  resolveCredentialEnvScrub,
+  scrubCredentialEnv,
+  type CredentialEnvScrubConfig,
+  type ResolvedCredentialEnvScrub,
+} from '../tools/exec/credential-env.js';
+
+// ---------------------------------------------------------------------------
+// AutomationCommands
+// ---------------------------------------------------------------------------
+// Starts the background commands of one runtime's workflow automation (trigger
+// actions and scheduled commands) and owns everything about them: the
+// credential-env scrub they start with, the per-trigger or per-schedule limit
+// on runs in flight, the kill timer, and the set of running processes that
+// shutdown kills. One instance per WorkflowServices, so disposing one runtime
+// stops only that runtime's commands.
+// ---------------------------------------------------------------------------
+
+export type AutomationCommandKind = 'trigger' | 'schedule';
+
+export interface AutomationCommandRequest {
+  readonly kind: AutomationCommandKind;
+  /** The trigger id or schedule name; the in-flight limit counts runs of this kind and key. */
+  readonly key: string;
+  readonly argv: readonly string[];
+  /** Variables added to the scrubbed environment, such as GV_TRIGGER_ID. */
+  readonly env?: Readonly<Record<string, string>> | undefined;
+  readonly maxInFlight: number;
+  /** The run is killed after this long; omitted, it is not timed. */
+  readonly timeoutMs?: number | undefined;
+  /** Returns a refusal reason when the command must not run. Runs after the slot is taken. */
+  readonly guard?: (() => Promise<string | undefined>) | undefined;
+  /** Starts the process. Defaults to Bun.spawn. */
+  readonly spawn?: typeof Bun.spawn | undefined;
+  /** Arms the kill timer and returns its canceller. Defaults to an unref'd setTimeout. */
+  readonly startTimer?: ((callback: () => void, ms: number) => () => void) | undefined;
+}
+
+export type AutomationCommandStart =
+  | { readonly started: true; readonly pid: number }
+  | { readonly started: false; readonly reason: 'busy'; readonly running: number; readonly limit: number }
+  | { readonly started: false; readonly reason: 'refused' | 'stopped' | 'failed'; readonly message: string };
+
+interface Run {
+  readonly kind: AutomationCommandKind;
+  readonly key: string;
+  proc: { kill(): void } | null;
+  stopped: boolean;
+}
+
+const defaultTimer = (callback: () => void, ms: number): (() => void) => {
+  const timer = setTimeout(callback, ms);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+};
+
+export class AutomationCommands {
+  readonly #runs = new Set<Run>();
+  #scrub: ResolvedCredentialEnvScrub = resolveCredentialEnvScrub();
+
+  /** The credential-env scrub the exec tool uses; registerAllTools passes the same configuration to both. */
+  setCredentialEnvScrub(config: CredentialEnvScrubConfig | undefined): void {
+    this.#scrub = resolveCredentialEnvScrub(config);
+  }
+
+  /** Runs of this kind and key that are starting or running. */
+  running(kind: AutomationCommandKind, key: string): number {
+    let count = 0;
+    for (const run of this.#runs) if (run.kind === kind && run.key === key) count++;
+    return count;
+  }
+
+  /**
+   * Starts one command. The slot is taken before the first await, so a burst of
+   * starts for the same key never exceeds `maxInFlight`.
+   */
+  async start(request: AutomationCommandRequest): Promise<AutomationCommandStart> {
+    const { kind, key } = request;
+    const running = this.running(kind, key);
+    if (running >= request.maxInFlight) return { started: false, reason: 'busy', running, limit: request.maxInFlight };
+    const run: Run = { kind, key, proc: null, stopped: false };
+    this.#runs.add(run);
+    let spawned = false;
+    try {
+      if (request.guard) {
+        const refusal = await request.guard();
+        if (refusal !== undefined) return { started: false, reason: 'refused', message: refusal };
+      }
+      const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
+      const { env } = await scrubCredentialEnv(hostEnv, this.#scrub);
+      // stop() ran while the guard or the scrub was being read: nothing may start that stop() cannot kill.
+      if (run.stopped) return { started: false, reason: 'stopped', message: 'Automation was stopped before the command started.' };
+      const spawn = request.spawn ?? Bun.spawn;
+      const proc = spawn([...request.argv], { env: { ...env, ...request.env }, stdout: 'ignore', stderr: 'ignore' });
+      spawned = true;
+      run.proc = proc;
+      let timedOut = false;
+      const cancelTimer = request.timeoutMs === undefined ? () => {} : (request.startTimer ?? defaultTimer)(() => {
+        timedOut = true;
+        try { proc.kill(); } catch { /* already exited */ }
+      }, request.timeoutMs);
+      proc.exited.then((code) => {
+        if (timedOut) logger.warn('Automation command killed after its timeout', { kind, key, pid: proc.pid, timeoutMs: request.timeoutMs });
+        else if (code !== 0 && !run.stopped) logger.warn('Automation command exited non-zero', { kind, key, pid: proc.pid, exitCode: code });
+      }).catch((err: unknown) => {
+        logger.warn('Automation command exit tracking failed', { kind, key, error: summarizeError(err) });
+      }).finally(() => {
+        cancelTimer();
+        this.#runs.delete(run);
+      });
+      return { started: true, pid: proc.pid };
+    } catch (err) {
+      return { started: false, reason: 'failed', message: summarizeError(err) };
+    } finally {
+      if (!spawned) this.#runs.delete(run);
+    }
+  }
+
+  /** Kills every command of `kind` (all kinds when omitted) and cancels any still starting. */
+  stop(kind?: AutomationCommandKind): void {
+    for (const run of [...this.#runs]) {
+      if (kind !== undefined && run.kind !== kind) continue;
+      run.stopped = true;
+      this.#runs.delete(run);
+      try { run.proc?.kill(); } catch (err) {
+        logger.debug('Automation command kill failed', { kind: run.kind, key: run.key, error: summarizeError(err) });
+      }
+    }
+  }
+}

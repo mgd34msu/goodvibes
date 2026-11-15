@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ScheduleManager, createWorkflowServices } from '../platform/src/platform/tools/workflow/index.ts';
+import { AutomationCommands } from '../platform/src/platform/workflow/automation-commands.ts';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { registerAllTools } from '../platform/src/platform/tools/index.ts';
 import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.ts';
@@ -115,16 +116,16 @@ describe('scheduled workflow command environment', () => {
   });
 
   test('a name on the configured allowlist is kept, as the exec path keeps it', async () => {
-    const manager = new ScheduleManager();
-    manager.setCredentialEnvScrub({ allowlist: ['gv_schedule_test_token'] });
-    expect(await runOnce(manager)).toContain('GV_SCHEDULE_TEST_TOKEN=tok-should-not-leak');
+    const commands = new AutomationCommands();
+    commands.setCredentialEnvScrub({ allowlist: ['gv_schedule_test_token'] });
+    expect(await runOnce(new ScheduleManager(commands))).toContain('GV_SCHEDULE_TEST_TOKEN=tok-should-not-leak');
   });
 
-  test('registerAllTools gives the schedule manager the credentialEnvScrub it gives exec', async () => {
+  test('registerAllTools gives scheduled commands and trigger actions the credentialEnvScrub it gives exec', async () => {
     const workflowServices = createWorkflowServices();
     const seen: unknown[] = [];
-    const original = workflowServices.scheduleManager.setCredentialEnvScrub.bind(workflowServices.scheduleManager);
-    workflowServices.scheduleManager.setCredentialEnvScrub = (config) => { seen.push(config); original(config); };
+    const original = workflowServices.commands.setCredentialEnvScrub.bind(workflowServices.commands);
+    workflowServices.commands.setCredentialEnvScrub = (config) => { seen.push(config); original(config); };
     const credentialEnvScrub = { allowlist: ['GV_SCHEDULE_TEST_TOKEN'] };
     const sessions = new CrossSessionTaskRegistry(join(dir, 'session-tasks.json'));
     registerAllTools(new ToolRegistry(), {

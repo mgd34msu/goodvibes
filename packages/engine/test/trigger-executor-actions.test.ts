@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   fireTriggers,
-  killTriggerActions,
   type TriggerExecutionOptions,
 } from '../platform/src/platform/workflow/trigger-executor.ts';
+import { AutomationCommands } from '../platform/src/platform/workflow/automation-commands.ts';
 import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
 import type { TriggerDefinition } from '../platform/src/platform/tools/workflow/index.ts';
 
@@ -28,10 +28,11 @@ function fakeSpawn() {
   }) as unknown as NonNullable<TriggerExecutionOptions['spawn']>;
   return { spawn, procs, envs };
 }
+let commands = new AutomationCommands();
 const run = (t: TriggerDefinition, options: TriggerExecutionOptions, ev = event()) =>
-  fireTriggers(ev, { list: () => [t] }, options);
+  fireTriggers(ev, { list: () => [t], commands }, options);
 
-afterEach(() => { killTriggerActions(); });
+afterEach(() => { commands.stop(); commands = new AutomationCommands(); });
 
 describe('trigger conditions with || and &&', () => {
   const passes = async (condition: string, payload: Record<string, unknown>) => {
@@ -101,11 +102,25 @@ describe('trigger results', () => {
     expect(f.procs[0]!.killed).toBe(true);
   });
 
-  test('killTriggerActions stops actions still running', async () => {
+  test('stopping one runtime\'s commands kills only its own actions', async () => {
     const f = fakeSpawn();
+    const other = new AutomationCommands();
     await run(trigger({}), { spawn: f.spawn, startTimer: () => () => {} });
-    killTriggerActions();
+    await fireTriggers(event(), { list: () => [trigger({ id: 't2' })], commands: other }, { spawn: f.spawn, startTimer: () => () => {} });
+    other.stop();
+    expect(f.procs.map((proc) => proc.killed)).toEqual([false, true]);
+    commands.stop();
     expect(f.procs[0]!.killed).toBe(true);
+  });
+
+  test('a burst of fires never starts more than the in-flight limit', async () => {
+    const f = fakeSpawn();
+    // The guard resolves on a later tick, so every fire is past the limit check before any spawns.
+    const options: TriggerExecutionOptions = { spawn: f.spawn, maxInFlight: 4, guardCommand: () => new Promise((resolve) => setTimeout(() => resolve(undefined), 0)) };
+    const results = (await Promise.all(Array.from({ length: 10 }, () => run(trigger({}), options)))).flat();
+    expect(f.procs.length).toBe(4);
+    expect(results.filter((r) => r.executed).length).toBe(4);
+    expect(results.filter((r) => r.error?.includes('still running')).length).toBe(6);
   });
 
   test('a command the guard refuses is not started', async () => {

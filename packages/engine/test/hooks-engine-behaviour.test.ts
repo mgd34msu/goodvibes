@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { HookDispatcher, HookWorkbench, createHookApi, createHookApiDispatcher, safeEvaluate } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { HookEvent, HookDefinition } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { hookTimeoutSeconds } from '../platform/src/platform/hooks/execution.ts';
+import { AutomationCommands } from '../platform/src/platform/workflow/automation-commands.ts';
 import { run as runHttp } from '../platform/src/platform/hooks/runners/http.ts';
 
 const dirs: string[] = [];
@@ -79,7 +80,7 @@ describe('triggers', () => {
   test('a trigger is evaluated for an event no hook matches', async () => {
     const dispatcher = new HookDispatcher();
     let listed = 0;
-    dispatcher.setTriggerManager({ list: () => { listed++; return []; } });
+    dispatcher.setTriggerManager({ list: () => { listed++; return []; }, commands: new AutomationCommands() });
     const result = await dispatcher.fire(makeEvent('Post:tool:read'));
     expect(result.ok).toBe(true);
     expect(listed).toBe(1);

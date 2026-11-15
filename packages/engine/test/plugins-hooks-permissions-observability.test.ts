@@ -10,6 +10,7 @@ import { PluginLifecycleManager } from '../platform/src/platform/runtime/plugins
 import type { PluginManifestV2 } from '../platform/src/platform/runtime/plugins/types.js';
 import type { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { logger } from '../platform/src/platform/utils/logger.js';
+import { AutomationCommands } from '../platform/src/platform/workflow/automation-commands.js';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 
 const tmpRoots: string[] = [];
@@ -199,6 +200,7 @@ describe('plugins/hooks/permissions observability', () => {
         list() {
           throw new Error('trigger registry unavailable');
         },
+        commands: new AutomationCommands(),
       });
 
       const result = await dispatcher.fire(hookEvent());

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { HookDispatcher, type HookEvent } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { TriggerManager } from '@goodvibes-jev/engine/platform/platform/tools';
-import { killTriggerActions } from '@goodvibes-jev/engine/platform/platform/workflow';
 
 type Spawned = { readonly command: readonly string[]; readonly triggerId: string | undefined };
 
@@ -19,8 +18,9 @@ beforeEach(() => {
   }) as unknown as typeof Bun.spawn);
 });
 
+const managers: TriggerManager[] = [];
 afterEach(() => {
-  killTriggerActions();
+  for (const manager of managers.splice(0)) manager.commands.stop();
   spawnSpy.mockRestore();
 });
 
@@ -34,6 +34,8 @@ const toolEvent = (specific: string): HookEvent => ({
   payload: {},
 });
 
+function track(manager: TriggerManager): TriggerManager { managers.push(manager); return manager; }
+
 /** Resolves once a trigger action has been started. */
 function nextSpawn(): Promise<void> {
   return new Promise<void>((resolve) => { onSpawn = resolve; });
@@ -42,7 +44,7 @@ function nextSpawn(): Promise<void> {
 describe('HookDispatcher trigger wiring', () => {
   test('a fired hook event starts the matching trigger action', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = new TriggerManager();
+    const tm = track(new TriggerManager());
     const matching = tm.add({ event: 'Post:tool:*', action: 'echo trigger-fired' });
     dispatcher.setTriggerManager(tm);
 
@@ -56,7 +58,7 @@ describe('HookDispatcher trigger wiring', () => {
 
   test('disabled triggers and triggers for other events do not fire', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = new TriggerManager();
+    const tm = track(new TriggerManager());
     const disabled = tm.add({ event: 'Post:tool:*', action: 'echo disabled' });
     tm.disable(disabled.id);
     tm.add({ event: 'Pre:tool:*', action: 'echo other-phase' });
@@ -74,7 +76,7 @@ describe('HookDispatcher trigger wiring', () => {
 
   test('a detached trigger manager is not consulted', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = new TriggerManager();
+    const tm = track(new TriggerManager());
     tm.add({ event: 'Post:tool:*', action: 'echo should-not-run' });
     dispatcher.setTriggerManager(tm);
     dispatcher.setTriggerManager(null);
@@ -83,7 +85,7 @@ describe('HookDispatcher trigger wiring', () => {
     // A second dispatcher with a manager supplies the positive gate: its spawn
     // proves the first fire had every chance to start its own action.
     const gate = new HookDispatcher();
-    const gateTriggers = new TriggerManager();
+    const gateTriggers = track(new TriggerManager());
     const gated = gateTriggers.add({ event: 'Post:tool:*', action: 'echo gate' });
     gate.setTriggerManager(gateTriggers);
     const started = nextSpawn();
@@ -95,7 +97,7 @@ describe('HookDispatcher trigger wiring', () => {
 
   test('the hook result is unaffected by a failing trigger action', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = new TriggerManager();
+    const tm = track(new TriggerManager());
     tm.add({ event: 'Post:tool:*', action: 'echo side-effect' });
     dispatcher.setTriggerManager(tm);
     spawnSpy.mockImplementation((() => { throw new Error('spawn refused'); }) as unknown as typeof Bun.spawn);

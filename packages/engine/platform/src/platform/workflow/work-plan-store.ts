@@ -1,10 +1,11 @@
 // ---------------------------------------------------------------------------
 // work-plan-store.ts, per-project work plan persisted at
-//   <home>/.goodvibes/<surfaceRoot>/work-plans/
+//   <home>/.goodvibes/<surfaceRoot>/work-plans/project-<hash>.json
 //
 // The surface root is supplied by the product that owns the plan, so two
 // products sharing a home directory keep separate plans and neither has to
-// spell the segment at a call site.
+// spell the segment at a call site. The file name is a pure function of the
+// project (work-plan-location.ts), resolved once when the store is built.
 //
 // Recovery discipline (applies to every read):
 //
@@ -12,48 +13,37 @@
 //    can exist and still be unusable, zero-byte, truncated mid-write, or
 //    otherwise torn by a crash. Every read parses defensively and validates the
 //    parsed SHAPE; an unusable file degrades to an empty plan instead of
-//    throwing out of the store's public methods (which used to brick every
-//    /work-plan operation until the user deleted the file by hand).
-//  * AN UNREADABLE FILE IS PRESERVED, NOT OVERWRITTEN. It is renamed aside to
-//    `<plan>.json.corrupt-<ms>-<rand>` so a user can still recover their list.
-//    Those quarantine copies are themselves bounded (age TTL + count cap) so
-//    the recovery path cannot become its own leak.
+//    throwing out of the store's public methods.
+//  * AN UNREADABLE FILE IS PRESERVED, NOT OVERWRITTEN. It is moved aside to
+//    `<plan>.json.corrupt-<time>-<rand>` so a user can still recover their list,
+//    and so is a file this build reads only partly (items it cannot read, a
+//    status it does not know) before the first rewrite. Those copies are
+//    themselves bounded (age TTL + count cap).
 //  * THE STORE IS BOUNDED. Terminal (done/cancelled) items age out and are
 //    capped by count. Items the user still has open, pending, in_progress,
-//    blocked, failed, are NEVER reclaimed by either bound: garbage collection
-//    must not delete live work.
+//    blocked, failed, are NEVER reclaimed by either bound.
 //  * NOTHING IS DELETED SILENTLY. Whatever a sweep reclaimed is recorded on the
-//    plan as `housekeeping` and rendered by `toMarkdown()` (which /work-plan
-//    show prints), so a reclaim is distinguishable from data loss.
+//    plan as `housekeeping` and rendered by `toMarkdown()`.
 //
-// Sweeps are idempotent and safe to run from more than one process: removal is
-// computed from the file's own contents, writes go through atomicWriteFileSync
-// (rename(2)), and unlink races are treated as already-done.
+// Every read that may write (a mutation, or a sweep that reclaimed something)
+// runs under the plan's kernel-released process lock, so two products editing
+// one project's plan never overwrite each other's change. A readonly read
+// takes no lock and writes nothing.
 // ---------------------------------------------------------------------------
 
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { randomUUID } from 'node:crypto';
-import { existsSync, lstatSync } from 'node:fs';
+import { closeSync, lstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { types as nodeTypes } from 'node:util';
 import { ToolInputProjectionError } from '../tools/input-projection.js';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '../config/atomic-write.js';
 import { requireSurfaceRoot } from '../runtime/surface-root.js';
-import { captureExistingDirectory, captureQuarantineSource, readCapturedQuarantineSource, quarantineCorruptFile, reapOwnedQuarantines, type QuarantineSource, QuarantineEncodingError } from '../utils/atomic-json-store.js';
-import { fileObservationIdentity } from '../utils/file-observation.js';
-import { resolveWorkPlanLocation } from './work-plan-location.js';
+import { quarantineCorruptFile, reapOwnedQuarantines, writeDocument } from '../utils/atomic-json-store.js';
+import { withProcessLockSync } from '../utils/process-lock.js';
+import type { RevisionSource } from '../utils/revision.js';
+import { importAssignedWorkPlans, workPlanPath } from './work-plan-location.js';
 
-const nativeWorkPlanStores = new WeakSet<object>();
-const nativeApply = Reflect.apply, nativeStoreAdd = WeakSet.prototype.add, nativeStoreHas = WeakSet.prototype.has;
-const ownDescriptor = Object.getOwnPropertyDescriptor, prototypeOf = Object.getPrototypeOf, ownKeys = Reflect.ownKeys;
-
+/** A caller's restriction on the store's writes: checked before each write, told after it. */
 export type WorkPlanEffectOptions = Pick<AtomicWriteOptions, 'assertCurrent' | 'onEffect'>;
-function retainEffects(effects: WorkPlanEffectOptions | undefined): WorkPlanEffectOptions | undefined {
-  if (!effects) return undefined;
-  const current = effects.assertCurrent?.bind(effects), effect = effects.onEffect?.bind(effects);
-  const check = (value: unknown) => { if (value !== undefined) { drainOwned(value); throw new TypeError('Work plan effect callbacks must be synchronous and return no value.'); } };
-  return Object.freeze({ assertCurrent: () => check(current?.()), onEffect: (published?: boolean) => check(effect?.(published)) });
-}
 
 export interface WorkPlanReadOptions { readonly readOnly?: boolean; }
 
@@ -365,15 +355,18 @@ export function nextWorkPlanStatus(status: WorkPlanItemStatus): WorkPlanItemStat
   }
 }
 
-export class WorkPlanStore {
-  /** Before the first mutation this is a readonly candidate, not an owned
-   * assignment; concurrent publication may select another slot. */
-  get filePath(): string { return this.selectedPath; }
-  private selectedPath: string;
-  private registered: boolean;
-  private locationCurrent: () => void;
-  private locationParentsCurrent: () => void;
-  private planReadCurrent: () => void = () => {};
+/** How long a writer waits for another process's edit of the same plan before refusing. */
+const WORK_PLAN_LOCK_WAIT_MS = 2_000;
+
+export class WorkPlanStore implements RevisionSource {
+  readonly id = 'work plan';
+  /** The plan file; fixed for the life of the store. */
+  readonly filePath: string;
+  readonly homeDirectory: string;
+  private readonly options: WorkPlanStoreOptions;
+  private readonly lockPath: string;
+  /** Earlier-build files that could not be attributed to a project; left in place for the owner. */
+  private readonly unassignedPlanPaths: readonly string[];
 
   /**
    * Unix ms of this instance's last quarantine-directory scan. Zero means the
@@ -382,24 +375,32 @@ export class WorkPlanStore {
   private lastQuarantineSweepAt = 0;
   private lastUnverifiedQuarantines = 0;
 
-  readonly homeDirectory: string;
-  private readonly options: WorkPlanStoreOptions;
-  private newPlanId: string | null;
-  private unassignedPlanPaths: readonly string[];
+  private observedIdentity: string | undefined;
+  private revisionCounter = 0;
 
   constructor(options: WorkPlanStoreOptions) {
     this.options = Object.freeze({ ...options });
     this.homeDirectory = options.homeDirectory;
     const directory = join(options.homeDirectory, '.goodvibes', requireSurfaceRoot(options.surfaceRoot), 'work-plans');
-    const assigned = resolveWorkPlanLocation(directory, this.options, { readOnly: true });
-    this.selectedPath = assigned.path; this.registered = assigned.registered; this.locationCurrent = assigned.assertCurrent; this.locationParentsCurrent = assigned.assertParentsCurrent;
-    this.newPlanId = assigned.planId;
-    this.unassignedPlanPaths = Object.freeze([...assigned.unassignedPaths]);
-    nativeApply(nativeStoreAdd, nativeWorkPlanStores, [this]);
+    this.unassignedPlanPaths = importAssignedWorkPlans(directory);
+    this.filePath = workPlanPath(directory, options);
+    this.lockPath = `${this.filePath}.writer.sqlite`;
+  }
+
+  /** Moves up whenever the plan file changed, by this store or another process; one `lstat`. */
+  revision(): number {
+    const stat = lstatSync(this.filePath, { bigint: true, throwIfNoEntry: false });
+    const identity = stat ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` : 'absent';
+    if (identity !== this.observedIdentity) {
+      if (this.observedIdentity !== undefined) this.revisionCounter++;
+      this.observedIdentity = identity;
+    }
+    return this.revisionCounter;
   }
 
   getActivePlan(options: WorkPlanReadOptions = {}): WorkPlan {
-    return this.readPlan(undefined, options.readOnly);
+    if (options.readOnly) return this.readPlan(undefined, true);
+    return this.locked(() => this.readPlan(undefined, false));
   }
 
   listItems(options: WorkPlanReadOptions = {}): readonly WorkPlanItem[] {
@@ -407,57 +408,35 @@ export class WorkPlanStore {
   }
 
   addItem(title: string, options: AddWorkPlanItemOptions = {}, effects?: WorkPlanEffectOptions): WorkPlanItem {
-    effects = retainEffects(effects);
     const normalizedTitle = title.trim();
     if (!normalizedTitle) throw new Error('Work plan item title is required.');
-    const plan = this.readPlan(effects);
-    const time = nowMs();
-    const item: WorkPlanItem = {
-      id: createItemId(),
-      title: normalizedTitle,
-      status: options.status ?? 'pending',
-      ...(options.owner ? { owner: options.owner } : {}),
-      ...(options.source ? { source: options.source } : {}),
-      ...(options.notes ? { notes: options.notes } : {}),
-      ...(options.linked ? { linked: options.linked } : {}),
-      createdAt: time,
-      updatedAt: time,
-      ...(options.status === 'done' ? { completedAt: time } : {}),
-    };
-    this.writePlan({
-      ...plan,
-      items: [...plan.items, item],
-      activeItemId: item.id,
-      updatedAt: time,
+    return this.locked(() => {
+      const plan = this.readPlan(effects, false, false);
+      const time = nowMs();
+      const item: WorkPlanItem = {
+        id: createItemId(),
+        title: normalizedTitle,
+        status: options.status ?? 'pending',
+        ...(options.owner ? { owner: options.owner } : {}),
+        ...(options.source ? { source: options.source } : {}),
+        ...(options.notes ? { notes: options.notes } : {}),
+        ...(options.linked ? { linked: options.linked } : {}),
+        createdAt: time,
+        updatedAt: time,
+        ...(options.status === 'done' ? { completedAt: time } : {}),
+      };
+      this.writePlan({
+        ...plan,
+        items: [...plan.items, item],
+        activeItemId: item.id,
+        updatedAt: time,
+      }, effects);
+      return item;
     }, effects);
-    return item;
   }
 
   updateItem(idOrPrefix: string, patch: UpdateWorkPlanItemPatch, effects?: WorkPlanEffectOptions): WorkPlanItem {
-    effects = retainEffects(effects);
-    const plan = this.readPlan(effects);
-    const item = this.resolveItem(plan, idOrPrefix);
-    const time = nowMs();
-    const nextStatus = patch.status ?? item.status;
-    const next: WorkPlanItem = this.pruneItem({
-      ...item,
-      ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
-      status: nextStatus,
-      ...(patch.owner !== undefined ? { owner: patch.owner || undefined } : {}),
-      ...(patch.source !== undefined ? { source: patch.source || undefined } : {}),
-      ...(patch.notes !== undefined ? { notes: patch.notes || undefined } : {}),
-      ...(patch.linked !== undefined ? { linked: patch.linked || undefined } : {}),
-      updatedAt: time,
-      ...(nextStatus === 'done' ? { completedAt: item.completedAt ?? time } : { completedAt: undefined }),
-    });
-    if (!next.title) throw new Error('Work plan item title is required.');
-    this.writePlan({
-      ...plan,
-      items: plan.items.map((candidate) => candidate.id === item.id ? next : candidate),
-      activeItemId: next.id,
-      updatedAt: time,
-    }, effects);
-    return next;
+    return this.locked(() => this.updateLocked(idOrPrefix, patch, effects), effects);
   }
 
   setItemStatus(idOrPrefix: string, status: WorkPlanItemStatus, effects?: WorkPlanEffectOptions): WorkPlanItem {
@@ -465,38 +444,41 @@ export class WorkPlanStore {
   }
 
   cycleItemStatus(idOrPrefix: string): WorkPlanItem {
-    const item = this.resolveItem(this.readPlan(), idOrPrefix);
-    return this.setItemStatus(item.id, nextWorkPlanStatus(item.status));
+    return this.locked(() => {
+      const item = this.resolveItem(this.readPlan(undefined, false, false), idOrPrefix);
+      return this.updateLocked(item.id, { status: nextWorkPlanStatus(item.status) });
+    });
   }
 
   removeItem(idOrPrefix: string, effects?: WorkPlanEffectOptions): WorkPlanItem {
-    effects = retainEffects(effects);
-    const plan = this.readPlan(effects);
-    const item = this.resolveItem(plan, idOrPrefix);
-    const time = nowMs();
-    const remaining = plan.items.filter((candidate) => candidate.id !== item.id);
-    this.writePlan({
-      ...plan,
-      items: remaining,
-      activeItemId: remaining[0]?.id,
-      updatedAt: time,
+    return this.locked(() => {
+      const plan = this.readPlan(effects, false, false);
+      const item = this.resolveItem(plan, idOrPrefix);
+      const remaining = plan.items.filter((candidate) => candidate.id !== item.id);
+      this.writePlan({
+        ...plan,
+        items: remaining,
+        activeItemId: remaining[0]?.id,
+        updatedAt: nowMs(),
+      }, effects);
+      return item;
     }, effects);
-    return item;
   }
 
   clearCompleted(effects?: WorkPlanEffectOptions): number {
-    effects = retainEffects(effects);
-    const plan = this.readPlan(effects);
-    const remaining = plan.items.filter((item) => item.status !== 'done' && item.status !== 'cancelled');
-    const removed = plan.items.length - remaining.length;
-    if (removed === 0) return 0;
-    this.writePlan({
-      ...plan,
-      items: remaining,
-      activeItemId: remaining[0]?.id,
-      updatedAt: nowMs(),
+    return this.locked(() => {
+      const plan = this.readPlan(effects, false, false);
+      const remaining = plan.items.filter((item) => item.status !== 'done' && item.status !== 'cancelled');
+      const removed = plan.items.length - remaining.length;
+      if (removed === 0) return 0;
+      this.writePlan({
+        ...plan,
+        items: remaining,
+        activeItemId: remaining[0]?.id,
+        updatedAt: nowMs(),
+      }, effects);
+      return removed;
     }, effects);
-    return removed;
   }
 
   /**
@@ -506,16 +488,13 @@ export class WorkPlanStore {
    * was written.
    */
   exportMarkdown(): { readonly path: string; readonly markdown: string } {
-    const plan = this.readPlan();
-    const markdown = this.toMarkdown(plan);
+    const markdown = this.toMarkdown(this.getActivePlan());
     const path = this.filePath.replace(/\.json$/, '.md');
-    // Same retained-location checks as the plan write: a replaced work-plan
-    // directory must not receive the export.
-    atomicWriteFileSync(path, `${markdown}\n`, { mkdirp: true, assertCurrent: () => { this.locationCurrent(); this.planReadCurrent(); } });
+    atomicWriteFileSync(path, `${markdown}\n`, { mkdirp: true });
     return { path, markdown };
   }
 
-  toMarkdown(plan: WorkPlan = this.readPlan()): string {
+  toMarkdown(plan: WorkPlan = this.getActivePlan()): string {
     const lines = [
       `# ${plan.title}`,
       '',
@@ -546,33 +525,70 @@ export class WorkPlanStore {
     return lines.join('\n');
   }
 
+  private locked<T>(fn: () => T, effects?: WorkPlanEffectOptions): T {
+    // The first lock of a project creates the directory and the lock file: a
+    // filesystem effect of this store that a restricting caller must see.
+    if (!lstatSync(this.lockPath, { throwIfNoEntry: false })) {
+      effects?.assertCurrent?.();
+      mkdirSync(dirname(this.lockPath), { recursive: true, mode: 0o700 });
+      try { closeSync(openSync(this.lockPath, 'wx', 0o600)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      effects?.onEffect?.(false);
+    }
+    try {
+      return withProcessLockSync(this.lockPath, fn, { waitMs: WORK_PLAN_LOCK_WAIT_MS });
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === 'PROCESS_LOCK_BUSY') {
+        throw new Error(`The work plan is being changed by another GoodVibes process (${this.filePath}); try again in a moment.`);
+      }
+      throw error;
+    }
+  }
+
+  private updateLocked(idOrPrefix: string, patch: UpdateWorkPlanItemPatch, effects?: WorkPlanEffectOptions): WorkPlanItem {
+    const plan = this.readPlan(effects, false, false);
+    const item = this.resolveItem(plan, idOrPrefix);
+    const time = nowMs();
+    const nextStatus = patch.status ?? item.status;
+    const next: WorkPlanItem = this.pruneItem({
+      ...item,
+      ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
+      status: nextStatus,
+      ...(patch.owner !== undefined ? { owner: patch.owner || undefined } : {}),
+      ...(patch.source !== undefined ? { source: patch.source || undefined } : {}),
+      ...(patch.notes !== undefined ? { notes: patch.notes || undefined } : {}),
+      ...(patch.linked !== undefined ? { linked: patch.linked || undefined } : {}),
+      updatedAt: time,
+      ...(nextStatus === 'done' ? { completedAt: item.completedAt ?? time } : { completedAt: undefined }),
+    });
+    if (!next.title) throw new Error('Work plan item title is required.');
+    this.writePlan({
+      ...plan,
+      items: plan.items.map((candidate) => candidate.id === item.id ? next : candidate),
+      activeItemId: next.id,
+      updatedAt: time,
+    }, effects);
+    return next;
+  }
+
   /**
    * The plan as callers see it: loaded from disk (content-validated), then put
    * through the recovery/bounding sweep. When the sweep reclaimed anything the
    * bounded plan, carrying its housekeeping disclosure, is written back
-   * immediately, so the disclosure survives even if the caller only reads.
+   * immediately, so the disclosure survives even if the caller only reads. A
+   * writable read of a project with no plan yet saves the empty plan (unless the
+   * caller writes next anyway), so its ID is stable from then on. Writable reads
+   * run under the plan lock.
    */
-  private readPlan(effects?: WorkPlanEffectOptions, readOnly = false): WorkPlan {
-    effects?.assertCurrent?.(); this.locationParentsCurrent(); if (this.registered) this.locationCurrent();
-    const directory = join(this.options.homeDirectory, '.goodvibes', requireSurfaceRoot(this.options.surfaceRoot), 'work-plans');
-    // The retained location owns native source facts, not the invocation that
-    // happened to select it. Keep that invocation restriction through adoption,
-    // then retire only this wrapper. The operation's read/write effects still
-    // check their original restriction separately at every actual effect.
-    let selectionEffects = effects;
-    let selected: ReturnType<typeof resolveWorkPlanLocation>;
-    try {
-      selected = resolveWorkPlanLocation(directory, this.options, { readOnly, assertCurrent: () => { selectionEffects?.assertCurrent?.(); }, onEffect: flag => { selectionEffects?.onEffect?.(flag); } });
-      effects?.assertCurrent?.(); selected.assertCurrent();
-      this.selectedPath = selected.path; this.newPlanId = selected.planId; this.registered = selected.registered; this.locationCurrent = selected.assertCurrent; this.locationParentsCurrent = selected.assertParentsCurrent; this.locationCurrent();
-    } finally { selectionEffects = undefined; }
-    this.unassignedPlanPaths = Object.freeze([...selected.unassignedPaths]);
+  private readPlan(effects?: WorkPlanEffectOptions, readOnly = false, saveNew = true): WorkPlan {
+    effects?.assertCurrent?.();
     const loaded = this.loadFromDisk(effects, readOnly);
-    const unassigned = this.unassignedPlanPaths.filter(path => existsSync(path));
-    const plan = unassigned.length ? { ...loaded.plan, unassignedPlanPaths: unassigned } : loaded.plan;
+    const plan = this.unassignedPlanPaths.length ? { ...loaded.plan, unassignedPlanPaths: this.unassignedPlanPaths } : loaded.plan;
     if (readOnly) return loaded.recovery?.recoveryRequired ? { ...plan, housekeeping: loaded.recovery } : plan;
     const swept = this.sweep(plan, loaded.recovery, effects);
-    if (swept.changed) this.writePlan(swept.plan, effects);
+    if (swept.changed || (saveNew && !loaded.exists)) {
+      const saved = this.writePlan(swept.plan, effects);
+      return swept.plan.id ? swept.plan : { ...swept.plan, id: saved.id, registration: 'registered' };
+    }
     return swept.plan;
   }
 
@@ -581,27 +597,25 @@ export class WorkPlanStore {
    * empty case. A file that exists but does not parse into a plan object is
    * moved aside (never overwritten in place) and reported as a recovery.
    */
-  private loadFromDisk(effects?: WorkPlanEffectOptions, readOnly = false): { plan: WorkPlan; recovery: WorkPlanHousekeeping | null } {
-    const heldSource = captureQuarantineSource(this.filePath);
-    if (!heldSource) {
-      this.planReadCurrent = () => { this.locationCurrent(); if (lstatSync(this.filePath, { throwIfNoEntry: false })) throw new Error('An unowned work plan appeared before publication.'); };
-      this.planReadCurrent(); return { plan: this.createEmptyPlan(), recovery: null };
+  private loadFromDisk(effects?: WorkPlanEffectOptions, readOnly = false): { plan: WorkPlan; recovery: WorkPlanHousekeeping | null; exists: boolean } {
+    let bytes: Buffer;
+    try { bytes = readFileSync(this.filePath); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return { plan: this.createEmptyPlan(false), recovery: null, exists: false };
     }
-    this.planReadCurrent = () => { this.locationCurrent(); heldSource.assertCurrent(); };
-    try {
     let raw: string, invalidEncoding = false;
-    try { raw = readCapturedQuarantineSource(this.filePath, heldSource); } catch (error) { if (!(error instanceof QuarantineEncodingError)) throw error; raw = ''; invalidEncoding = true; } this.planReadCurrent();
+    try { raw = new TextDecoder('utf8', { fatal: true }).decode(bytes); } catch { raw = ''; invalidEncoding = true; }
     const parsed = invalidEncoding ? null : parsePlanDocument(raw);
     if (parsed && (('projectId' in parsed && parsed.projectId !== this.options.projectId)
       || ('projectRoot' in parsed && parsed.projectRoot !== this.options.projectRoot))) {
-      throw new Error('Saved work plan belongs to a different project; its contents were left untouched.');
+      throw new Error(`Saved work plan at ${this.filePath} belongs to a different project; its contents were left untouched.`);
     }
     if (parsed === null) {
       // The file EXISTED but its contents are not a usable plan: zero-byte,
       // truncated mid-write, or otherwise torn. Existence is not validity.
-      const recovery = !readOnly && (invalidEncoding || raw.trim().length > 0) ? this.quarantineUnreadableFile(heldSource, effects) : undefined;
+      const recovery = !readOnly && (invalidEncoding || raw.trim().length > 0) ? this.quarantineUnreadableFile(effects) : undefined;
       return {
-        plan: this.createEmptyPlan(),
+        plan: this.createEmptyPlan(true),
         recovery: {
           at: nowMs(),
           expiredItems: 0,
@@ -609,6 +623,7 @@ export class WorkPlanStore {
           ...(readOnly ? { recoveryRequired: true } : { resetFromUnreadableFile: true }),
           ...(recovery ? { quarantinePath: recovery.path, quarantinesRemoved: recovery.reaped, preservedUnverifiedQuarantines: recovery.unknown } : {}),
         },
+        exists: true,
       };
     }
     const lossy = countLossyItems(parsed.items);
@@ -616,7 +631,7 @@ export class WorkPlanStore {
     // it does not know) is not rewritten in place: the original is preserved
     // first, as for an unreadable file, so a newer build's items are not lost.
     const lossyRecovery: WorkPlanHousekeeping | null = lossy.dropped + lossy.coerced === 0 ? null : (() => {
-      const kept = readOnly ? undefined : this.quarantineUnreadableFile(heldSource, effects, {
+      const kept = readOnly ? undefined : this.quarantineUnreadableFile(effects, {
         reason: 'saved work plan has items this version cannot read in full',
         recovery: 'The plan continues with the items this version understands; the original bytes remain at the reported recovery path.',
       });
@@ -635,7 +650,7 @@ export class WorkPlanStore {
     const housekeeping = normalizeHousekeeping(parsed.housekeeping);
     return {
       plan: {
-        id: readString(parsed.id) ?? this.newPlanId ?? '',
+        id: readString(parsed.id) ?? '',
         projectId: readString(parsed.projectId) ?? this.options.projectId,
         projectRoot: readString(parsed.projectRoot) ?? this.options.projectRoot,
         title: readString(parsed.title) ?? 'Work Plan',
@@ -647,8 +662,8 @@ export class WorkPlanStore {
         ...(housekeeping ? { housekeeping } : {}),
       },
       recovery: lossyRecovery,
+      exists: true,
     };
-    } finally { heldSource.close(); }
   }
 
   /**
@@ -656,8 +671,7 @@ export class WorkPlanStore {
    * the throttled quarantine-file sweep. Pure with respect to disk except for
    * quarantine deletions; the caller persists the result when `changed`.
    *
-   * Idempotent: re-running it on the returned plan reclaims nothing further,
-   * which is what makes it safe to run concurrently from several processes.
+   * Idempotent: re-running it on the returned plan reclaims nothing further.
    */
   private sweep(
     plan: WorkPlan,
@@ -701,6 +715,7 @@ export class WorkPlanStore {
     return {
       plan: {
         id: plan.id,
+        ...(plan.registration ? { registration: plan.registration } : {}),
         projectId: plan.projectId,
         projectRoot: plan.projectRoot,
         title: plan.title,
@@ -719,22 +734,17 @@ export class WorkPlanStore {
   }
 
   /**
-   * Move an unparseable plan file aside so the user can still recover it.
-   * The shared original-source reader publishes an exclusive archive and an
-   * owned receipt; a failed preservation propagates before any reset.
+   * Move an unparseable or partly readable plan file aside so the user can
+   * still recover it. A failed preservation propagates before any reset.
    */
-  private quarantineUnreadableFile(source: QuarantineSource, effects?: WorkPlanEffectOptions, why?: { reason: string; recovery: string }): { path: string; reaped: number; unknown: number } {
-    let published = false;
-    const current = () => { effects?.assertCurrent?.(); this.locationCurrent(); if (!published) source.assertCurrent(); };
-    const outcome = quarantineCorruptFile(this.filePath, { source, label: 'workflow/work-plan', reason: why?.reason ?? 'saved work plan is not a usable JSON document',
+  private quarantineUnreadableFile(effects?: WorkPlanEffectOptions, why?: { reason: string; recovery: string }): { path: string; reaped: number; unknown: number } {
+    const outcome = quarantineCorruptFile(this.filePath, { label: 'workflow/work-plan', reason: why?.reason ?? 'saved work plan is not a usable JSON document',
       recovery: why?.recovery ?? 'The local plan is rebuilt empty; the original bytes remain at the reported recovery path.',
       maxFiles: WORK_PLAN_QUARANTINE_CAP, maximumAgeMs: WORK_PLAN_QUARANTINE_TTL_MS,
-      assertCurrent: current, onEffect: flag => { if (flag) published = true; effects?.onEffect?.(flag); },
+      assertCurrent: effects?.assertCurrent, onEffect: effects?.onEffect,
     });
     this.lastQuarantineSweepAt = nowMs(); this.lastUnverifiedQuarantines = outcome.preservedUnknown;
-    const parent = captureExistingDirectory(dirname(this.filePath));
-    this.planReadCurrent = () => { this.locationCurrent(); parent.assertCurrent(); if (lstatSync(this.filePath, { throwIfNoEntry: false })) throw new Error('An unowned work plan appeared before publication.'); };
-    this.planReadCurrent(); return { path: outcome.quarantinePath, reaped: outcome.reaped, unknown: outcome.preservedUnknown };
+    return { path: outcome.quarantinePath, reaped: outcome.reaped, unknown: outcome.preservedUnknown };
   }
 
   /** Only persisted native receipt/payload pairs participate in these bounds.
@@ -742,17 +752,18 @@ export class WorkPlanStore {
   private sweepQuarantines(now: number, effects?: WorkPlanEffectOptions): { removed: number; unknown: number } {
     if (now - this.lastQuarantineSweepAt < WORK_PLAN_QUARANTINE_SWEEP_INTERVAL_MS) return { removed: 0, unknown: this.lastUnverifiedQuarantines };
     const result = reapOwnedQuarantines(this.filePath, { now, maxFiles: WORK_PLAN_QUARANTINE_CAP, maximumAgeMs: WORK_PLAN_QUARANTINE_TTL_MS,
-      assertCurrent: () => { effects?.assertCurrent?.(); this.locationCurrent(); this.planReadCurrent(); }, onEffect: effects?.onEffect,
+      assertCurrent: effects?.assertCurrent, onEffect: effects?.onEffect,
     });
     this.lastQuarantineSweepAt = now; this.lastUnverifiedQuarantines = result.preservedUnknown;
     return { removed: result.reaped, unknown: result.preservedUnknown };
   }
 
-  private createEmptyPlan(): WorkPlan {
+  /** `saved` is false for a project whose plan has never been written: no ID yet. */
+  private createEmptyPlan(saved: boolean): WorkPlan {
     const time = nowMs();
     return {
-      id: this.newPlanId ?? '',
-      registration: this.registered ? 'registered' : 'unregistered',
+      id: '',
+      registration: saved ? 'registered' : 'unregistered',
       projectId: this.options.projectId,
       projectRoot: this.options.projectRoot,
       title: 'Work Plan',
@@ -763,17 +774,13 @@ export class WorkPlanStore {
     };
   }
 
-  private writePlan(plan: WorkPlan, effects?: WorkPlanEffectOptions): void {
-    let published = false;
-    const assertCurrent = () => { effects?.assertCurrent?.(); this.locationCurrent(); if (!published) this.planReadCurrent(); };
-    assertCurrent();
-    atomicWriteFileSync(this.filePath, `${JSON.stringify(plan, null, 2)}\n`, { mkdirp: true, assertCurrent,
-      onEffect: flag => { if (flag) published = true; effects?.onEffect?.(flag); },
-    });
-    // Only a fully confirmed publication becomes our reusable read frame. A
-    // failed fsync/observer retains the old frame and propagates uncertainty.
-    const physical = fileObservationIdentity(this.filePath);
-    this.planReadCurrent = () => { this.locationCurrent(); if (fileObservationIdentity(this.filePath) !== physical) throw new Error('Original work plan changed before publication.'); };
+  private writePlan(plan: WorkPlan, effects?: WorkPlanEffectOptions): WorkPlan {
+    const { registration: _registration, unassignedPlanPaths: _unassigned, ...stored } = plan;
+    const saved: WorkPlan = stored.id ? stored : { ...stored, id: `wp-${randomUUID()}` };
+    effects?.assertCurrent?.();
+    writeDocument(this.filePath, saved);
+    effects?.onEffect?.(true);
+    return saved;
   }
 
   private resolveItem(plan: WorkPlan, idOrPrefix: string): WorkPlanItem {
@@ -811,82 +818,29 @@ export class WorkPlanStore {
   }
 }
 
-const workPlanPrototype = WorkPlanStore.prototype;
-const nativeReadActivePlan = workPlanPrototype.getActivePlan;
-const nativePathDescriptor = ownDescriptor(workPlanPrototype, 'filePath');
-const nativePlanDescriptors = Object.getOwnPropertyDescriptors(workPlanPrototype);
-const nativePlanKeys = Object.freeze(ownKeys(nativePlanDescriptors));
-
 export interface WorkPlanItemsObservation {
   readonly items: readonly WorkPlanItem[];
   assertCurrent(): void;
 }
 
-/** One readonly native read for a caller-owned operation. Rechecks retain the
- * original assignment, ancestry and complete file incarnation without opening,
- * reparsing or durably publishing the plan again. Custom stores keep their own
- * ordinary read path; a copied object cannot mint a native observation. */
+/** One readonly read of a store's items for a caller-owned operation. The
+ * returned check costs one `lstat` and throws when the plan changed since the
+ * read. Other stores keep their own ordinary read path. */
 export function captureWorkPlanItems(store: object): WorkPlanItemsObservation | undefined {
-  if (!nativeApply(nativeStoreHas, nativeWorkPlanStores, [store]) || prototypeOf(store) !== workPlanPrototype) return undefined;
-  const methodsMatch = () => {
-    if (ownKeys(workPlanPrototype).length !== nativePlanKeys.length) return false;
-    for (let index = 0; index < nativePlanKeys.length; index++) {
-      const key = nativePlanKeys[index];
-      if (key === undefined) return false;
-      if (key !== 'constructor' && (ownDescriptor(store, key)
-        || !sameDescriptor(ownDescriptor(workPlanPrototype, key), nativePlanDescriptors[key as keyof typeof nativePlanDescriptors]))) return false;
-    }
-    return true;
-  };
-  if (!methodsMatch()) return undefined;
-  const plan = nativeApply(nativeReadActivePlan, store, [{ readOnly: true }]) as WorkPlan;
-  const location = captureWorkPlanLocation(store);
-  const assignment = ownDescriptor(store, 'locationCurrent')?.value as unknown;
-  const source = ownDescriptor(store, 'planReadCurrent')?.value as unknown;
-  if (typeof assignment !== 'function' || typeof source !== 'function') throw new ToolInputProjectionError('held');
+  if (!(store instanceof WorkPlanStore)) return undefined;
+  const revision = store.revision();
+  const plan = store.getActivePlan({ readOnly: true });
   for (const item of plan.items) { if (item.linked) Object.freeze(item.linked); Object.freeze(item); }
   const items = Object.freeze(plan.items);
-  const assertCurrent = () => {
-    if (!methodsMatch()) throw new ToolInputProjectionError('held');
-    location(); nativeApply(assignment, undefined, []); nativeApply(source, undefined, []); location();
-  };
-  assertCurrent(); return Object.freeze({ items, assertCurrent });
+  const assertCurrent = () => { if (store.revision() !== revision) throw new ToolInputProjectionError('held'); };
+  return Object.freeze({ items, assertCurrent });
 }
 
-/** Retain the original path descriptor without invoking an unknown getter.
- * This observes a location; it grants neither filesystem ownership nor writes.
- * Only an actual constructed store may use the native filePath getter. Other
- * implementations may omit a location or supply an ordinary string data property. */
+/** A check that the store still names the plan file it named when captured.
+ * A store without a `filePath` has no location to hold. */
 export function captureWorkPlanLocation(store: object): () => void {
-  const fail = (): never => { throw new ToolInputProjectionError('held'); };
-  const chain: object[] = [];
-  for (let owner: object | null = store; owner; owner = prototypeOf(owner)) {
-    if (nodeTypes.isProxy(owner) || chain.length >= 64) fail();
-    chain.push(owner);
-  }
-  const native = nativeApply(nativeStoreHas, nativeWorkPlanStores, [store]) as boolean;
-  const pathOwner = chain.find(owner => ownDescriptor(owner, 'filePath'));
-  const path = pathOwner && ownDescriptor(pathOwner, 'filePath');
-  const backing = native ? ownDescriptor(store, 'selectedPath') : path;
-  if ((native || path) && (!backing || !('value' in backing) || typeof backing.value !== 'string')) fail();
-  if (native && (pathOwner !== workPlanPrototype || !nativePathDescriptor?.get || nativePathDescriptor.set
-    || !sameDescriptor(path, nativePathDescriptor))) fail();
-  const assertCurrent = () => {
-    let owner: object | null = store;
-    for (const original of chain) {
-      if (owner !== original || nodeTypes.isProxy(owner)) fail();
-      owner = prototypeOf(owner);
-    }
-    if (owner !== null || chain.find(entry => ownDescriptor(entry, 'filePath')) !== pathOwner
-      || !sameDescriptor(pathOwner && ownDescriptor(pathOwner, 'filePath'), path)
-      || native && !sameDescriptor(ownDescriptor(store, 'selectedPath'), backing)) fail();
-  };
-  assertCurrent(); return assertCurrent;
-}
-
-function sameDescriptor(current: PropertyDescriptor | undefined, original: PropertyDescriptor | undefined): boolean {
-  if (!current || !original) return current === original;
-  return current.configurable === original.configurable && current.enumerable === original.enumerable
-    && ('value' in current) === ('value' in original) && current.value === original.value
-    && current.writable === original.writable && current.get === original.get && current.set === original.set;
+  const read = () => (store as { readonly filePath?: unknown }).filePath;
+  const path = read();
+  if (path !== undefined && typeof path !== 'string') throw new ToolInputProjectionError('held');
+  return () => { if (read() !== path) throw new ToolInputProjectionError('held'); };
 }

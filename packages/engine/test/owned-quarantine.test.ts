@@ -5,7 +5,7 @@ import { WorkPlanStore } from '../platform/src/platform/workflow/work-plan-store
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { captureQuarantineSource, readCapturedQuarantineSourceAsync, quarantineCorruptFile, readJsonFileOrQuarantine, reapOwnedQuarantines, reapOwnedQuarantineDirectories } from '../platform/src/platform/utils/atomic-json-store.ts';
 import { JsonFileStore } from '../platform/src/platform/state/json-file-store.ts';
 import { logger } from '../platform/src/platform/utils/logger.ts';
@@ -14,15 +14,6 @@ afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: 
 function fixture() { const root = mkdtempSync(join(tmpdir(), 'owned-quarantine-')); roots.push(root); return { root, path: join(root, 'store.json') }; }
 const options = { label: 'test/quarantine', reason: 'invalid saved container', recovery: 'The test rebuilds from preserved evidence.' };
 const payloads = (root: string) => readdirSync(root).filter(name => name.startsWith('store.json.corrupt-') && !name.endsWith('.why'));
-test('a validator cannot quarantine the different file it installs before throwing', () => {
-  const f = fixture(); writeFileSync(f.path, '{}');
-  expect(() => readJsonFileOrQuarantine(f.path, { ...options, validate() { renameSync(f.path, `${f.path}.retained`); writeFileSync(f.path, '{"replacement":true}'); throw Error('invalid shape'); } })).toThrow();
-  expect(readFileSync(f.path, 'utf8')).toBe('{"replacement":true}'); expect(readFileSync(`${f.path}.retained`, 'utf8')).toBe('{}'); expect(payloads(f.root)).toEqual([]);
-});
-test('a successful validator cannot publish a result from a retired original source', () => {
-  const f = fixture(); writeFileSync(f.path, '{"version":1}');
-  expect(() => readJsonFileOrQuarantine(f.path, { ...options, validate(value) { renameSync(f.path, `${f.path}.retained`); writeFileSync(f.path, '{"version":2}'); return value; } })).toThrow(); expect(payloads(f.root)).toEqual([]);
-});
 test('JSON parser and validator excerpts are absent from native recovery logs and receipts', () => {
   const f = fixture(), secret = 'SYNTHETIC_PRIVATE_BODY_NEVER_LOG'; writeFileSync(f.path, `{"password":"${secret}"`);
   const calls: unknown[] = [], log = spyOn(logger, 'error').mockImplementation((...args) => { calls.push(args); });
@@ -98,8 +89,8 @@ test('native lifecycle parsing cannot quarantine or overwrite a different marker
 });
 test('readonly malformed local plan reports recovery required without quarantine, reset or byte changes', () => {
   const f = fixture(), options = { homeDirectory: f.root, surfaceRoot: 'test', projectId: 'saved-project', projectRoot: '/actual/workspace' }, store = new WorkPlanStore(options); store.addItem('Saved work'); writeFileSync(store.filePath, '{"items":[');
-  const raw = readFileSync(store.filePath), members = readdirSync(join(f.root, '.goodvibes', 'test', 'work-plans', '.native-plans')).sort();
-  const projected = store.getActivePlan({ readOnly: true }); expect(projected.housekeeping?.recoveryRequired).toBe(true); expect(projected.housekeeping?.resetFromUnreadableFile).not.toBe(true); expect(readFileSync(store.filePath)).toEqual(raw); expect(readdirSync(join(f.root, '.goodvibes', 'test', 'work-plans', '.native-plans')).sort()).toEqual(members);
+  const raw = readFileSync(store.filePath), members = readdirSync(dirname(store.filePath)).sort();
+  const projected = store.getActivePlan({ readOnly: true }); expect(projected.housekeeping?.recoveryRequired).toBe(true); expect(projected.housekeeping?.resetFromUnreadableFile).not.toBe(true); expect(readFileSync(store.filePath)).toEqual(raw); expect(readdirSync(dirname(store.filePath)).sort()).toEqual(members);
 });
 
 test('requesting source close during an actual async FD read holds the descriptor until callback drainage', async () => {

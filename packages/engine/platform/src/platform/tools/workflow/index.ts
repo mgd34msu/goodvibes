@@ -6,7 +6,7 @@ import { assertAgentBriefFidelity, DelegationPlanHeldError } from '../../agents/
 import { readCompletionRepairContext } from '../../core/completion-repair-context.js';
 import { assertCurrentToolInvocation } from '../registry.js';
 import type { Tool, ToolExecuteOptions } from '../../types/tools.js';
-import { resolveCredentialEnvScrub, scrubCredentialEnv, type CredentialEnvScrubConfig, type ResolvedCredentialEnvScrub } from '../exec/credential-env.js';
+import { AutomationCommands } from '../../workflow/automation-commands.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import { workflowSchema } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -192,6 +192,9 @@ export interface TriggerDefinition {
 export class TriggerManager {
   private triggers = new Map<string, TriggerDefinition>();
 
+  /** `commands` starts, limits and tracks this manager's actions; WorkflowServices shares one with its schedules. */
+  constructor(readonly commands: AutomationCommands = new AutomationCommands()) {}
+
   add(def: { event: string; condition?: string | undefined; action: string }): TriggerDefinition {
     const id = `trg-${crypto.randomUUID().slice(0, 8)}`;
     const trigger: TriggerDefinition = {
@@ -292,25 +295,14 @@ export function splitCommand(command: string): string[] {
 
 export class ScheduleManager {
   private schedules = new Map<string, ScheduleEntry>();
-  /** Names whose previous run has not exited; a tick during one is skipped so runs never pile up. */
-  private running = new Set<string>();
-  /** Bumped by destroy() so a start that was awaiting its credential scrub does not spawn afterwards. */
-  private epoch = 0;
   /** Timer IDs keyed by schedule name */
   private timers = new Map<string, ReturnType<typeof setInterval>>();
-  /** Spawned process handles tracked for cleanup in destroy() */
-  private spawnedProcs: Array<{ pid: number; proc: ReturnType<typeof Bun.spawn> }> = [];
-  /** The credential-env scrub settings scheduled commands start with (the exec path's). */
-  private credentialEnvScrub: ResolvedCredentialEnvScrub = resolveCredentialEnvScrub();
 
   /**
-   * Sets the credential-env scrub settings scheduled commands use: the same
-   * configuration the exec tool reads (registerAllTools passes its
-   * `credentialEnvScrub` to both), so an allowlisted name is kept here too.
+   * `commands` starts scheduled commands with the exec path's credential-env
+   * scrub, allows one run of a schedule at a time, and kills them on destroy().
    */
-  setCredentialEnvScrub(config: CredentialEnvScrubConfig | undefined): void {
-    this.credentialEnvScrub = resolveCredentialEnvScrub(config);
-  }
+  constructor(readonly commands: AutomationCommands = new AutomationCommands()) {}
 
   add(name: string, interval: string, command: string): ScheduleEntry {
     // Refuse what could never run, before anything is stored: an entry with no timer
@@ -385,29 +377,13 @@ export class ScheduleManager {
       this._clearTimer(name);
     }
     this.schedules.clear();
-    this.running.clear();
-    this.epoch += 1;
-    // Kill any still-running spawned processes
-    for (const { proc } of this.spawnedProcs) {
-      try {
-        proc.kill();
-      } catch (error) {
-        logger.debug('Workflow scheduler process kill failed during destroy', { error: summarizeError(error) });
-      }
-    }
-    this.spawnedProcs = [];
+    this.commands.stop('schedule');
   }
 
   /** Execute a schedule tick: run the command and update lastRun/nextRun. */
   private _tick(name: string): void {
     const entry = this.schedules.get(name);
     if (!entry || !entry.enabled) return;
-
-    // The previous run is still going: starting another would pile processes up.
-    if (this.running.has(name)) {
-      logger.debug('[workflow] scheduled command still running; tick skipped', { workflow: name });
-      return;
-    }
 
     const intervalMs = parseInterval(entry.interval);
     entry.nextRun = intervalMs !== null ? Date.now() + intervalMs : undefined;
@@ -419,53 +395,26 @@ export class ScheduleManager {
     }
     if (parts.length === 0) return;
 
-    this.running.add(name);
     void this._spawnScheduled(name, entry.command, parts);
   }
 
   /**
    * Starts a scheduled command with the environment the exec path gives a
-   * command: credential-bearing variables withheld (tools/exec/credential-env.ts,
-   * each name read once per process), plus GV_SCHEDULE_NAME. A failed start,
-   * including a scrub reading that could not be made, is logged and the
-   * command does not run.
+   * command: credential-bearing variables withheld, plus GV_SCHEDULE_NAME. One
+   * run of a schedule at a time: a tick while the previous run is still going
+   * is skipped so runs never pile up. A failed start is logged and the command
+   * does not run.
    */
   private async _spawnScheduled(name: string, command: string, parts: string[]): Promise<void> {
-    const epoch = this.epoch;
-    try {
-      const base = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
-      const { env } = await scrubCredentialEnv(base, this.credentialEnvScrub);
-      // destroy() ran while the scrub was being read: nothing may start that destroy cannot stop.
-      if (epoch !== this.epoch) return;
-      const proc = Bun.spawn(parts, {
-        env: { ...env, GV_SCHEDULE_NAME: name },
-        stdout: 'ignore',
-        stderr: 'ignore',
-      });
-      const pid = proc.pid;
+    const outcome = await this.commands.start({ kind: 'schedule', key: name, argv: parts, env: { GV_SCHEDULE_NAME: name }, maxInFlight: 1 });
+    if (outcome.started) {
       // Recorded only once the command actually started, so `list` never shows a run that did not happen.
       const entry = this.schedules.get(name);
       if (entry) entry.lastRun = Date.now();
-      this.spawnedProcs.push({ pid, proc });
-      proc.exited.then(() => {
-        // Remove from tracking once the process has exited
-        const idx = this.spawnedProcs.findIndex(p => p.pid === pid);
-        if (idx !== -1) this.spawnedProcs.splice(idx, 1);
-        if (epoch === this.epoch) this.running.delete(name);
-      }).catch((error: unknown) => {
-        if (epoch === this.epoch) this.running.delete(name);
-        logger.warn('[workflow] scheduled command exit tracking failed', {
-          workflow: name,
-          error: summarizeError(error),
-        });
-      });
-    } catch (error) {
-      if (epoch === this.epoch) this.running.delete(name);
-      logger.warn('[workflow] scheduled command failed to start', {
-        workflow: name,
-        command,
-        error: summarizeError(error),
-      });
+    } else if (outcome.reason === 'busy') {
+      logger.debug('[workflow] scheduled command still running; tick skipped', { workflow: name });
+    } else if (outcome.reason !== 'stopped') {
+      logger.warn('[workflow] scheduled command failed to start', { workflow: name, command, error: outcome.message });
     }
   }
 
@@ -505,13 +454,17 @@ export interface WorkflowServices {
   readonly workflowManager: WorkflowManager;
   readonly triggerManager: TriggerManager;
   readonly scheduleManager: ScheduleManager;
+  /** Starts and tracks this runtime's trigger actions and scheduled commands; its scrub is the exec path's. */
+  readonly commands: AutomationCommands;
 }
 
 export function createWorkflowServices(): WorkflowServices {
+  const commands = new AutomationCommands();
   return {
     workflowManager: new WorkflowManager(),
-    triggerManager: new TriggerManager(),
-    scheduleManager: new ScheduleManager(),
+    triggerManager: new TriggerManager(commands),
+    scheduleManager: new ScheduleManager(commands),
+    commands,
   };
 }
 

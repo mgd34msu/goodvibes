@@ -44,7 +44,6 @@ import { createAgentTool } from './agent/index.js';
 import { createConfiguredFetchDeps, createFetchTool } from './fetch/index.js';
 import { createStateTool } from './state/index.js';
 import { createWorkflowServices, createWorkflowTool } from './workflow/index.js';
-import { setTriggerCredentialEnvScrub } from '../workflow/trigger-executor.js';
 import { createRegistryTool } from './registry-tool/index.js';
 import type { KVState } from '../state/kv-state.js';
 import { createKeyedStateReclaimCheck, createSessionBoundKvState } from './session-kv-state.js';
@@ -434,9 +433,8 @@ export function registerAllTools(
   const channelRegistry = deps?.channelRegistry ?? null;
   const remoteRunnerRegistry = deps?.remoteRunnerRegistry;
   const workflowServices = deps.workflowServices;
-  // Scheduled workflow commands get the same credential-env scrub settings as exec.
-  workflowServices.scheduleManager.setCredentialEnvScrub(deps.credentialEnvScrub);
-  setTriggerCredentialEnvScrub(deps.credentialEnvScrub);
+  // Trigger actions and scheduled commands get the same credential-env scrub settings as exec.
+  workflowServices.commands.setCredentialEnvScrub(deps.credentialEnvScrub);
   const mcpRegistry = deps?.mcpRegistry;
   if (!deps?.configManager || !deps?.providerRegistry || !deps?.toolLLM) {
     throw new Error('registerAllTools requires configManager, providerRegistry, and toolLLM');

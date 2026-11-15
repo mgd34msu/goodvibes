@@ -5,12 +5,7 @@ import type { TriggerDefinition } from '../tools/workflow/index.js';
 import { matchesEventPath } from '../hooks/matcher.js';
 import { summarizeError } from '../utils/error-display.js';
 import { toRecord } from '../utils/record-coerce.js';
-import {
-  resolveCredentialEnvScrub,
-  scrubCredentialEnv,
-  type CredentialEnvScrubConfig,
-  type ResolvedCredentialEnvScrub,
-} from '../tools/exec/credential-env.js';
+import type { AutomationCommands } from './automation-commands.js';
 
 // ---------------------------------------------------------------------------
 // TriggerExecutor
@@ -21,6 +16,8 @@ import {
 
 export interface TriggerManagerLike {
   list(): TriggerDefinition[];
+  /** Starts, limits, times and tracks this manager's actions; disposing it stops only these. */
+  readonly commands: AutomationCommands;
 }
 
 /**
@@ -52,35 +49,9 @@ export interface TriggerExecutionOptions {
   readonly guardCommand?: ((command: string) => Promise<string | undefined>) | undefined;
 }
 
-interface TrackedAction {
-  readonly triggerId: string;
-  readonly proc: { kill(): void };
-}
-
-const trackedActions = new Set<TrackedAction>();
-let credentialEnvScrub: ResolvedCredentialEnvScrub = resolveCredentialEnvScrub();
-
-/**
- * Sets the credential-env scrub that trigger actions start with: the same
- * configuration the exec tool and scheduled commands use.
- */
-export function setTriggerCredentialEnvScrub(config: CredentialEnvScrubConfig | undefined): void {
-  credentialEnvScrub = resolveCredentialEnvScrub(config);
-}
-
-/** Kills every trigger action still running. Call at shutdown. */
-export function killTriggerActions(): void {
-  for (const action of [...trackedActions]) {
-    try { action.proc.kill(); } catch (err) {
-      logger.debug('TriggerExecutor: action kill failed', { triggerId: action.triggerId, error: summarizeError(err) });
-    }
-  }
-  trackedActions.clear();
-}
-
 /**
  * Evaluate all enabled triggers against a fired hook event.
- * Matching triggers have their action executed via Bun.spawn.
+ * Matching triggers have their action started through `triggerManager.commands`.
  */
 export async function fireTriggers(
   event: HookEvent,
@@ -110,7 +81,7 @@ export async function fireTriggers(
     }
 
     // Execute the action
-    const fireResult = await executeAction(trigger, event, options);
+    const fireResult = await executeAction(trigger, event, triggerManager.commands, options);
     results.push(fireResult);
   }
 
@@ -351,14 +322,15 @@ function evaluateCondition(condition: string, event: HookEvent): { passed: boole
 }
 
 /**
- * Execute a trigger action command via Bun.spawn with the environment the exec
- * path gives a command (credential-bearing variables withheld). The process is
- * tracked so shutdown can kill it, is killed after a timeout, and a non-zero
- * exit is logged.
+ * Starts a trigger action through the manager's automation commands: the
+ * environment the exec path gives a command (credential-bearing variables
+ * withheld), a kill timer, a per-trigger in-flight limit, and tracking so
+ * disposal kills it. A non-zero exit is logged.
  */
 async function executeAction(
   trigger: TriggerDefinition,
   event: HookEvent,
+  commands: AutomationCommands,
   options: TriggerExecutionOptions,
 ): Promise<TriggerFireResult> {
   const base: Omit<TriggerFireResult, 'executed'> = {
@@ -374,77 +346,40 @@ async function executeAction(
   try {
     parts = shellSplit(trigger.action, { strict: true });
   } catch (err) {
-    return { ...base, executed: false, error: `Action could not be parsed: ${summarizeError(err)}` };
+    return { ...base, executed: false,
+      error: `Action could not be parsed: ${summarizeError(err)}. The action was not run; close the quote in trigger ${trigger.id}'s action and save it again.` };
   }
   if (parts.length === 0) {
-    return { ...base, executed: false, error: 'Empty action command' };
+    return { ...base, executed: false, error: `Empty action command: trigger ${trigger.id} has no command to run; give it an action or remove it.` };
   }
 
-  const maxInFlight = options.maxInFlight ?? TRIGGER_MAX_IN_FLIGHT;
-  const running = [...trackedActions].filter((action) => action.triggerId === trigger.id).length;
-  if (running >= maxInFlight) {
-    const error = `Not started: ${running} runs of this trigger are still running (limit ${maxInFlight}). Wait for them to finish or narrow the trigger event.`;
-    logger.warn('TriggerExecutor: in-flight limit reached', { triggerId: trigger.id, running, maxInFlight });
-    return { ...base, executed: false, error };
+  const guardCommand = options.guardCommand;
+  const outcome = await commands.start({
+    kind: 'trigger',
+    key: trigger.id,
+    argv: parts,
+    env: { GV_TRIGGER_ID: trigger.id, GV_TRIGGER_EVENT: event.path, GV_TRIGGER_PHASE: event.phase },
+    maxInFlight: options.maxInFlight ?? TRIGGER_MAX_IN_FLIGHT,
+    timeoutMs: options.timeoutMs ?? TRIGGER_ACTION_TIMEOUT_MS,
+    guard: guardCommand ? () => guardCommand(trigger.action) : undefined,
+    spawn: options.spawn,
+    startTimer: options.startTimer,
+  });
+  if (outcome.started) {
+    logger.debug('TriggerExecutor: action spawned', { triggerId: trigger.id, pid: outcome.pid, action: trigger.action });
+    return { ...base, executed: true, pid: outcome.pid };
   }
-
-  try {
-    if (options.guardCommand) {
-      const refusal = await options.guardCommand(trigger.action);
-      if (refusal !== undefined) {
-        logger.warn('TriggerExecutor: action refused by command guard', { triggerId: trigger.id });
-        return { ...base, executed: false, error: `Action refused by command policy: ${refusal}` };
-      }
-    }
-    const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
-    const { env } = await scrubCredentialEnv(hostEnv, credentialEnvScrub);
-    const spawn = options.spawn ?? Bun.spawn;
-    const proc = spawn(parts, {
-      env: {
-        ...env,
-        GV_TRIGGER_ID: trigger.id,
-        GV_TRIGGER_EVENT: event.path,
-        GV_TRIGGER_PHASE: event.phase,
-      },
-      stdout: 'ignore',
-      stderr: 'ignore',
-    });
-    const tracked: TrackedAction = { triggerId: trigger.id, proc };
-    trackedActions.add(tracked);
-    let timedOut = false;
-    const startTimer = options.startTimer ?? ((callback, ms) => {
-      const timer = setTimeout(callback, ms);
-      timer.unref?.();
-      return () => clearTimeout(timer);
-    });
-    const cancelTimer = startTimer(() => {
-      timedOut = true;
-      try { proc.kill(); } catch { /* already exited */ }
-    }, options.timeoutMs ?? TRIGGER_ACTION_TIMEOUT_MS);
-
-    // Fire-and-forget: the result reports the start, the exit is logged.
-    proc.exited.then((code) => {
-      if (timedOut) {
-        logger.warn('TriggerExecutor: action killed after timeout', { triggerId: trigger.id, pid: proc.pid });
-      } else if (code !== 0) {
-        logger.warn('TriggerExecutor: action exited non-zero', { triggerId: trigger.id, pid: proc.pid, exitCode: code });
-      }
-    }).catch((err) => {
-      logger.warn('TriggerExecutor: action process error', {
-        triggerId: trigger.id,
-        error: summarizeError(err),
-      });
-    }).finally(() => {
-      cancelTimer();
-      trackedActions.delete(tracked);
-    });
-
-    const pid = proc.pid;
-    logger.debug('TriggerExecutor: action spawned', { triggerId: trigger.id, pid, action: trigger.action });
-    return { ...base, executed: true, pid };
-  } catch (err) {
-    const message = summarizeError(err);
-    logger.warn('TriggerExecutor: failed to spawn action', { triggerId: trigger.id, error: message });
-    return { ...base, executed: false, error: message };
+  switch (outcome.reason) {
+    case 'busy':
+      logger.warn('TriggerExecutor: in-flight limit reached', { triggerId: trigger.id, running: outcome.running, maxInFlight: outcome.limit });
+      return { ...base, executed: false, error: `Not started: ${outcome.running} runs of this trigger are still running (limit ${outcome.limit}). Wait for them to finish or narrow the trigger event.` };
+    case 'refused':
+      logger.warn('TriggerExecutor: action refused by command guard', { triggerId: trigger.id });
+      return { ...base, executed: false, error: `Action refused by command policy: ${outcome.message}` };
+    case 'stopped':
+      return { ...base, executed: false, error: `Not started: ${outcome.message}` };
+    case 'failed':
+      logger.warn('TriggerExecutor: failed to spawn action', { triggerId: trigger.id, error: outcome.message });
+      return { ...base, executed: false, error: outcome.message };
   }
 }

@@ -201,8 +201,9 @@ Sessions, Agents or Processes, and a search box narrows it. The Show select
 switches between Active (the default), Active and finished (adds the Finished
 group) and Archive. The header line counts what is running and what needs you; in
 the Archive it counts what is archived. Select a row to open
-its detail beside the list (over the page on a phone). New offers Native request,
-task, hosted session, CI watch and a one-off CI status check.
+its detail beside the list (over the page on a phone). New offers Ask for work
+to be done, Run a background task, Start a session in a folder, CI watch and a
+one-off CI status check.
 
 Under the list, Archive finished processes moves fully finished processes out of
 the default list straight away, without a confirmation. They stay readable under
@@ -220,11 +221,17 @@ What the list brings together:
 
 ### Native requests and contracts
 
-Choose New, Native request to submit the original request to the daemon. The
-daemon owns Jev admission and the continuation into native work or a hosted
-conversation. The form shows pending, held, failed and completed states and
-provides cancellation. A refusal or uncertain reading does not ask you to approve
-a semantic decision.
+Choose New, Ask for work to be done, type what you want and press Send. The
+daemon decides whether it becomes work or a reply in a session and carries it
+through; the message box stays open for the next message. Each message you sent
+is a row with one status line that refreshes by itself every few seconds while
+the message is still moving. "Needs you" appears only when the daemon cannot go
+on without you (an interrupted start, a reply that failed without changing
+anything, a result that did not pass its final check), with the one button that
+answers it; Cancel stops a message that is still in progress. Identifiers and
+revisions are under Details. A message is kept in this browser only until the
+daemon has finished with it. Files and images cannot be attached here yet; note
+them as missing so the daemon knows what it was not given.
 
 Contract details show the original ask, criteria, recorded readings, checks,
 attempts and terminal result. Inspection is read-only. Recorded confirmation or

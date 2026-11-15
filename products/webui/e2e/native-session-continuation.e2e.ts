@@ -28,15 +28,15 @@ async function open(page: Page, fixture: Fixture, surface: ContinuationSurface) 
   await page.goto(`/?view=work&tab=${surfaceTab(surface)}`);
   const detail = await openRow(page, surfaceTitle(fixture, surface));
   await expect(
-    detail.getByText("Native continuation: Submit sends this original through Jev admission.")
+    detail.getByText("Your message is kept in this browser", { exact: false })
   ).toBeVisible();
   return detail;
 }
 async function submit(detail: Locator, fixture: Fixture, name: ContinuationCase = "second") {
   await detail
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(fixture.capture[name].input.text);
-  await detail.getByRole("button", { name: "Submit", exact: true }).click();
+  await detail.getByRole("button", { name: "Send", exact: true }).click();
 }
 async function close(page: Page, detail: Locator) {
   const back = page.getByRole("button", { name: "All work", exact: true });
@@ -152,7 +152,7 @@ for (const surface of ["Sessions", "Fleet"] as const) {
       );
       await detail
         .getByRole("button", {
-          name: `Inspect input ${fixture.capture.second.input.inputId}`,
+          name: `Show message ${fixture.capture.second.input.inputId}`,
           exact: true,
         })
         .click();
@@ -174,10 +174,10 @@ for (const surface of ["Sessions", "Fleet"] as const) {
       });
       const detail = await open(page, fixture, surface);
       await detail
-        .getByRole("textbox", { name: "Original request", exact: true })
+        .getByRole("textbox", { name: "Message", exact: true })
         .fill(fixture.capture.second.input.text);
       await detail
-        .getByRole("button", { name: "Submit", exact: true })
+        .getByRole("button", { name: "Send", exact: true })
         .evaluate((button: HTMLButtonElement) => {
           button.click();
           button.click();
@@ -211,7 +211,7 @@ for (const surface of ["Sessions", "Fleet"] as const) {
       ]);
       await detail
         .getByRole("button", {
-          name: `Inspect input ${fixture.capture.second.input.inputId}`,
+          name: `Show message ${fixture.capture.second.input.inputId}`,
           exact: true,
         })
         .click();
@@ -272,9 +272,9 @@ for (const surface of ["Sessions", "Fleet"] as const) {
       await close(page, detail);
       detail = await openRow(page, surfaceTitle(fixture, surface, true));
       await expect(
-        detail.getByRole("textbox", { name: "Original request", exact: true })
+        detail.getByRole("textbox", { name: "Message", exact: true })
       ).toBeVisible();
-      await expect(detail.getByRole("region", { name: "Saved requests", exact: true })).toHaveCount(
+      await expect(detail.getByRole("region", { name: "Sent", exact: true })).toHaveCount(
         0
       );
       await fixture.releaseStart();
@@ -307,7 +307,7 @@ for (const surface of ["Sessions", "Fleet"] as const) {
         await page.goto(`/?view=work&tab=${surfaceTab(surface)}`);
         let detail = await openRow(page, surfaceTitle(fixture, surface));
         await expect(
-          detail.getByRole("textbox", { name: "Original request", exact: true })
+          detail.getByRole("textbox", { name: "Message", exact: true })
         ).toBeVisible();
         await submit(detail, fixture, name);
         await expect(conversation(detail)).toContainText(
@@ -316,7 +316,7 @@ for (const surface of ["Sessions", "Fleet"] as const) {
         if (name === "queuedCancel")
           await expect(conversation(detail)).toContainText("excluding the active reply");
         await conversation(detail)
-          .getByRole("button", { name: "Cancel conversation", exact: true })
+          .getByRole("button", { name: "Cancel", exact: true })
           .click();
         await expect(conversation(detail)).toContainText("cancelled");
         const cancellation = fixture.writes.filter((request) => request.operation === "cancel");
@@ -324,7 +324,7 @@ for (const surface of ["Sessions", "Fleet"] as const) {
           fixture.capture[name].identity,
         ]);
         await expect(
-          conversation(detail).getByRole("button", { name: "Cancel conversation", exact: true })
+          conversation(detail).getByRole("button", { name: "Cancel", exact: true })
         ).toHaveCount(0);
         await expect(
           conversation(detail).getByRole("button", {
@@ -357,7 +357,7 @@ for (const surface of ["Sessions", "Fleet"] as const) {
       const detail = await openRow(page, surfaceTitle(fixture, surface));
       await expect(
         detail.getByText(
-          "Native continuation: the host queues conversation delivery behind any active turn."
+          "A new message goes after the reply in progress."
         )
       ).toBeVisible();
       await submit(detail, fixture, "queuedDelivery");
@@ -388,9 +388,9 @@ for (const surface of ["Sessions", "Fleet"] as const) {
         detail.getByRole("textbox", { name: /Original request|Steer message|Follow-up message/ })
       ).toHaveCount(0);
       await expect(
-        detail.getByRole("button", { name: "Retry session verification", exact: true })
+        detail.getByRole("button", { name: "Try again", exact: true })
       ).toBeVisible();
-      await detail.getByRole("button", { name: "Retry session verification", exact: true }).click();
+      await detail.getByRole("button", { name: "Try again", exact: true }).click();
       await expect(detail.getByRole("alert")).toContainText(
         "Native sessions require their existing paired owner"
       );
@@ -469,7 +469,7 @@ for (const surface of ["Sessions", "Fleet"] as const) {
       );
       await detail
         .getByRole("button", {
-          name: `Inspect input ${fixture.capture.second.input.inputId}`,
+          name: `Show message ${fixture.capture.second.input.inputId}`,
           exact: true,
         })
         .click();

@@ -19,9 +19,9 @@ async function submit(page: Page, daemon: Daemon) {
   await page.goto("/?view=work");
   const dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   return dialog;
 }
 const executionSection = (dialog: Locator) =>
@@ -128,7 +128,7 @@ test("one Submit commits source and exact execution target before automatically 
   expectNoLegacyWrites(daemon);
   await expectNoHorizontalScroll(page);
   await dialog
-    .getByRole("region", { name: "Original request", exact: true })
+    .getByRole("region", { name: "Message", exact: true })
     .scrollIntoViewIfNeeded();
   const sourceScreenshot = test.info().outputPath("native-original-and-admission.png");
   await page.screenshot({ path: sourceScreenshot, fullPage: true });
@@ -254,7 +254,7 @@ test("pending admission can be cancelled while start waits, without inventing a 
   const daemon = await installNativeExecutionDaemon(page, "pending-intent", { hold: ["start"] });
   const dialog = await submit(page, daemon);
   await expect.poll(() => daemon.pendingCount).toBe(1);
-  await dialog.getByRole("button", { name: "Cancel execution", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(executionSection(dialog).getByRole("status")).toContainText(
     "prevented before admission"
   );
@@ -280,7 +280,7 @@ test("host cancellation remains visible when a late successful start response is
   });
   const dialog = await submit(page, daemon);
   await expect.poll(() => daemon.pendingCount).toBe(1);
-  await dialog.getByRole("button", { name: "Cancel execution", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(executionSection(dialog).getByRole("status")).toContainText(
     "Native execution is cancelled"
   );
@@ -302,7 +302,7 @@ test("New request detaches a held start without cancellation or a late receipt o
   const dialog = await submit(page, daemon);
   await expect.poll(() => daemon.pendingCount).toBe(1);
   await dialog.getByRole("button", { name: "New request", exact: true }).click();
-  const composer = dialog.getByRole("textbox", { name: "Original request", exact: true });
+  const composer = dialog.getByRole("textbox", { name: "Message", exact: true });
   await composer.fill("A deliberately separate original source");
   await daemon.release("start");
   await expect(composer).toHaveValue("A deliberately separate original source");
@@ -425,7 +425,7 @@ test("missing fleet authority preserves admission but blocks every execution ope
   await expect(
     dialog.getByRole("region", { name: "Admission receipt", exact: true })
   ).toBeVisible();
-  for (const name of ["Inspect execution", "Continue request", "Cancel execution"]) {
+  for (const name of ["Inspect execution", "Continue request", "Cancel"]) {
     await dialog.getByRole("button", { name, exact: true }).click();
     await expect(dialog.getByRole("button", { name, exact: true })).toBeEnabled();
   }
@@ -453,7 +453,7 @@ test("changing paired authority while start waits fences its late result and hid
   await daemon.release("start");
   const dialog = await open(page);
   await expect(
-    dialog.getByRole("textbox", { name: "Original request", exact: true })
+    dialog.getByRole("textbox", { name: "Message", exact: true })
   ).toBeEnabled();
   await expect(
     dialog.getByRole("heading", { name: /^(Saved requests|Admission receipt|Execution receipt)$/ })
@@ -531,7 +531,7 @@ test("a corrupt retained target blocks cancellation without rewriting the origin
         };
       })
   );
-  await dialog.getByRole("button", { name: "Cancel execution", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(executionSection(dialog).getByRole("alert")).toContainText("corrupt");
   expect((await nativeBrowserRecords(page)).originals).toEqual(before.originals);
   expect(daemon.executionWrites.map((request) => request.operation)).toEqual(["start"]);
@@ -558,7 +558,7 @@ test("stale source lookup still allows reading and cancelling the same retained 
   await expect(
     dialog.getByRole("region", { name: "Hosted conversation", exact: true })
   ).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Cancel execution", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(executionSection(dialog).getByRole("status")).toContainText(
     "Native execution is cancelled"
   );
@@ -598,7 +598,7 @@ test("cancelling an exact retained target before start records prevention withou
   const dialog = await submit(page, daemon);
   await expect(executionSection(dialog).getByRole("alert")).toBeVisible();
   expect(daemon.executionWrites).toEqual([]);
-  await dialog.getByRole("button", { name: "Cancel execution", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(executionSection(dialog).getByRole("status")).toContainText(
     "prevented before admission"
   );

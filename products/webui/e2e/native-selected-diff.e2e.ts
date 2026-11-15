@@ -47,9 +47,9 @@ async function openComment(page: Page, hunk = 0, filePath = "selected-change.ts"
 }
 async function submit(dialog: Locator, fixture: Fixture, name: DiffCaseName = "session") {
   await dialog
-    .getByRole("textbox", { name: "Original comment", exact: true })
+    .getByRole("textbox", { name: "Comment", exact: true })
     .fill(fixture.capture[name].command.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
 }
 async function closeComment(page: Page) {
   await commentDialog(page)
@@ -190,7 +190,7 @@ test("session hunk keeps exact original separate from the complete >40-line sour
   await expect(conversation(dialog)).toContainText("completed");
   await dialog
     .getByRole("button", {
-      name: `Inspect input ${fixture.capture.session.command.inputId}`,
+      name: `Show message ${fixture.capture.session.command.inputId}`,
       exact: true,
     })
     .click();
@@ -283,10 +283,10 @@ test("double Submit while delivery is unresolved sends one exact original; Close
   await openChanges(page, fixture);
   let dialog = await openComment(page);
   await dialog
-    .getByRole("textbox", { name: "Original comment", exact: true })
+    .getByRole("textbox", { name: "Comment", exact: true })
     .fill(fixture.capture.session.command.text);
   await dialog
-    .getByRole("button", { name: "Submit", exact: true })
+    .getByRole("button", { name: "Send", exact: true })
     .evaluate((button: HTMLButtonElement) => {
       button.click();
       button.click();
@@ -345,7 +345,7 @@ test("queued cancellation targets only the selected original and reopening remai
   await submit(dialog, fixture, "queuedCancel");
   await expect(conversation(dialog)).toContainText("queued");
   await conversation(dialog)
-    .getByRole("button", { name: "Cancel conversation", exact: true })
+    .getByRole("button", { name: "Cancel", exact: true })
     .click();
   await expect.poll(() => fixture.pendingCount).toBe(1);
   const cancellation = fixture.capture.queuedCancel.cancel;
@@ -363,7 +363,7 @@ test("queued cancellation targets only the selected original and reopening remai
     conversation(dialog).getByRole("button", { name: "Continue conversation request", exact: true })
   ).toHaveCount(0);
   await expect(
-    conversation(dialog).getByRole("button", { name: "Cancel conversation", exact: true })
+    conversation(dialog).getByRole("button", { name: "Cancel", exact: true })
   ).toHaveCount(0);
   expect(fixture.writes.map((request) => request.operation)).toEqual([
     "capture",
@@ -409,7 +409,7 @@ test("Cancel intake during unresolved capture preserves the source and never adv
   const dialog = await openComment(page);
   await submit(dialog, fixture, "cancel");
   await expect.poll(() => fixture.pendingCount).toBe(1);
-  await dialog.getByRole("button", { name: "Cancel intake", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(dialog.getByRole("status").filter({ hasText: /cancelled/i })).toBeVisible();
   await fixture.release();
   await nextFrames(page);
@@ -450,17 +450,17 @@ test("Escape, Close and history navigation discard an unsent comment with no mut
   await openChanges(page, fixture);
   let dialog = await openComment(page);
   await dialog
-    .getByRole("textbox", { name: "Original comment", exact: true })
+    .getByRole("textbox", { name: "Comment", exact: true })
     .fill("Unsent original");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   dialog = await openComment(page);
-  await expect(dialog.getByRole("textbox", { name: "Original comment", exact: true })).toHaveValue(
+  await expect(dialog.getByRole("textbox", { name: "Comment", exact: true })).toHaveValue(
     ""
   );
   await closeComment(page);
   dialog = await openComment(page);
-  await dialog.getByRole("textbox", { name: "Original comment", exact: true }).fill("Still unsent");
+  await dialog.getByRole("textbox", { name: "Comment", exact: true }).fill("Still unsent");
   await page.goBack();
   await expect(page).toHaveURL(/view=library/);
   await expect(commentDialog(page)).toHaveCount(0);
@@ -484,9 +484,9 @@ test("selecting another hunk during unresolved delivery cannot adopt or retarget
   expect(await page.locator(".diff-mb__hunk").count()).toBeGreaterThan(1);
   dialog = await openComment(page, 1);
   await expect(
-    dialog.getByRole("textbox", { name: "Original comment", exact: true })
+    dialog.getByRole("textbox", { name: "Comment", exact: true })
   ).toBeVisible();
-  await expect(dialog.getByRole("region", { name: "Saved requests", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("region", { name: "Sent", exact: true })).toHaveCount(0);
   await fixture.release();
   await expect(conversation(dialog)).toHaveCount(0);
   await closeComment(page);
@@ -516,9 +516,9 @@ test("refreshing a changed host diff does not attach an older selected-source re
   await expect(detail.locator(".session-changes__captured")).toContainText(changed.to);
   dialog = await openComment(page);
   await expect(
-    dialog.getByRole("textbox", { name: "Original comment", exact: true })
+    dialog.getByRole("textbox", { name: "Comment", exact: true })
   ).toBeVisible();
-  await expect(dialog.getByRole("region", { name: "Saved requests", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("region", { name: "Sent", exact: true })).toHaveCount(0);
   await expect(conversation(dialog)).toHaveCount(0);
   expect((await nativeBrowserRecords(page)).originals).toEqual(saved.originals);
   await closeComment(page);
@@ -548,7 +548,7 @@ test("changing sessions after closing unresolved delivery cannot carry the selec
   await expect(other).toContainText("No captured changes for this session");
   await fixture.release();
   await expect(commentDialog(page)).toHaveCount(0);
-  await expect(other.getByRole("region", { name: "Saved requests", exact: true })).toHaveCount(0);
+  await expect(other.getByRole("region", { name: "Sent", exact: true })).toHaveCount(0);
   expect((await nativeBrowserRecords(page)).originals.map((record) => record.command)).toEqual([
     fixture.capture.session.command,
   ]);
@@ -599,9 +599,9 @@ test("failed native verification offers retry and no legacy comment control", as
   await expect(dialog.getByRole("textbox")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: /Send steer|Queue follow-up/ })).toHaveCount(0);
   fixture.setDiscoveryFailure(false);
-  await dialog.getByRole("button", { name: "Retry session verification", exact: true }).click();
+  await dialog.getByRole("button", { name: "Try again", exact: true }).click();
   await expect(
-    dialog.getByRole("textbox", { name: "Original comment", exact: true })
+    dialog.getByRole("textbox", { name: "Comment", exact: true })
   ).toBeVisible();
   expect(fixture.writes).toEqual([]);
   noLegacyWrites(fixture);
@@ -636,7 +636,7 @@ for (const surface of ["Sessions", "Fleet"] as const) {
     );
     await expect(
       target.getByRole("button", {
-        name: `Inspect input ${fixture.capture.session.command.inputId}`,
+        name: `Show message ${fixture.capture.session.command.inputId}`,
         exact: true,
       })
     ).toBeVisible();
@@ -644,9 +644,9 @@ for (const surface of ["Sessions", "Fleet"] as const) {
     await page.getByRole("menuitem", { name: "Ask for work to be done", exact: true }).click();
     const fresh = page.getByRole("dialog", { name: "Ask for work to be done", exact: true });
     await expect(
-      fresh.getByRole("textbox", { name: "Original request", exact: true })
+      fresh.getByRole("textbox", { name: "Message", exact: true })
     ).toBeVisible();
-    await expect(fresh.getByRole("region", { name: "Saved requests", exact: true })).toHaveCount(0);
+    await expect(fresh.getByRole("region", { name: "Sent", exact: true })).toHaveCount(0);
     expect(fixture.writes.map((request) => request.operation)).toEqual([
       "capture",
       "admit",
@@ -667,7 +667,7 @@ test("explicitly legacy session preserves the existing prefixed steer and Cancel
   await expect(
     dialog.getByRole("textbox", { name: "Comment on the selected change", exact: true })
   ).toBeVisible();
-  await expect(dialog.getByRole("textbox", { name: "Original comment", exact: true })).toHaveCount(
+  await expect(dialog.getByRole("textbox", { name: "Comment", exact: true })).toHaveCount(
     0
   );
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();

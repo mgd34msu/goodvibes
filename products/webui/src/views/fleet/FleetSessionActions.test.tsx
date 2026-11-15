@@ -118,7 +118,7 @@ test("native discovery gates sending and mounts the existing workflow with verif
   const pending = deferred<unknown>();
   invoke.mockImplementation(() => pending.promise);
   const h = render();
-  expect(h.el.textContent).toContain("Verifying session continuation");
+  expect(h.el.textContent).toContain("Connecting to the session");
   expect(h.el.querySelector("input")).toBeNull();
   expect(invoke.mock.calls[0]?.[0]).toBe("workLedger.turn.session");
   expect(invoke.mock.calls[0]?.[1]).toEqual({ sessionId: "native-a" });
@@ -126,9 +126,7 @@ test("native discovery gates sending and mounts the existing workflow with verif
   pending.resolve(native());
   await settle(() => Boolean(h.el.querySelector('[data-native-session="native-a"]')));
   expect(h.el.querySelector('[data-native-project="native-project"]')).not.toBeNull();
-  expect(h.el.textContent).toContain("queues conversation delivery behind any active turn");
-  expect(h.el.textContent).toContain("active reply is excluded");
-  expect(h.el.textContent).toContain("never supplies or rewrites the transcript");
+  expect(h.el.textContent).toContain("goes after the reply in progress");
   expect(h.el.querySelector("input")).toBeNull();
   expect(send).not.toHaveBeenCalled();
   expect(invoke).toHaveBeenCalledTimes(1);
@@ -247,12 +245,12 @@ test("hung discovery times out honestly and a late result cannot enable sending"
     const h = render();
     expect(deadline).toBeDefined();
     flushSync(() => deadline!());
-    expect(h.el.textContent).toContain("Session verification timed out");
+    expect(h.el.textContent).toContain("did not answer within 15 seconds");
     expect(invoke.mock.calls[0]?.[2]?.aborted).toBe(true);
     pending.resolve({ kind: "legacy" });
     await drain();
     expect(h.el.querySelector("input")).toBeNull();
-    expect(h.el.textContent).toContain("Session verification timed out");
+    expect(h.el.textContent).toContain("did not answer within 15 seconds");
     expect(send).not.toHaveBeenCalled();
   } finally {
     timer.mockRestore();

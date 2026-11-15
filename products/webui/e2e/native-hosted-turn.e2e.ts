@@ -22,9 +22,9 @@ async function submit(page: Page, daemon: Daemon) {
   await page.goto("/?view=work");
   const dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   return dialog;
 }
 async function identity(dialog: Locator, daemon: Daemon, phase: "start" | "status" = "start") {
@@ -144,7 +144,7 @@ test("one Submit commits the exact original before automatic hosted delivery; In
   );
   await expectNoHorizontalScroll(page);
   await dialog
-    .getByRole("region", { name: "Original request", exact: true })
+    .getByRole("region", { name: "Message", exact: true })
     .scrollIntoViewIfNeeded();
   await screenshot(
     page,
@@ -164,10 +164,10 @@ test("one Submit commits the exact original before automatic hosted delivery; In
     dialog.getByRole("button", { name: "Inspect conversation", exact: true })
   ).toBeEnabled();
   await expect(
-    dialog.getByRole("button", { name: "Cancel conversation", exact: true })
+    dialog.getByRole("button", { name: "Cancel", exact: true })
   ).toHaveCount(0);
   await expect(
-    dialog.getByRole("button", { name: "Open hosted session", exact: true })
+    dialog.getByRole("button", { name: "Open the session", exact: true })
   ).toBeEnabled();
   expect(await nativeBrowserRecords(page)).toEqual(retained);
   expect(writes(daemon)).toEqual(["capture", "admit", "start"]);
@@ -240,14 +240,14 @@ test("cancel while the pre-start status read waits records real prevention witho
   let dialog = await submit(page, daemon);
   await expect.poll(() => daemon.pendingCount).toBe(1);
   expect(writes(daemon)).toEqual(["capture", "admit"]);
-  await dialog.getByRole("button", { name: "Cancel conversation", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(conversation(dialog).getByRole("status")).toContainText("delivery is cancelled");
   await expect(conversation(dialog).getByText("Not recorded", { exact: true })).toHaveCount(3);
   const retained = await nativeBrowserRecords(page);
   await daemon.release("status");
   await expect(conversation(dialog).getByRole("status")).toContainText("delivery is cancelled");
   await expect(
-    dialog.getByRole("button", { name: "Open hosted session", exact: true })
+    dialog.getByRole("button", { name: "Open the session", exact: true })
   ).toHaveCount(0);
   expect(writes(daemon)).toEqual(["capture", "admit", "cancel"]);
   await page.reload();
@@ -274,7 +274,7 @@ for (const failure of ["abort", "relaxed", "unavailable"] as const) {
     const daemon = await installNativeHostedTurnDaemon(page);
     await page.goto("/?view=work");
     const dialog = await open(page);
-    const composer = dialog.getByRole("textbox", { name: "Original request", exact: true });
+    const composer = dialog.getByRole("textbox", { name: "Message", exact: true });
     await composer.fill(daemon.capture.input.text);
     // Inject after the empty-journal mount read, so this proves the actual Submit barrier.
     await page.evaluate((mode) => {
@@ -298,7 +298,7 @@ for (const failure of ["abort", "relaxed", "unavailable"] as const) {
         return transaction.apply(this, args);
       };
     }, failure);
-    await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+    await dialog.getByRole("button", { name: "Send", exact: true }).click();
     await expect(dialog.getByRole("alert")).toContainText("source journal");
     await expect(composer).toHaveValue(daemon.capture.input.text);
     expect((await nativeBrowserRecords(page)).originals).toEqual([]);

@@ -32,7 +32,7 @@ test.describe('process actions', () => {
     const detail = await openRow(page, FLEET_AGENT_NODE.label);
     const input = detail.getByRole('textbox', { name: 'Steer message' });
     await expect(input).toBeVisible();
-    await expect(detail.getByRole('textbox', { name: 'Original request', exact: true })).toHaveCount(0);
+    await expect(detail.getByRole('textbox', { name: 'Message', exact: true })).toHaveCount(0);
     const discoveryIndex = daemon.requests.findIndex((request) => request.method === 'POST' && request.path === '/api/work-ledger/turn/session');
     expect(discoveryIndex).toBeGreaterThanOrEqual(0);
     expect(daemon.requests[discoveryIndex].body).toEqual({ sessionId: FLEET_AGENT_NODE.sessionRef.sessionId });

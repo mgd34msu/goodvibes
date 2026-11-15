@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import type { NativeConversationIntakeUnsupportedSource, NativeSelectedDiffSelector } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import { type ClientLifetime, isClientLifetimeCurrent } from "../../lib/client-lifetime";
 import {
-  nativeIntakeDescription,
   openNativeIntake,
   type NativeIntakeResult,
   type NativeIntakeSession,
@@ -13,15 +12,21 @@ import {
 } from "../../lib/native-intake-journal";
 import { formatError } from "../../lib/errors";
 import type { NativeExecutionObservation } from "../../lib/native-execution";
+import type { NativeTurnObservation } from "../../lib/native-turn";
 import { NativeExecutionStatus } from "./NativeExecutionStatus";
 import { NativeTurnStatus } from "./NativeTurnStatus";
-import type { NativeTurnObservation } from "../../lib/native-turn";
+import {
+  requestIsMoving,
+  requestIsSettled,
+  requestStatusLine,
+  turnStatusLine,
+} from "./native-request-status";
 import { Button } from "../../components/ui/Button";
 import { Field, Input, Textarea } from "../../components/ui/Field";
 import { Select } from "../../components/ui/Select";
-import { Facts, DetailSection } from "../../components/data-view/DataView";
+import { Facts, DetailSection, Disclosure } from "../../components/data-view/DataView";
 
-/** One original submission continues into native work or hosted conversation delivery. */
+/** One message box: each message sent continues into work or a reply in its session. */
 interface NativeIntakeFormProps {
   lifetime: ClientLifetime;
   onOpenSession?: (sessionId: string) => void;
@@ -29,9 +34,22 @@ interface NativeIntakeFormProps {
   selectedDiff?: NativeSelectedDiffSelector;
   projectId?: string;
   closed?: boolean;
+  /** Text typed before the form was ready, carried into the message box. */
+  initialText?: string;
 }
-/** How often an unsettled request's status is read again. */
+/** How often a request the host is still moving is read again. */
 const NATIVE_STATUS_REFRESH_MS = 5_000;
+const MAX_TEXT = 20_000;
+
+/** An error whose message already says what happened and what to do. */
+class KnownOutcome extends Error {}
+
+/**
+ * read: a status read, superseded by any press. write: a step on the selected
+ * message. send/cancel: supersede anything except a cancel already in flight
+ * (sending a new message detaches the previous one's pending step, never cancels it).
+ */
+type RunMode = "write" | "read" | "send" | "cancel";
 
 export function NativeIntakeForm(props: NativeIntakeFormProps) {
   return (
@@ -55,27 +73,36 @@ function ScopedNativeIntakeForm({
   selectedDiff,
   projectId,
   closed = false,
+  initialText,
 }: NativeIntakeFormProps) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialText ?? "");
   const [sources, setSources] = useState<NativeConversationIntakeUnsupportedSource[]>([]);
   const [records, setRecords] = useState<NativeIntakeBrowserRecord[]>([]);
-  // Originals saved under other sessions or selected changes: shown only after a full
-  // journal refuses a save, because they count toward its capacity but not this form's list.
-  const [otherRecords, setOtherRecords] = useState<NativeIntakeBrowserRecord[]>([]);
+  const [lines, setLines] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<NativeIntakeBrowserRecord>();
   const [result, setResult] = useState<NativeIntakeResult>();
   const [turn, setTurn] = useState<NativeTurnObservation>();
   const [turnError, setTurnError] = useState<string>();
   const [busy, setBusy] = useState<string>("Connecting");
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
+  const [sendError, setSendError] = useState<string>();
   const [execution, setExecution] = useState<NativeExecutionObservation>();
   const [executionError, setExecutionError] = useState<string>();
   const [ready, setReady] = useState(false);
+  const [settleTried, setSettleTried] = useState<string>();
   const session = useRef<NativeIntakeSession | undefined>(undefined);
   const operation = useRef<AbortController | undefined>(undefined);
   const generation = useRef(0);
   const busyRef = useRef(true);
+  // A status read in flight never blocks a press: any action supersedes it.
+  const reading = useRef(false);
   const cancelling = useRef(false);
+  // Stages this page already carried forward once per message, so a failed step
+  // turns into a "Needs you" action instead of being repeated on every refresh.
+  const continued = useRef(new Set<string>());
+  // Messages this page already asked the browser store to drop.
+  const released = useRef(new Set<string>());
   // Bumped by "Retry connection": re-runs the connect effect after a failed connect,
   // which otherwise leaves the form gated on `ready` with nothing to press.
   const [connectAttempt, setConnectAttempt] = useState(0);
@@ -113,11 +140,13 @@ function ScopedNativeIntakeForm({
         if (!current()) return;
         setRecords(saved);
         setReady(true);
-        // Reopening only inspects. It never resubmits or resumes a saved input.
+        // Reopening reads the latest message's status; the page carries it on from there.
         if (saved.length > 0) {
           const latest = [...saved].sort((a, b) => b.createdAt - a.createdAt)[0];
           setSelected(latest);
-          setBusy("Inspecting");
+          reading.current = true;
+          setBusy("");
+          setRefreshing(true);
           const read = new AbortController();
           operation.current = read;
           await Promise.all([
@@ -152,6 +181,8 @@ function ScopedNativeIntakeForm({
       } finally {
         if (current()) {
           busyRef.current = false;
+          reading.current = false;
+          setRefreshing(false);
           setBusy("");
         }
       }
@@ -179,11 +210,15 @@ function ScopedNativeIntakeForm({
       signal: AbortSignal,
       current: () => boolean
     ) => Promise<void>,
-    cancel = false
+    mode: RunMode = "write"
   ) => {
-    if (!session.current || (busyRef.current && (!cancel || cancelling.current))) return;
+    if (!session.current) return;
+    const supersedes =
+      reading.current || ((mode === "send" || mode === "cancel") && !cancelling.current);
+    if (busyRef.current && !supersedes) return;
     busyRef.current = true;
-    cancelling.current = cancel;
+    reading.current = mode === "read";
+    cancelling.current = mode === "cancel";
     const epoch = ++generation.current;
     operation.current?.abort();
     const controller = new AbortController();
@@ -192,20 +227,25 @@ function ScopedNativeIntakeForm({
       epoch === generation.current &&
       !controller.signal.aborted &&
       isClientLifetimeCurrent(lifetime);
-    setBusy(label);
+    if (mode === "read") setRefreshing(true);
+    else setBusy(label);
     setError(undefined);
     try {
       await action(session.current, controller.signal, current);
     } catch (cause) {
       if (current()) {
         setError(
-          `${formatError(cause)} The outcome may be unknown. Inspect the saved input before retrying.`
+          cause instanceof KnownOutcome
+            ? cause.message
+            : `${formatError(cause)} Whether it went through is not known yet. Check again before sending it again.`
         );
       }
     } finally {
       if (current()) {
         busyRef.current = false;
+        reading.current = false;
         cancelling.current = false;
+        setRefreshing(false);
         setBusy("");
       }
     }
@@ -224,9 +264,7 @@ function ScopedNativeIntakeForm({
       if (current()) setExecution(found);
     } catch (cause) {
       if (current())
-        setExecutionError(
-          `${formatError(cause)} Execution outcome is unconfirmed. Inspect execution to read the host's current state.`
-        );
+        setExecutionError(`${formatError(cause)} Whether the work started is not known yet.`);
     }
   };
   const observeTurn = async (
@@ -243,9 +281,7 @@ function ScopedNativeIntakeForm({
       if (current()) setTurn(found);
     } catch (cause) {
       if (current())
-        setTurnError(
-          `${formatError(cause)} Conversation delivery is unconfirmed. Inspect conversation to read the host's current state. No automatic retry was sent.`
-        );
+        setTurnError(`${formatError(cause)} Whether the reply started is not known yet.`);
     }
   };
   const continueWork = async (
@@ -258,235 +294,364 @@ function ScopedNativeIntakeForm({
     if (!current()) return;
     // Admission is already durable. Never erase its receipt if execution fails.
     setResult(found);
+    const id = record.command.inputId;
     if (found.kind === "work") {
-      setBusy("Requesting execution");
+      continued.current.add(`${id}:execution-request`);
+      setBusy("Starting the work");
       await observeExecution(connected, record, "request", signal, current);
     } else if (found.kind === "turn") {
-      setBusy("Requesting conversation");
+      continued.current.add(`${id}:turn-request`);
+      setBusy("Starting the reply");
       await observeTurn(connected, record, "request", signal, current);
     }
   };
-  const inspect = (record: NativeIntakeBrowserRecord) => {
-    if (busyRef.current) return;
-    if (record.command.inputId !== selected?.command.inputId) {
-      setResult(undefined);
-      setTurn(undefined);
-      setTurnError(undefined);
-      setExecution(undefined);
-      setExecutionError(undefined);
-    }
-    setSelected(record);
-    void run("Inspecting", async (connected, signal, current) => {
-      // Independent reads keep durable execution controls reachable when intake
-      // lookup is unavailable or its older source scope has become stale.
-      await Promise.all([
-        connected.inspect(record, signal).then(
-          (found) => {
-            if (current()) setResult(found);
-          },
-          (cause: unknown) => {
-            if (current()) setError(formatError(cause));
-          }
-        ),
-        observeExecution(connected, record, "inspect", signal, current),
-        observeTurn(connected, record, "inspect", signal, current),
-      ]);
-    });
-  };
-  const submit = (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (
-      closed ||
-      !text.trim() ||
-      text.length > 20_000 ||
-      sources.some((source) => !source.label.trim() || source.label.length > 200) ||
-      busyRef.current
-    )
-      return;
-    void run("Submitting", async (connected, signal, current) => {
-      let original: NativeIntakeBrowserRecord | undefined;
-      let found: NativeIntakeResult;
-      try {
-        found = await connected.submit(
-          { text, unsupportedSources: sources },
-          (record) => {
-            original = record;
-            if (!current()) return;
-            setSelected(record);
-            setResult(undefined);
-            setTurn(undefined);
-            setTurnError(undefined);
-            setExecution(undefined);
-            setExecutionError(undefined);
-            setRecords((saved) => [...saved, record]);
-            setOtherRecords([]);
-            setText("");
-            setSources([]);
-          },
-          signal
-        );
-      } catch (cause) {
-        if (cause instanceof NativeIntakeBrowserJournalError && cause.code === "capacity") {
-          const others = await connected.listOtherScopes().catch(() => []);
-          if (current()) setOtherRecords(others);
-        }
-        throw cause;
-      }
-      if (original) await continueWork(connected, original, found, signal, current);
-    });
-  };
-  const executionAction = (method: "inspect" | "request" | "resume" | "cancel") => {
-    if (!selected || (closed && method !== "inspect" && method !== "cancel")) return;
-    const labels = {
-      inspect: "Inspecting execution",
-      request: "Continuing execution request",
-      resume: "Resuming execution",
-      cancel: "Cancelling execution",
-    };
-    void run(
-      labels[method],
-      (connected, signal, current) =>
-        observeExecution(connected, selected, method, signal, current),
-      method === "cancel"
-    );
-  };
-  const turnAction = (method: "inspect" | "request" | "cancel") => {
-    if (!selected || (closed && method !== "inspect" && method !== "cancel")) return;
-    const labels = {
-      inspect: "Inspecting conversation",
-      request: "Continuing conversation request",
-      cancel: "Cancelling conversation",
-    };
-    void run(
-      labels[method],
-      (connected, signal, current) => observeTurn(connected, selected, method, signal, current),
-      method === "cancel"
-    );
-  };
-  const release = (record: NativeIntakeBrowserRecord) => {
-    if (busyRef.current) return;
-    void run("Releasing", async (connected, signal, current) => {
-      const outcome = await connected.release(record, signal);
-      if (!current()) return;
-      if (outcome.released) {
-        const keep = (saved: NativeIntakeBrowserRecord[]) =>
-          saved.filter((item) => item.command.inputId !== record.command.inputId);
-        setRecords(keep);
-        setOtherRecords(keep);
-        if (selected?.command.inputId === record.command.inputId) {
-          setSelected(undefined);
-          setResult(undefined);
-          setTurn(undefined);
-          setTurnError(undefined);
-          setExecution(undefined);
-          setExecutionError(undefined);
-        }
-      } else {
-        setError(
-          `Not released: the host has not finished this request. ${nativeIntakeDescription(outcome.result)} The saved original is kept.`
-        );
-      }
-    });
-  };
-  // The status keeps itself current: while the selected request's turn or work
-  // is still moving, it is read again every few seconds (one read in flight at a
-  // time), so nobody has to press Inspect to learn that it finished.
-  const turnState = turn?.kind === "recorded" ? turn.snapshot.state : undefined;
-  const executionSnapshot = execution?.kind === "recorded" ? execution.snapshot : undefined;
-  const unsettled = Boolean(selected) && !error && (
-    (turnState !== undefined && ["queued", "preparing", "running", "cancelling"].includes(turnState))
-    || (executionSnapshot !== undefined && !["refused", "cancelled"].includes(executionSnapshot.state)
-      && executionSnapshot.recovery !== "required" && executionSnapshot.recovery !== "cancelled"
-      && executionSnapshot.progress?.status !== "passed" && executionSnapshot.progress?.status !== "failed"));
-  useEffect(() => {
-    if (!unsettled || busy || !selected) return;
-    const timer = setTimeout(() => { if (!busyRef.current) inspect(selected); }, NATIVE_STATUS_REFRESH_MS);
-    return () => clearTimeout(timer);
-  });
-  const newRequest = () => {
-    // Detach only. The saved immutable input and host execution are untouched.
-    ++generation.current;
-    operation.current?.abort();
-    operation.current = undefined;
-    busyRef.current = false;
-    cancelling.current = false;
-    setBusy("");
-    setSelected(undefined);
+  const clearObservations = () => {
     setResult(undefined);
     setTurn(undefined);
     setTurnError(undefined);
     setExecution(undefined);
     setExecutionError(undefined);
-    setError(undefined);
   };
-  const terminal =
-    result !== undefined &&
-    ["work", "turn", "blocked", "refused", "cancelled"].includes(result.kind);
+  const inspect = (record: NativeIntakeBrowserRecord) => {
+    if (busyRef.current && !reading.current) return;
+    if (record.command.inputId !== selected?.command.inputId) clearObservations();
+    setSelected(record);
+    void run(
+      "Checking",
+      async (connected, signal, current) => {
+        // Independent reads keep durable work controls reachable when intake
+        // lookup is unavailable or its older source scope has become stale.
+        await Promise.all([
+          connected.inspect(record, signal).then(
+            (found) => {
+              if (current()) setResult(found);
+            },
+            (cause: unknown) => {
+              if (current()) setError(formatError(cause));
+            }
+          ),
+          observeExecution(connected, record, "inspect", signal, current),
+          observeTurn(connected, record, "inspect", signal, current),
+        ]);
+      },
+      "read"
+    );
+  };
+  /** Drop every message the host reports finished; returns how many were dropped. */
+  const releaseSettled = async (connected: NativeIntakeSession, signal: AbortSignal, current: () => boolean) => {
+    const saved = [...(await connected.list()), ...(await connected.listOtherScopes())];
+    let freed = 0;
+    for (const record of saved) {
+      if (!current()) break;
+      const outcome = await connected.release(record, signal).catch(() => undefined);
+      if (outcome?.released) {
+        freed += 1;
+        released.current.add(record.command.inputId);
+      }
+    }
+    return freed;
+  };
+  const invalid =
+    !text.trim() ||
+    text.length > MAX_TEXT ||
+    sources.some((source) => !source.label.trim() || source.label.length > 200);
+  const submit = (event: SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (closed || invalid || cancelling.current) return;
+    const source = { text, unsupportedSources: sources };
+    setSendError(undefined);
+    void run("Sending", async (connected, signal, current) => {
+      let original: NativeIntakeBrowserRecord | undefined;
+      const saved = (record: NativeIntakeBrowserRecord) => {
+        original = record;
+        if (!current()) return;
+        setSelected(record);
+        clearObservations();
+        setRecords((items) => [...items, record]);
+        setText("");
+        setSources([]);
+      };
+      let found: NativeIntakeResult;
+      try {
+        try {
+          found = await connected.submit(source, saved, signal);
+        } catch (cause) {
+          if (original || !(cause instanceof NativeIntakeBrowserJournalError && cause.code === "capacity"))
+            throw cause;
+          // The browser keeps a message only until the daemon has finished with it.
+          // A full store usually holds finished ones nobody looked at again: drop
+          // those and send once more; still-running ones are never dropped.
+          const freed = await releaseSettled(connected, signal, current);
+          if (!current()) return;
+          if (freed === 0)
+            throw new KnownOutcome(
+              "Not sent: this browser is already holding as many messages as it can while they are in progress. Send it again when one of them finishes."
+            );
+          found = await connected.submit(source, saved, signal);
+        }
+      } catch (cause) {
+        if (original) throw cause;
+        if (current())
+          setSendError(cause instanceof KnownOutcome ? cause.message : `Not sent: ${formatError(cause)} Your text is still in the box.`);
+        return;
+      }
+      if (original) await continueWork(connected, original, found, signal, current);
+    }, "send");
+  };
+  const executionAction = (method: "inspect" | "request" | "resume" | "cancel") => {
+    const record = selected;
+    if (!record || (closed && method !== "inspect" && method !== "cancel")) return;
+    const labels = {
+      inspect: "Checking",
+      request: "Starting the work",
+      resume: "Continuing the work",
+      cancel: "Cancelling",
+    };
+    void run(
+      labels[method],
+      (connected, signal, current) => observeExecution(connected, record, method, signal, current),
+      method === "cancel" ? "cancel" : method === "inspect" ? "read" : "write"
+    );
+  };
+  const turnAction = (method: "inspect" | "request" | "cancel") => {
+    const record = selected;
+    if (!record || (closed && method !== "inspect" && method !== "cancel")) return;
+    const labels = {
+      inspect: "Checking",
+      request: "Starting the reply",
+      cancel: "Cancelling",
+    };
+    void run(
+      labels[method],
+      (connected, signal, current) => observeTurn(connected, record, method, signal, current),
+      method === "cancel" ? "cancel" : method === "inspect" ? "read" : "write"
+    );
+  };
+  const retrySubmission = () => {
+    const record = selected;
+    if (!record || closed) return;
+    void run("Sending", async (connected, signal, current) =>
+      continueWork(connected, record, await connected.retry(record, signal), signal, current)
+    );
+  };
+  const resumeIntake = () => {
+    const record = selected;
+    if (!record || closed) return;
+    void run("Continuing", async (connected, signal, current) =>
+      continueWork(connected, record, await connected.resume(record, signal), signal, current)
+    );
+  };
+  const cancelIntake = () => {
+    const record = selected;
+    if (!record) return;
+    void run(
+      "Cancelling",
+      async (connected, signal, current) => {
+        const found = await connected.cancel(record, signal);
+        if (!current()) return;
+        setResult(found);
+        // A cancellation race may reveal admitted work. Read it;
+        // cancellation must never become a new execution request.
+        if (found.kind === "work")
+          await observeExecution(connected, record, "inspect", signal, current);
+        else if (found.kind === "turn")
+          await observeTurn(connected, record, "inspect", signal, current);
+      },
+      "cancel"
+    );
+  };
+
+  const executionSnapshot = execution?.kind === "recorded" ? execution.snapshot : undefined;
+  const executionRecord = executionSnapshot?.kind === "execution" ? executionSnapshot : undefined;
+  const turnSnapshot = turn?.kind === "recorded" ? turn.snapshot : undefined;
+  const moving = Boolean(selected) && !error && requestIsMoving(result, turn, execution);
+  const settled = requestIsSettled(result, turn, execution);
+  const idle = !busy && !refreshing;
+
+  // The status keeps itself current: while the host is still moving the selected
+  // message, it is read again every few seconds (one read in flight at a time).
+  useEffect(() => {
+    if (!moving || !idle || !selected) return;
+    const record = selected;
+    const timer = setTimeout(() => {
+      if (!busyRef.current) inspect(record);
+    }, NATIVE_STATUS_REFRESH_MS);
+    return () => clearTimeout(timer);
+    // `inspect` is recreated each render; the timer re-arms after every answer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moving, idle, selected, result, turn, execution]);
+
+  // Carry the message on by itself: each step the host leaves for its client
+  // (finish intake, start the work or reply, check a finished result) runs once.
+  useEffect(() => {
+    if (!selected || !idle || closed || error) return;
+    const id = selected.command.inputId;
+    const once = (stage: string, act: () => void) => {
+      const key = `${id}:${stage}`;
+      if (continued.current.has(key)) return;
+      continued.current.add(key);
+      act();
+    };
+    if (result?.kind === "captured") once("intake", retrySubmission);
+    else if (result?.kind === "work" && execution?.kind === "not-found" && !executionError)
+      once("execution-request", () => executionAction("request"));
+    else if (result?.kind === "turn" && turn?.kind === "not-found" && !turnError)
+      once("turn-request", () => turnAction("request"));
+    else if (executionRecord?.progress?.status === "passed" && executionRecord.settlement?.state === "required")
+      once("settle", () => {
+        setSettleTried(id);
+        executionAction("resume");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, idle, closed, error, result, turn, execution, executionError, turnError]);
+
+  // A finished message no longer needs to be kept in this browser.
+  useEffect(() => {
+    if (!selected || !idle || !settled) return;
+    const record = selected;
+    const id = record.command.inputId;
+    if (released.current.has(id)) return;
+    released.current.add(id);
+    void session.current?.release(record).catch(() => undefined);
+  }, [selected, idle, settled]);
+
+  // Each row keeps the last status line read for it.
+  useEffect(() => {
+    if (!selected || (!result && !turn && !execution)) return;
+    const id = selected.command.inputId;
+    const line = requestStatusLine(result, turn, execution);
+    setLines((known) => (known[id] === line ? known : { ...known, [id]: line }));
+  }, [selected, result, turn, execution]);
+
   const hasTurnTarget = turn !== undefined && turn.kind !== "not-requested";
-  // A failed source lookup cannot establish that a hosted conversation exists.
-  // Keep that error with intake until a real turn disposition/target owns it.
-  const showTurn = result?.kind === "turn" || hasTurnTarget;
   const hasExecutionTarget = execution !== undefined && execution.kind !== "not-requested";
-  const showExecution = result?.kind === "work" || hasExecutionTarget || Boolean(executionError);
-  const canCancel = Boolean(
-    selected &&
-    !terminal &&
-    !hasExecutionTarget &&
-    !hasTurnTarget &&
-    busy !== "Cancelling" &&
-    busy !== "Cancelling execution" &&
-    busy !== "Cancelling conversation" &&
-    busy !== "Connecting"
+  const intakeTerminal =
+    result !== undefined && ["work", "turn", "blocked", "refused", "cancelled"].includes(result.kind);
+  const executionCancelled =
+    executionSnapshot?.kind === "prevented-before-admission" || executionSnapshot?.state === "cancelled";
+  const turnFinished =
+    turnSnapshot?.state === "completed" || turnSnapshot?.state === "cancelled" || turnSnapshot?.state === "failed";
+  const cancelTarget: "execution" | "turn" | "intake" | undefined = !selected || settled
+    ? undefined
+    : result?.kind === "work" || hasExecutionTarget
+      ? (executionCancelled ? undefined : "execution")
+      : result?.kind === "turn" || hasTurnTarget
+        ? (turnFinished || turn?.kind === "not-requested" ? undefined : "turn")
+        : intakeTerminal
+          ? undefined
+          : "intake";
+  const cancel = () => {
+    if (cancelTarget === "execution") executionAction("cancel");
+    else if (cancelTarget === "turn") turnAction("cancel");
+    else if (cancelTarget === "intake") cancelIntake();
+  };
+  const check = () => {
+    if (selected) inspect(selected);
+  };
+  const executionResumable = Boolean(
+    executionSnapshot &&
+    !executionSnapshot.stale &&
+    executionSnapshot.currentAttempt &&
+    ((executionSnapshot.kind === "pending-intent" && executionSnapshot.recovery === "required") ||
+      (executionSnapshot.kind === "execution" &&
+        executionSnapshot.state === "prepared" &&
+        ["available", "required"].includes(executionSnapshot.recovery)))
   );
+  const executionCanRequest = result?.kind === "work" && (!execution || execution.kind === "not-found");
+  const turnCanRequest = result?.kind === "turn" && (!turn || turn.kind === "not-found");
+
+  // At most one decision is offered, and only when the host cannot go on without one.
+  let need: { reason: string; label: string; act: () => void; sends: boolean } | undefined;
+  if (!selected) need = undefined;
+  else if (error) need = { reason: error, label: "Check again", act: check, sends: false };
+  else if (executionError)
+    need = executionCanRequest
+      ? { reason: executionError, label: "Try again", act: () => executionAction("request"), sends: true }
+      : { reason: executionError, label: "Check again", act: check, sends: false };
+  else if (turnError)
+    need = turnCanRequest
+      ? { reason: turnError, label: "Try again", act: () => turnAction("request"), sends: true }
+      : { reason: turnError, label: "Check again", act: check, sends: false };
+  else if (result?.kind === "not-found")
+    need = { reason: "The daemon has no record of this message.", label: "Send it", act: retrySubmission, sends: true };
+  else if (result?.kind === "processing" && result.recovery === "required")
+    need = { reason: "Deciding how to handle this message was interrupted.", label: "Continue", act: resumeIntake, sends: true };
+  else if (turnSnapshot?.state === "failed" && turnSnapshot.failure?.retryable)
+    need = { reason: turnStatusLine(turnSnapshot), label: "Send again", act: () => turnAction("request"), sends: true };
+  else if (turnSnapshot?.state === "recovery-required")
+    need = {
+      reason: "The process running this reply stopped, so its outcome is unknown. Cancel it to free the session; it will not be run again.",
+      label: "Cancel it",
+      act: cancel,
+      sends: false,
+    };
+  else if (executionResumable)
+    need = { reason: "Starting the work was interrupted.", label: "Resume", act: () => executionAction("resume"), sends: true };
+  else if (executionRecord?.progress?.status === "passed" && executionRecord.settlement?.state === "failed")
+    need = { reason: requestStatusLine(result, turn, execution), label: "Check the result again", act: () => executionAction("resume"), sends: true };
+  else if (
+    executionRecord?.progress?.status === "passed" &&
+    executionRecord.settlement?.state === "required" &&
+    settleTried === selected.command.inputId &&
+    idle
+  )
+    need = { reason: "The finished work has not been checked yet.", label: "Check the result", act: () => executionAction("resume"), sends: true };
+  else if (executionRecord?.recovery === "required" && executionRecord.state === "launch-claimed")
+    need = {
+      reason: "The process running this work stopped, so its outcome is unknown. Cancel it to free it; it will not be run again.",
+      label: "Cancel it",
+      act: cancel,
+      sends: false,
+    };
+  const needCancels = need?.act === cancel;
+  const sessionId = turnSnapshot?.sessionId;
+  const rows = [...records].sort((a, b) => b.createdAt - a.createdAt);
 
   return (
     <div className="work-form native-intake">
-      <p>
-        Submit complete original text for the host to process under its current decision-model
-        policy. Conversation requests start hosted delivery of that exact input. Autonomous native
-        work requires an available decision model.
-      </p>
       <p className="dv-muted">
-        Original text and source markers are saved in this browser before sending. Closing this view
-        does not cancel daemon intake, execution or hosted conversation delivery.
+        Your message is kept in this browser until the daemon has it. Closing this page does not
+        stop anything already sent.
       </p>
-      {error && <p role="alert">{error}</p>}
+      {!selected && error && <p role="alert">{error}</p>}
       {busy && <p role="status">{busy}…</p>}
       {!ready && !busy && (
         <Button type="button" onClick={retryConnection}>
           Retry connection
         </Button>
       )}
-      {closed && <p role="status">Session closed: reopen to submit a continuation.</p>}
+      {closed && <p role="status">This session is closed. Reopen it to send another message.</p>}
       {ready && !closed && (
         <form className="work-form" onSubmit={submit}>
           <Field
-            label={selectedDiff ? "Original comment" : "Original request"}
-            help="Include all required context. Whitespace and repeated requirements are preserved exactly; maximum 20,000 UTF-16 characters."
+            label={selectedDiff ? "Comment" : "Message"}
+            help="Sent exactly as written, up to 20,000 characters."
           >
             <Textarea
               autoFocus
-              rows={6}
+              rows={4}
               value={text}
-              disabled={Boolean(busy)}
-              onChange={(event) => setText(event.target.value)}
+              onChange={(event) => {
+                setText(event.target.value);
+                setSendError(undefined);
+              }}
             />
           </Field>
-          {text.length > 20_000 && (
+          {text.length > MAX_TEXT && (
             <p role="alert">
-              The request exceeds 20,000 characters. Nothing will be truncated or sent.
+              The message is longer than 20,000 characters. Nothing will be cut or sent.
             </p>
           )}
+          {sendError && <p role="alert">{sendError}</p>}
           {sources.map((source, index) => (
             <div className="work-form__pair" key={index}>
-              <Field label={`Source ${index + 1} type`}>
+              <Field label={`Missing item ${index + 1}`}>
                 <Select
                   value={source.kind}
-                  disabled={Boolean(busy)}
                   options={[
-                    { value: "context", label: "Missing context" },
-                    { value: "file", label: "Unread file" },
-                    { value: "image", label: "Unread image" },
+                    { value: "context", label: "Missing details" },
+                    { value: "file", label: "A file I could not include" },
+                    { value: "image", label: "An image I could not include" },
                   ]}
                   onChange={(kind: NativeConversationIntakeUnsupportedSource["kind"]) =>
                     setSources((items) =>
@@ -496,16 +661,15 @@ function ScopedNativeIntakeForm({
                 />
               </Field>
               <Field
-                label={`Source ${index + 1} label`}
+                label={`Missing item ${index + 1} description`}
                 error={
                   source.label.length > 200
-                    ? "Source labels must be at most 200 characters. Nothing will be truncated."
+                    ? "At most 200 characters. Nothing will be cut."
                     : undefined
                 }
               >
                 <Input
                   value={source.label}
-                  disabled={Boolean(busy)}
                   onChange={(event) =>
                     setSources((items) =>
                       items.map((item, i) =>
@@ -517,90 +681,106 @@ function ScopedNativeIntakeForm({
               </Field>
               <Button
                 type="button"
-                disabled={Boolean(busy)}
                 onClick={() => setSources((items) => items.filter((_, i) => i !== index))}
               >
-                Remove source {index + 1}
+                Remove missing item {index + 1}
               </Button>
             </div>
           ))}
           <div className="work-form__actions">
             <Button
               type="button"
-              disabled={Boolean(busy) || sources.length >= 100}
+              disabled={sources.length >= 100}
               onClick={() => setSources((items) => [...items, { kind: "context", label: "" }])}
             >
-              Mark an unavailable source
+              Note something missing
             </Button>
             <Button
               type="submit"
               variant="primary"
-              disabled={
-                Boolean(busy) ||
-                !text.trim() ||
-                text.length > 20_000 ||
-                sources.some((source) => !source.label.trim() || source.label.length > 200)
-              }
+              disabled={busy === "Connecting" || busy.startsWith("Cancelling") || invalid}
             >
-              Submit
+              Send
             </Button>
           </div>
         </form>
       )}
+      {rows.length > 0 && (
+        <DetailSection title="Sent">
+          <ul className="native-intake__saved">
+            {rows.map((record) => {
+              const id = record.command.inputId;
+              return (
+                <li key={id}>
+                  <Button
+                    disabled={Boolean(busy)}
+                    aria-pressed={selected?.command.inputId === id}
+                    onClick={() => {
+                      // Tapping a message asks again: its next step may run once more.
+                      for (const key of [...continued.current])
+                        if (key.startsWith(`${id}:`)) continued.current.delete(key);
+                      inspect(record);
+                    }}
+                    aria-label={`Show message ${id}`}
+                  >
+                    {record.command.text.slice(0, 80)}
+                    {record.command.text.length > 80 ? "…" : ""}
+                  </Button>
+                  <span className="dv-muted">
+                    {lines[id] ?? `Sent ${new Date(record.createdAt).toLocaleString()}.`}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </DetailSection>
+      )}
       {selected && (
-        <>
-          <DetailSection title={selectedDiff ? "Original comment" : "Original request"}>
-            <pre className="native-intake__source">{selected.command.text}</pre>
-            {selected.command.unsupportedSources.length > 0 && (
-              <ul>
-                {selected.command.unsupportedSources.map((source, index) => (
-                  <li key={index}>
-                    {source.kind}: {source.label}
-                  </li>
-                ))}
-              </ul>
+        <section className="native-intake__request" aria-label="Selected message">
+          <pre className="native-intake__source">{selected.command.text}</pre>
+          {selected.command.unsupportedSources.length > 0 && (
+            <ul>
+              {selected.command.unsupportedSources.map((source, index) => (
+                <li key={index}>
+                  Missing {source.kind === "context" ? "details" : source.kind}: {source.label}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p role="status">{requestStatusLine(result, turn, execution)}</p>
+          {need && (
+            <div className="native-intake__needs">
+              <p role="alert">Needs you: {need.reason}</p>
+              <Button
+                variant="primary"
+                disabled={(need.act === cancel ? busy.startsWith("Cancelling") : Boolean(busy)) || (need.sends && closed)}
+                onClick={need.act}
+              >
+                {need.label}
+              </Button>
+            </div>
+          )}
+          <div className="work-form__actions">
+            {cancelTarget && !needCancels && (
+              <Button
+                disabled={busy.startsWith("Cancelling") || busy === "Connecting"}
+                onClick={cancel}
+              >
+                Cancel
+              </Button>
             )}
-          </DetailSection>
-          <Facts
-            items={[
-              { label: "Input", value: selected.command.inputId },
-              { label: "Request", value: selected.command.requestId },
-              ...(selected.command.continuation
-                ? [
-                    {
-                      label: "Continuation session",
-                      value: selected.command.continuation.sessionId,
-                    },
-                  ]
-                : []),
-              ...(result && result.kind !== "not-found" && result.sourceRef.continuation
-                ? [
-                    {
-                      label: "Completed context revision",
-                      value: result.sourceRef.continuation.revision,
-                    },
-                  ]
-                : []),
-              ...(selected.command.continuation?.selectedDiff ? [
-                { label: "Selected change scope", value: selected.command.continuation.selectedDiff.kind === "session" ? "Session-stamped checkpoint aggregate" : "Workspace checkpoint to captured working tree" },
-                { label: "Selected diff revision", value: selected.command.continuation.selectedDiff.revision },
-                { label: "Selected file / hunk", value: `${selected.command.continuation.selectedDiff.fileIndex + 1} / ${selected.command.continuation.selectedDiff.hunkIndex + 1}` },
-              ] : []),
-              ...(result && result.kind !== "not-found"
-                ? [{ label: "Source revision", value: result.sourceRef.sourceRevision }]
-                : []),
-            ]}
-          />
-          {result && <p role="status">{nativeIntakeDescription(result)}</p>}
-          {result?.kind === "work" && (
-            <DetailSection title="Admission receipt">
-              <Facts
-                items={[
-                  { label: "Work", value: result.receipt.workId },
-                  { label: "Attempt", value: result.receipt.attemptId },
-                  { label: "Decision", value: result.receipt.source.admissionDecisionId },
-                ]}
-              />
+            {sessionId && onOpenSession && (
+              <Button
+                onClick={() => {
+                  if (isClientLifetimeCurrent(lifetime)) onOpenSession(sessionId);
+                }}
+              >
+                Open the session
+              </Button>
+            )}
+          </div>
+          {result?.kind === "work" && result.receipt.criteria.length > 0 && (
+            <DetailSection title="What will be checked">
               <ol>
                 {result.receipt.criteria.map((criterion, index) => (
                   <li className="native-intake__source" key={index}>
@@ -610,162 +790,34 @@ function ScopedNativeIntakeForm({
               </ol>
             </DetailSection>
           )}
-          <div className="work-form__actions">
-            <Button disabled={Boolean(busy)} onClick={() => inspect(selected)}>
-              Inspect
-            </Button>
-            {(result?.kind === "not-found" || result?.kind === "captured") && (
-              <Button
-                disabled={Boolean(busy) || closed}
-                onClick={() =>
-                  void run("Retrying submission", async (connected, signal, current) =>
-                    continueWork(
-                      connected,
-                      selected,
-                      await connected.retry(selected, signal),
-                      signal,
-                      current
-                    )
-                  )
-                }
-              >
-                Retry submission
-              </Button>
-            )}
-            {result?.kind === "processing" && result.recovery === "required" && (
-              <Button
-                disabled={Boolean(busy) || closed}
-                onClick={() =>
-                  void run("Resuming", async (connected, signal, current) =>
-                    continueWork(
-                      connected,
-                      selected,
-                      await connected.resume(selected, signal),
-                      signal,
-                      current
-                    )
-                  )
-                }
-              >
-                Resume
-              </Button>
-            )}
-            {canCancel && (
-              <Button
-                onClick={() =>
-                  void run(
-                    "Cancelling",
-                    async (connected, signal, current) => {
-                      const found = await connected.cancel(selected, signal);
-                      if (!current()) return;
-                      setResult(found);
-                      // A cancellation race may reveal admitted work. Read it;
-                      // cancellation must never become a new execution request.
-                      if (found.kind === "work")
-                        await observeExecution(connected, selected, "inspect", signal, current);
-                      else if (found.kind === "turn")
-                        await observeTurn(connected, selected, "inspect", signal, current);
-                    },
-                    true
-                  )
-                }
-              >
-                Cancel intake
-              </Button>
-            )}
-            <Button onClick={newRequest}>New request</Button>
-          </div>
-          {showExecution && (
-            <NativeExecutionStatus
-              observation={execution}
-              error={executionError}
-              busy={busy}
-              onInspect={() => executionAction("inspect")}
-              requestDisabled={closed}
-              onRequest={() => executionAction("request")}
-              onResume={() => executionAction("resume")}
-              onCancel={() => executionAction("cancel")}
+          <Disclosure summary="Details">
+            <Facts
+              items={[
+                { label: "Input", value: selected.command.inputId },
+                { label: "Request", value: selected.command.requestId },
+                ...(selected.command.continuation
+                  ? [{ label: "Session", value: selected.command.continuation.sessionId }]
+                  : []),
+                ...(result && result.kind !== "not-found" && result.sourceRef.continuation
+                  ? [{ label: "Conversation revision", value: result.sourceRef.continuation.revision }]
+                  : []),
+                ...(selected.command.continuation?.selectedDiff ? [
+                  { label: "Commented change", value: selected.command.continuation.selectedDiff.kind === "session" ? "This session's changes" : "Workspace changes since a checkpoint" },
+                  { label: "Change revision", value: selected.command.continuation.selectedDiff.revision },
+                  { label: "File / hunk", value: `${selected.command.continuation.selectedDiff.fileIndex + 1} / ${selected.command.continuation.selectedDiff.hunkIndex + 1}` },
+                ] : []),
+                ...(result && result.kind !== "not-found"
+                  ? [{ label: "Source revision", value: result.sourceRef.sourceRevision }]
+                  : []),
+                ...(result?.kind === "work"
+                  ? [{ label: "Admission decision", value: result.receipt.source.admissionDecisionId }]
+                  : []),
+              ]}
             />
-          )}
-          {showTurn && (
-            <NativeTurnStatus
-              observation={turn}
-              error={turnError}
-              busy={busy}
-              onInspect={() => turnAction("inspect")}
-              requestDisabled={closed}
-              onRequest={() => turnAction("request")}
-              onCancel={() => turnAction("cancel")}
-              onOpenSession={
-                onOpenSession
-                  ? (sessionId) => {
-                      if (isClientLifetimeCurrent(lifetime)) onOpenSession(sessionId);
-                    }
-                  : undefined
-              }
-            />
-          )}
-          {!terminal && (
-            <p className="dv-muted">
-              A separate new request keeps this original saved. It does not cancel daemon intake or
-              execution for this original.
-            </p>
-          )}
-        </>
-      )}
-      {otherRecords.length > 0 && (
-        <DetailSection title="Saved requests from other sessions">
-          <p className="dv-muted">
-            This browser's journal is full. These originals were saved under other sessions or
-            selected changes; release any the host has finished to make room.
-          </p>
-          <ul className="native-intake__saved">
-            {[...otherRecords]
-              .sort((a, b) => b.createdAt - a.createdAt)
-              .map((record) => (
-                <li key={record.command.inputId}>
-                  <span>
-                    {record.command.text.slice(0, 80)}
-                    {record.command.text.length > 80 ? "…" : ""}
-                  </span>
-                  <Button
-                    disabled={Boolean(busy)}
-                    onClick={() => release(record)}
-                    aria-label={`Release input ${record.command.inputId}`}
-                  >
-                    Release
-                  </Button>
-                </li>
-              ))}
-          </ul>
-        </DetailSection>
-      )}
-      {records.length > 0 && (
-        <DetailSection title="Saved requests">
-          <ul className="native-intake__saved">
-            {[...records]
-              .sort((a, b) => b.createdAt - a.createdAt)
-              .map((record) => (
-                <li key={record.command.inputId}>
-                  <Button
-                    disabled={Boolean(busy)}
-                    onClick={() => inspect(record)}
-                    aria-label={`Inspect input ${record.command.inputId}`}
-                  >
-                    {record.command.text.slice(0, 80)}
-                    {record.command.text.length > 80 ? "…" : ""}
-                  </Button>
-                  <Button
-                    disabled={Boolean(busy)}
-                    onClick={() => release(record)}
-                    aria-label={`Release input ${record.command.inputId}`}
-                  >
-                    Release
-                  </Button>
-                </li>
-              ))}
-          </ul>
-        </DetailSection>
+            <NativeExecutionStatus observation={execution} />
+            <NativeTurnStatus observation={turn} />
+          </Disclosure>
+        </section>
       )}
     </div>
   );

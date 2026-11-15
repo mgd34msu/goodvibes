@@ -140,7 +140,6 @@ let session: NativeIntakeSession;
 const open = mock(async () => session);
 mock.module("../../lib/native-intake", () => ({
   openNativeIntake: open,
-  nativeIntakeDescription: (result: NativeIntakeResult) => `Intake outcome: ${result.kind}`,
 }));
 const { NativeIntakeForm } = await import("./NativeIntakeForm");
 const cleanups: (() => void)[] = [];
@@ -295,7 +294,7 @@ async function render(
     flushSync(() => item!.click());
   };
   await settle(() =>
-    Boolean(button("Submit") || button("New request") || el.textContent?.includes("Session closed"))
+    Boolean(button("Send") || el.textContent?.includes("This session is closed"))
   );
   return { el, button, click, unmount, rerender };
 }
@@ -316,193 +315,183 @@ function submit(el: HTMLElement) {
   );
 }
 
-describe("Native intake to execution lifecycle", () => {
-  test("one Submit preserves exact original, renders admission immediately and requests execution once", async () => {
+const textareaValue = (el: HTMLElement) => el.querySelector("textarea")?.value;
+const rows = (el: HTMLElement) => el.querySelectorAll(".native-intake__saved li").length;
+
+describe("A message that becomes work", () => {
+  test("one Send keeps the exact text, starts the work once and keeps the box ready", async () => {
     const pending = deferred<NativeExecutionObservation>();
     connected.execution.request.mockImplementation(() => pending.promise);
     const { el, button } = await render();
     submit(el);
-    await settle(
-      () =>
-        connected.execution.request.mock.calls.length === 1 && Boolean(button("Cancel execution"))
-    );
+    await settle(() => connected.execution.request.mock.calls.length === 1 && button("Cancel")?.disabled === false);
     expect(connected.submit.mock.calls[0]?.[0]).toEqual({ text: original, unsupportedSources: [] });
     expect(connected.execution.request.mock.calls[0]?.[0]).toBe(record);
+    expect(el.querySelector("pre")?.textContent).toBe(original);
+    expect(textareaValue(el)).toBe("");
     expect(el.textContent).toContain("admission-real");
-    expect(el.textContent).not.toContain("contract-real");
-    expect(button("Cancel execution")?.disabled).toBe(false);
-    expect(button("New request")?.disabled).toBe(false);
     pending.resolve(running);
     await settle(() => el.textContent?.includes("contract-real") === true);
-    expect(connected.execution.resume).not.toHaveBeenCalled();
     expect(connected.execution.request).toHaveBeenCalledTimes(1);
+    expect(connected.execution.resume).not.toHaveBeenCalled();
     expect(connected.turn.request).not.toHaveBeenCalled();
   });
 
-  test("dispatch failure retains admission and explicit continuation; inspection does not dispatch", async () => {
-    connected.execution.request.mockRejectedValue(
-      new Error("Native execution requires write:fleet.")
-    );
-    const { el, click } = await render();
+  test("a start that fails is offered once as Try again and is never repeated by itself", async () => {
+    connected.execution.request.mockRejectedValue(new Error("Native execution requires write:fleet."));
+    const { el, button, click } = await render();
     submit(el);
-    await settle(() => el.textContent?.includes("requires write:fleet") === true);
-    expect(el.textContent).toContain("admission-real");
-    expect(el.textContent).toContain("Repeat.Repeat.");
+    await settle(() => el.textContent?.includes("requires write:fleet") === true && Boolean(button("Try again")));
+    expect(el.textContent).toContain("Needs you");
     expect(el.querySelector("pre")?.textContent).toBe(original);
-    click("Inspect execution");
-    await settle(() => connected.execution.inspect.mock.calls.length === 1);
+    await drain();
     expect(connected.execution.request).toHaveBeenCalledTimes(1);
     connected.execution.request.mockResolvedValue(running);
-    await settle(() => el.textContent?.includes("latest lookup found no execution") === true);
-    click("Continue request");
+    click("Try again");
     await settle(() => el.textContent?.includes("contract-real") === true);
     expect(connected.execution.request).toHaveBeenCalledTimes(2);
   });
 
-  test("reopen and saved-request inspection only read intake and execution", async () => {
+  test("reopening carries admitted work on: one start, only on the host's exact absence", async () => {
     connected.list.mockResolvedValue([record]);
-    const { el, click } = await render();
-    await settle(() => el.textContent?.includes("latest lookup found no execution") === true);
-    expect(connected.inspect).toHaveBeenCalledTimes(1);
-    expect(connected.execution.inspect).toHaveBeenCalledTimes(1);
-    click("Inspect");
-    await settle(() => connected.execution.inspect.mock.calls.length === 2);
+    const { el } = await render();
+    await settle(() => connected.execution.request.mock.calls.length === 1 && el.textContent?.includes("contract-real") === true);
+    await drain();
+    expect(connected.execution.request).toHaveBeenCalledTimes(1);
     expect(connected.submit).not.toHaveBeenCalled();
     expect(connected.retry).not.toHaveBeenCalled();
-    expect(connected.execution.request).not.toHaveBeenCalled();
     expect(connected.execution.resume).not.toHaveBeenCalled();
   });
 
-  test("retry submission and admission recovery continue work dispatch without an extra gate", async () => {
+  test("reopening work that is already running only reads it", async () => {
+    connected.list.mockResolvedValue([record]);
+    connected.execution.inspect.mockResolvedValue(running);
+    const { el } = await render();
+    await settle(() => el.textContent?.includes("contract-real") === true);
+    await drain();
+    expect(connected.execution.request).not.toHaveBeenCalled();
+    expect(connected.execution.resume).not.toHaveBeenCalled();
+    expect(connected.submit).not.toHaveBeenCalled();
+  });
+
+  test("a captured message is carried through by itself; an interrupted one waits for Continue", async () => {
     for (const kind of ["captured", "processing"] as const) {
       connected = fixture();
       session = connected;
       connected.list.mockResolvedValue([record]);
       connected.inspect.mockResolvedValue(
-        kind === "captured"
-          ? { kind, ...common }
-          : { kind, ...common, recovery: "required", stage: "waiting" }
+        kind === "captured" ? { kind, ...common } : { kind, ...common, recovery: "required", stage: "waiting" }
       );
       connected.execution.inspect.mockResolvedValue({ kind: "not-requested" });
-      const { el, button, click } = await render();
-      const label = kind === "captured" ? "Retry submission" : "Resume";
-      await settle(() => button(label)?.disabled === false);
-      click(label);
+      const { el, button, click, unmount } = await render();
+      if (kind === "processing") {
+        await settle(() => button("Continue")?.disabled === false);
+        expect(connected.resume).not.toHaveBeenCalled();
+        click("Continue");
+      }
       await settle(() => el.textContent?.includes("contract-real") === true);
+      expect(kind === "captured" ? connected.retry : connected.resume).toHaveBeenCalledTimes(1);
       expect(connected.execution.request).toHaveBeenCalledTimes(1);
       expect(connected.execution.resume).not.toHaveBeenCalled();
+      unmount();
     }
   });
 
-  test("turn outcome never dispatches native execution", async () => {
+  test("a message that becomes a reply never starts work", async () => {
     connected.submit.mockImplementation(async (_source, saved) => {
       saved(record);
       return turn;
     });
     const { el } = await render();
     submit(el);
-    await settle(() => el.textContent?.includes("Intake outcome: turn") === true);
+    await settle(() => connected.turn.request.mock.calls.length === 1);
     expect(connected.execution.request).not.toHaveBeenCalled();
-    expect(el.textContent).not.toContain("Execution receipt");
+    expect(el.textContent).not.toContain("contract-real");
   });
 
-  test("cancel interrupts dispatch and a late start response cannot overwrite prevention", async () => {
+  test("blocked and refused messages start nothing and offer nothing to press", async () => {
+    for (const found of [
+      { kind: "blocked", ...common, reason: "missing-context", recovery: "required" },
+      { kind: "refused", ...common, reason: "semantic" },
+    ] as const) {
+      connected = fixture();
+      session = connected;
+      connected.submit.mockImplementation(async (_source, saved) => {
+        saved(record);
+        return found;
+      });
+      const { el, button, unmount } = await render();
+      submit(el);
+      await settle(() => el.textContent?.includes("Not started") === true);
+      expect(connected.turn.request).not.toHaveBeenCalled();
+      expect(connected.execution.request).not.toHaveBeenCalled();
+      expect(button("Cancel")).toBeUndefined();
+      expect(el.textContent).not.toContain("Needs you");
+      unmount();
+    }
+  });
+
+  test("Cancel interrupts a pending start and a late answer cannot overwrite it", async () => {
     const pending = deferred<NativeExecutionObservation>();
     connected.execution.request.mockImplementation(() => pending.promise);
     const { el, click, button } = await render();
     submit(el);
-    await settle(() => button("Cancel execution")?.disabled === false);
+    await settle(() => button("Cancel")?.disabled === false && connected.execution.request.mock.calls.length === 1);
     const oldSignal = connected.execution.request.mock.calls[0]?.[1];
-    click("Cancel execution");
-    await settle(() => el.textContent?.includes("prevented before admission") === true);
+    click("Cancel");
+    await settle(() => el.textContent?.includes("Cancelled before the work started") === true);
     expect(oldSignal?.aborted).toBe(true);
     expect(connected.execution.cancel).toHaveBeenCalledTimes(1);
     pending.resolve(running);
     await drain();
-    flushSync(() => {});
-    expect(el.textContent).toContain("prevented before admission");
+    expect(el.textContent).toContain("Cancelled before the work started");
     expect(el.textContent).not.toContain("contract-real");
-    expect(el.textContent).toContain("admission-real");
   });
 
-  test("New request detaches a pending execution without cancelling it or adopting its late response", async () => {
+  test("Cancel interrupts the reopening status read", async () => {
+    const pending = deferred<NativeExecutionObservation>();
+    connected.list.mockResolvedValue([record]);
+    connected.execution.inspect.mockImplementation(() => pending.promise);
+    const { el, button, click } = await render();
+    await settle(() => button("Cancel")?.disabled === false);
+    const oldSignal = connected.execution.inspect.mock.calls[0]?.[1];
+    click("Cancel");
+    await settle(() => el.textContent?.includes("Cancelled before the work started") === true);
+    expect(oldSignal?.aborted).toBe(true);
+    pending.resolve(running);
+    await drain();
+    expect(el.textContent).not.toContain("contract-real");
+    expect(connected.execution.request).not.toHaveBeenCalled();
+  });
+
+  test("sending another message detaches the pending start without cancelling it", async () => {
     const pending = deferred<NativeExecutionObservation>();
     connected.execution.request.mockImplementation(() => pending.promise);
-    const { el, click, button } = await render();
+    const { el } = await render();
     submit(el);
     await settle(() => connected.execution.request.mock.calls.length === 1);
     const oldSignal = connected.execution.request.mock.calls[0]?.[1];
-    click("New request");
+    const next: NativeIntakeBrowserRecord = {
+      ...record,
+      command: { ...record.command, inputId: "next-input", requestId: "next-request" },
+      createdAt: 2,
+    };
+    connected.submit.mockImplementation(async (_source, saved) => {
+      saved(next);
+      return { kind: "processing", ...common, requestId: "next-request", sourceRef: { ...common.sourceRef, inputId: "next-input" }, recovery: "pending", stage: "waiting" } as NativeIntakeResult;
+    });
+    submit(el);
+    await settle(() => connected.submit.mock.calls.length === 2 && rows(el) === 2);
     expect(oldSignal?.aborted).toBe(true);
-    expect(button("Submit")).toBeDefined();
     pending.resolve(running);
     await drain();
-    flushSync(() => {});
-    expect(button("Submit")).toBeDefined();
     expect(el.textContent).not.toContain("contract-real");
-    expect(el.textContent).toContain("Saved requests");
     expect(connected.cancel).not.toHaveBeenCalled();
     expect(connected.execution.cancel).not.toHaveBeenCalled();
+    expect(el.querySelector("textarea")).not.toBeNull();
   });
 
-  test("a durable execution target stays inspectable and cancellable after intake lookup fails", async () => {
-    connected.list.mockResolvedValue([record]);
-    connected.inspect.mockRejectedValue(new Error("Original intake scope is stale."));
-    connected.turn.inspect.mockRejectedValue(new Error("Original intake scope is stale."));
-    connected.execution.inspect.mockResolvedValue(running);
-    const { el, button, click } = await render();
-    await settle(
-      () =>
-        el.textContent?.includes("contract-real") === true &&
-        button("Inspect execution")?.disabled === false
-    );
-    expect(el.textContent).toContain("Original intake scope is stale");
-    expect(el.querySelectorAll('[role="alert"]')).toHaveLength(1);
-    expect(el.textContent).not.toContain("Hosted conversation");
-    expect(button("Continue conversation request")).toBeUndefined();
-    expect(button("Cancel conversation")).toBeUndefined();
-    expect(button("Cancel execution")).toBeDefined();
-    click("Inspect execution");
-    await settle(() => connected.execution.inspect.mock.calls.length === 2);
-    expect(connected.execution.request).not.toHaveBeenCalled();
-  });
-  test("cancellation supersedes a pending execution inspection or explicit resume", async () => {
-    for (const method of ["inspect", "resume"] as const) {
-      connected = fixture();
-      session = connected;
-      connected.list.mockResolvedValue([record]);
-      connected.execution.inspect.mockResolvedValue({
-        kind: "recorded",
-        target,
-        snapshot: {
-          ...target,
-          projectId: "project",
-          currentRevision: target.expectedRevision,
-          currentAttempt: true,
-          stale: false,
-          kind: "pending-intent",
-          state: "admitting",
-          recovery: "required",
-        },
-      });
-      const { el, button, click } = await render();
-      await settle(() => button("Resume execution")?.disabled === false);
-      const pending = deferred<NativeExecutionObservation>();
-      connected.execution[method].mockImplementation(() => pending.promise);
-      click(method === "inspect" ? "Inspect execution" : "Resume execution");
-      const oldSignal = connected.execution[method].mock.calls.at(-1)?.[1];
-      click("Cancel execution");
-      await settle(() => el.textContent?.includes("prevented before admission") === true);
-      expect(oldSignal?.aborted).toBe(true);
-      pending.resolve(running);
-      await drain();
-      flushSync(() => {});
-      expect(el.textContent).not.toContain("contract-real");
-      expect(el.textContent).toContain("prevented before admission");
-    }
-  });
-
-  test("closing detaches and disposes without host cancellation", async () => {
+  test("closing detaches and disposes without cancelling anything on the host", async () => {
     const pending = deferred<NativeExecutionObservation>();
     connected.execution.request.mockImplementation(() => pending.promise);
     const { el, unmount } = await render();
@@ -518,48 +507,30 @@ describe("Native intake to execution lifecycle", () => {
     await drain();
   });
 
-  test("connection replacement clears prior source and receipts and fences a late result", async () => {
+  test("a connection change clears the previous message and fences its late answer", async () => {
     const pending = deferred<NativeExecutionObservation>();
     connected.execution.request.mockImplementation(() => pending.promise);
     const old = connected;
     const { el, button, rerender } = await render();
     submit(el);
     await settle(() => old.execution.request.mock.calls.length === 1);
-    expect(el.textContent).toContain("admission-real");
     connected = fixture();
     session = connected;
     invalidateClientLifetime();
     rerender();
-    await settle(() => button("Submit")?.disabled === true);
+    await settle(() => button("Send")?.disabled === true);
     expect(old.dispose).toHaveBeenCalledTimes(1);
     expect(old.execution.request.mock.calls[0]?.[1]?.aborted).toBe(true);
     expect(el.textContent).not.toContain("admission-real");
-    expect(el.textContent).not.toContain("Saved requests");
+    expect(rows(el)).toBe(0);
     pending.resolve(running);
     await drain();
-    flushSync(() => {});
-    expect(el.textContent).not.toContain("contract-real");
-    expect(connected.execution.request).not.toHaveBeenCalled();
-  });
-  test("cancellation can interrupt the read-only reopening status lookup", async () => {
-    const pending = deferred<NativeExecutionObservation>();
-    connected.list.mockResolvedValue([record]);
-    connected.execution.inspect.mockImplementation(() => pending.promise);
-    const { el, button, click } = await render();
-    await settle(() => button("Cancel execution")?.disabled === false);
-    const oldSignal = connected.execution.inspect.mock.calls[0]?.[1];
-    click("Cancel execution");
-    await settle(() => el.textContent?.includes("prevented before admission") === true);
-    expect(oldSignal?.aborted).toBe(true);
-    pending.resolve(running);
-    await drain();
-    flushSync(() => {});
     expect(el.textContent).not.toContain("contract-real");
     expect(connected.execution.request).not.toHaveBeenCalled();
   });
 });
 
-describe("Native intake to hosted conversation lifecycle", () => {
+describe("A message that becomes a reply", () => {
   beforeEach(() => {
     connected.submit.mockImplementation(async (_source, saved) => {
       saved(record);
@@ -567,131 +538,65 @@ describe("Native intake to hosted conversation lifecycle", () => {
     });
   });
 
-  test("one Submit requests the exact turn once and exposes cancellation before acknowledgement", async () => {
+  test("one Send starts the reply once and Cancel is offered before it is acknowledged", async () => {
     const pending = deferred<NativeTurnObservation>();
     connected.turn.request.mockImplementation(() => pending.promise);
-    const { el, button, rerender } = await render();
+    const { el, button } = await render();
     submit(el);
-    await settle(() => connected.turn.request.mock.calls.length === 1);
-    expect(connected.submit.mock.calls[0]?.[0]).toEqual({ text: original, unsupportedSources: [] });
+    await settle(() => connected.turn.request.mock.calls.length === 1 && button("Cancel")?.disabled === false);
     expect(connected.turn.request.mock.calls[0]?.[0]).toBe(record);
     expect(el.querySelector("pre")?.textContent).toBe(original);
-    expect(el.textContent).toContain("Intake outcome: turn");
-    expect(button("Cancel conversation")?.disabled).toBe(false);
-    expect(button("New request")?.disabled).toBe(false);
-    expect(button("Start conversation")).toBeUndefined();
-    expect(button("Approve")).toBeUndefined();
     pending.resolve(turnRunning);
-    await settle(() => el.textContent?.includes("hosted-session-real") === true);
-    rerender();
+    await settle(() => el.textContent?.includes("Replying.") === true);
+    expect(el.textContent).toContain("hosted-session-real");
     await drain();
     expect(connected.turn.request).toHaveBeenCalledTimes(1);
-    expect(connected.turn.inspect).not.toHaveBeenCalled();
     expect(connected.execution.request).not.toHaveBeenCalled();
-    expect(connected.execution.resume).not.toHaveBeenCalled();
-    expect(button("Continue conversation request")).toBeUndefined();
+    expect(button("Send again")).toBeUndefined();
   });
 
-  test("reopen and both inspection buttons only read the saved input and hosted turn", async () => {
-    connected.list.mockResolvedValue([record]);
-    connected.inspect.mockResolvedValue(turn);
-    connected.turn.inspect.mockResolvedValue({ kind: "not-found", target: turnTarget });
-    const { el, button, click } = await render();
-    await settle(() => button("Inspect conversation")?.disabled === false);
-    expect(connected.inspect).toHaveBeenCalledTimes(1);
-    expect(connected.turn.inspect).toHaveBeenCalledTimes(1);
-    expect(connected.turn.inspect.mock.calls[0]?.[0]).toBe(record);
-    click("Inspect");
-    await settle(
-      () => connected.turn.inspect.mock.calls.length === 2 && button("Inspect")?.disabled === false
-    );
-    click("Inspect conversation");
-    await settle(
-      () =>
-        connected.turn.inspect.mock.calls.length === 3 &&
-        button("Inspect conversation")?.disabled === false
-    );
-    expect(el.querySelector("pre")?.textContent).toBe(original);
-    expect(connected.submit).not.toHaveBeenCalled();
-    expect(connected.retry).not.toHaveBeenCalled();
-    expect(connected.resume).not.toHaveBeenCalled();
-    expect(connected.turn.request).not.toHaveBeenCalled();
-    expect(connected.turn.cancel).not.toHaveBeenCalled();
-    expect(connected.execution.request).not.toHaveBeenCalled();
-  });
-
-  test("retry submission and intake recovery continue the turn without another approval gate", async () => {
-    for (const kind of ["captured", "processing"] as const) {
-      connected = fixture();
-      session = connected;
-      connected.list.mockResolvedValue([record]);
-      connected.inspect.mockResolvedValue(
-        kind === "captured"
-          ? { kind, ...common }
-          : { kind, ...common, recovery: "required", stage: "waiting" }
-      );
-      connected.retry.mockResolvedValue(turn);
-      connected.resume.mockResolvedValue(turn);
-      connected.execution.inspect.mockResolvedValue({ kind: "not-requested" });
-      const { el, button, click, unmount } = await render();
-      const label = kind === "captured" ? "Retry submission" : "Resume";
-      await settle(() => button(label)?.disabled === false);
-      click(label);
-      await settle(() => el.textContent?.includes("hosted-session-real") === true);
-      expect(connected.turn.request).toHaveBeenCalledTimes(1);
-      expect(connected.turn.request.mock.calls[0]?.[0]).toBe(record);
-      expect(connected.execution.request).not.toHaveBeenCalled();
-      expect(connected.execution.resume).not.toHaveBeenCalled();
-      unmount();
-    }
-  });
-
-  test("an unconfirmed request retains the source and requires explicit inspection or continuation", async () => {
-    connected.turn.request.mockRejectedValue(
-      new Error("Hosted conversation acknowledgement was lost.")
-    );
+  test("a reply whose start was not confirmed is offered once as Try again", async () => {
+    connected.turn.request.mockRejectedValue(new Error("Hosted conversation acknowledgement was lost."));
     const { el, button, click } = await render();
     submit(el);
-    await settle(() => el.textContent?.includes("acknowledgement was lost") === true);
-    expect(el.textContent).toContain("Intake outcome: turn");
-    expect(el.querySelector("pre")?.textContent).toBe(original);
-    expect(button("Inspect conversation")?.disabled).toBe(false);
-    expect(button("Cancel conversation")?.disabled).toBe(false);
-    expect(connected.turn.request).toHaveBeenCalledTimes(1);
-    expect(connected.turn.inspect).not.toHaveBeenCalled();
-    connected.turn.inspect.mockResolvedValue({ kind: "not-found", target: turnTarget });
-    click("Inspect conversation");
-    await settle(
-      () =>
-        connected.turn.inspect.mock.calls.length === 1 &&
-        button("Continue conversation request")?.disabled === false
-    );
+    await settle(() => el.textContent?.includes("acknowledgement was lost") === true && Boolean(button("Try again")));
+    await drain();
     expect(connected.turn.request).toHaveBeenCalledTimes(1);
     connected.turn.request.mockResolvedValue(turnRunning);
-    click("Continue conversation request");
-    await settle(() => el.textContent?.includes("hosted-session-real") === true);
+    click("Try again");
+    await settle(() => el.textContent?.includes("Replying.") === true);
     expect(connected.turn.request).toHaveBeenCalledTimes(2);
     expect(connected.submit).toHaveBeenCalledTimes(1);
-    expect(connected.retry).not.toHaveBeenCalled();
-    expect(connected.resume).not.toHaveBeenCalled();
   });
 
-  test("opening a hosted session uses its durable session ID without requesting another turn", async () => {
+  test("a failed reply that changed nothing is offered as Send again", async () => {
+    connected.turn.request.mockResolvedValue({
+      ...turnRunning,
+      snapshot: { ...turnRunning.snapshot, state: "failed", failure: { summary: "The provider timed out", retryable: true } },
+    } as NativeTurnObservation);
+    const { el, button, click } = await render();
+    submit(el);
+    await settle(() => Boolean(button("Send again")));
+    expect(el.textContent).toContain("The provider timed out");
+    connected.turn.request.mockResolvedValue(turnRunning);
+    click("Send again");
+    await settle(() => el.textContent?.includes("Replying.") === true);
+    expect(connected.turn.request).toHaveBeenCalledTimes(2);
+    expect(connected.release).not.toHaveBeenCalled();
+  });
+
+  test("Open the session uses the recorded session id without starting another reply", async () => {
     const opened = mock((_sessionId: string) => {});
     const { el, button, click } = await render(opened);
     submit(el);
-    await settle(() => button("Open hosted session")?.disabled === false);
-    expect(opened).not.toHaveBeenCalled();
-    expect(el.textContent).toContain("hosted-session-real");
-    click("Open hosted session");
+    await settle(() => button("Open the session")?.disabled === false);
+    click("Open the session");
     expect(opened).toHaveBeenCalledTimes(1);
     expect(opened.mock.calls[0]?.[0]).toBe("hosted-session-real");
     expect(connected.turn.request).toHaveBeenCalledTimes(1);
-    expect(connected.turn.inspect).not.toHaveBeenCalled();
-    expect(connected.execution.request).not.toHaveBeenCalled();
   });
 
-  test("NewWorkMenu opens the recorded hosted Work item and closes native intake without cancellation", async () => {
+  test("New work opens the recorded hosted item and closes the form without cancelling", async () => {
     const { NewWorkMenu } = await import("./NewWorkMenu");
     const opened = mock((_key: string) => {});
     const el = document.createElement("div");
@@ -706,7 +611,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     expect(menuButton).not.toBeNull();
     flushSync(() => menuButton!.click());
     const nativeItem = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
-      (item) => item.textContent === "Native request"
+      (item) => item.textContent === "Ask for work to be done"
     );
     expect(nativeItem).toBeDefined();
     flushSync(() => nativeItem!.click());
@@ -715,278 +620,83 @@ describe("Native intake to hosted conversation lifecycle", () => {
     await settle(() => Boolean(dialog?.querySelector("textarea")));
     submit(dialog!);
     const openButton = () =>
-      [...dialog!.querySelectorAll("button")].find(
-        (item) => item.textContent === "Open hosted session"
-      );
+      [...dialog!.querySelectorAll("button")].find((item) => item.textContent === "Open the session");
     await settle(() => openButton()?.disabled === false);
-    expect(opened).not.toHaveBeenCalled();
     flushSync(() => openButton()!.click());
     expect(opened).toHaveBeenCalledTimes(1);
     expect(opened.mock.calls[0]?.[0]).toBe("hosted:hosted-session-real");
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(connected.dispose).toHaveBeenCalledTimes(1);
-    expect(connected.turn.request).toHaveBeenCalledTimes(1);
     expect(connected.turn.cancel).not.toHaveBeenCalled();
     expect(connected.cancel).not.toHaveBeenCalled();
-    expect(connected.execution.cancel).not.toHaveBeenCalled();
-  });
-
-  test("blocked and refused intake never request conversation delivery or execution", async () => {
-    for (const found of [
-      { kind: "blocked", ...common, reason: "missing-context", recovery: "required" },
-      { kind: "refused", ...common, reason: "semantic" },
-    ] as const) {
-      connected = fixture();
-      session = connected;
-      connected.submit.mockImplementation(async (_source, saved) => {
-        saved(record);
-        return found;
-      });
-      const { el, button, unmount } = await render();
-      submit(el);
-      await settle(() => el.textContent?.includes(`Intake outcome: ${found.kind}`) === true);
-      expect(connected.turn.request).not.toHaveBeenCalled();
-      expect(connected.execution.request).not.toHaveBeenCalled();
-      expect(button("Continue conversation request")).toBeUndefined();
-      expect(button("Cancel conversation")).toBeUndefined();
-      expect(button("Open hosted session")).toBeUndefined();
-      unmount();
-    }
-  });
-
-  test("cancelling intake fences a late turn result before it can request hosted delivery", async () => {
-    const pending = deferred<NativeIntakeResult>();
-    connected.submit.mockImplementation((_source, saved) => {
-      saved(record);
-      return pending.promise;
-    });
-    const { el, button, click } = await render();
-    submit(el);
-    await settle(() => button("Cancel intake")?.disabled === false);
-    const oldSignal = connected.submit.mock.calls[0]?.[2];
-    click("Cancel intake");
-    await settle(() => el.textContent?.includes("Intake outcome: cancelled") === true);
-    expect(oldSignal?.aborted).toBe(true);
-    pending.resolve(turn);
-    await drain();
-    flushSync(() => {});
-    expect(el.textContent).toContain("Intake outcome: cancelled");
-    expect(connected.turn.request).not.toHaveBeenCalled();
-    expect(connected.turn.inspect).not.toHaveBeenCalled();
-    expect(connected.execution.request).not.toHaveBeenCalled();
-    expect(button("Cancel conversation")).toBeUndefined();
-  });
-
-  test("a cancellation race that reveals a turn only inspects hosted delivery", async () => {
-    const pending = deferred<NativeIntakeResult>();
-    connected.submit.mockImplementation((_source, saved) => {
-      saved(record);
-      return pending.promise;
-    });
-    connected.cancel.mockResolvedValue(turn);
-    connected.turn.inspect.mockResolvedValue(turnRunning);
-    const { el, button, click } = await render();
-    submit(el);
-    await settle(() => button("Cancel intake")?.disabled === false);
-    click("Cancel intake");
-    await settle(() => el.textContent?.includes("hosted-session-real") === true);
-    expect(connected.turn.inspect).toHaveBeenCalledTimes(1);
-    expect(connected.turn.inspect.mock.calls[0]?.[0]).toBe(record);
-    expect(connected.turn.request).not.toHaveBeenCalled();
-    pending.resolve(turn);
-    await drain();
-    flushSync(() => {});
-    expect(connected.turn.request).not.toHaveBeenCalled();
-    expect(connected.execution.request).not.toHaveBeenCalled();
-  });
-
-  test("cancelling waits for an explicit host observation before displaying terminal cancellation", async () => {
-    const cancelling: NativeTurnObservation = {
-      ...turnRunning,
-      snapshot: { ...turnRunning.snapshot, state: "cancelling" },
-    };
-    connected.turn.cancel.mockResolvedValue(cancelling);
-    connected.turn.inspect.mockResolvedValue(turnCancelled);
-    const { el, button, click } = await render();
-    submit(el);
-    await settle(() => button("Inspect conversation")?.disabled === false);
-    expect(connected.turn.request).toHaveBeenCalledTimes(1);
-    click("Cancel conversation");
-    await settle(() => el.textContent?.includes("waiting for its owned work to stop") === true);
-    expect(el.textContent).not.toContain("delivery is cancelled");
-    expect(el.textContent).not.toContain("recorded completion");
-    expect(button("Continue conversation request")).toBeUndefined();
-    expect(button("Start conversation")).toBeUndefined();
-    expect(button("Resume conversation")).toBeUndefined();
-    expect(button("Inspect conversation")?.disabled).toBe(false);
-    expect(connected.turn.cancel).toHaveBeenCalledTimes(1);
-    expect(connected.turn.inspect).not.toHaveBeenCalled();
-    expect(connected.turn.request).toHaveBeenCalledTimes(1);
-    click("Inspect conversation");
-    await settle(() => el.textContent?.includes("delivery is cancelled") === true);
-    expect(el.textContent).toContain("Effects already performed are not undone");
-    expect(el.textContent).not.toContain("waiting for its owned work to stop");
-    expect(button("Cancel conversation")).toBeUndefined();
-    expect(button("Continue conversation request")).toBeUndefined();
-    expect(connected.turn.inspect).toHaveBeenCalledTimes(1);
-    expect(connected.turn.request).toHaveBeenCalledTimes(1);
-    expect(connected.turn.cancel).toHaveBeenCalledTimes(1);
-  });
-
-  test("cancellation supersedes a pending delivery and ignores its late acknowledgement", async () => {
-    const pending = deferred<NativeTurnObservation>();
-    connected.turn.request.mockImplementation(() => pending.promise);
-    const { el, button, click } = await render();
-    submit(el);
-    await settle(() => button("Cancel conversation")?.disabled === false);
-    const oldSignal = connected.turn.request.mock.calls[0]?.[1];
-    click("Cancel conversation");
-    await settle(
-      () =>
-        connected.turn.cancel.mock.calls.length === 1 &&
-        button("Inspect conversation")?.disabled === false
-    );
-    expect(oldSignal?.aborted).toBe(true);
-    expect(connected.turn.cancel.mock.calls[0]?.[0]).toBe(record);
-    expect(button("Cancel conversation")).toBeUndefined();
-    pending.resolve(turnRunning);
-    await drain();
-    flushSync(() => {});
-    expect(button("Cancel conversation")).toBeUndefined();
-    expect(button("Continue conversation request")).toBeUndefined();
-    expect(el.querySelector("pre")?.textContent).toBe(original);
-    expect(connected.turn.request).toHaveBeenCalledTimes(1);
-    expect(connected.cancel).not.toHaveBeenCalled();
-    expect(connected.execution.cancel).not.toHaveBeenCalled();
-  });
-
-  test("cancellation supersedes an explicit turn inspection without adopting its late state", async () => {
-    const { el, button, click } = await render();
-    submit(el);
-    await settle(() => button("Inspect conversation")?.disabled === false);
-    const pending = deferred<NativeTurnObservation>();
-    connected.turn.inspect.mockImplementation(() => pending.promise);
-    click("Inspect conversation");
-    const oldSignal = connected.turn.inspect.mock.calls[0]?.[1];
-    expect(button("Cancel conversation")?.disabled).toBe(false);
-    click("Cancel conversation");
-    await settle(
-      () =>
-        connected.turn.cancel.mock.calls.length === 1 &&
-        button("Inspect conversation")?.disabled === false
-    );
-    expect(oldSignal?.aborted).toBe(true);
-    pending.resolve(turnRunning);
-    await drain();
-    flushSync(() => {});
-    expect(button("Cancel conversation")).toBeUndefined();
-    expect(connected.turn.request).toHaveBeenCalledTimes(1);
-  });
-
-  test("reopening can cancel while its read-only turn observation is pending", async () => {
-    const pending = deferred<NativeTurnObservation>();
-    connected.list.mockResolvedValue([record]);
-    connected.inspect.mockResolvedValue(turn);
-    connected.execution.inspect.mockResolvedValue({ kind: "not-requested" });
-    connected.turn.inspect.mockImplementation(() => pending.promise);
-    const { button, click } = await render();
-    await settle(() => button("Cancel conversation")?.disabled === false);
-    const oldSignal = connected.turn.inspect.mock.calls[0]?.[1];
-    click("Cancel conversation");
-    await settle(
-      () =>
-        connected.turn.cancel.mock.calls.length === 1 &&
-        button("Inspect conversation")?.disabled === false
-    );
-    expect(oldSignal?.aborted).toBe(true);
-    pending.resolve(turnRunning);
-    await drain();
-    flushSync(() => {});
-    expect(button("Cancel conversation")).toBeUndefined();
-    expect(connected.turn.request).not.toHaveBeenCalled();
-    expect(connected.submit).not.toHaveBeenCalled();
-  });
-
-  test("a durable hosted turn remains inspectable and cancellable when intake lookup fails", async () => {
-    connected.list.mockResolvedValue([record]);
-    connected.inspect.mockRejectedValue(new Error("Original intake scope is stale."));
-    connected.execution.inspect.mockResolvedValue({ kind: "not-requested" });
-    connected.turn.inspect.mockResolvedValue(turnRunning);
-    const { el, button, click } = await render();
-    await settle(() => button("Inspect conversation")?.disabled === false);
-    expect(el.textContent).toContain("Original intake scope is stale");
-    expect(el.textContent).toContain("hosted-session-real");
-    expect(button("Cancel conversation")?.disabled).toBe(false);
-    click("Inspect conversation");
-    await settle(() => connected.turn.inspect.mock.calls.length === 2);
-    expect(connected.turn.request).not.toHaveBeenCalled();
-  });
-
-  test("New request detaches pending delivery and fences the late acknowledgement without cancellation", async () => {
-    const pending = deferred<NativeTurnObservation>();
-    connected.turn.request.mockImplementation(() => pending.promise);
-    const { el, click, button } = await render();
-    submit(el);
-    await settle(() => connected.turn.request.mock.calls.length === 1);
-    const oldSignal = connected.turn.request.mock.calls[0]?.[1];
-    click("New request");
-    expect(oldSignal?.aborted).toBe(true);
-    expect(button("Submit")).toBeDefined();
-    pending.resolve(turnRunning);
-    await drain();
-    flushSync(() => {});
-    expect(button("Submit")).toBeDefined();
-    expect(el.textContent).not.toContain("hosted-session-real");
-    expect(el.textContent).toContain("Saved requests");
-    expect(connected.cancel).not.toHaveBeenCalled();
-    expect(connected.turn.cancel).not.toHaveBeenCalled();
-    expect(connected.execution.cancel).not.toHaveBeenCalled();
-  });
-
-  test("closing aborts local delivery observation and disposes without cancelling the host", async () => {
-    const pending = deferred<NativeTurnObservation>();
-    connected.turn.request.mockImplementation(() => pending.promise);
-    const { el, unmount } = await render();
-    submit(el);
-    await settle(() => connected.turn.request.mock.calls.length === 1);
-    const oldSignal = connected.turn.request.mock.calls[0]?.[1];
-    unmount();
-    expect(oldSignal?.aborted).toBe(true);
-    expect(connected.dispose).toHaveBeenCalledTimes(1);
-    expect(connected.cancel).not.toHaveBeenCalled();
-    expect(connected.turn.cancel).not.toHaveBeenCalled();
-    expect(connected.execution.cancel).not.toHaveBeenCalled();
-    pending.resolve(turnRunning);
-    await pending.promise;
-  });
-
-  test("connection replacement clears the old source and fences a late hosted receipt", async () => {
-    const pending = deferred<NativeTurnObservation>();
-    connected.turn.request.mockImplementation(() => pending.promise);
-    const old = connected;
-    const { el, button, rerender } = await render();
-    submit(el);
-    await settle(() => old.turn.request.mock.calls.length === 1);
-    expect(el.querySelector("pre")?.textContent).toBe(original);
-    connected = fixture();
-    session = connected;
-    invalidateClientLifetime();
-    rerender();
-    await settle(() => button("Submit")?.disabled === true);
-    expect(old.dispose).toHaveBeenCalledTimes(1);
-    expect(old.turn.request.mock.calls[0]?.[1]?.aborted).toBe(true);
-    expect(el.querySelector("pre")).toBeNull();
-    expect(el.textContent).not.toContain("Saved requests");
-    pending.resolve(turnRunning);
-    await drain();
-    flushSync(() => {});
-    expect(el.textContent).not.toContain("hosted-session-real");
-    expect(connected.turn.request).not.toHaveBeenCalled();
-    expect(old.turn.cancel).not.toHaveBeenCalled();
   });
 });
 
-describe("Native session continuation form", () => {
+describe("Messages kept in this browser", () => {
+  beforeEach(() => {
+    connected.submit.mockImplementation(async (_source, saved) => {
+      saved(record);
+      return turn;
+    });
+  });
+
+  test("a finished message is dropped from the browser store and its row stays on the page", async () => {
+    connected.turn.request.mockResolvedValue({ ...turnRunning, snapshot: { ...turnRunning.snapshot, state: "completed" } } as NativeTurnObservation);
+    connected.release.mockResolvedValue({ released: true, result: turn });
+    const { el } = await render();
+    submit(el);
+    await settle(() => connected.release.mock.calls.length === 1);
+    expect(connected.release.mock.calls[0]?.[0]).toEqual(record);
+    expect(el.textContent).toContain("Replied.");
+    expect(rows(el)).toBe(1);
+    await drain();
+    expect(connected.release).toHaveBeenCalledTimes(1);
+  });
+
+  test("a message still in progress is never dropped", async () => {
+    const { el } = await render();
+    submit(el);
+    await settle(() => el.textContent?.includes("Replying.") === true);
+    await drain();
+    expect(connected.release).not.toHaveBeenCalled();
+  });
+
+  test("a full store drops finished messages and sends once more", async () => {
+    const other = {
+      ...record,
+      command: { ...record.command, inputId: "other-input", requestId: "other-request", text: "from another session" },
+    } as NativeIntakeBrowserRecord;
+    connected.listOtherScopes.mockResolvedValue([other]);
+    connected.release.mockResolvedValue({ released: true, result: turn });
+    connected.submit.mockImplementationOnce(async () => {
+      throw new NativeIntakeBrowserJournalError("capacity");
+    });
+    const { el } = await render();
+    submit(el);
+    await settle(() => connected.submit.mock.calls.length === 2 && connected.turn.request.mock.calls.length === 1);
+    expect(connected.release.mock.calls[0]?.[0]).toEqual(other);
+    expect(el.querySelector("pre")?.textContent).toBe(original);
+  });
+
+  test("a full store holding only messages in progress says so and keeps the text", async () => {
+    const other = {
+      ...record,
+      command: { ...record.command, inputId: "other-input", requestId: "other-request", text: "still running" },
+    } as NativeIntakeBrowserRecord;
+    connected.listOtherScopes.mockResolvedValue([other]);
+    connected.submit.mockImplementation(async () => {
+      throw new NativeIntakeBrowserJournalError("capacity");
+    });
+    const { el } = await render();
+    submit(el);
+    await settle(() => el.textContent?.includes("Not sent") === true);
+    expect(textareaValue(el)).toBe(original);
+    expect(connected.submit).toHaveBeenCalledTimes(1);
+    expect(connected.turn.request).not.toHaveBeenCalled();
+  });
+});
+
+describe("Messages to a session", () => {
   const continuationRecord: NativeIntakeBrowserRecord = {
     ...record,
     command: { ...record.command, continuation: { sessionId: "native-a" } },
@@ -995,89 +705,53 @@ describe("Native session continuation form", () => {
     ...turnRunning,
     snapshot: { ...turnRunning.snapshot, state: "queued", sessionId: "native-a" },
   };
-  test("same-session reopen inspects all lifecycle targets independently and excludes other saved scopes", async () => {
+
+  test("reopening reads only this session's messages and keeps Cancel reachable when one read fails", async () => {
     const other = {
       ...continuationRecord,
-      command: {
-        ...continuationRecord.command,
-        inputId: "other-input",
-        text: "Other session private source",
-        continuation: { sessionId: "native-b" },
-      },
+      command: { ...continuationRecord.command, inputId: "other-input", text: "Other session private source", continuation: { sessionId: "native-b" } },
       createdAt: 3,
     };
     connected.list.mockResolvedValue([record, continuationRecord, other]);
     connected.inspect.mockRejectedValue(new Error("Source temporarily unavailable"));
     connected.turn.inspect.mockResolvedValue(queued);
     connected.execution.inspect.mockResolvedValue({ kind: "not-requested" });
-    const { el, button, click } = await render(undefined, {
+    const { el, button, click } = await render(undefined, { continuationSessionId: "native-a", projectId: "project" });
+    await settle(() => button("Cancel")?.disabled === false && el.textContent?.includes("Waiting for the reply in progress") === true);
+    expect(open).toHaveBeenCalledWith(getClientLifetime(), expect.any(AbortSignal), undefined, undefined, undefined, {
       continuationSessionId: "native-a",
       projectId: "project",
     });
-    await settle(() => button("Inspect conversation")?.disabled === false);
-    expect(open).toHaveBeenCalledWith(
-      getClientLifetime(),
-      expect.any(AbortSignal),
-      undefined,
-      undefined,
-      undefined,
-      { continuationSessionId: "native-a", projectId: "project" }
-    );
-    expect(connected.inspect.mock.calls[0]?.[0]).toBe(continuationRecord);
     expect(connected.turn.inspect.mock.calls[0]?.[0]).toBe(continuationRecord);
-    expect(connected.execution.inspect.mock.calls[0]?.[0]).toBe(continuationRecord);
     expect(el.textContent).toContain("Source temporarily unavailable");
-    expect(el.textContent).toContain("host queued this continuation");
-    expect(el.textContent).toContain("excluding the active reply");
     expect(el.textContent).not.toContain("Other session private source");
-    expect(el.querySelectorAll(".native-intake__saved li")).toHaveLength(1);
-    expect(connected.submit).not.toHaveBeenCalled();
-    expect(connected.retry).not.toHaveBeenCalled();
+    expect(rows(el)).toBe(1);
     expect(connected.turn.request).not.toHaveBeenCalled();
-    expect(button("Cancel conversation")?.disabled).toBe(false);
-    connected.turn.cancel.mockResolvedValue({
-      ...queued,
-      snapshot: { ...queued.snapshot, state: "cancelled" },
-    });
-    click("Cancel conversation");
-    await settle(() => el.textContent?.includes("conversation delivery is cancelled") === true);
+    connected.turn.cancel.mockResolvedValue({ ...queued, snapshot: { ...queued.snapshot, state: "cancelled" } });
+    click("Cancel");
+    await settle(() => el.textContent?.includes("Cancelled. Anything already done stays done.") === true);
     expect(connected.turn.cancel.mock.calls[0]?.[0]).toBe(continuationRecord);
   });
 
-  test("Work/New never selects or shows continuation originals", async () => {
+  test("the Work form never shows a session's messages", async () => {
     connected.list.mockResolvedValue([continuationRecord]);
     const { el, button } = await render();
-    expect(button("Submit")).toBeDefined();
-    expect(el.textContent).not.toContain("Saved requests");
+    expect(button("Send")).toBeDefined();
+    expect(rows(el)).toBe(0);
     expect(connected.inspect).not.toHaveBeenCalled();
     expect(connected.turn.inspect).not.toHaveBeenCalled();
-    expect(connected.execution.inspect).not.toHaveBeenCalled();
   });
 
-  test("continuation submission preserves the original and automatically queues delivery; new request permits another submission", async () => {
+  test("a second message goes out while the first is queued, without cancelling it", async () => {
     connected.submit.mockImplementation(async (_source, saved) => {
       saved(continuationRecord);
       return turn;
     });
     connected.turn.request.mockResolvedValue(queued);
-    const { el, button, click } = await render(undefined, { continuationSessionId: "native-a" });
+    const { el } = await render(undefined, { continuationSessionId: "native-a" });
     submit(el);
-    await settle(() => button("Inspect conversation")?.disabled === false);
-    expect(connected.submit.mock.calls[0]?.[0]).toEqual({ text: original, unsupportedSources: [] });
-    expect(connected.turn.request.mock.calls[0]?.[0]).toBe(continuationRecord);
-    expect(el.querySelector("pre")?.textContent).toBe(original);
-    expect(el.textContent).toContain("host queued this continuation");
-    expect(button("Approve")).toBeUndefined();
-    expect(button("Start conversation")).toBeUndefined();
-    expect(button("Continue conversation request")).toBeUndefined();
-    expect(connected.execution.request).not.toHaveBeenCalled();
-    click("New request");
-    expect(button("Submit")).toBeDefined();
-    expect(connected.turn.cancel).not.toHaveBeenCalled();
-    const next = {
-      ...continuationRecord,
-      command: { ...continuationRecord.command, inputId: "next", requestId: "next-request" },
-    };
+    await settle(() => el.textContent?.includes("Waiting for the reply in progress") === true);
+    const next = { ...continuationRecord, command: { ...continuationRecord.command, inputId: "next", requestId: "next-request" }, createdAt: 2 };
     connected.submit.mockImplementation(async (_source, saved) => {
       saved(next);
       return turn;
@@ -1085,10 +759,11 @@ describe("Native session continuation form", () => {
     submit(el);
     await settle(() => connected.turn.request.mock.calls.length === 2);
     expect(connected.turn.request.mock.calls[1]?.[0]).toBe(next);
-    expect(el.querySelectorAll(".native-intake__saved li")).toHaveLength(2);
+    expect(rows(el)).toBe(2);
+    expect(connected.turn.cancel).not.toHaveBeenCalled();
   });
 
-  test("navigating between native sessions retires prior controls and pending delivery", async () => {
+  test("moving to another session retires the previous one's pending reply", async () => {
     const pending = deferred<NativeTurnObservation>();
     connected.submit.mockImplementation(async (_source, saved) => {
       saved(continuationRecord);
@@ -1102,37 +777,30 @@ describe("Native session continuation form", () => {
     connected = fixture();
     session = connected;
     rerender({ continuationSessionId: "native-b" });
-    await settle(() => Boolean(button("Submit")));
+    await settle(() => Boolean(button("Send")));
     expect(old.dispose).toHaveBeenCalledTimes(1);
     expect(old.turn.request.mock.calls[0]?.[1]?.aborted).toBe(true);
-    expect(el.textContent).not.toContain("native-a");
     pending.resolve(queued);
     await drain();
-    flushSync(() => {});
-    expect(el.textContent).not.toContain("host queued this continuation");
+    expect(el.textContent).not.toContain("Waiting for the reply in progress");
     expect(connected.turn.request).not.toHaveBeenCalled();
   });
 
-  test("closed native session remains inspectable and cancellable without a new submission gate", async () => {
+  test("a closed session offers no box and keeps Cancel", async () => {
     connected.list.mockResolvedValue([continuationRecord]);
     connected.inspect.mockResolvedValue(turn);
     connected.turn.inspect.mockResolvedValue(queued);
     connected.execution.inspect.mockResolvedValue({ kind: "not-requested" });
-    const { el, button, click } = await render(undefined, {
-      continuationSessionId: "native-a",
-      closed: true,
-    });
-    await settle(() => button("Inspect conversation")?.disabled === false);
-    expect(el.textContent).toContain("Session closed");
-    expect(button("Submit")).toBeUndefined();
-    expect(button("Cancel conversation")?.disabled).toBe(false);
-    click("New request");
-    expect(button("Submit")).toBeUndefined();
+    const { el, button } = await render(undefined, { continuationSessionId: "native-a", closed: true });
+    await settle(() => button("Cancel")?.disabled === false);
+    expect(el.textContent).toContain("This session is closed");
+    expect(button("Send")).toBeUndefined();
+    expect(el.querySelector("textarea")).toBeNull();
     expect(connected.turn.request).not.toHaveBeenCalled();
   });
 });
 
-test("selected comment form saves exact text separately, scopes reopening, and retires a replaced hunk", async () => {
+test("a comment on a change is kept apart from other hunks and retired when the hunk changes", async () => {
   const selectedDiff = { kind: "session" as const, revision: "a".repeat(64), fileIndex: 0, hunkIndex: 0 };
   const source: NativeIntakeBrowserRecord = { ...record, command: { ...record.command, continuation: { sessionId: "native-a", selectedDiff } } };
   const other: NativeIntakeBrowserRecord = { ...source, command: { ...source.command, inputId: "other-hunk", requestId: "other-hunk-request", text: "Other hunk comment", continuation: { sessionId: "native-a", selectedDiff: { ...selectedDiff, hunkIndex: 1 } } } };
@@ -1142,98 +810,41 @@ test("selected comment form saves exact text separately, scopes reopening, and r
   connected.turn.request.mockImplementation(() => pending.promise);
   const view = await render(undefined, { continuationSessionId: "native-a", selectedDiff });
   expect(view.el.textContent).not.toContain("Other hunk comment");
-  expect(view.el.textContent).toContain("Original comment");
   submit(view.el);
   await settle(() => connected.turn.request.mock.calls.length === 1);
   expect(connected.submit.mock.calls[0]?.[0]).toEqual({ text: original, unsupportedSources: [] });
   expect(view.el.querySelector("pre.native-intake__source")?.textContent).toBe(original);
-  expect(view.el.textContent).toContain("Session-stamped checkpoint aggregate");
+  expect(view.el.textContent).toContain("This session's changes");
   const previous = connected;
   connected = fixture(); session = connected;
   view.rerender({ continuationSessionId: "native-a", selectedDiff: { ...selectedDiff, hunkIndex: 1 } });
-  await settle(() => Boolean(view.button("Submit")));
+  await settle(() => Boolean(view.button("Send")));
   expect(previous.dispose).toHaveBeenCalledTimes(1);
   expect(previous.turn.request.mock.calls[0]?.[1]?.aborted).toBe(true);
   pending.resolve(turnRunning);
-  await drain(); flushSync(() => {});
+  await drain();
   expect(view.el.textContent).not.toContain("broker-input-real");
   expect(connected.turn.request).not.toHaveBeenCalled();
 });
 
-describe("Native intake release", () => {
-  const releaseButton = (el: HTMLElement) =>
-    el.querySelector<HTMLButtonElement>(`button[aria-label="Release input ${record.command.inputId}"]`);
-  test("Release removes a settled saved request and returns to the submit form", async () => {
-    connected.list.mockResolvedValue([record]);
-    connected.release.mockResolvedValue({ released: true, result: work });
-    const { el, button } = await render();
-    await settle(() => !el.textContent?.includes("Inspecting…") && Boolean(releaseButton(el)));
-    flushSync(() => releaseButton(el)!.click());
-    await settle(() => Boolean(button("Submit")));
-    expect(connected.release).toHaveBeenCalledTimes(1);
-    expect(connected.release.mock.calls[0]![0]).toEqual(record);
-    expect(releaseButton(el)).toBeNull();
+test("a failed connect offers Retry connection, which reconnects and opens the box", async () => {
+  open.mockImplementationOnce(async () => {
+    throw new Error("daemon unreachable");
   });
-  test("Release of a request the host has not finished keeps it and says why", async () => {
-    connected.list.mockResolvedValue([record]);
-    const { el } = await render();
-    await settle(() => !el.textContent?.includes("Inspecting…") && Boolean(releaseButton(el)));
-    flushSync(() => releaseButton(el)!.click());
-    await settle(() => el.textContent?.includes("Not released") === true);
-    expect(el.textContent).toContain("The saved original is kept.");
-    expect(releaseButton(el)).not.toBeNull();
-    expect(connected.cancel).not.toHaveBeenCalled();
+  const el = document.createElement("div");
+  document.body.appendChild(el);
+  const root = createRoot(el);
+  cleanups.push(() => {
+    flushSync(() => root.unmount());
+    el.remove();
   });
-});
-
-describe("Native intake release from a full journal", () => {
-  test("a form with no saved requests of its own lists other sessions' originals beside the capacity error and releases one", async () => {
-    const other = {
-      ...record,
-      command: { ...record.command, inputId: "other-input", requestId: "other-request", text: "from another session" },
-    } as NativeIntakeBrowserRecord;
-    connected.list.mockResolvedValue([]);
-    connected.listOtherScopes.mockResolvedValue([other]);
-    connected.submit.mockImplementation(async () => {
-      throw new NativeIntakeBrowserJournalError("capacity");
-    });
-    connected.release.mockResolvedValue({ released: true, result: work });
-    const { el, button } = await render();
-    await settle(() => Boolean(button("Submit")));
-    submit(el);
-    const releaseOther = () =>
-      el.querySelector<HTMLButtonElement>('button[aria-label="Release input other-input"]');
-    await settle(() => Boolean(releaseOther()));
-    expect(el.textContent).toContain("capacity");
-    flushSync(() => releaseOther()!.click());
-    await settle(() => !releaseOther());
-    expect(connected.release).toHaveBeenCalledTimes(1);
-    expect(connected.release.mock.calls[0]![0]).toEqual(other);
-  });
-});
-
-describe("Native intake connection failure", () => {
-  test("a failed connect offers Retry connection, which reconnects and opens the form", async () => {
-    open.mockImplementationOnce(async () => {
-      throw new Error("daemon unreachable");
-    });
-    const el = document.createElement("div");
-    document.body.appendChild(el);
-    const root = createRoot(el);
-    cleanups.push(() => {
-      flushSync(() => root.unmount());
-      el.remove();
-    });
-    flushSync(() => root.render(<NativeIntakeForm lifetime={getClientLifetime()} />));
-    const retry = () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Retry connection");
-    await settle(() => Boolean(retry()));
-    expect(el.textContent).toContain("daemon unreachable");
-    expect(el.querySelector("textarea")).toBeNull();
-
-    flushSync(() => retry()!.click());
-    await settle(() => Boolean(el.querySelector("textarea")));
-    expect(open).toHaveBeenCalledTimes(2);
-    expect(el.textContent).not.toContain("daemon unreachable");
-    expect(retry()).toBeUndefined();
-  });
+  flushSync(() => root.render(<NativeIntakeForm lifetime={getClientLifetime()} />));
+  const retry = () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Retry connection");
+  await settle(() => Boolean(retry()));
+  expect(el.textContent).toContain("daemon unreachable");
+  expect(el.querySelector("textarea")).toBeNull();
+  flushSync(() => retry()!.click());
+  await settle(() => Boolean(el.querySelector("textarea")));
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(el.textContent).not.toContain("daemon unreachable");
 });

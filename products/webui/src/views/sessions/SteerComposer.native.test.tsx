@@ -108,18 +108,18 @@ test("native discovery gates sending and mounts the existing workflow with verif
   const pending = deferred<unknown>();
   invoke.mockImplementation(() => pending.promise);
   const h = render();
-  expect(h.el.textContent).toContain("Verifying session continuation");
-  expect(h.el.querySelector("textarea")).toBeNull();
+  // The box is drawn at once; nothing can be sent until the session is classified.
+  expect(h.el.textContent).toContain("Connecting to the session");
+  expect(h.el.querySelector("form")).toBeNull();
+  expect([...h.el.querySelectorAll("button")].find((item) => item.textContent === "Send")?.disabled).toBe(true);
   expect(invoke.mock.calls[0]?.[0]).toBe("workLedger.turn.session");
   expect(invoke.mock.calls[0]?.[1]).toEqual({ sessionId: "native-a" });
   expect(send).not.toHaveBeenCalled();
   pending.resolve(native());
   await settle(() => Boolean(h.el.querySelector('[data-native-session="native-a"]')));
   expect(h.el.querySelector('[data-native-project="native-project"]')).not.toBeNull();
-  expect(h.el.textContent).toContain("queues conversation delivery behind any active turn");
-  expect(h.el.textContent).toContain("active reply is excluded");
-  expect(h.el.textContent).toContain("never supplies or rewrites the transcript");
-  expect(h.el.querySelector("textarea")).toBeNull();
+  expect(h.el.textContent).toContain("goes after the reply in progress");
+  expect(h.el.querySelector("form")).toBeNull();
   expect(send).not.toHaveBeenCalled();
   h.rerender({ closed: true, streamPaused: true });
   expect(h.el.querySelector('[data-closed="true"]')).not.toBeNull();
@@ -163,7 +163,7 @@ for (const response of [
     const h = render();
     await settle(() => Boolean(h.el.querySelector('[role="alert"]')));
     expect(h.el.textContent).toContain("Nothing was sent");
-    expect(h.el.querySelector("textarea")).toBeNull();
+    expect(h.el.querySelector("form")).toBeNull();
     expect(form).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
@@ -178,7 +178,7 @@ for (const message of [
     invoke.mockRejectedValue(new Error(message));
     const h = render();
     await settle(() => h.el.textContent?.includes(message) === true);
-    expect(h.el.querySelector("textarea")).toBeNull();
+    expect(h.el.querySelector("form")).toBeNull();
     await drain();
     expect(invoke).toHaveBeenCalledTimes(1);
     invoke.mockResolvedValue(native());
@@ -200,7 +200,7 @@ test("late discovery cannot change a newer session selection", async () => {
   pending.resolve({ kind: "legacy" });
   await drain();
   flushSync(() => {});
-  expect(h.el.querySelector("textarea")).toBeNull();
+  expect(h.el.querySelector("form")).toBeNull();
   expect(h.el.querySelector('[data-native-session="native-b"]')).not.toBeNull();
 });
 
@@ -221,7 +221,7 @@ for (const change of ["account", "relay", "unmount"] as const)
     pending.resolve({ kind: "legacy" });
     await drain();
     flushSync(() => {});
-    expect(h.el.querySelector("textarea")).toBeNull();
+    expect(h.el.querySelector("form")).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -242,13 +242,13 @@ test("hung discovery times out honestly and a late result cannot enable sending"
     const h = render();
     expect(deadline).toBeDefined();
     flushSync(() => deadline!());
-    expect(h.el.textContent).toContain("Session verification timed out");
+    expect(h.el.textContent).toContain("did not answer within 15 seconds");
     expect(invoke.mock.calls[0]?.[2]?.aborted).toBe(true);
     pending.resolve({ kind: "legacy" });
     await new Promise((resolve) => realTimeout(resolve, 5));
     flushSync(() => {});
-    expect(h.el.querySelector("textarea")).toBeNull();
-    expect(h.el.textContent).toContain("Session verification timed out");
+    expect(h.el.querySelector("form")).toBeNull();
+    expect(h.el.textContent).toContain("did not answer within 15 seconds");
     expect(send).not.toHaveBeenCalled();
   } finally {
     timer.mockRestore();

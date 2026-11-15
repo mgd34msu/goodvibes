@@ -62,9 +62,9 @@ test("an absent journaled input can be left saved while composing a deliberate n
   await page.goto("/?view=work");
   const dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect(dialog.getByRole("alert").first()).toBeVisible();
   await dialog.getByRole("button", { name: "Inspect", exact: true }).click();
   // Source lookup can finish while the independent execution inspection is still busy.
@@ -72,10 +72,10 @@ test("an absent journaled input can be left saved while composing a deliberate n
     dialog.getByRole("status").filter({ hasText: "latest lookup found no capture" })
   ).toContainText("latest lookup found no capture");
   await dialog.getByRole("button", { name: "New request", exact: true }).click();
-  const field = dialog.getByRole("textbox", { name: "Original request", exact: true });
+  const field = dialog.getByRole("textbox", { name: "Message", exact: true });
   await expect(field).toBeEnabled();
   await field.fill("A corrected, deliberately separate request");
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect(dialog.getByRole("alert").first()).toBeVisible();
   const stored = await originals(page);
   expect(stored).toHaveLength(2);
@@ -94,9 +94,9 @@ test("one Submit durably preserves exact text and admission when execution autho
   await page.goto("/?view=work");
   const dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).dblclick();
+  await dialog.getByRole("button", { name: "Send", exact: true }).dblclick();
   await expect.poll(() => daemon.pendingCount).toBe(1);
   expect((await originals(page)).map((record) => record.command)).toEqual([daemon.capture.input]);
   expect(daemon.writes).toHaveLength(1);
@@ -151,9 +151,9 @@ test("lost capture acknowledgement survives reload; reopening only inspects and 
   await page.goto("/?view=work");
   let dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("outcome may be unknown");
   expect(daemon.writes).toHaveLength(1);
   await page.reload();
@@ -176,9 +176,9 @@ test("interrupted admission does not reroll on inspect or reopen, and only expli
   await page.goto("/?view=work");
   let dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect(dialog.getByRole("alert").first()).toBeVisible();
   await dialog.getByRole("button", { name: "Inspect", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "Resume", exact: true })).toBeEnabled();
@@ -200,11 +200,11 @@ test("cancellation during a provider wait uses the real source identity and a la
   await page.goto("/?view=work");
   const dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => daemon.pendingCount).toBe(1);
-  await dialog.getByRole("button", { name: "Cancel intake", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(
     dialog.getByRole("status").filter({ hasText: "Intake was cancelled before work admission" })
   ).toContainText("Intake was cancelled before work admission");
@@ -224,7 +224,7 @@ for (const name of ["turn", "blocked", "refused"] as const)
     await page.goto("/?view=work");
     const dialog = await open(page);
     await dialog
-      .getByRole("textbox", { name: "Original request", exact: true })
+      .getByRole("textbox", { name: "Message", exact: true })
       .fill(daemon.capture.input.text);
     for (const [index, source] of daemon.capture.input.unsupportedSources.entries()) {
       await dialog.getByRole("button", { name: "Mark an unavailable source", exact: true }).click();
@@ -243,7 +243,7 @@ for (const name of ["turn", "blocked", "refused"] as const)
         .getByRole("textbox", { name: `Source ${index + 1} label`, exact: true })
         .fill(source.label);
     }
-    await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+    await dialog.getByRole("button", { name: "Send", exact: true }).click();
     await expect(dialog.getByRole("button", { name: "New request", exact: true })).toBeEnabled();
     const disposition =
       name === "turn"
@@ -283,7 +283,7 @@ test("unsupported authority and unavailable durable storage block submission bef
   await page.goto("/?view=work");
   let dialog = await open(page);
   await expect(dialog.getByRole("alert")).toContainText("existing paired admin");
-  await expect(dialog.getByRole("button", { name: "Submit", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
   expect(daemon.writes).toHaveLength(0);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   daemon.setAuthResponse(JSON.parse(daemon.capture.auth.body));
@@ -295,7 +295,7 @@ test("unsupported authority and unavailable durable storage block submission bef
   });
   dialog = await open(page);
   await expect(dialog.getByRole("alert")).toContainText("durability");
-  await expect(dialog.getByRole("button", { name: "Submit", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
   expect(daemon.writes).toHaveLength(0);
 });
 
@@ -307,9 +307,9 @@ test("a stored original is visible to a second tab of the same paired owner with
   await page.goto("/?view=work");
   const dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect(
     dialog.getByRole("heading", { name: "Admission receipt", exact: true })
   ).toBeVisible();
@@ -333,9 +333,9 @@ test("replacing the paired identity hides the old source and ignores its late ad
   await page.goto("/?view=work");
   let dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => daemon.pendingCount).toBe(1);
   daemon.setAuthResponse({
     ...(JSON.parse(daemon.capture.auth.body) as Record<string, unknown>),
@@ -351,12 +351,12 @@ test("replacing the paired identity hides the old source and ignores its late ad
   await daemon.release("admit");
   dialog = await open(page);
   await expect(
-    dialog.getByRole("textbox", { name: "Original request", exact: true })
+    dialog.getByRole("textbox", { name: "Message", exact: true })
   ).toBeEnabled();
   await expect(dialog.getByRole("heading", { name: "Admission receipt", exact: true })).toHaveCount(
     0
   );
-  await expect(dialog.getByRole("heading", { name: "Saved requests", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("heading", { name: "Sent", exact: true })).toHaveCount(0);
   expect(daemon.writes.map((request) => request.operation)).toEqual(["capture", "admit"]);
   expect((await originals(page))[0]?.command).toEqual(daemon.capture.input);
 });
@@ -368,9 +368,9 @@ test("a stale original does not prevent a separately identified request under th
   await page.goto("/?view=work");
   let dialog = await open(page);
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill(daemon.capture.input.text);
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect(
     dialog.getByRole("heading", { name: "Admission receipt", exact: true })
   ).toBeVisible();
@@ -398,9 +398,9 @@ test("a stale original does not prevent a separately identified request under th
     });
   });
   await dialog
-    .getByRole("textbox", { name: "Original request", exact: true })
+    .getByRole("textbox", { name: "Message", exact: true })
     .fill("Fresh source for the current workspace scope");
-  await dialog.getByRole("button", { name: "Submit", exact: true }).click();
+  await dialog.getByRole("button", { name: "Send", exact: true }).click();
   await expect(dialog.getByRole("alert").first()).toBeVisible();
   expect(fresh).toMatchObject({
     text: "Fresh source for the current workspace scope",

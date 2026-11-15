@@ -1,11 +1,12 @@
 /** Authoritative session classification shared by conversation and Fleet text actions. */
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { NativeHostedSessionLookup } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import { inspectNativeSession } from '../../lib/native-session';
 import { formatError } from '../../lib/errors';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../../lib/client-lifetime';
 import { NativeIntakeForm } from '../work/NativeIntakeForm';
 import { Button } from '../../components/ui/Button';
+import { Field, Textarea } from '../../components/ui/Field';
 import { StatusDot } from '../../components/ui/StatusDot';
 import '../../styles/components/steer-composer.css';
 
@@ -13,6 +14,8 @@ export interface NativeSessionContinuationBinding {
   sessionId: string;
   projectId: string;
   lifetime: ClientLifetime;
+  /** Text typed while the session was being classified. */
+  draft: string;
 }
 
 interface SessionContinuationProps {
@@ -26,6 +29,12 @@ interface SessionContinuationProps {
   renderPending?: (content: ReactNode) => ReactNode;
 }
 
+const ContinuationDraft = createContext('');
+/** Text typed before the session's composer was chosen; a composer seeds its box with it. */
+export function useContinuationDraft(): string {
+  return useContext(ContinuationDraft);
+}
+
 export function SessionContinuation(props: SessionContinuationProps) {
   const lifetime = useSyncExternalStore(subscribeClientLifetime, getClientLifetime, getClientLifetime);
   return <ScopedSessionContinuation key={`${lifetime.revision}:${props.sessionId}`} {...props} lifetime={lifetime} />;
@@ -36,50 +45,53 @@ function ScopedSessionContinuation(props: SessionContinuationProps & { lifetime:
   const [discovery, setDiscovery] = useState<NativeHostedSessionLookup>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
+  const [draft, setDraft] = useState('');
   useEffect(() => {
     const controller = new AbortController();
     let disposed = false;
     const timeout = setTimeout(() => {
       controller.abort();
-      if (!disposed && isClientLifetimeCurrent(lifetime)) setError("Session verification timed out.");
+      if (!disposed && isClientLifetimeCurrent(lifetime)) setError('The daemon did not answer within 15 seconds.');
     }, 15_000);
+    // Runs behind the composer: the box is already on screen while this answers.
     void inspectNativeSession(lifetime, sessionId, controller.signal).then(
       (found) => {
         if (!disposed && isClientLifetimeCurrent(lifetime)) setDiscovery(found);
       },
       (cause: unknown) => {
         if (!disposed && isClientLifetimeCurrent(lifetime))
-          setError(controller.signal.aborted ? "Session verification timed out." : formatError(cause));
+          setError(controller.signal.aborted ? 'The daemon did not answer within 15 seconds.' : formatError(cause));
       }
     ).finally(() => clearTimeout(timeout));
     return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
   }, [lifetime, sessionId, attempt]);
 
-  if (discovery?.kind === 'legacy') return props.children;
+  if (discovery?.kind === 'legacy')
+    return <ContinuationDraft.Provider value={draft}>{props.children}</ContinuationDraft.Provider>;
   if (discovery?.kind === 'native' && props.renderNative)
-    return props.renderNative({ sessionId, projectId: discovery.projectId, lifetime });
+    return props.renderNative({ sessionId, projectId: discovery.projectId, lifetime, draft });
   if (discovery?.kind === 'native') return (
     <div className="steer-composer">
-      <p className="steer-composer__mode"><StatusDot tone={discovery.busy ? 'live' : 'idle'} />
-        {discovery.busy
-          ? 'Native continuation: the host queues conversation delivery behind any active turn.'
-          : 'Native continuation: Submit sends this original through Jev admission.'}
-      </p>
-      <p className="dv-muted">
-        The host captures the completed transcript when the source is submitted. An active reply
-        is excluded from that snapshot. This browser sends your original text and session identity;
-        it never supplies or rewrites the transcript.
-      </p>
-      {streamPaused && <p role="status">Live updates are paused. Inspect the saved input to read the host’s current state.</p>}
-      <NativeIntakeForm lifetime={lifetime} continuationSessionId={sessionId} projectId={discovery.projectId} closed={closed} />
+      {discovery.busy && (
+        <p className="steer-composer__mode"><StatusDot tone="live" />
+          The session is replying. A new message goes after the reply in progress.
+        </p>
+      )}
+      {streamPaused && <p role="status">Live updates are paused. A sent message's status still refreshes by itself.</p>}
+      <NativeIntakeForm lifetime={lifetime} continuationSessionId={sessionId} projectId={discovery.projectId} closed={closed} initialText={draft} />
     </div>
   );
+  // The box is drawn at once; Send waits until the daemon says how this session takes messages.
   const pending = (
     <div className="steer-composer">
+      <Field label="Message">
+        <Textarea rows={3} value={draft} disabled={closed} onChange={(event) => setDraft(event.target.value)} />
+      </Field>
       {error ? <>
-        <p role="alert">Session continuation is unavailable: {error} Nothing was sent. Native sessions require their existing paired owner and native delivery permissions.</p>
-        <Button onClick={() => { setError(undefined); setAttempt((value) => value + 1); }}>Retry session verification</Button>
-      </> : <p role="status">Verifying session continuation…</p>}
+        <p role="alert">Cannot send to this session yet: {error} Nothing was sent; your text is kept.</p>
+        <Button onClick={() => { setError(undefined); setAttempt((value) => value + 1); }}>Try again</Button>
+      </> : <p role="status" className="dv-muted">Connecting to the session…</p>}
+      <Button variant="primary" disabled>Send</Button>
     </div>
   );
   return props.renderPending ? props.renderPending(pending) : pending;

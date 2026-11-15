@@ -127,7 +127,7 @@ export {
   readContractSnapshot,
   serializeContract,
 } from './store.js';
-export type { ContractCreationReservation, ContractReapSummary, ContractSnapshot, ContractSnapshotRejection, ContractStoreOptions } from './store.js';
+export type { ContractCreationReservation, ContractReapSummary, ContractRemoval, ContractSnapshot, ContractSnapshotRejection, ContractStoreOptions, EndedContractSummary } from './store.js';
 export type { ReviewedFileReference } from './review-file-observations.js';
 export type { OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 export { CHANGING_TOOLS, createUnitCheckLoop } from './agent-hooks.js';
@@ -229,7 +229,7 @@ export {
   trimEvidence,
   writtenPaths,
 } from './evidence.js';
-export type { CheckState, CommandExecutionReceipt, ContractTurnRecord, EvidenceCommand, FileChange, RawUnitEvidence, UnitEvidence, UnitEvidenceSources } from './evidence.js';
+export type { CheckState, CommandExecutionReceipt, ContractTurnRecord, EvidenceCommand, FileChange, FoldedReads, RawUnitEvidence, UnitEvidence, UnitEvidenceSources } from './evidence.js';
 export {
   CHECK_SITES,
   applySeverities,
@@ -391,6 +391,6 @@ export type { ContractRow } from './cli-render.js';
 export type { ContractInputSnapshot, ContractInputFile, CaptureContractInputOptions } from './input-snapshot.js';
 export { captureNativeContractSource, nativeContractSourceForAdmission } from './native-source.js';
 
-export type { NativeContractDecisionHost, NativeContractAuthority, NativeContractCondition, NativeContractDecisionRecord, NativeContractDecisionState, NativeContractProgress, NativeContractTransportProgress, NativeContractStage } from './native-decisions.js';
+export type { NativeContractDecisionHost, NativeContractIdentity, NativeContractAuthority, NativeContractCondition, NativeContractDecisionRecord, NativeContractDecisionState, NativeContractProgress, NativeContractTransportProgress, NativeContractStage } from './native-decisions.js';
 export { criteriaSetIdForWork, DurableContractAdmissionError } from './durable-admission.js';
 export type { DurableContractAdmission, DurableContractExecution, DurableContractBoundary, DurableContractKey, DurableContractReceipt, DurableContractRequest, DurableStartedContract } from './durable-admission.js';

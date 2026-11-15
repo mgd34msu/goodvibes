@@ -1,4 +1,4 @@
-import { estimateTokens, LIMITS, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { estimateTokens, LIMITS, mapLimit, type JudgmentPort } from '@goodvibes-jev/judgment';
 import type { UnitEvidence } from './evidence.js';
 import { retainOwnedJson } from '../gate/judgment-input.js';
 import { sourceCitationBatch } from './batteries/source-citation-purpose.js';
@@ -8,6 +8,9 @@ interface CitationCache { readonly report: string; readonly byPath: Map<string, 
 // Only the current complete report is cached for this actual unit owner.
 // A late read for another report writes its own frame, never the current one.
 const caches = new WeakMap<object, CitationCache>();
+/** Citation batches read at once; each batch is one request. */
+const BATCH_CONCURRENCY = 2;
+const LINE_LABEL = /^[ \t]*(\d+) \|/;
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const citations = (path: string, text: string) => [...text.matchAll(
   new RegExp('(?<![\\w./-])' + escape(path) + '(?::|#L)(\\d+)(?:[-–]L?(\\d+))?', 'g'),
@@ -34,8 +37,9 @@ export async function selectSourceCitationEvidence(owner: object, evidence: Unit
   const occurrences = [...new Set(cited.map(read => read.path))].flatMap(path => citations(path, report));
   const pending = occurrences.filter(citation => !cache.byPath.get(citation.path)?.has(citation.offset));
   const batches = Array.from({ length: Math.ceil(pending.length / 16) }, (_, index) => pending.slice(index * 16, (index + 1) * 16));
-  const results = await Promise.allSettled(batches.map(async batch => {
-    const read = await sourceCitationBatch(batch.length).run(port, { report, citations: batch },
+  // Each batch carries its citations with the report text around them, not the whole report.
+  await mapLimit(batches, BATCH_CONCURRENCY, async batch => {
+    const read = await sourceCitationBatch(batch.length).run(port, { citations: batch },
       { site: 'contract.check.source-citation-purpose', beforeAttempt: assertCurrent, ...(signal === undefined ? {} : { signal }) });
     assertCurrent();
     usage.calls++; usage.inputTokens += read.result.usage?.inputTokens ?? 0; usage.outputTokens += read.result.usage?.outputTokens ?? 0;
@@ -47,17 +51,19 @@ export async function selectSourceCitationEvidence(owner: object, evidence: Unit
       byOffset.set(citation.offset, reading.verdict === 'yes' && reading.outcome === 'act');
     }
     read.recordAction('select-primary-citations-with-all-scope-records-retained');
-  }));
-  for (const result of results) if (result.status === 'rejected') throw result.reason;
+  });
   assertCurrent();
   const receiptOnly = occurrences.map(citation => cache.byPath.get(citation.path)?.get(citation.offset) === true);
   const claims = occurrences.filter((_, index) => !receiptOnly[index]);
   let changed = false;
   const sourceReads = evidence.sourceReads.map(read => {
     if (read.contentKind !== 'cited-source' || !read.returnedContent) return read;
+    const lines = read.returnedContent.split('\n');
+    // Without line labels no row can be matched to a cited range, so the read stays whole.
+    if (!lines.some(row => LINE_LABEL.test(row))) return read;
     const ranges = claims.filter(citation => citation.path === read.path);
-    const rows = read.returnedContent.split('\n').filter(row => {
-      const match = /^[ \t]*(\d+) \|/.exec(row), line = Number(match?.[1]);
+    const rows = lines.filter(row => {
+      const match = LINE_LABEL.exec(row), line = Number(match?.[1]);
       return match && ranges.some(({ start, end }) => line >= start && line <= end);
     });
     const { returnedContent: _contents, contentKind: _kind, ...scope } = read;

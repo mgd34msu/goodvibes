@@ -204,8 +204,15 @@ as well.
 
 The daemon's operator methods `contracts.list`, `contracts.get`,
 `contracts.start`, `contracts.cancel` and `contracts.reply` (REST
-`/api/contracts...`) and `contracts.dispatch` (invoke) act through one
-service across the daemon's runner and each hosted floor's runner.
+`/api/contracts...`) and `contracts.dispatch` and `contracts.remove` (invoke)
+act through one service across the daemon's runner and each hosted floor's
+runner. All of them apply one session-ownership rule: a caller sees and acts
+on a contract only when its session is not owned by another principal; a
+contract of another principal's session reads as `CONTRACT_NOT_FOUND`
+(404), and starting one in such a session is refused with
+`SESSION_NOT_OWNED` (403). `contracts.remove` deletes an ended contract's
+record (`CONTRACT_NOT_ENDED`, 409, while it runs; `CONTRACT_NATIVE`, 409, for
+native work, whose record its native execution keeps).
 `contracts.dispatch` starts the work in a hosted session made for it, so its
 questions arrive as that session's replies, and ends the session when the
 contract settles; a daemon that hosts no sessions refuses it with
@@ -223,8 +230,8 @@ directory, or in a folder inside it when `workspaceRoot` names one; a
 `workspaceRoot` outside it is refused with `INVALID_ARGUMENT`. A `sessionId`
 that names a hosted session that has ended is refused with `SESSION_NOT_LIVE`
 (409), not run in the daemon's directory. `contracts.list` leaves out each
-contract's captured file manifest (`inputSnapshot`), which `contracts.get`
-returns, and neither returns the earlier conversation or selected diff of the
+contract's input receipt (`inputSnapshot`: the captured git tree and commit),
+which `contracts.get` returns, and neither returns the earlier conversation or selected diff of the
 session that started the contract. `contracts.cancel` and `contracts.reply`
 answer a stored contract this runner is not running with `CONTRACT_NOT_RUNNING`
 (409), and a native work contract's cancel with `CONTRACT_NATIVE` (409).
@@ -356,15 +363,27 @@ waits.
   applied as uncommitted changes, or left in place. A commit failure is a
   warning on a passed contract, never a failure. A publication the project
   tree refuses (a merge in progress, a lock) is retried a few times with
-  backoff; after that the contract waits for the project tree to change (a
-  changed file or HEAD, or an owner Git operation or lock appearing or going
-  away), or for a cancel, and the owner's progress line says so. A contract cancelled
+  backoff; after that the owner is asked to retry or cancel. When the owner
+  kept working while the contract ran, Git merges the captured input, the
+  owner's tree now and the accepted result: changes to different files are
+  published with no model request; only files both sides changed are read for
+  compatibility, as diffs; a conflict names the files and the work stays on its
+  branch. When the owner switched branches, the note says which branch to
+  switch back to. A contract cancelled
   while its result was being published still records that publication, and
   its status line says the result already reached the project.
 - **Persistence.** Each contract is written to
   `.goodvibes/contracts/checkpoints-v6/<contractId>.json` (`ContractStore`,
-  `contract/store.ts`). At startup `resumeAll()` imports every unfinished
-  contract; one whose workstream snapshot or worktree is gone is failed as a
+  `contract/store.ts`). A contract's input is recorded as its git tree and
+  commit only, so the record does not grow with the repository. An ended
+  contract gets a small summary in `.goodvibes/contracts/ended/`; it leaves
+  memory and is read back from disk when asked for. Ended contracts are kept
+  30 days, at most 100 per project, then removed (native work is kept with its
+  native execution); `goodvibes-contract remove <id>` and `contracts.remove`
+  remove one sooner. A failed contract's status line names the reason, the
+  criteria still unmet, the work kept (files and branch, or the working tree)
+  and the next step. At startup `resumeAll()` imports every unfinished
+  contract (ended ones are known from their summaries and not read); one whose workstream snapshot or worktree is gone is failed as a
   zombie, and the rest resume at the step they left. A unit whose check had
   already passed settles its work without a fresh agent, and a working unit
   whose work item ended without it fails with that item's reason.

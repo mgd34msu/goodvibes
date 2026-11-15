@@ -59,7 +59,7 @@ import { emitContractEvent } from './events.js';
 import { OwnerReplyRefusedError, type FailurePauseInput, type OwnerReplyOutcome } from './escalation.js';
 import { createGroupRunner, takeBaseline, type ContractEngineInput } from './group-runner.js';
 import { CONTRACT_RUNNER_AGENT_ID } from './nudge.js';
-import { captureContractInput, releaseContractInputObservations, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInputDevice } from './input-snapshot.js';
+import { captureContractInput, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInputDevice } from './input-snapshot.js';
 import { planContract, shapeContract, type ContractPlannerDeps, type PlanningOutcome, type ShapeOutcome } from './planner.js';
 import type { NativeContractDecisionHost, NativeContractServices } from './native-decisions.js';
 import { bindNativeContractSource, captureNativeContractSource, nativeSourceCriteria } from './native-source.js';
@@ -73,11 +73,12 @@ import { createContractFleetControls, type ContractFleetControls } from './fleet
 import type { OwnerEvidenceReader } from './owner-evidence.js';
 import { ContractRun, failureFromError, type RunEnv } from './run-context.js';
 import { createContractSteps, type ContractSteps, type ContractStepsWithReplies } from './steps.js';
-import { deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractCreationReservation, type ContractStore } from './store.js';
+import { deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractCreationReservation, type ContractRemoval, type ContractStore } from './store.js';
 import { retainOriginalReviewDescriptors } from './review-file-observations.js';
 import { releaseTreeBaselineBytes, retainOriginalTreeBaselines } from './tree-baseline.js';
 import {
   CURRENT_CONTRACT_SCHEMA_VERSION,
+  isOpaqueContractId,
   isTerminalContractStatus,
   newContractId,
   type Contract,
@@ -253,6 +254,14 @@ export interface ContractRunner {
   /** Stops a contract and everything it runs. False when it is unknown or already ended. */
   cancel(contractId: string, reason: string): boolean;
   /**
+   * Deletes an ended contract's record (its checkpoint, summary and run claim).
+   * `not-ended` while it runs or still settles here, `native` for native work
+   * (its native execution owns the record), `not-found` for an unknown id.
+   * Ended contracts are also removed by retention (contract/store.ts).
+   * Optional for custom runners; the factory always supplies it.
+   */
+  remove?(contractId: string): ContractRemoval;
+  /**
    * Resolves once the project work plan holds the contracts' latest statuses, or after a bounded wait. A host that
    * is about to exit awaits it after `dispose`, which cannot: `dispose` is synchronous. Optional for custom runners;
    * the factory always supplies it.
@@ -317,7 +326,33 @@ export function filesModified(contract: Pick<Contract, 'units'>): number {
   return new Set(contract.units.flatMap((unit) => unit.touchedPaths)).size;
 }
 
-export function createContractRunner(deps: ContractRunnerDeps): ContractRunner & Required<Pick<ContractRunner, 'inspectIntegration'>> {
+/** Unmet criteria named in a failure line; the rest are counted. */
+const FAILURE_CRITERIA_NAMED = 8;
+
+/**
+ * A failed contract's status line, from facts the contract holds: what failed
+ * (the reason and the criteria still unmet), what work is kept and where, and
+ * the next step. The owner did not choose the failure, so the line must let
+ * them find and use the work.
+ */
+export function failureStatusLine(contract: Pick<Contract, 'id' | 'units' | 'groups' | 'criteria' | 'isolation' | 'branch' | 'worktreePath' | 'failureKind'>, reason: string): string {
+  const unmet = [...new Set([...contract.criteria, ...contract.groups.flatMap((group) => group.criteria), ...contract.units.flatMap((unit) => unit.criteria)]
+    .filter((criterion) => criterion.disposition === 'judged' && (criterion.status === 'unmet' || criterion.status === 'unshown'))
+    .map((criterion) => criterion.id))];
+  const unmetPart = unmet.length === 0 ? '' : `; unmet criteria: ${unmet.slice(0, FAILURE_CRITERIA_NAMED).join(', ')}${unmet.length > FAILURE_CRITERIA_NAMED ? ` and ${unmet.length - FAILURE_CRITERIA_NAMED} more` : ''}`;
+  const count = filesModified(contract);
+  const files = `${count} changed file${count === 1 ? '' : 's'}`;
+  const onBranch = contract.isolation === 'worktree' && contract.branch !== undefined;
+  const kept = count === 0 ? 'no files were changed'
+    : onBranch ? `${files} kept on branch ${contract.branch}${contract.worktreePath === undefined ? '' : ` (worktree ${contract.worktreePath})`}`
+    : `${files} left in your working tree`;
+  const retry = contract.failureKind === 'judgment-unavailable' || contract.failureKind === 'transport'
+    ? 'start the request again once the model is reachable' : 'start the request again, changed to address the reason above';
+  const next = count > 0 && onBranch ? `to keep the work, merge it with git merge ${contract.branch}; or ${retry}` : retry;
+  return `Contract ${contract.id} failed: ${reason}${unmetPart}. Kept: ${kept}. Next: ${next}.`;
+}
+
+export function createContractRunner(deps: ContractRunnerDeps): ContractRunner & Required<Pick<ContractRunner, 'inspectIntegration' | 'remove'>> {
   const now = deps.now ?? Date.now;
   const durableAdmissions = new DurableContractAdmissions(deps.store.projectRoot);
   const durableLeases = new Map<string, () => void>();
@@ -392,9 +427,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       // executor drainage, rather than a terminal status event, ends private
       // dirty-byte ownership; durable commitments/provenance remain intact.
       releaseTreeBaselineBytes(run.contract);
-      releaseContractInputObservations(run.contract.inputSnapshot);
       const disposal = disposalCheckpoints.get(run.id);
-      if (disposal) { releaseTreeBaselineBytes(disposal); releaseContractInputObservations(disposal.inputSnapshot); }
+      if (disposal) releaseTreeBaselineBytes(disposal);
       let checkpointed = false;
       try {
         if (deps.store.get(run.id) !== run.contract) throw new Error('Contract settlement checkpoint owner changed');
@@ -433,6 +467,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       entry.resolve();
       settlements.delete(run.id);
       settling.delete(run.id);
+      // An ended contract leaves memory once written; reads load it from disk (bounded cache in the store).
+      if (checkpointed && !disposed && isTerminalContractStatus(run.contract.status)) deps.store.noteEnded(run.contract);
     })().catch((error: unknown) => {
       // A failed join cannot certify settlement. Retain the pending barrier.
       logger.warn('contract settlement could not be established', { contractId: run.id, error });
@@ -491,7 +527,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const planSync = createContractPlanSync({
     workPlanService: deps.workPlanService,
     planManager: deps.planManager,
-    getContract: (contractId) => runs.get(contractId)?.contract ?? deps.store.get(contractId),
+    getContract: (contractId) => runs.get(contractId)?.contract ?? deps.store.get(contractId) ?? deps.store.ended(contractId),
   });
   const detachPlanSync = on(planSync.onEvent);
 
@@ -804,9 +840,16 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         return durableResult(existing);
       }
       requireDecisionFeature('autonomous contract planning and acceptance');
-      // Never mint another binding if a compatibility checkpoint proves the receipt went missing.
-      const storedIds = deps.store.listStoredIds();
-      for (const storedId of storedIds) {
+      // Never mint another binding if a surviving contract proves the receipt went missing. The
+      // contract-id index names every bound key in small files; no checkpoint is read for it.
+      for (const { key } of durableAdmissions.indexedKeys()) {
+        if (durableKeyIdentity(key) === durableKeyIdentity(frozen.key)
+          || (frozen.input.nativeSource !== undefined && key.workId === frozen.key.workId && key.attemptId === frozen.key.attemptId)) {
+          throw new DurableContractAdmissionError('checkpoint');
+        }
+      }
+      // Ids from before the index existed have no entry in it; only their checkpoints are read.
+      for (const storedId of deps.store.listStoredIds().filter((id) => !isOpaqueContractId(id))) {
         const stored = deps.store.load(storedId);
         const admission = stored?.durableAdmission;
         if (admission !== undefined && (durableKeyIdentity(admission.key) === durableKeyIdentity(frozen.key)
@@ -993,7 +1036,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     const known = deps.store.readIdempotentStart(scope);
     if (known !== undefined) {
       if (known.fingerprint !== fingerprint) throw idempotencyKeyReused(known.contractId);
-      const contract = deps.store.get(known.contractId) ?? deps.store.load(known.contractId);
+      const contract = deps.store.get(known.contractId) ?? deps.store.ended(known.contractId) ?? deps.store.load(known.contractId);
       if (contract !== null) return { contract: withCheckpointWarning(structuredClone(contract)), ownerAgentId: contract.ownerAgentId, replayed: true };
       // The contract the key started is gone (removed by hand): the key starts a new one.
       deps.store.forgetIdempotentStart(scope);
@@ -1259,7 +1302,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     run.abort.signal.throwIfAborted();
     await new IsolatedWorktree(contract.projectRoot, contract.worktreePath!, contract.branch!, contract.baseBranch ?? 'main').create(snapshot.inputCommit, false);
     await materializeContractInput(snapshot, contract.worktreePath!, run.abort.signal);
-    run.decide('created', contract.id, `admitted local input generation ${snapshot.id}; captured ${snapshot.files.length} paths`);
+    run.decide('created', contract.id, `admitted local input generation ${snapshot.id}; captured tree ${snapshot.inputTree}`);
   }
 
   /** Shapes and plans a contract, then runs its groups. */
@@ -1457,7 +1500,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     run.endOpenUnits('cancelled', reason);
     run.abort.abort();
     groups.stopRun(run);
-    contract.statusLine = `Contract ${contract.id} failed: ${reason}`;
+    contract.statusLine = failureStatusLine(contract, reason);
     run.decide('failed', contract.id, reason);
     run.emit({ type: 'CONTRACT_FAILED', contractId: contract.id, reason, failureKind: kind, membersSettled: settled ?? membersSettled(contract) });
     settleEnded(run);
@@ -1575,14 +1618,26 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     join: (contractId) => settlements.get(contractId)?.promise ?? Promise.resolve(),
     inspectIntegration: (contractId) => inspectContractIntegration(runs.get(contractId), disposed),
     get: (contractId) => {
-      const contract = deps.store.get(contractId);
+      const contract = deps.store.get(contractId) ?? deps.store.ended(contractId);
       return contract === null ? null : withCheckpointWarning(structuredClone(contract));
     },
-    list: (filter = {}) => deps.store.list()
-      .filter((contract) => filter.sessionId === undefined || contract.sessionId === filter.sessionId)
-      .filter((contract) => filter.includeTerminal === true || !isTerminalContractStatus(contract.status))
-      .map((contract) => withCheckpointWarning(structuredClone(filter.includeInputSnapshot === false
-        ? { ...contract, inputSnapshot: undefined } : contract))),
+    list: (filter = {}) => {
+      const held = deps.store.list();
+      // Ended contracts are listed from their summaries; only those the filter keeps are read.
+      const heldIds = new Set(held.map((contract) => contract.id));
+      const ended = filter.includeTerminal !== true ? [] : deps.store.listEnded()
+        .filter((summary) => !heldIds.has(summary.id) && (filter.sessionId === undefined || summary.sessionId === filter.sessionId))
+        .flatMap((summary) => { const contract = deps.store.ended(summary.id); return contract === null ? [] : [contract]; });
+      return [...held, ...ended]
+        .filter((contract) => filter.sessionId === undefined || contract.sessionId === filter.sessionId)
+        .filter((contract) => filter.includeTerminal === true || !isTerminalContractStatus(contract.status))
+        .map((contract) => withCheckpointWarning(structuredClone(filter.includeInputSnapshot === false
+          ? { ...contract, inputSnapshot: undefined } : contract)));
+    },
+    remove: (contractId) => {
+      if (runs.has(contractId) || settling.has(contractId) || settlements.has(contractId)) return 'not-ended';
+      return deps.store.remove(contractId);
+    },
     cancel: (contractId, reason) => {
       const run = runs.get(contractId);
       return run === undefined ? false : cancelRun(run, reason);

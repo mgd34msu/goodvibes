@@ -28,11 +28,17 @@ export interface NativeContractCondition {
   wait(signal: AbortSignal): Promise<void>;
   current(): JevVersionRef;
 }
+/**
+ * What the host needs to establish who owns a native contract: its ids and its
+ * durable admission. Built once per admission and frozen; the contract record
+ * itself (answers, evidence, decisions) is never copied for this.
+ */
+export type NativeContractIdentity = Readonly<Pick<ContractView, 'id' | 'sessionId' | 'ownerAgentId' | 'nativeSource' | 'durableAdmission'>>;
 export interface NativeContractDecisionHost {
   /** Host-owned transfer while this exact native source is still current. */
   reserveCiContinuation?(contract: ContractView, operation: ExternalOperationSource): ExternalOperationSource;
-  /** Authenticated native host ownership, rebuilt before every transport attempt and continuation. */
-  authorityOf(contract: ContractView): NativeContractAuthority;
+  /** Authenticated native host ownership, read once per judgment request and once per member tool call. */
+  authorityOf(contract: NativeContractIdentity): NativeContractAuthority;
   /** External evidence/resource changes only. Never approval or Jev availability. */
   conditions?(contract: ContractView, stage: NativeContractStage, targetId: string): readonly NativeContractCondition[];
   onRetry?(contractId: string, progress: JudgmentRetryProgress): void | Promise<void>;
@@ -78,12 +84,18 @@ export interface NativeContractTransportProgress {
   readonly requests: readonly JudgmentRetryProgress[];
 }
 const waiting = new WeakMap<Contract, Map<string, JudgmentRetryProgress>>();
+/**
+ * One judgment request's lifetime: host authority is read when the request
+ * starts and again when it settles (`verify`); each transport attempt only
+ * checks that the contract is alive and the request still wanted.
+ */
 function readLifetime(contract: Contract, owner: NativeContractServices, signal?: AbortSignal) {
   const expected = authority(contract, owner);
   const owned = new Set<string>();
-  const active = () => { checkAlive(contract, signal); if (JSON.stringify(authority(contract, owner)) !== JSON.stringify(expected)) { owner.cancel?.(contract, 'Native authority or scope changed'); throw new JudgmentError('aborted', 'Native authority or scope changed'); } };
+  const alive = () => { checkAlive(contract, signal); };
+  const verify = () => { alive(); if (!sameAuthority(authority(contract, owner), expected)) { owner.cancel?.(contract, 'Native authority or scope changed'); throw new JudgmentError('aborted', 'Native authority or scope changed'); } };
   const publish = () => { const current = waiting.get(contract); contract.nativeWaiting = current?.size ? { schemaVersion: 1, requests: [...current.values()] } : undefined; owner.changed(contract); };
-  return { beforeAttempt: active,
+  return { beforeAttempt: alive, verify,
     onRetry(progress: JudgmentRetryProgress) { if (isTerminalContractStatus(contract.status)) return; const current = waiting.get(contract) ?? new Map<string, JudgmentRetryProgress>(); waiting.set(contract, current); current.set(progress.logicalRequestId, progress); owned.add(progress.logicalRequestId); publish(); return owner.host.onRetry?.(contract.id, progress); },
     finish() { for (const id of owned) waiting.get(contract)?.delete(id); if (owned.size > 0) publish(); },
   };
@@ -94,7 +106,7 @@ export async function nativeContractRoute(selector: ContractRouteSelector, contr
   if (contract.nativeSource === undefined) return selector({ ...request, signal });
   autonomousSourceEvidence(nativeContractSourceForAdmission(contract));
   const scope = readLifetime(contract, ownedServices(services), signal);
-  try { scope.beforeAttempt(); const route = await selector({ ...request, signal, beforeAttempt: scope.beforeAttempt, onRetry: scope.onRetry }); scope.beforeAttempt(); return route; }
+  try { scope.verify(); const route = await selector({ ...request, signal, beforeAttempt: scope.beforeAttempt, onRetry: scope.onRetry }); scope.verify(); return route; }
   finally { scope.finish(); }
 }
 
@@ -137,13 +149,25 @@ function ownedServices(services: NativeContractServices | undefined): NativeCont
   if (services === undefined) throw new JudgmentError('invalid-request', 'Native contract requires its authenticated semantic owner');
   return services;
 }
+/** The frozen identity of each contract, rebuilt only when one of its fields is replaced. */
+const identities = new WeakMap<Contract, NativeContractIdentity>();
+function identityOf(contract: Contract): NativeContractIdentity {
+  const known = identities.get(contract);
+  if (known !== undefined && known.id === contract.id && known.sessionId === contract.sessionId && known.ownerAgentId === contract.ownerAgentId
+    && known.nativeSource === contract.nativeSource && known.durableAdmission === contract.durableAdmission) return known;
+  const identity: NativeContractIdentity = Object.freeze({ id: contract.id, sessionId: contract.sessionId, ownerAgentId: contract.ownerAgentId,
+    nativeSource: contract.nativeSource, durableAdmission: contract.durableAdmission });
+  identities.set(contract, identity);
+  return identity;
+}
+function sameAuthority(left: NativeContractAuthority, right: NativeContractAuthority): boolean {
+  return left.authorityId === right.authorityId && left.authorityRevision === right.authorityRevision
+    && left.scopeId === right.scopeId && left.scopeRevision === right.scopeRevision;
+}
 function authority(contract: Contract, services: NativeContractServices): NativeContractAuthority {
   assertNativeContractSource(contract);
   if (contract.durableAdmission !== undefined) assertDurableCheckpoint(contract, contract.durableAdmission);
-  // The host reads identity and admission, never the captured file manifest or the decision history, which grow with the
-  // repository and the contract; this runs before and after every attempt, so a full copy would be paid many times over.
-  const { inputSnapshot: _manifest, nativeDecisions: _history, ...identityFields } = contract;
-  const result = services.host.authorityOf(structuredClone(identityFields));
+  const result = services.host.authorityOf(identityOf(contract));
   const binding = captureJevDecisionContext({ decisionId: 'authority', binding: { sourceId: 'source', inputRevision: 'input', actionId: 'action', actionRevision: 'revision', ...result }, judgmentDecisionIds: [], evidence: [], continuations: [], resumeConditions: [] }).binding;
   return { authorityId: binding.authorityId, authorityRevision: binding.authorityRevision, scopeId: binding.scopeId, scopeRevision: binding.scopeRevision };
 }
@@ -158,7 +182,7 @@ function authorityIdentity(value: NativeContractAuthority): NativeContractAuthor
 /** External evidence may advance a deferred operation; a different owner or scope may not adopt it. */
 function assertAuthority(contract: Contract, owner: NativeContractServices, expected: NativeContractAuthority, signal: AbortSignal): void {
   checkAlive(contract, signal);
-  if (JSON.stringify(authority(contract, owner)) !== JSON.stringify(authorityIdentity(expected))) {
+  if (!sameAuthority(authority(contract, owner), expected)) {
     owner.cancel?.(contract, 'Native authority or scope changed');
     throw new JudgmentError('aborted', 'Native authority or scope changed');
   }
@@ -195,7 +219,7 @@ export function nativeContractPort(contract: Contract, services: NativeContractS
       const state = request.state !== null && typeof request.state === 'object' && !Array.isArray(request.state)
         ? { ...request.state, originalSource } : { input: request.state, originalSource };
       try {
-        active();
+        lifetime.verify(); active();
         const result = await port.ask({ ...request, state: state as unknown as EntryType, ...(combined === undefined ? {} : { signal: combined }), beforeAttempt: active,
           async onRetry(progress) {
             active();
@@ -208,7 +232,7 @@ export function nativeContractPort(contract: Contract, services: NativeContractS
             if (failed?.status === 'rejected') throw failed.reason;
           },
         });
-        active(); return result;
+        lifetime.verify(); active(); return result;
       } finally { lifetime.finish(); }
     },
   };
@@ -289,6 +313,13 @@ function showNativeProgress(contract: Contract): void {
   contract.nativeProgress = deciding === undefined ? undefined : { schemaVersion: 1, state: 'deciding', stage: deciding.stage, targetId: deciding.targetId };
 }
 
+/** The operation's own inputs moved while it was read (a setting, a parallel update): read it again from the new state. */
+class NativeOperationChangedError extends JudgmentError {
+  constructor(reason: string) { super('aborted', reason); }
+}
+/** Readings of one operation discarded for changed inputs before the contract is stopped as unable to settle. */
+const MAX_OPERATION_REREADS = 3;
+
 /** Reconstructs current bindings after a real external change. No stored receipt is replayed on resume. */
 export async function decideNativeContract(contract: Contract, services: NativeContractServices | undefined, input: NativeContractDecisionInput): Promise<NativeContractDecision> {
   requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
@@ -298,11 +329,12 @@ export async function decideNativeContract(contract: Contract, services: NativeC
   // Keep the admission identity through every condition wait and fresh reading.
   // After restart, the pending receipt supplies that identity rather than the new host state.
   const expectedAuthority = authorityIdentity(state.pending[key]?.decision.binding ?? authority(contract, owner));
+  let rereads = 0;
   for (;;) {
     assertAuthority(contract, owner, expectedAuthority, input.signal);
     const source = nativeContractSourceForAdmission(contract);
     const evidence = snapshotJudgmentInput(input.state()) as EntryType;
-    const conditions = [...(owner.host.conditions?.(structuredClone(contract), input.stage, input.targetId) ?? [])];
+    const conditions = [...(owner.host.conditions?.(contract, input.stage, input.targetId) ?? [])];
     const capturedConditions = conditions.map(condition => ({ ref: { ...condition.ref }, description: condition.description }));
     // Only a real pending deferral needs a compact restart comparison. Its
     // exact earlier saved recipe remains unchanged; ordinary outcomes have no
@@ -337,10 +369,10 @@ export async function decideNativeContract(contract: Contract, services: NativeC
       actionId: `${contract.id}:${key}`, actionRevision, ...expectedAuthority };
     const active = () => {
       assertAuthority(contract, owner, expectedAuthority, input.signal);
-      if (!isDeepStrictEqual(snapshotJudgmentInput(input.state()), evidence)) { owner.cancel?.(contract, 'Native operation was superseded'); throw new JudgmentError('aborted', 'Native operation was superseded'); }
+      if (!isDeepStrictEqual(snapshotJudgmentInput(input.state()), evidence)) throw new NativeOperationChangedError('the operation\'s evidence or limits changed while it was read');
       for (const [index, condition] of conditions.entries()) {
         const current = condition.current(); const captured = capturedConditions[index]!.ref;
-        if (current.id !== captured.id || current.revision !== captured.revision) { owner.cancel?.(contract, 'Native condition catalog changed'); throw new JudgmentError('aborted', 'Native condition catalog changed'); }
+        if (current.id !== captured.id || current.revision !== captured.revision) throw new NativeOperationChangedError('an external condition changed while the operation was read');
       }
     };
     let inFlight = decidingNow.get(contract);
@@ -348,7 +380,9 @@ export async function decideNativeContract(contract: Contract, services: NativeC
     inFlight.set(key, { stage: input.stage, targetId: input.targetId });
     showNativeProgress(contract); owner.changed(contract);
     const deciding = inFlight;
-    const result = await decideAutonomous({ port: nativeSemanticPort(contract, owner, input.signal),
+    let result: AutonomousDecision;
+    try {
+    result = await decideAutonomous({ port: nativeSemanticPort(contract, owner, input.signal),
       site: `contract.native.${input.stage}`, instructions: INSTRUCTIONS, actionDescription: input.action, binding,
       state: { source: autonomousSourceEvidence(source), evidence, externalConditions: capturedConditions.map(condition => ({ description: condition.description })) } as unknown as EntryType,
       // These references name the snapshots retained by this action. They do
@@ -364,6 +398,17 @@ export async function decideNativeContract(contract: Contract, services: NativeC
       if (contract.nativeProgress?.state !== 'refused') showNativeProgress(contract);
     });
     result.assertCurrent();
+    } catch (error) {
+      // A reading of a state that no longer holds is discarded and the operation read again from the
+      // new state; the contract is stopped only when its inputs keep moving under every reading.
+      if (!(error instanceof NativeOperationChangedError)) throw error;
+      if (++rereads > MAX_OPERATION_REREADS) {
+        const reason = `Native operation ${key} could not be decided: ${error.message} on ${MAX_OPERATION_REREADS + 1} readings in a row`;
+        owner.cancel?.(contract, reason);
+        throw new JudgmentError('aborted', reason);
+      }
+      continue;
+    }
     const record: NativeContractDecisionRecord = { schemaVersion: 1, stage: input.stage, targetId: input.targetId,
       operationRevision: result.decision.outcome === 'defer' ? deferredOperationRevision() : actionRevision, decision: result.decision };
     state.history.push(record);

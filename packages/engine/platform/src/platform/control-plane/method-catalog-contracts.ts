@@ -1,10 +1,11 @@
 /**
  * method-catalog-contracts.ts, the `contracts.*` operator methods: list,
- * read, start, dispatch, cancel and reply to contracts, over every contract
+ * read, start, dispatch, cancel, reply to and remove contracts, over every contract
  * runner this daemon holds (its own and each hosted-session workspace
  * floor's). Handlers are in routes/contracts.ts; each method except dispatch
- * also has a REST path, served through the daemon-api REST route table
- * (gateway-rest-routes.ts) by the same handler; dispatch is reached by invoke.
+ * and remove also has a REST path, served through the daemon-api REST route
+ * table (gateway-rest-routes.ts) by the same handler; dispatch and remove are
+ * reached by invoke.
  *
  * Scopes follow the fleet methods: reading is `read:fleet`, acting is
  * `write:fleet`.
@@ -22,6 +23,8 @@ import {
   CONTRACTS_LIST_OUTPUT_SCHEMA,
   CONTRACTS_REPLY_INPUT_SCHEMA,
   CONTRACTS_REPLY_OUTPUT_SCHEMA,
+  CONTRACTS_REMOVE_INPUT_SCHEMA,
+  CONTRACTS_REMOVE_OUTPUT_SCHEMA,
   CONTRACTS_START_INPUT_SCHEMA,
   CONTRACTS_START_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-contracts.js';
@@ -118,5 +121,20 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
     ],
     inputSchema: CONTRACTS_REPLY_INPUT_SCHEMA,
     outputSchema: CONTRACTS_REPLY_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'contracts.remove',
+    title: 'Remove an Ended Contract',
+    description: 'Delete the record of a contract that has ended (passed, failed or cancelled): its checkpoint and summary. Its branch and worktree, if any, are left to the worktree retention rules. Ended contracts are also removed automatically 30 days after they end, and beyond the newest 100 per project. `removed` is true when it was deleted. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_ENDED while it runs (cancel it first); 409 with CONTRACT_NATIVE for native work, whose record its native execution keeps.',
+    category: 'contracts',
+    scopes: ['write:fleet'],
+    effect: 'write',
+    errorCodes: [
+      CONTRACT_NOT_FOUND,
+      { code: 'CONTRACT_NOT_ENDED', status: 409, meaning: 'The contract is still running or settling; cancel it, then remove it once it has stopped.' },
+      { code: 'CONTRACT_NATIVE', status: 409, meaning: 'Native work keeps its record with its native execution.' },
+    ],
+    inputSchema: CONTRACTS_REMOVE_INPUT_SCHEMA,
+    outputSchema: CONTRACTS_REMOVE_OUTPUT_SCHEMA,
   }),
 ];

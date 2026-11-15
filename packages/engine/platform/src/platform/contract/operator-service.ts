@@ -29,7 +29,7 @@ import { isTerminalContractStatus, type ContractOrigin, type ContractView, type 
 export const OPERATOR_SESSION_ID = 'operator';
 
 /** The runner surface the service reads and acts through. */
-export type OperatorContractRunner = Pick<ContractRunner, 'start' | 'startIdempotent' | 'get' | 'list' | 'cancel' | 'reply'>;
+export type OperatorContractRunner = Pick<ContractRunner, 'start' | 'startIdempotent' | 'get' | 'list' | 'cancel' | 'reply' | 'remove'>;
 
 /** A live hosted session's floor runner and the workspace its turns work in. */
 export interface HostedSessionContracts {
@@ -120,6 +120,11 @@ export interface ContractOperatorService {
   cancel(contractId: string, reason: string, caller?: OperatorCaller): boolean;
   reply(contractId: string, escalationId: string, text: string, caller?: OperatorCaller): Promise<OwnerReplyOutcome>;
   /**
+   * Deletes an ended contract's record. Refused while it runs (CONTRACT_NOT_ENDED)
+   * and for native work (CONTRACT_NATIVE), whose record its native execution owns.
+   */
+  remove(contractId: string, caller?: OperatorCaller): { readonly removed: true };
+  /**
    * Joins the hosted-session runners in, or takes them out with null. The
    * hosted-session engine is composed after the runtime services that build
    * this service, so it attaches itself when it exists.
@@ -160,6 +165,8 @@ export type ContractOperatorErrorCode =
   | 'SESSION_NOT_OWNED'
   /** The escalation is answered, or another reply to it is being read. */
   | 'ESCALATION_NOT_OPEN'
+  /** The contract is still running (or still settling), so its record cannot be removed. */
+  | 'CONTRACT_NOT_ENDED'
   /** This daemon hosts no sessions, so work cannot be dispatched into a new one. */
   | 'NOT_HOSTING'
   | 'INVALID_ARGUMENT';
@@ -374,6 +381,18 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
         }
         throw error;
       }
+    },
+    remove(contractId, caller) {
+      const { runner, contract } = holder(contractId, caller);
+      if (runner === nativeRunner || contract.durableAdmission !== undefined) {
+        throw new ContractOperatorError(`Contract ${contractId} is native work: its record belongs to the native work execution and is kept with it.`, 'CONTRACT_NATIVE', 409);
+      }
+      const outcome = (runner as OperatorContractRunner).remove?.(contractId);
+      if (outcome === undefined) throw new ContractOperatorError(`The runner holding contract ${contractId} cannot remove contracts.`, 'CONTRACT_NOT_RUNNING', 409);
+      if (outcome === 'removed') return { removed: true };
+      if (outcome === 'not-found') throw new ContractOperatorError(`No contract ${contractId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
+      if (outcome === 'native') throw new ContractOperatorError(`Contract ${contractId} is native work: its record belongs to the native work execution and is kept with it.`, 'CONTRACT_NATIVE', 409);
+      throw new ContractOperatorError(`Contract ${contractId} is ${contract.status} and has not ended; cancel it first, then remove it once it has stopped.`, 'CONTRACT_NOT_ENDED', 409);
     },
     attachHosted(hosted) {
       hostedRunners = hosted;

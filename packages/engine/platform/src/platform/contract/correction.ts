@@ -357,7 +357,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         if (config().planRepairLimit > 0 && nativeSpent(contract, key) >= config().planRepairLimit + 1) {
           await readDecision(run, { stage: 'fix-plan', targetId: brief.targetId, action: 'Start another fix-planning attempt', allowAct: false,
             state: () => ({ attempts: nativeSpent(contract, key), limit: config().planRepairLimit === 0 ? null : config().planRepairLimit + 1 }), continuations: [], signal: run.abort.signal });
-          run.control.fail('planning', 'Native fix planner exhausted its unchanged budget'); return;
+          run.control.fail('planning', 'the fix planner used every attempt its budget allows without a usable fix plan'); return;
         }
         const attempt = spendNative(contract, context.native, key);
         const result = await context.decompositionRunner.run(bindContractPlanConsumer(bindContractActionSource(bindContractInputAuthority({ goal: contract.nativeSource!.goal, workingDir: input.workingDirectory,
@@ -365,7 +365,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
           attempt: attempt === 1 ? 'initial' : 'repair', route: route!, signal: run.abort.signal }, input.authority), sourceOf, port => nativeContractPort(contract, context.native, port, run.abort.signal))));
         if (result.agentId !== undefined) contract.plannerAgentIds.push(result.agentId);
         if (run.terminal) return;
-        if (result.status !== 'completed') { run.control.fail('planning', 'Native fix planner did not finish'); return; }
+        if (result.status !== 'completed') { run.control.fail('planning', 'the fix planner stopped before it produced a fix plan'); return; }
         output = result.output; state.plannerOutputs[key] = output; context.native?.changed(contract);
       }
       const checked = await checkFixPlan(run, brief, output!);
@@ -383,7 +383,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         const tree = buildFixGroup(brief, round, checked.group);
         startFixGroup(run, brief, round, tree.group, tree.units, decision.decision.judgmentDecisionIds, route); return;
       }
-      if (decision.decision.outcome === 'reject') { run.control.fail('planning', 'Jev refused the native fix plan'); return; }
+      if (decision.decision.outcome === 'reject') { run.control.fail('planning', 'the decision model rejected the fix plan, and no other fix was eligible'); return; }
       if (!canRepair || decision.continuationId !== 'repair-fix-plan') throw new Error('Native fix continuation is no longer eligible');
       decision.assertCurrent(); repair = { problems: checked.problems, previousPlan: checked.plan === undefined ? output! : renderContractPlan(checked.plan) }; needsPlan = true;
       await waitForTaskRecovery(0, run.abort.signal);
@@ -482,7 +482,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         allowAct: run.contract.sessionMode !== true && (config().maxFixRounds === 0 || unit.fixRounds + unit.freshAgents + cost <= config().maxFixRounds),
         state: () => ({ goal: unit.goal, brief: unit.brief, criteria: unit.criteria.map(c => ({ id: c.id, text: c.text, status: c.status })), route, spent: unit.fixRounds + unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, cost }) as unknown as import('@goodvibes-jev/judgment').EntryType,
         continuations: [], decisionIds, signal: run.abort.signal });
-      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'Jev refused a fresh native worker'); return; }
+      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'the decision model would not start another worker on this unit, so the unmet criteria were not repaired'); return; }
       decision.recordClaim();
     }
     unit.freshAgents += 1;
@@ -577,7 +577,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         fixRounds: unit.fixRounds, freshAgents: unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, sessionMode: run.contract.sessionMode === true }) as unknown as import('@goodvibes-jev/judgment').EntryType,
       continuations: canFresh ? [{ id: 'fresh-worker', kind: 'revise-action', description: 'Prepare a fresh worker for the same requirements and obtain a new exact-action decision before starting it.' }] : [],
       decisionIds: check.check.decisionIds, signal: run.abort.signal });
-    if (decision.decision.outcome === 'reject') { run.control.fail('other', 'Jev refused further native correction without sufficient evidence or remaining budget'); return; }
+    if (decision.decision.outcome === 'reject') { run.control.fail('other', 'the decision model stopped correcting the work: the evidence or the remaining budget was not enough for another round'); return; }
     if (decision.decision.outcome === 'act') { decision.recordClaim(); await splitUnit(run, unit); return; }
     if (decision.continuationId !== 'fresh-worker' || !canFresh) throw new Error('Native correction continuation is no longer eligible');
     decision.assertCurrent(); await freshUnit(run, unit, 'registered native fresh-worker continuation', decision.decision.judgmentDecisionIds);
@@ -595,7 +595,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       const decision = await readDecision(run, { stage: 'stall', targetId: unit.id, action: 'Plan a bounded repair of this exact merge conflict without weakening criteria',
         allowAct: run.contract.sessionMode !== true && !exhausted(run, unit.fixRounds + unit.freshAgents),
         state: () => ({ conflict: { ...conflict, files: [...conflict.files] }, goal: unit.goal, spent: unit.fixRounds + unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds }), continuations: [], signal: run.abort.signal });
-      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'Jev refused the native merge repair'); return; }
+      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'the decision model would not repair the conflicting merge of the units\' work'); return; }
       decision.recordClaim(); const runtime = run.runtime(unit); runtime.cwd = run.contract.worktreePath ?? run.contract.projectRoot;
       selectBaselineExecutionRoot(unit.baseline, runtime.cwd); stopForFix(run, unit); unit.fixRounds += 1;
       await planFix(run, unitBrief(run, unit, conflict), unit.fixRounds); return;
@@ -623,7 +623,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         allowAct: run.contract.sessionMode !== true && !exhausted(run, target.fixRounds),
         state: () => ({ scope, goal: target.goal, criteria: target.criteria.map(c => ({ id: c.id, text: c.text, status: c.status })), unmet: [...finding.unmet], unshown: [...finding.unshown], spent: target.fixRounds, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds, sessionMode: run.contract.sessionMode === true }),
         continuations: [], decisionIds: finding.decisionIds, signal: run.abort.signal });
-      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'Jev refused native target correction'); return; }
+      if (decision.decision.outcome !== 'act') { run.control.fail('other', 'the decision model would not start another correction of the unmet work'); return; }
       decision.recordClaim(); target.fixRounds += 1;
       if (scope === 'group') { const group = run.group(target.id); if (group !== undefined) run.moveGroup(group, 'fixing'); }
       else run.moveContract('fixing');

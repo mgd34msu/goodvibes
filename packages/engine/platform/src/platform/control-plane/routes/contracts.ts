@@ -169,6 +169,17 @@ export function createContractsReplyHandler(service: ContractOperatorService): G
   };
 }
 
+export function createContractsRemoveHandler(service: ContractOperatorService): GatewayMethodHandler {
+  return (invocation) => {
+    const contractId = requireString(readInvocationParams(invocation), 'contractId');
+    try {
+      return service.remove(contractId, callerOf(invocation));
+    } catch (error) {
+      return toGatewayVerbError(error);
+    }
+  };
+}
+
 /** Every method this module owns. */
 export const CONTRACT_METHOD_IDS: readonly string[] = [
   'contracts.list',
@@ -177,6 +188,7 @@ export const CONTRACT_METHOD_IDS: readonly string[] = [
   'contracts.dispatch',
   'contracts.cancel',
   'contracts.reply',
+  'contracts.remove',
 ];
 
 /**
@@ -197,4 +209,5 @@ export function registerContractGatewayMethods(catalog: GatewayMethodCatalog, se
   attach('contracts.dispatch', createContractsDispatchHandler(service));
   attach('contracts.cancel', createContractsCancelHandler(service));
   attach('contracts.reply', createContractsReplyHandler(service));
+  attach('contracts.remove', createContractsRemoveHandler(service));
 }

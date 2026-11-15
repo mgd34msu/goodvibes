@@ -1,7 +1,7 @@
 import { pinContractInputAdmission } from './input-authority.js';
 /**
  * One running contract's state and bookkeeping: the live contract tree, its orchestration engine, and
- * what the runner keeps in memory per unit (the agent's turns, a pending
+ * what the runner keeps in memory per unit (its reads and written paths folded from each turn, a pending
  * completion hold, the check in flight, the phase's settlement).
  *
  * Every status move goes through the transition tables and emits its event;
@@ -20,7 +20,7 @@ import { logger } from '../utils/logger.js';
 import { OwnedWork } from '../utils/owned-work.js';
 import type { ContractHoldOutcome } from './agent-hooks.js';
 import type { ContractConfig } from './config.js';
-import type { ContractTurnRecord } from './evidence.js';
+import type { FoldedReads } from './evidence.js';
 import {
   isTerminalContractStatus,
   isTerminalUnitStatus,
@@ -53,8 +53,10 @@ export interface InFlightCheck {
 
 /** What the runner keeps in memory for one unit. */
 export interface UnitRuntime {
-  /** Every turn the unit's agents reported, oldest first: commands and written paths for evidence. */
-  readonly turns: ContractTurnRecord[];
+  /** The unit's reads, folded from each turn as it arrives; the raw turn is not kept. */
+  readonly reads: FoldedReads;
+  /** The paths the unit's write and edit calls named, folded from each turn: changes outside git. */
+  readonly writtenPaths: Set<string>;
   /** The last assistant text a turn reported: a mid-run check's output. */
   lastAssistantText: string;
   /** The agent held at its completion point, waiting for a check. */
@@ -276,7 +278,8 @@ export class ContractRun {
     let runtime = this.unitRuntimes.get(unit.id);
     if (runtime === undefined) {
       runtime = {
-        turns: [],
+        reads: new Map(),
+        writtenPaths: new Set(),
         lastAssistantText: '',
         hold: null,
         check: null,

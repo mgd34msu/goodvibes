@@ -132,13 +132,17 @@ export interface RawUnitEvidence {
 
 // ── Commands and written paths from the agent's turns (fixed tool formats) ─────
 
-/** Count complete actual rows with host-bound offsets; retain legacy numbered
- * returns, never requested ranges, file totals or previews. */
-export function sourceReadsFromTurns(turns: readonly ContractTurnRecord[], referencePaths: readonly string[] = [], citationText = ''): SourceReadEvidence[] {
-  const files = new Map<string, Set<number>>();
-  const references = new Set(referencePaths);
-  const referenceLines = new Map<string, Map<number, string>>();
-  for (const turn of turns) for (let index = 0; index < turn.toolCalls.length; index++) {
+/**
+ * A unit's reads, folded as each turn arrives: every returned row once, by
+ * file and line. The raw turn (its tool arguments and complete results) is not
+ * kept, so memory follows the distinct lines read, not the number of turns,
+ * and a check reads these rows instead of re-parsing every earlier turn.
+ */
+export type FoldedReads = Map<string, Map<number, string>>;
+
+/** Fold one turn's successful `read` results into `folded`. One pass over that turn only. */
+export function foldTurnReads(folded: FoldedReads, turn: ContractTurnRecord): void {
+  for (let index = 0; index < turn.toolCalls.length; index++) {
     if (turn.toolCalls[index]!.name !== 'read') continue;
     const result = turn.results[index];
     if (!result?.success || !result.output) continue;
@@ -150,39 +154,45 @@ export function sourceReadsFromTurns(turns: readonly ContractTurnRecord[], refer
       const file = value as { path?: unknown; extract?: unknown; content?: unknown; error?: unknown; binary?: unknown; readObservation?: unknown };
       if (typeof file.path !== 'string' || typeof file.content !== 'string' || file.error || file.binary
         || (file.extract !== 'content' && file.extract !== 'lines')) continue;
-      const lines = files.get(file.path) ?? new Set<number>();
-      const escaped = file.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const citations = [...citationText.matchAll(new RegExp('(?<![\\w./-])' + escaped + '(?::|#L)(\\d+)(?:[-–]L?(\\d+))?', 'g'))]
-        .map(match => [Number(match[1]), Number(match[2] ?? match[1])] as const);
+      const rows = folded.get(file.path) ?? new Map<number, string>();
       for (const row of returnedReadRows({ content: file.content, readObservation: file.readObservation })) {
         const match = /^[ \t]*(\d+) \|/.exec(row);
-        if (!match) continue;
-        const line = Number(match[1]);
-        if (Number.isSafeInteger(line) && line > 0) {
-          lines.add(line);
-          if (references.has(file.path) || citations.some(([start, end]) => line >= start && line <= end)) {
-            const contents = referenceLines.get(file.path) ?? new Map<number, string>();
-            contents.set(line, row);
-            referenceLines.set(file.path, contents);
-          }
-        }
+        const line = Number(match?.[1]);
+        if (match && Number.isSafeInteger(line) && line > 0) rows.set(line, row);
       }
-      if (lines.size) files.set(file.path, lines);
+      if (rows.size) folded.set(file.path, rows);
     }
   }
-  return [...files].map(([path, lines]) => {
-    const sorted = [...lines].sort((a, b) => a - b), returnedRanges: string[] = [];
-    for (let index = 0; index < sorted.length; index++) {
-      const start = sorted[index]!;
+}
+
+/** Count complete actual rows with host-bound offsets; retain legacy numbered
+ * returns, never requested ranges, file totals or previews. Content is kept for
+ * declared reference files and for lines `citationText` cites. */
+export function sourceReadsFromFolded(folded: FoldedReads, referencePaths: readonly string[] = [], citationText = ''): SourceReadEvidence[] {
+  const references = new Set(referencePaths);
+  return [...folded].map(([path, rows]) => {
+    const lines = [...rows.keys()].sort((a, b) => a - b), returnedRanges: string[] = [];
+    for (let index = 0; index < lines.length; index++) {
+      const start = lines[index]!;
       let end = start;
-      while (sorted[index + 1] === end + 1) end = sorted[++index]!;
+      while (lines[index + 1] === end + 1) end = lines[++index]!;
       returnedRanges.push(start === end ? String(start) : `${start}-${end}`);
     }
-    const content = referenceLines.get(path);
-    return { path, returnedRanges, returnedLines: lines.size,
-      ...(content ? { returnedContent: [...content].sort(([a], [b]) => a - b).map(([, text]) => text).join('\n'),
+    const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const citations = references.has(path) || citationText === '' ? [] : [...citationText.matchAll(new RegExp('(?<![\\w./-])' + escaped + '(?::|#L)(\\d+)(?:[-–]L?(\\d+))?', 'g'))]
+      .map(match => [Number(match[1]), Number(match[2] ?? match[1])] as const);
+    const kept = references.has(path) ? lines : lines.filter(line => citations.some(([start, end]) => line >= start && line <= end));
+    return { path, returnedRanges, returnedLines: lines.length,
+      ...(kept.length ? { returnedContent: kept.map(line => rows.get(line)!).join('\n'),
         contentKind: references.has(path) ? 'declared-reference' as const : 'cited-source' as const } : {}) };
   });
+}
+
+/** The reads of `turns`, as `sourceReadsFromFolded` reads them. */
+export function sourceReadsFromTurns(turns: readonly ContractTurnRecord[], referencePaths: readonly string[] = [], citationText = ''): SourceReadEvidence[] {
+  const folded: FoldedReads = new Map();
+  for (const turn of turns) foldTurnReads(folded, turn);
+  return sourceReadsFromFolded(folded, referencePaths, citationText);
 }
 
 /** Merge retained observations with new reads; no prior verdict is carried forward. */
@@ -277,6 +287,19 @@ export function mergeCommandReceipts(previous: readonly CommandExecutionReceipt[
     receipts.set(key, receipt);
   }
   return [...receipts.values()];
+}
+
+/** Fold the paths one turn's `write` and `edit` calls named into `paths`, keeping first-seen order. */
+export function foldWrittenPaths(paths: Set<string>, turn: ContractTurnRecord): void {
+  for (const call of turn.toolCalls) {
+    const key = call.name === 'write' ? 'files' : call.name === 'edit' ? 'edits' : null;
+    if (key === null) continue;
+    const items = Array.isArray(call.arguments[key]) ? (call.arguments[key] as unknown[]) : [];
+    for (const item of items) {
+      const path = item !== null && typeof item === 'object' ? (item as { path?: unknown }).path : undefined;
+      if (typeof path === 'string' && path.length > 0) paths.add(path);
+    }
+  }
 }
 
 /** The paths the turns' `write` and `edit` calls named, in first-seen order. */
@@ -374,8 +397,8 @@ async function sharedTreeChanges(cwd: string, baseline: ContractUnit['baseline']
 }
 
 /** Outside git: the paths the unit wrote or edited, with their current text. */
-function writtenChanges(cwd: string, turns: readonly ContractTurnRecord[]): FileChange[] {
-  return writtenPaths(turns).map((path) => ({
+function writtenChanges(cwd: string, written: Iterable<string>): FileChange[] {
+  return [...written].map((path) => ({
     path: isAbsolute(path) ? relative(cwd, path) : path,
     diff: `${path}\n${fileText(cwd, path)}`,
   }));
@@ -388,8 +411,10 @@ export interface UnitEvidenceSources {
   readonly ownerEvidence?: JsonValue | undefined;
   /** The final output at completion; the last assistant text mid-run. */
   readonly output: string;
-  /** Every turn the unit's agents reported through the turn-end hook. */
-  readonly turns: readonly ContractTurnRecord[];
+  /** The unit's reads, folded from every turn its agents reported (`foldTurnReads`). */
+  readonly reads: FoldedReads;
+  /** The paths the unit's `write` and `edit` calls named, folded from every turn (`foldWrittenPaths`). */
+  readonly writtenPaths: ReadonlySet<string>;
   /** The unit's worktree path, or the project root in shared mode. */
   readonly cwd: string;
   readonly configManager: ContractConfigReader;
@@ -411,9 +436,9 @@ export interface UnitEvidenceSources {
 const GATED_TRIGGERS: ReadonlySet<CheckTrigger> = new Set(['completion', 'agent-failed', 'fix-passed', 'resume', 'owner-amend']);
 
 /** The changed files of a unit, from the source its isolation mode gives. */
-export async function collectChanges(unit: Pick<ContractUnit, 'baseline'>, sources: Pick<UnitEvidenceSources, 'cwd' | 'turns'>): Promise<FileChange[]> {
+export async function collectChanges(unit: Pick<ContractUnit, 'baseline'>, sources: Pick<UnitEvidenceSources, 'cwd' | 'writtenPaths'>): Promise<FileChange[]> {
   if (GitService.isGitRepo(sources.cwd)) return sharedTreeChanges(sources.cwd, unit.baseline);
-  return writtenChanges(sources.cwd, sources.turns);
+  return writtenChanges(sources.cwd, sources.writtenPaths);
 }
 
 /**
@@ -451,7 +476,7 @@ export async function collectUnitEvidence(
   const planChecks = contract.decisions?.filter(decision => decision.action === 'plan-accepted' && decision.targetId === contract.id)
     .map(decision => ({ at: decision.at, reason: decision.reason, decisionIds: [...decision.decisionIds] })) ?? [];
   const firstUnitStartedAt = contract.decisions?.find(decision => decision.action === 'spawned' && contract.units?.some(unit => unit.id === decision.targetId))?.at;
-  const currentReads = sourceReadsFromTurns(sources.turns, sources.mustWrite ? [] : unit.files, sources.output);
+  const currentReads = sourceReadsFromFolded(sources.reads, sources.mustWrite ? [] : unit.files, sources.output);
   const observedReads = sources.mustWrite ? currentReads : mergeSourceReads(unit.readEvidence ?? [], currentReads);
   const currentUnit = contract.units?.find(planned => planned.id === unit.id);
   // Assignment is not inspection. Unread assigned files remain in the
@@ -507,7 +532,7 @@ export async function collectUnitEvidence(
   const referencesExecution = (id: string | undefined): boolean => id !== undefined && new RegExp('(?<![\\w.-])'
     + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w-]|\\.[\\w-])').test(unit.brief + '\n' + sources.output);
   const privateArtifacts = readNativePrivateReceiptArchives(contract, unit.files);
-  return trimEvidence({ output: sources.output, changes, claims, gates, commands: unit.commandEvidence ?? commandsFromTurns(sources.turns),
+  return trimEvidence({ output: sources.output, changes, claims, gates, commands: unit.commandEvidence ?? [],
     sourceReads: observedReads,
     ...(planChecks.length ? { orchestration: { contractId: contract.id, ...(contract.status === undefined ? {} : { status: contract.status }), planChecks,
       requirements,

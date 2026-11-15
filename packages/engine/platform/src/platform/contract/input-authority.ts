@@ -9,6 +9,7 @@ import {
   assertContractInputObjects,
   assertContractInputGitIdentity,
   createContractInputViewAssertion,
+  contractInputFiles,
   CONTRACT_INPUT_EXCLUSIONS,
   type ContractInputSnapshot,
 } from './input-snapshot.js';
@@ -37,8 +38,8 @@ interface Authority {
   readonly root: string;
   readonly identity: string;
   readonly mutable: boolean;
-  /** Exact construction-selected generation membership; never a read grant. */
-  readonly inputFiles: readonly string[];
+  /** Exact construction-selected generation membership, read from its tree on first use; never a read grant. */
+  readonly inputFiles: () => readonly string[];
   readonly signal?: AbortSignal | undefined;
   readonly assertView: () => Promise<void>;
   readonly assertInputPath: ((path: string, signal?: AbortSignal) => Promise<void>) | undefined;
@@ -153,7 +154,7 @@ export async function createContractInputAuthority(
     root: view,
     identity: identity(stat),
     mutable: options.mutable === true,
-    inputFiles: Object.freeze(snapshot.files.filter(file => file.kind === 'file').map(file => file.path)),
+    inputFiles: () => contractInputFiles(snapshot),
     assertView,
     assertInputPath: immutableView?.assertPath,
     batchable: options.assertView === undefined,
@@ -324,7 +325,7 @@ export function contractInputAuthorityMutable(token: ContractInputAuthority): bo
 /** Immutable consumers may discover only the selected receipt's files. Mutable members enumerate their own authorized current files. */
 export function contractInputAuthorityFiles(token: ContractInputAuthority): readonly string[] | undefined {
   const state = stateOf(token);
-  return state.mutable ? undefined : state.inputFiles;
+  return state.mutable ? undefined : state.inputFiles();
 }
 
 /** Reject aliases and excluded runtime paths before any backend opens bytes. */

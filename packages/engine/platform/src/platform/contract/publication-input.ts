@@ -4,8 +4,7 @@ import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { Contract } from './types.js';
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
 import { assertContractInputAdmission, authorizeContractInputPath, createContractInputAuthority, revokeContractInputAuthority } from './input-authority.js';
-import { assertContractInputOwner, captureContractInput, type ContractInputSnapshot } from './input-snapshot.js';
-import { currentFileObservations } from './current-file-observations.js';
+import { assertContractInputOwner, captureContractInput, ContractInputBranchSwitchedError, type ContractInputSnapshot } from './input-snapshot.js';
 import { goalObligationSource } from './goal-obligation-proof.js';
 import { renderContractAnswer } from './answer.js';
 import { mergePublicationTree } from './publication-merge.js';
@@ -38,25 +37,31 @@ function gitBytes(root: string, args: readonly string[]): Buffer {
 }
 const git = (root: string, args: readonly string[]) => gitBytes(root, args).toString('utf8');
 
-/** Read the immutable bytes actually selected by the publication delta, after
- * original-owner and result-path permissions have both been checked. */
-function resultFile(root: string, head: string, path: string, identity: 'resultHead' | 'publicationTree' = 'resultHead'): JsonValue[] {
-  const entry = git(root, ['ls-tree', '-z', head, '--', path]);
-  if (!entry) return [{ operation: 'read-publication-result', source: 'native-git-object', success: true, path, missing: true, [identity]: head }];
-  const separator = entry.indexOf('\t');
-  const [mode, kind, oid] = entry.slice(0, separator).split(' ');
-  if (separator < 0 || entry.slice(separator + 1) !== `${path}\0` || kind !== 'blob' || !['100644', '100755'].includes(mode!))
-    throw new Error('publication result has an unsupported file kind or ambiguous path');
-  const bytes = gitBytes(root, ['cat-file', 'blob', oid!]), text = bytes.toString('utf8');
-  return [{ operation: 'read-publication-result', source: 'native-git-object', success: true, path, [identity]: head,
-    // Git already identifies these immutable bytes. Do not manufacture a
-    // second content identity for the same selected publication object.
-    blobOid: oid!, mode: mode!, bytes: bytes.length,
-    ...(bytes.includes(0) || !Buffer.from(text, 'utf8').equals(bytes) ? { binary: true } : { binary: false, text }) }];
+/** Longest diff of one path sent for a compatibility reading; a longer one is cut and says so. */
+const MAX_PATH_DIFF_CHARS = 32_000;
+
+/** One path's change between two trees, as a unified diff without external drivers. */
+function pathDiff(root: string, from: string, to: string, path: string): JsonValue {
+  const text = git(root, ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', from, to, '--', path]);
+  return text.length <= MAX_PATH_DIFF_CHARS ? { success: true, diff: text }
+    : { success: true, partial: true, diff: `${text.slice(0, MAX_PATH_DIFF_CHARS)}\n[... ${text.length - MAX_PATH_DIFF_CHARS} characters of this diff omitted ...]` };
 }
 
-/** Current owner facts are a separate publication premise. The original task,
- * captured source, accepted units and result branch are never recaptured. */
+function changedPaths(root: string, from: string, to: string): string[] {
+  return git(root, ['diff', '--name-only', '--no-ext-diff', '--no-textconv', '--no-renames', '-z', from, to, '--']).split('\0').filter(Boolean);
+}
+
+/**
+ * The owner kept working while the contract ran. Git answers the structural
+ * question: a three-way merge of the captured input, the owner's tree now and
+ * the accepted result. When the owner's changes and the result touch different
+ * paths and the merge is clean, the result is admitted with no model request.
+ * Only paths both sides changed are read for compatibility, as three diffs
+ * (owner's change, result's change, what publication would do to the owner's
+ * file), never as whole files. A merge conflict throws
+ * ContractPublicationConflictError naming the paths. The original task,
+ * captured source, accepted units and result branch are never recaptured.
+ */
 export async function admitPublicationInput(contract: Contract, filter: ReadAccessFilter | undefined, signal: AbortSignal,
   judge: (evidence: JsonValue & object) => Promise<(() => void) | null>): Promise<PublicationInputAdmission | null> {
   assertContractInputAdmission(contract);
@@ -69,72 +74,51 @@ export async function admitPublicationInput(contract: Contract, filter: ReadAcce
   if (!original || !view || !branch || !filter) throw new Error('publication recovery requires its captured result and original-owner authority');
   const owner = await captureContractInput(original.sourceRoot, { signal });
   assertScope();
-  if (owner.sourceIdentity !== original.sourceIdentity || owner.gitIdentity !== original.gitIdentity
-    || owner.ownerRef !== original.ownerRef) throw new Error('publication recovery cannot replace the original owner repository or selected branch');
+  if (owner.sourceIdentity !== original.sourceIdentity || owner.gitIdentity !== original.gitIdentity)
+    throw new Error('publication recovery cannot replace the original owner repository');
+  if (owner.ownerRef !== original.ownerRef) throw new ContractInputBranchSwitchedError(original.ownerRef, owner.ownerRef);
+  const root = original.sourceRoot;
   const resultHead = git(view, ['rev-parse', 'HEAD']).trim();
-  const before = new Map(original.files.map(file => [file.path, file]));
-  const after = new Map(owner.files.map(file => [file.path, file]));
-  const changed = [...new Set([...before.keys(), ...after.keys()])].filter(path => {
-    const old = before.get(path), current = after.get(path);
-    return old?.kind !== current?.kind || old?.mode !== current?.mode || old?.oid !== current?.oid
-      || (old?.oid?.length === 40 && old.digest !== current?.digest);
-  });
-  const targets = git(original.sourceRoot, ['diff', '--name-only', '--no-ext-diff', '--no-textconv', '--no-renames', '-z',
-    original.inputCommit, resultHead, '--']).split('\0').filter(Boolean);
-  const authority = await createContractInputAuthority(contract, view, { signal, mutable: true, branch });
+  const ownerChanged = owner.inputTree === original.inputTree ? [] : changedPaths(root, original.inputTree, owner.inputTree);
+  const targets = changedPaths(root, original.inputCommit, resultHead);
+  const targetSet = new Set(targets);
+  const overlap = ownerChanged.filter(path => targetSet.has(path));
+  const publicationTree = owner.inputTree === original.inputTree ? git(view, ['rev-parse', `${resultHead}^{tree}`]).trim()
+    : await mergePublicationTree(root, original.inputCommit, owner.inputCommit, resultHead, overlap.length > 0 ? overlap : targets, signal);
+  const proposedPaths = changedPaths(root, owner.inputCommit, publicationTree);
+  if (proposedPaths.some(path => !targetSet.has(path))) throw new Error('Publication merge changes a path outside the accepted result.');
   let assertCurrent: () => void = () => signal.throwIfAborted();
-  try {
-    const paths = [...new Set([...changed, ...targets])];
-    for (const path of paths) await authorizeContractInputPath(authority, path, filter, signal);
-    const publicationTree = owner.inputTree === original.inputTree ? git(view, ['rev-parse', `${resultHead}^{tree}`]).trim()
-      : await mergePublicationTree(original.sourceRoot, original.inputCommit, owner.inputCommit, resultHead, targets, signal);
-    const proposedPaths = git(original.sourceRoot, ['diff', '--name-only', '--no-ext-diff', '--no-textconv', '--no-renames', '-z',
-      owner.inputCommit, publicationTree, '--']).split('\0').filter(Boolean);
-    if (proposedPaths.some(path => !targets.includes(path))) throw new Error('Publication merge changes a path outside the accepted result.');
-    const observations: JsonValue[] = [];
-    for (const path of paths) {
-      await authorizeContractInputPath(authority, path, filter, signal);
-      const expected = after.get(path);
-      const currentOwner = currentFileObservations(original.sourceRoot, [path], {
-        includeText: true, owner: contract, ...(expected?.kind === 'file' ? { inputFile: expected } : {}),
-      });
-      if (expected?.kind === 'file') {
-        const observation = currentOwner[0] as { success?: unknown; inputBlobOid?: unknown; sha256?: unknown } | undefined;
-        if (observation?.success !== true || observation.inputBlobOid !== expected.oid
-          || (expected.digest !== undefined && observation.sha256 !== expected.digest))
-          throw new Error('current owner file observation does not match its captured publication input');
-      }
-      observations.push({ path, ownerChanged: changed.includes(path), resultChanged: targets.includes(path),
-        original: before.get(path) ? { kind: before.get(path)!.kind, mode: before.get(path)!.mode, oid: before.get(path)!.oid ?? null } : null,
-        currentOwner,
-        acceptedResult: resultFile(original.sourceRoot, resultHead, path),
-        proposedPublication: resultFile(original.sourceRoot, publicationTree, path, 'publicationTree') });
-    }
-    await assertContractInputOwner(owner, signal);
-    if (git(view, ['rev-parse', 'HEAD']).trim() !== resultHead) throw new Error('accepted result changed during publication recovery');
-    // Index-only changes and byte-identical inode replacement add no semantic
-    // question. Actual content drift needs a new native compatibility reading.
-    if (changed.length || owner.ownerHead !== original.ownerHead) {
+  if (overlap.length > 0) {
+    // Only the overlapping paths' text leaves the host, after the owner's read policy allows each.
+    const authority = await createContractInputAuthority(contract, view, { signal, mutable: true, branch });
+    try {
+      for (const path of overlap) await authorizeContractInputPath(authority, path, filter, signal);
+      const observations: JsonValue[] = overlap.map(path => ({ path,
+        currentOwner: [pathDiff(root, original.inputTree, owner.inputTree, path)],
+        acceptedResult: [pathDiff(root, original.inputCommit, resultHead, path)],
+        proposedPublication: [pathDiff(root, owner.inputTree, publicationTree, path)] }));
+      if (git(view, ['rev-parse', 'HEAD']).trim() !== resultHead) throw new Error('accepted result changed during publication recovery');
       assertScope();
       const qualified = await judge({ originalScope: scope,
         acceptedResult: { answer: contract.answer ?? renderContractAnswer(contract), check: contract.checks.at(-1) as unknown as JsonValue ?? null,
           resultHead, resultPaths: targets },
-        ownerChange: { originalInputTree: original.inputTree, currentOwnerTree: owner.inputTree, proposedPublicationTree: publicationTree, paths: changed,
-          observations, ownerHeadAdvanced: owner.ownerHead !== original.ownerHead },
-        meaning: 'Actual current-owner, accepted-result and proposed native-merged publication observations. The proposedPublication entries show the exact merged candidate to judge against every original obligation and accepted answer. Git computed this candidate from the ORIGINAL captured input, current owner and unchanged accepted result. A clean merge is not semantic approval. Publication applies only the current-owner-to-candidate delta on accepted result paths after Git verifies it fits; other owner files, index and history remain untouched. Original source, scope, accepted units and result branch are unchanged. This check must hold an invalidated behavior, stale answer claim or missing compatibility evidence; it does not execute publication.' });
+        ownerChange: { originalInputTree: original.inputTree, currentOwnerTree: owner.inputTree, proposedPublicationTree: publicationTree, paths: overlap,
+          observations, ownerHeadAdvanced: owner.ownerHead !== original.ownerHead,
+          otherOwnerPaths: ownerChanged.length - overlap.length },
+        meaning: 'Only the paths both the owner and the accepted result changed are shown; every other owner change touches files the result does not, and Git merged them cleanly. For each path: currentOwner.diff is the owner\'s change from the original captured input, acceptedResult.diff is the accepted result\'s change from that same input, and proposedPublication.diff is what publication would do to the owner\'s current file (the native three-way merge). A diff marked partial was cut for length. A clean merge is not semantic approval. Publication applies only that delta on accepted result paths after Git verifies it fits; other owner files, index and history remain untouched. This check must hold an invalidated behavior, stale answer claim or missing compatibility evidence; it does not execute publication.' });
       if (!qualified) return null;
       assertCurrent = qualified;
-    }
-    assertCurrent();
-    assertScope();
-    await assertContractInputOwner(owner, signal);
-    assertContractInputAdmission(contract);
-    if (git(view, ['rev-parse', 'HEAD']).trim() !== resultHead) throw new Error('accepted result changed after publication assessment');
-    const token = freezeAdmission({ kind: 'publication-input-admission' as const, publicationTree });
-    applyAdmission(setAdmission, admissions, [token, { contract, original, owner, ownerSnapshot: structuredClone(owner), resultHead,
-      publicationTree, originalScope, acceptedEvidence, assertCurrent, used: false }]);
-    return token;
-  } finally { revokeContractInputAuthority(authority); }
+    } finally { revokeContractInputAuthority(authority); }
+  }
+  assertCurrent();
+  assertScope();
+  await assertContractInputOwner(owner, signal);
+  assertContractInputAdmission(contract);
+  if (git(view, ['rev-parse', 'HEAD']).trim() !== resultHead) throw new Error('accepted result changed after publication assessment');
+  const token = freezeAdmission({ kind: 'publication-input-admission' as const, publicationTree });
+  applyAdmission(setAdmission, admissions, [token, { contract, original, owner, ownerSnapshot: structuredClone(owner), resultHead,
+    publicationTree, originalScope, acceptedEvidence, assertCurrent, used: false }]);
+  return token;
 }
 
 export function publicationInputOwner(token: PublicationInputAdmission, contract: Contract): ContractInputSnapshot {

@@ -4,7 +4,7 @@ import { agentBriefFidelity } from '../agents/brief-fidelity.js';
 import { hasDerivedAcceptanceChecks } from './owned-source.js';
 /**
  * The Jev checks on a plan (docs/design/contract-runner.md section 3.4), run
- * after the code checks pass, all concurrently: each criterion traces to the
+ * after the code checks pass, a few at a time: each criterion traces to the
  * user's words, no stated requirement is missing, each criterion is checkable
  * and not only about agent layout, each unit's role, and no unit narrows the
  * scope it serves. The readings are folded here, in code, into plan problems
@@ -369,14 +369,38 @@ async function checkRepairContinuation(port: JudgmentPort, plan: ContractPlan, a
   return output;
 }
 
+/** Plan-check requests in flight at once: a plan with many criteria and units must not burst the provider. */
+const PLAN_CHECK_CONCURRENCY = 4;
+
+/** `port` with at most `limit` requests in flight; the rest wait their turn in order. */
+function concurrencyLimited(port: JudgmentPort, limit: number): JudgmentPort {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return {
+    get model() { return port.model; },
+    async ask(request) {
+      // A finished request hands its slot straight to the next waiter.
+      if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+      else active += 1;
+      try { return await port.ask(request); }
+      finally { const next = waiting.shift(); if (next) next(); else active -= 1; }
+    },
+    ...(port.recorder === undefined ? {} : { recorder: port.recorder }),
+    ...(port.health === undefined ? {} : { health: port.health.bind(port) }),
+    ...(port.decisionDeadlineMs === undefined ? {} : { decisionDeadlineMs: port.decisionDeadlineMs }),
+    ...(port.revision === undefined ? {} : { revision: port.revision.bind(port) }),
+  };
+}
+
 /**
- * Runs every Jev plan check concurrently and folds the readings into problems
- * and dispositions. Call it only on a plan whose code checks passed.
+ * Runs every Jev plan check, at most PLAN_CHECK_CONCURRENCY requests at once,
+ * and folds the readings into problems and dispositions. Call it only on a
+ * plan whose code checks passed.
  */
 export async function runPlanChecks(plan: ContractPlan, ask: string, shape: RequestShape, options: PlanCheckOptions = {}): Promise<PlanVerdict> {
   requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const owner = planCheckOwner(options, { plan, ask, shape });
-  const port = owner.port;
+  const port = concurrencyLimited(owner.port, PLAN_CHECK_CONCURRENCY);
   const derived = hasDerivedAcceptanceChecks(options.originalSource);
   const checkRootMeaning = options.nativeSource === undefined && (options.originalSource === undefined || derived);
   const [trace, coverage, shapes, units, continuation] = await Promise.all([

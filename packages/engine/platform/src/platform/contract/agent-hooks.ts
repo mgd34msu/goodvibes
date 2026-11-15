@@ -48,7 +48,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { applySeverities, applyUnitCheck, checkSettings, emptyJudgmentUsage, readUnmetSeverities, runUnitCheck, unitMustWrite, type DecidedCheck, type UnitCheckOutcome } from './check.js';
 import type { ContractConfigReader } from './config.js';
 import { parseUnitCompletionReport } from './claims.js';
-import { collectUnitEvidence, commandReceiptsFromTurns, headAndTail, mergeCommandReceipts, mergeSourceReads, sourceReadsFromTurns, OUTPUT_CAP_CHARS, type ContractTurnRecord } from './evidence.js';
+import { collectUnitEvidence, commandReceiptsFromTurns, foldTurnReads, foldWrittenPaths, headAndTail, mergeCommandReceipts, mergeSourceReads, sourceReadsFromFolded, OUTPUT_CAP_CHARS, type ContractTurnRecord, type FoldedReads } from './evidence.js';
 import { createNudge, dispatchNudge, type NudgeTargetState } from './nudge.js';
 import { engineItem, takeBaseline } from './group-runner.js';
 import { describeStall } from './progress.js';
@@ -167,7 +167,15 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     const found = locate(record);
     if (found === null) return;
     const { run, unit, runtime } = found;
-    runtime.turns.push(turn);
+    // Fold the turn into the unit's evidence now; the raw turn is dropped.
+    const turnReads: FoldedReads = new Map();
+    foldTurnReads(turnReads, turn);
+    for (const [path, rows] of turnReads) {
+      const kept = runtime.reads.get(path);
+      if (kept === undefined) runtime.reads.set(path, new Map(rows));
+      else for (const [line, row] of rows) kept.set(line, row);
+    }
+    foldWrittenPaths(runtime.writtenPaths, turn);
     if (turn.assistantText.trim().length > 0) runtime.lastAssistantText = turn.assistantText;
     let observed = false;
     const commands = commandReceiptsFromTurns(record.id, [turn]);
@@ -176,7 +184,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       observed = true;
     }
     if (!unitMustWrite(run.contract, unit)) {
-      const reads = sourceReadsFromTurns([turn], unit.files, runtime.lastAssistantText || unit.lastOutput || '');
+      const reads = sourceReadsFromFolded(turnReads, unit.files, runtime.lastAssistantText || unit.lastOutput || '');
       if (reads.length > 0) {
         unit.readEvidence = mergeSourceReads(unit.readEvidence ?? [], reads);
         observed = true;
@@ -296,7 +304,8 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
         // A check after a restart reads the report stored on the unit (design 7.2), not the capped output.
         report: trigger === 'resume' ? (unit.lastReport ?? null) : read,
         mustWrite: unitMustWrite(run.contract, unit),
-        turns: runtime.turns,
+        reads: runtime.reads,
+        writtenPaths: runtime.writtenPaths,
         cwd: runtime.cwd,
         configManager: deps.configManager,
         runtimeBus: deps.runtimeBus,

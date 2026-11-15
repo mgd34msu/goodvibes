@@ -64,7 +64,7 @@ export interface ContractCliIo {
 }
 
 /** The runner surface the CLI uses. */
-export type ContractCliRunner = Pick<ContractRunner, 'start' | 'get' | 'list' | 'cancel' | 'reply' | 'on'>;
+export type ContractCliRunner = Pick<ContractRunner, 'start' | 'get' | 'list' | 'cancel' | 'reply' | 'remove' | 'on'>;
 
 /** The conversation sessions the CLI hosts for session-mode contracts (design 6.6). */
 export interface ContractSessionDriver {
@@ -115,10 +115,12 @@ export const CONTRACT_CLI_USAGE = [
   '  status [<id>] [--json]                                    one contract\'s tree, or a table of contracts',
   '  list [--all]                                              contracts not ended (--all: every contract)',
   '  cancel <id>                                               cancel a contract',
+  '  remove <id>                                               delete an ended contract\'s record',
   '  reply <id> "<text>" [--no-follow] [--json]               answer a contract\'s open question and follow it',
   '  resume [--json]                                           resume the contracts on disk and follow them',
   '',
   'Every command takes --cwd <dir>, the project (default: the working directory).',
+  'Ended contracts are kept 30 days (at most 100 per project), then removed.',
   'Ctrl-C stops following and keeps the contracts as they are: resume continues them, cancel <id> cancels one.',
   'Exit codes: 0 passed, 1 failed or refused, 2 waiting on the owner without a terminal, 64 usage, 130 stopped following.',
 ];
@@ -144,6 +146,7 @@ const COMMAND_FLAGS: Readonly<Record<string, { readonly flags: readonly string[]
   status: { flags: ['--cwd', '--json'], positionals: [0, 1] },
   list: { flags: ['--cwd', '--all'], positionals: [0, 0] },
   cancel: { flags: ['--cwd'], positionals: [1, 1] },
+  remove: { flags: ['--cwd'], positionals: [1, 1] },
   reply: { flags: ['--cwd', '--no-follow', '--json'], positionals: [2, 2] },
   resume: { flags: ['--cwd', '--json'], positionals: [0, 0] },
 };
@@ -276,6 +279,8 @@ async function withRunner(args: ParsedArgs, io: ContractCliIo, deps: ContractCli
         return await runCommand(args, io, opened, deps.newSessionId?.() ?? `cli-${randomUUID()}`);
       case 'cancel':
         return await cancelCommand(args, io, opened);
+      case 'remove':
+        return await removeCommand(args, io, opened);
       case 'reply':
         return await replyCommand(args, io, opened);
       default:
@@ -325,6 +330,23 @@ async function cancelCommand(args: ParsedArgs, io: ContractCliIo, opened: Opened
   }
   io.out(opened.runner.get(id)?.statusLine ?? `Contract ${id} cancelled.`);
   return EXIT_OK;
+}
+
+async function removeCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
+  const id = args.positionals[0]!;
+  if (await opened.resumed() === null) {
+    io.err(resumeFailedLine(args.projectRoot));
+    return EXIT_FAILED;
+  }
+  const outcome = opened.runner.remove?.(id) ?? 'not-found';
+  if (outcome === 'removed') {
+    io.out(`Contract ${id} removed.`);
+    return EXIT_OK;
+  }
+  io.err(outcome === 'not-ended' ? `Contract ${id} has not ended; cancel it first (goodvibes-contract cancel ${id}), then remove it.`
+    : outcome === 'native' ? `Contract ${id} is native work; its record is kept with the native work execution.`
+    : `No contract ${id} in ${args.projectRoot}.`);
+  return EXIT_FAILED;
 }
 
 /**

@@ -54,7 +54,7 @@ export const OWNER_PICK_SITE = 'contract.owner-pick';
 
 /** One fixed sentence per reason. */
 export const REASON_SENTENCES: Readonly<Record<EscalationReason, string>> = {
-  'plan-unresolved': 'The planner could not resolve these problems within its repair limit.',
+  'plan-unresolved': 'The planner could not resolve these problems, and repairing again is not making progress.',
   'writing-unclear': 'Your request does not make clear whether the work may change files.',
   stalled: 'The work stopped making progress and the remaining problems need you.',
   unsettled: 'The checks could not confirm some criteria from the evidence, and the agent could not show more.',

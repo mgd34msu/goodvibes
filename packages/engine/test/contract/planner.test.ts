@@ -540,7 +540,7 @@ test('unlimited planning stops repeated structural failure without an attempt ca
   } } });
   expect(outcome.kind).toBe('failed'); expect(requests).toHaveLength(2);
   expect(contract.failureKind).toBe('planning');
-  expect(contract.error).toContain('repeated the same unresolved planning state');
+  expect(contract.error).toContain('not a readable plan');
   expect(contract.groups).toEqual([]); expect(contract.units).toEqual([]);
 });
 

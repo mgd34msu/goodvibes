@@ -1,21 +1,21 @@
 /**
- * The claim a process holds on each contract it runs, so a second process on the
- * same project root does not resume (and run) a contract that is already live.
+ * The claim a runner holds on each contract it runs, so a second runner on the
+ * same project root (another process, or another runner in this one) does not
+ * resume and run a contract that is already live: two runs of one contract
+ * would write the same worktree and checkpoint and pay for the work twice.
  *
- * It is a cross-process lock held for the life of the run: a second claimant is
- * refused while the holder is alive, and a lock whose holder is proven dead is
- * taken over, so a process that died does not strand its contract.
+ * It is a kernel-released lock held for the life of the run: a second claimant
+ * is refused while the holder runs, and the operating system frees it when the
+ * holder exits, so a process that died does not strand its contract and no
+ * stale-holder rule is needed. Cost: one open and two statements per run.
  */
-import { join } from 'node:path';
-import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
-import { contractsDir } from './store.js';
+import { holdProcessLock } from '../utils/process-lock.js';
+import { contractLeasePath } from './store.js';
 
-/** Where the claim for one contract lives. Outside the checkpoint files, so no contract listing sees it. */
-export function contractLeasePath(projectRoot: string, contractId: string): string {
-  return join(contractsDir(projectRoot), '.leases', `${contractId}.lock`);
-}
+export { contractLeasePath } from './store.js';
 
-/** Claims the contract for this process; the returned function releases it. Null when another live holder has it. */
+/** Claims the contract for this runner; the returned function releases it. Null when another holder has it. */
 export function claimContractLease(projectRoot: string, contractId: string): (() => void) | null {
-  return tryAcquireCrossProcessLock(contractLeasePath(projectRoot, contractId));
+  const held = holdProcessLock(contractLeasePath(projectRoot, contractId));
+  return held === null ? null : () => held.release();
 }

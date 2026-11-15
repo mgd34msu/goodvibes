@@ -189,14 +189,20 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
         skipped.push(contractId);
         continue;
       }
+      // An ended contract is known from its small summary and stays on disk: its checkpoint is not read.
+      // Only a failed planning contract may need the historical repair migration below.
+      const ended = deps.store.endedSummary(contractId);
+      if (ended !== undefined && !(ended.status === 'failed' && ended.failureKind === 'planning')) continue;
       const contract = deps.store.load(contractId);
       if (contract === null) continue;
       if (isClassicOperation()) {
+        if (isTerminalContractStatus(contract.status)) { deps.store.noteEnded(contract); continue; }
         deps.store.hold(contract);
-        if (!isTerminalContractStatus(contract.status)) {
-          skipped.push(contractId); heldForPolicy.push({ contractId, reason: 'decision-model-required' });
-        }
+        skipped.push(contractId); heldForPolicy.push({ contractId, reason: 'decision-model-required' });
         continue;
+      }
+      if (isTerminalContractStatus(contract.status) && ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined) || contract.durableAdmission !== undefined)) {
+        deps.store.noteEnded(contract); continue;
       }
       if ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined)) { deps.store.hold(contract); skipped.push(contractId); continue; }
       // Native authority is never reconstructed from disk. Only resumeDurable may adopt this binding.
@@ -214,7 +220,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
         && contract.error.includes('Refused before judgment:')
         && contract.units.some(unit => unit.commandEvidence?.some(command => findCardNumberShapes(command.head, 1).length > 0));
       if (isTerminalContractStatus(contract.status) && !pendingRepair) {
-        deps.store.hold(contract);
+        deps.store.noteEnded(contract);
         continue;
       }
       if (contract.inputSnapshot !== undefined) {

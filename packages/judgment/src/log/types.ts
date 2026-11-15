@@ -138,6 +138,15 @@ export interface DecisionVolumeEntry {
   };
 }
 
+/** Payload-free outcome of one call: whether it was answered and by which model. */
+export interface DecisionSummary {
+  readonly id: DecisionId;
+  readonly status: DecisionEntry['status'];
+  readonly requestedModel: string;
+  /** The versioned model that answered; absent on a failed call. */
+  readonly model?: string;
+}
+
 /**
  * Durable record of every reading. The engine state layer hosts an
  * implementation; this package ships the SQLite one.
@@ -156,6 +165,9 @@ export interface DecisionLog {
   queryIds?(query?: DecisionQuery): readonly DecisionId[];
   /** Optional on older/custom logs. Native SQLite reads only bounded counters. */
   queryVolume?(query?: DecisionQuery): readonly DecisionVolumeEntry[];
+  /** Optional on older/custom logs. Status and models of the given ids in one
+   * read, without questions, answers or notes; an unknown id is left out. */
+  summaries?(ids: readonly string[]): readonly DecisionSummary[];
   /**
    * Optional on older/custom logs. Deletes up to `rule.batch` entries, with
    * their notes, that the retention rule no longer keeps, oldest first, and

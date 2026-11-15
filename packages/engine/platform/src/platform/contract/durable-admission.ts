@@ -259,14 +259,20 @@ export function parseDurableAdmission(value: unknown, original?: DurableContract
     ...(execution === undefined ? {} : { execution }) });
 }
 
-/** Checkpoint content must still name the original operation, not just copy its receipt hash. */
+/**
+ * Checkpoint content must still name the original operation, not just copy its
+ * receipt hash. The same object compares by reference (the common case: the
+ * live contract holds its own admission), so the check costs a few compares;
+ * only a copy is serialised to compare.
+ */
 export function assertDurableCheckpoint(contract: ContractView, admission: DurableContractAdmission): void {
-  if (contract.durableAdmission === undefined || canonical(contract.durableAdmission) !== canonical(admission)
+  if (contract.durableAdmission === undefined || (contract.durableAdmission !== admission && canonical(contract.durableAdmission) !== canonical(admission))
     || contract.id !== admission.contractId || contract.ownerAgentId !== admission.ownerAgentId) {
     throw new DurableContractAdmissionError('checkpoint');
   }
   for (const field of ['ask', 'sessionId', 'origin', 'projectRoot', 'parentAgentId', 'selectedModel', 'budget', 'proposedUnits', 'nativeSource', 'taskEvidence'] as const) {
-    if (canonical({ value: contract[field] }) !== canonical({ value: admission.input[field] })) {
+    const value = contract[field], admitted = admission.input[field];
+    if (value !== admitted && canonical({ value }) !== canonical({ value: admitted })) {
       throw new DurableContractAdmissionError('checkpoint');
     }
   }
@@ -423,6 +429,25 @@ export class DurableContractAdmissions {
   }
 
   read(key: DurableContractKey): DurableContractAdmission | null { return this.envelope(key)?.admission ?? null; }
+
+  /**
+   * Every key the contract-id index binds, from its small files (no receipt or
+   * checkpoint is read). A start uses it to refuse a second binding of a key
+   * whose receipt went missing while its contract survives.
+   */
+  indexedKeys(): { readonly contractId: string; readonly key: DurableContractKey }[] {
+    const directory = join(this.directory, '.by-contract');
+    if (!admissionPathExists(directory)) return [];
+    const keys: { contractId: string; key: DurableContractKey }[] = [];
+    for (const file of readdirSync(directory)) {
+      if (!file.endsWith('.json')) continue;
+      const contractId = file.slice(0, -'.json'.length);
+      if (!isContractId(contractId)) continue;
+      const key = this.indexedKey(contractId);
+      if (key !== null) keys.push({ contractId, key });
+    }
+    return keys;
+  }
 
   /** The authoritative checkpoint lives in the same atomic envelope as its immutable key binding. */
   checkpoint(key: DurableContractKey): string {

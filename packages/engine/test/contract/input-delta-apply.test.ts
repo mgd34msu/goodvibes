@@ -145,7 +145,8 @@ test('conflicting later owner edit retains both owner and contract result withou
   await waitFor(() => h.store.get(contract.id)?.commit?.status === 'failed', 'conflicting dirty input hold', 15_000);
   const done = h.store.get(contract.id)!;
   expect(done.commit?.status).toBe('failed');
-  expect(done.commit?.note).toBe(`not applied: captured result patch does not fit the current owner; preserve both versions for focused integration; the work stays on branch ${done.branch}`);
+  expect(done.commit?.note).toContain('src/csv.ts');
+  expect(done.commit?.note).toContain(`the work stays on branch ${done.branch}`);
   expect(done.status).not.toBe('passed');
   expect(done.commit?.hash).toBeUndefined();
   expect(readFileSync(join(h.root, 'src/csv.ts'), 'utf8')).toBe('owner later replacement\n');

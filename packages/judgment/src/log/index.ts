@@ -10,6 +10,7 @@ export {
   type AnsweredEntry,
   type DecisionEntry,
   type DecisionVolumeEntry,
+  type DecisionSummary,
   type DecisionNote,
   type DecisionTruth,
   type TruthSource,

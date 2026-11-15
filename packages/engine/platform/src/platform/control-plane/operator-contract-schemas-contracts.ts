@@ -398,6 +398,8 @@ export const CONTRACTS_DISPATCH_INPUT_SCHEMA = objectSchema({
 
 export const CONTRACTS_CANCEL_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA, reason: STRING_SCHEMA }, ['contractId']);
 export const CONTRACTS_CANCEL_OUTPUT_SCHEMA = objectSchema({ cancelled: BOOLEAN_SCHEMA }, ['cancelled']);
+export const CONTRACTS_REMOVE_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA }, ['contractId']);
+export const CONTRACTS_REMOVE_OUTPUT_SCHEMA = objectSchema({ removed: BOOLEAN_SCHEMA }, ['removed']);
 
 export const CONTRACTS_REPLY_INPUT_SCHEMA = objectSchema({
   contractId: STRING_SCHEMA,

@@ -10,8 +10,17 @@ import { contractCreationPathAbsent, publishInitialContractCheckpoint } from './
  * admission keys and execution leases stay in their existing directory.
  * Writes use an atomic temp-file/fsync/rename. Unsupported future versions
  * remain at their original path and refuse replacement; malformed known
- * versions are quarantined. Completed checkpoints are retained until removed;
- * quarantine and abandoned temporary files have bounded housekeeping.
+ * versions are quarantined.
+ *
+ * Ended contracts: when a checkpoint is written with a terminal status, a small
+ * summary (id, status, session, dates) is written to `ended/<id>.json`. Start-up
+ * and listing read those summaries, not the checkpoints; an ended contract is
+ * not held in memory and its full record is loaded on first read and cached up
+ * to the retention cap. Ended contracts are kept for TERMINAL_CONTRACT_MAX_AGE_MS
+ * and at most MAX_TERMINAL_CONTRACT_FILES, and `remove` deletes one on request.
+ * Native work contracts (with a durable admission) belong to their native
+ * execution and are neither reaped nor removed here. Quarantine and abandoned
+ * temporary files have bounded housekeeping.
  *
  * Modeled on orchestration/persistence.ts.
  */
@@ -37,11 +46,10 @@ import { CURRENT_CONTRACT_SCHEMA_VERSION, isContractId, isOpaqueContractId, isTe
 import { recoverPendingFixIdentities, recoverRepeatedStructuralCriteria } from './fix-identity.js';
 
 const DEBOUNCE_MS = 250;
-/** @deprecated Completed contracts are retained until explicitly removed. */
-export const MAX_TERMINAL_CONTRACT_FILES = Infinity;
-/** Age past which a terminal contract file is reaped, from its completion (or last write). */
-export const TERMINAL_CONTRACT_MAX_AGE_MS = Infinity;
-const REAPS_TERMINAL_CONTRACTS = Number.isFinite(TERMINAL_CONTRACT_MAX_AGE_MS) || Number.isFinite(MAX_TERMINAL_CONTRACT_FILES);
+/** Ended contracts kept per project; the oldest beyond this are removed. */
+export const MAX_TERMINAL_CONTRACT_FILES = 100;
+/** Age past which an ended contract is removed, from its completion (or last write): thirty days. */
+export const TERMINAL_CONTRACT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 /** Quarantine files are forensic, so they outlive terminal contracts: a month. */
 export const CONTRACT_QUARANTINE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 /** A crash loop can mint one quarantine file per start, so the age bound alone is not a bound. Newest are kept. */
@@ -73,6 +81,39 @@ export class ContractStoreVersionError extends Error {
 /** Original contract authority root. Durable admission keys and leases never move. */
 export function contractsDir(projectRoot: string): string {
   return join(projectRoot, '.goodvibes', 'contracts');
+}
+
+/** Where the summary of each ended contract lives: one small file per contract. */
+export function contractEndedDir(projectRoot: string): string {
+  return join(contractsDir(projectRoot), 'ended');
+}
+
+/** Where the run claim for one contract lives (contract/lease.ts). Outside the checkpoint files, so no contract listing sees it. */
+export function contractLeasePath(projectRoot: string, contractId: string): string {
+  return join(contractsDir(projectRoot), '.leases', `${contractId}.writer.sqlite`);
+}
+
+/** What listing and start-up need of an ended contract, without its checkpoint. */
+export interface EndedContractSummary {
+  readonly version: 1;
+  readonly id: string;
+  readonly status: Contract['status'];
+  readonly sessionId: string;
+  readonly createdAt: number;
+  readonly completedAt?: number | undefined;
+  readonly failureKind?: Contract['failureKind'] | undefined;
+  /** A native work contract: kept for its native execution, never reaped or removed here. */
+  readonly durable: boolean;
+}
+
+/** Why `remove` did not remove a contract. */
+export type ContractRemoval = 'removed' | 'not-found' | 'not-ended' | 'native';
+
+function isEndedSummary(value: unknown, id: string): value is EndedContractSummary {
+  if (!isRecord(value)) return false;
+  return value['version'] === 1 && value['id'] === id && typeof value['status'] === 'string' && isTerminalContractStatus(value['status'] as Contract['status'])
+    && typeof value['sessionId'] === 'string' && typeof value['createdAt'] === 'number' && typeof value['durable'] === 'boolean'
+    && (value['completedAt'] === undefined || typeof value['completedAt'] === 'number');
 }
 
 /** Where contracts.start records a caller's retry key, one small file per (principal, key). */
@@ -308,6 +349,12 @@ export class ContractStore {
   private readonly beforeCreate: ((contractId: string) => void) | undefined;
   private readonly creations = new Map<string, CreationState>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  /** Summaries of ended contracts read so far, by id; checked against the directory on each listing. */
+  private readonly endedSummaries = new Map<string, EndedContractSummary>();
+  /** Checkpoints without a summary that housekeeping read as not ended, by path, with the file identity it read. */
+  private readonly notEnded = new Map<string, string>();
+  /** Full records of ended contracts read on demand, newest use last; at most MAX_TERMINAL_CONTRACT_FILES. */
+  private readonly endedRecords = new Map<string, Contract>();
   private readonly writeFailures = new Map<string, ContractWriteFailure>();
   private readonly onWriteFailure: ContractStoreOptions['onWriteFailure'];
 
@@ -321,9 +368,12 @@ export class ContractStore {
     this.beforeCreate = options.beforeCreate?.bind(options);
   }
 
-  /** The live contract, which the runner mutates in place. */
+  /** The live contract, which the runner mutates in place; for an ended contract, its record (read from disk on first use). */
   get(contractId: string): Contract | null {
-    return this.contracts.get(contractId) ?? null;
+    const live = this.contracts.get(contractId);
+    if (live !== undefined) return live;
+    if (!this.endedRecords.has(contractId) && !this.endedSummaries.has(contractId)) return null;
+    return this.ended(contractId);
   }
 
   /** The failure of this contract's most recent checkpoint write, or null when it last succeeded (or never failed). */
@@ -418,6 +468,7 @@ export class ContractStore {
   /** Holds a contract in memory and schedules its write. */
   put(contract: Contract): void {
     this.assertStoredVersion(contract.id);
+    this.endedRecords.delete(contract.id);
     // The newer-format file is gone or replaced: writing may resume.
     if (this.writeFailures.get(contract.id)?.newerFormat) this.writeFailures.delete(contract.id);
     this.contracts.set(contract.id, contract);
@@ -427,6 +478,7 @@ export class ContractStore {
   /** Holds a contract read from its own file in memory, without writing it back (resume, design 7.2). */
   hold(contract: Contract): void {
     this.assertStoredVersion(contract.id);
+    this.endedRecords.delete(contract.id);
     this.contracts.set(contract.id, contract);
   }
 
@@ -462,6 +514,7 @@ export class ContractStore {
         syncContractDirectory(contractsDir(this.projectRoot));
       }
       this.writeFailures.delete(contract.id);
+      this.recordEnded(contract);
       return true;
     } catch (error) {
       logger.error('contract store: write failed', { path, error: summarizeError(error) });
@@ -475,6 +528,116 @@ export class ContractStore {
       catch (callbackError) { logger.warn('contract store: write-failure listener threw', { error: summarizeError(callbackError) }); }
       return false;
     }
+  }
+
+  /** Keeps the ended summary in step with a contract just written: written when it ended, removed when it is running again. */
+  private recordEnded(contract: Contract): void {
+    const path = join(contractEndedDir(this.projectRoot), `${contract.id}${JSON_SUFFIX}`);
+    try {
+      if (!isTerminalContractStatus(contract.status)) {
+        if (this.endedSummaries.delete(contract.id) || existsSync(path)) removeFile(path);
+        return;
+      }
+      const summary: EndedContractSummary = { version: 1, id: contract.id, status: contract.status, sessionId: contract.sessionId,
+        createdAt: contract.createdAt, ...(contract.completedAt === undefined ? {} : { completedAt: contract.completedAt }),
+        ...(contract.failureKind === undefined ? {} : { failureKind: contract.failureKind }), durable: contract.durableAdmission !== undefined };
+      writeFileAtomic(path, JSON.stringify(summary));
+      this.endedSummaries.set(contract.id, summary);
+      // A record read earlier is replaced by this write (an import over an ended contract).
+      if (this.endedRecords.get(contract.id) !== contract) this.endedRecords.delete(contract.id);
+    } catch (error) {
+      // The checkpoint itself is written; without its summary the contract is read from the checkpoint instead.
+      logger.warn('contract store: the ended-contract summary was not written', { contractId: contract.id, error: summarizeError(error) });
+    }
+  }
+
+  /** The summary of an ended contract, or undefined when the store has none (running, unknown, or written before summaries). */
+  endedSummary(contractId: string): EndedContractSummary | undefined {
+    const known = this.endedSummaries.get(contractId);
+    if (known !== undefined) return known;
+    if (!isContractId(contractId)) return undefined;
+    let value: unknown;
+    try { value = JSON.parse(readFileSync(join(contractEndedDir(this.projectRoot), `${contractId}${JSON_SUFFIX}`), 'utf8')); }
+    catch { return undefined; }
+    if (!isEndedSummary(value, contractId)) return undefined;
+    this.endedSummaries.set(contractId, value);
+    return value;
+  }
+
+  /** Every ended contract's summary, from the summary directory (one listing; a file is read once per process). */
+  listEnded(): EndedContractSummary[] {
+    const dir = contractEndedDir(this.projectRoot);
+    let names: string[];
+    try { names = readdirSync(dir); } catch { return []; }
+    const present = new Set<string>();
+    const summaries: EndedContractSummary[] = [];
+    for (const name of names) {
+      if (!name.endsWith(JSON_SUFFIX)) continue;
+      const id = name.slice(0, -JSON_SUFFIX.length);
+      present.add(id);
+      const summary = this.endedSummary(id);
+      if (summary !== undefined) summaries.push(summary);
+    }
+    // Another process removed some: forget them here too.
+    for (const id of [...this.endedSummaries.keys()]) if (!present.has(id)) { this.endedSummaries.delete(id); this.endedRecords.delete(id); }
+    return summaries;
+  }
+
+  /** Records that a held contract ended and is written: it leaves memory, and is read back from disk when asked for. */
+  noteEnded(contract: Contract): void {
+    if (!isTerminalContractStatus(contract.status)) return;
+    if (this.endedSummary(contract.id) === undefined) this.recordEnded(contract);
+    if (this.contracts.get(contract.id) !== contract || this.timers.has(contract.id)) return;
+    this.contracts.delete(contract.id);
+    // Kept among the recently read ended records, so a read right after the end needs no disk read.
+    if (this.endedRecords.size >= MAX_TERMINAL_CONTRACT_FILES) this.endedRecords.delete(this.endedRecords.keys().next().value!);
+    this.endedRecords.set(contract.id, contract);
+  }
+
+  /** An ended contract's full record, read from its checkpoint on first use; not held with the live contracts. */
+  ended(contractId: string): Contract | null {
+    const cached = this.endedRecords.get(contractId);
+    if (cached !== undefined) { this.endedRecords.delete(contractId); this.endedRecords.set(contractId, cached); return cached; }
+    let contract: Contract | null;
+    try { contract = this.load(contractId); } catch { return null; }
+    if (contract === null || !isTerminalContractStatus(contract.status)) return null;
+    if (this.endedRecords.size >= MAX_TERMINAL_CONTRACT_FILES) this.endedRecords.delete(this.endedRecords.keys().next().value!);
+    this.endedRecords.set(contractId, contract);
+    return contract;
+  }
+
+  /**
+   * Deletes an ended contract: its checkpoint (current and older layout), its
+   * summary and its run claim. A running contract is refused (`not-ended`), and
+   * so is native work (`native`), which its native execution owns.
+   */
+  remove(contractId: string): ContractRemoval {
+    if (!isContractId(contractId)) return 'not-found';
+    const held = this.contracts.get(contractId);
+    if (held !== undefined && !isTerminalContractStatus(held.status)) return 'not-ended';
+    const contract = held ?? this.ended(contractId);
+    if (contract === null) {
+      if (this.endedSummary(contractId) === undefined) return 'not-found';
+    } else {
+      if (!isTerminalContractStatus(contract.status)) return 'not-ended';
+      if (contract.durableAdmission !== undefined) return 'native';
+    }
+    this.forgetEnded(contractId);
+    return 'removed';
+  }
+
+  /** Removes every file and memory of one ended contract. Returns the bytes freed. */
+  private forgetEnded(contractId: string): number {
+    this.cancelPendingWrite(contractId);
+    let freed = removeFile(contractPath(this.projectRoot, contractId)) + removeFile(historicalContractPath(this.projectRoot, contractId))
+      + removeFile(join(contractEndedDir(this.projectRoot), `${contractId}${JSON_SUFFIX}`));
+    const lease = contractLeasePath(this.projectRoot, contractId);
+    for (const path of [lease, `${lease}-journal`, `${lease}-wal`, `${lease}-shm`]) freed += removeFile(path);
+    this.contracts.delete(contractId); this.endedRecords.delete(contractId); this.endedSummaries.delete(contractId);
+    this.writeFailures.delete(contractId);
+    this.supportedStoredVersions.delete(contractPath(this.projectRoot, contractId));
+    this.supportedStoredVersions.delete(historicalContractPath(this.projectRoot, contractId));
+    return freed;
   }
 
   /** Writes the contract after the debounce; a later call for the same contract restarts the wait. */
@@ -625,10 +788,11 @@ export class ContractStore {
   }
 
   /**
-   * Housekeeping: completed contracts remain available; native quarantine pairs
-   * have a global 30-day / 20-file bound, plus temp files left by a dead writer. A
-   * contract that is not terminal (on disk, or held in memory) is never
-   * reaped. A reaped terminal contract is also released from memory.
+   * Housekeeping: ended contracts past TERMINAL_CONTRACT_MAX_AGE_MS or beyond
+   * the newest MAX_TERMINAL_CONTRACT_FILES are removed (native work is kept);
+   * native quarantine pairs have a global 30-day / 20-file bound, plus temp
+   * files left by a dead writer. A contract that is not terminal (on disk, or
+   * held in memory) is never reaped. A reaped contract is also released from memory.
    * Safe to run from two processes at once: a file already gone is success.
    */
   reap(): ContractReapSummary {
@@ -669,31 +833,33 @@ export class ContractStore {
       if (!isContractId(id)) continue;
       const held = this.contracts.get(id);
       if (held && !isTerminalContractStatus(held.status)) continue;
-      // Completed contracts are kept without bound, so there is nothing to reap
-      // and no reason to read and parse every checkpoint to find out.
-      if (!REAPS_TERMINAL_CONTRACTS) continue;
-      // Terminal-ness is decided by content. A file that is refused is left
-      // for load() to quarantine with its disclosure, not deleted here.
-      let text: string;
-      try {
-        text = readFileSync(path, 'utf-8');
-      } catch {
-        continue;
+      // Ended-ness and dates come from the small summary. A checkpoint written
+      // before summaries existed is read once and its summary written then.
+      let summary = this.endedSummary(id);
+      if (summary === undefined) {
+        // A checkpoint already read as not ended is read again only once it changed.
+        let observed: string;
+        try { observed = fileObservationIdentity(path); } catch { continue; }
+        if (this.notEnded.get(path) === observed) continue;
+        let text: string;
+        try { text = readFileSync(path, 'utf-8'); } catch { continue; }
+        const read = readContractSnapshot(text);
+        // A file that is refused is left for load() to quarantine with its disclosure, not deleted here.
+        if ('rejected' in read || !isTerminalContractStatus(read.snapshot.contract.status)) { this.notEnded.set(path, observed); continue; }
+        this.notEnded.delete(path);
+        this.recordEnded(read.snapshot.contract);
+        summary = this.endedSummary(id);
+        if (summary === undefined) continue;
       }
-      const read = readContractSnapshot(text);
-      if ('rejected' in read || read.snapshot.contract.durableAdmission !== undefined || !isTerminalContractStatus(read.snapshot.contract.status)) continue;
-      const completedAt = read.snapshot.contract.completedAt;
-      const at = typeof completedAt === 'number' && Number.isFinite(completedAt) ? completedAt : read.snapshot.writtenAt;
-      terminal.push({ path, at, id });
+      if (summary.durable) continue;
+      terminal.push({ path, at: summary.completedAt ?? summary.createdAt, id });
     }
 
     const reapedIds: string[] = [];
     const reapFile = (file: DatedFile): void => {
-      bytesReclaimed += removeFile(file.path);
-      if (file.id === undefined) return;
+      if (file.id === undefined) { bytesReclaimed += removeFile(file.path); return; }
+      bytesReclaimed += this.forgetEnded(file.id);
       reapedIds.push(file.id);
-      const held = this.contracts.get(file.id);
-      if (held && isTerminalContractStatus(held.status)) this.contracts.delete(file.id);
     };
 
     const terminalWithinAge = terminal.filter((file) => now - file.at <= TERMINAL_CONTRACT_MAX_AGE_MS);
@@ -730,7 +896,11 @@ export class ContractStore {
    */
   attach(subscribe: (listener: (event: ContractEvent) => void) => () => void): () => void {
     const unsubscribe = subscribe((event) => {
-      if (event.contractId !== undefined && this.contracts.has(event.contractId)) this.scheduleWrite(event.contractId);
+      if (event.contractId === undefined) return;
+      // A late event of an ended contract (its result published as it ended) is written like any other.
+      const ended = this.endedRecords.get(event.contractId);
+      if (ended !== undefined && !this.contracts.has(event.contractId)) { this.endedRecords.delete(event.contractId); this.contracts.set(event.contractId, ended); }
+      if (this.contracts.has(event.contractId)) this.scheduleWrite(event.contractId);
     });
     if (this.sweepIntervalMs > 0 && this.sweepTimer === null) {
       this.sweepTimer = setInterval(() => this.reap(), this.sweepIntervalMs);

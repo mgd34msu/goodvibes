@@ -271,7 +271,7 @@ export function buildContractPlannerRequest(input: PlannerRequestInput): string 
 // ── Escalation questions (section 6.3's form) ─────────────────────────────────
 
 const REASON_SENTENCES: Readonly<Partial<Record<EscalationReason, string>>> = {
-  'plan-unresolved': 'The planner could not resolve these problems within its repair limit.',
+  'plan-unresolved': 'The planner could not resolve these problems, and repairing again is not making progress.',
   'writing-unclear': 'Your request does not make clear whether the work may change files.',
 };
 
@@ -579,17 +579,24 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
   const admitted = contract.inputSnapshot;
   if (admitted !== undefined) pinContractInputAdmission(contract, signal);
   const snapshot = admitted === undefined ? undefined : structuredClone(admitted);
-  const receipt = JSON.stringify(admitted);
+  /** Cheap and run often: the owner, cancellation, and the admitted receipt compared by reference. */
   const assertCurrent = async (): Promise<void> => {
     assertOwnedContractSource(contract);
     signal?.throwIfAborted();
+    if (contract.inputSnapshot !== admitted) throw new Error('contract input receipt changed during planning');
     if (admitted !== undefined) assertContractInputAdmission(contract);
-    if (contract.inputSnapshot !== admitted || JSON.stringify(contract.inputSnapshot) !== receipt) throw new Error('contract input receipt changed during planning');
-    if (snapshot !== undefined) await assertContractInputView(snapshot, signal);
-    signal?.throwIfAborted();
-    if (contract.inputSnapshot !== admitted || JSON.stringify(contract.inputSnapshot) !== receipt) throw new Error('contract input receipt changed during planning');
   };
-  await assertCurrent();
+  /**
+   * The planner's read-only view still holds the captured tree. The view is
+   * made here and nothing writes it, so it is checked once before each planner
+   * run and once when a plan is accepted (the planner's own reads are checked
+   * by its authority). Cost: one tree computation over git's stat cache.
+   */
+  const assertView = async (): Promise<void> => {
+    await assertCurrent();
+    if (snapshot !== undefined) await assertContractInputView(snapshot, signal);
+  };
+  await assertView();
   if (snapshot !== undefined && deps.readAccessFilter === undefined) throw new Error('captured planning requires original-owner read authorization');
   const workingDirectory = snapshot === undefined ? contract.projectRoot : contractInputPath(snapshot);
   const authority = snapshot === undefined ? undefined : await createContractInputAuthority(contract, workingDirectory, { signal, snapshot });
@@ -643,7 +650,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
   await assertReadAccess();
   const bounds = readPlannerBounds(deps.configManager);
   const systemPrompt = buildContractPlannerPrompt();
-  if (contract.nativeSource !== undefined) return planNativeContract(context, input, route, repositoryMap, bounds, systemPrompt, { workingDirectory, authority, assertCurrent, assertReadAccess });
+  if (contract.nativeSource !== undefined) return planNativeContract(context, input, route, repositoryMap, bounds, systemPrompt, { workingDirectory, authority, assertCurrent, assertView, assertReadAccess });
 
   const rejectedPlans = new Set<string>();
   let repair = 0;
@@ -651,7 +658,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
   try {
     for (;;) {
       if (signal?.aborted) return { kind: 'cancelled' };
-      await assertCurrent();
+      await assertView();
       await assertReadAccess();
       const userPrompt = buildContractPlannerRequest({
         ...(contract.reviewInventory ? { reviewInventory: contract.reviewInventory } : {}),
@@ -692,17 +699,16 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       if (run.status !== 'completed') await backOff(deps, Math.min(250 * (repair + 1), 5_000), signal);
       await assertCurrent();
       if (checked.problems.length === 0 && checked.plan !== undefined) {
+        await assertView();
         const decisionIds = [...contract.shape.decisionIds, ...(checked.verdict?.decisionIds ?? [])];
         acceptPlan(contract, checked.plan, checked.verdict?.dispositions ?? new Map(), context, decisionIds);
         return { kind: 'accepted', plan: checked.plan, decisionIds };
       }
       // A run that failed to finish (an outage, a refused call) is retried with a backoff; only a plan the planner actually returned can repeat.
-      if (context.config.planRepairLimit === 0 && run.status === 'completed' && repeatsRejectedPlan(rejectedPlans, checked)) {
-        return context.fail('planning', 'Planning stopped because a repair repeated the same unresolved planning state. ' + checked.problems.map(entry => entry.message).join(' '));
-      }
-      // The same problems on the same targets two rounds running: the planner is not converging, so the
-      // owner is asked now rather than after the rest of the repair budget is spent on the same answer.
-      const stuck = run.status === 'completed' && checked.plan !== undefined && sameProblemTargets(previous?.problems, checked.problems);
+      // A repeated rejected plan, or the same problems on the same targets two rounds running: the planner is
+      // not converging, so the owner is asked now (whatever the repair limit) rather than repairing in a loop.
+      const repeated = run.status === 'completed' && repeatsRejectedPlan(rejectedPlans, checked);
+      const stuck = repeated || (run.status === 'completed' && checked.plan !== undefined && sameProblemTargets(previous?.problems, checked.problems));
       if (stuck || (context.config.planRepairLimit > 0 && repair >= context.config.planRepairLimit)) {
         if (checked.plan === undefined) {
           return context.fail('planning', `the planner's answer was not a readable plan after ${repair} repairs: ${checked.problems.map((entry) => entry.message).join(' ')}`);
@@ -739,7 +745,7 @@ function priorOwnerReadContext(contract: Contract, deps: ContractPlannerDeps): s
 
 /** Native planning consumes durable attempt counters and semantic receipts, never an owner approval. */
 async function planNativeContract(context: PlanningContext, input: PlanContractInput, route: UnitRoute, repositoryMap: string, bounds: DecompositionBounds, systemPrompt: string,
-  admitted: { readonly workingDirectory: string; readonly authority: ContractInputAuthority | undefined; assertCurrent(): Promise<void>; assertReadAccess(): Promise<void> }): Promise<PlanningOutcome> {
+  admitted: { readonly workingDirectory: string; readonly authority: ContractInputAuthority | undefined; assertCurrent(): Promise<void>; assertView(): Promise<void>; assertReadAccess(): Promise<void> }): Promise<PlanningOutcome> {
   const { contract, deps } = context;
   const signal = input.signal ?? new AbortController().signal;
   const sourceOf = nativeContractActionSource(contract, deps.native, signal);
@@ -754,13 +760,13 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
   try {
     for (;;) {
       signal.throwIfAborted();
-      await admitted.assertCurrent();
+      await (needsPlan ? admitted.assertView() : admitted.assertCurrent());
       await admitted.assertReadAccess();
       if (needsPlan) {
         if (context.config.planRepairLimit > 0 && nativeSpent(contract, budgetKey) >= context.config.planRepairLimit + 1) {
           await decideNativeContract(contract, deps.native, { stage: 'plan', targetId: contract.id, action: 'Start another planning attempt', allowAct: false,
             state: () => ({ attempts: nativeSpent(contract, budgetKey), limit: context.config.planRepairLimit === 0 ? null : context.config.planRepairLimit + 1, reason: 'Planning budget exhausted' }), continuations: [], signal });
-          return context.fail('planning', 'Native planning budget exhausted; no eligible planning continuation');
+          return context.fail('planning', 'the planner used every attempt its budget allows without a plan that passed its checks');
         }
         const attempt = spendNative(contract, deps.native, budgetKey);
         const request = buildContractPlannerRequest({ ask: contract.ask, nativeSource: contract.nativeSource, shape: contract.shape!, config: context.config,
@@ -782,8 +788,9 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
       }
       const checked = await checkPlanOwned(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent);
       await admitted.assertCurrent();
-      if (context.config.planRepairLimit === 0 && !failedRun && rejectedPlans.has(checked.text)) {
-        return context.fail('planning', 'Planning stopped because the planner repeated a plan already returned for revision. ' + checked.problems.map(entry => entry.message).join(' '));
+      // Native contracts take no owner approval of a plan: a repeated rejected plan is their refusal, in the words the owner question would use.
+      if (!failedRun && rejectedPlans.has(checked.text)) {
+        return context.fail('planning', `${REASON_SENTENCES['plan-unresolved']} The planner returned the same plan again. Problems: ${checked.problems.map(entry => entry.message).join(' ')} Start the work again with a changed request.`);
       }
       const valid = checked.problems.length === 0 && checked.plan !== undefined;
       const canRepair = context.config.planRepairLimit === 0 || nativeSpent(contract, budgetKey) < context.config.planRepairLimit + 1;
@@ -795,11 +802,13 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
       await admitted.assertCurrent();
       decision.assertCurrent();
       if (decision.decision.outcome === 'act' && checked.plan !== undefined) {
+        await admitted.assertView();
+        decision.assertCurrent();
         decision.recordClaim();
         acceptPlan(contract, checked.plan, checked.verdict?.dispositions ?? new Map(), context, decision.decision.judgmentDecisionIds, 'native Jev act on the exact checked plan');
         return { kind: 'accepted', plan: checked.plan, decisionIds: decision.decision.judgmentDecisionIds };
       }
-      if (decision.decision.outcome === 'reject') return context.fail('planning', 'Jev refused the native plan');
+      if (decision.decision.outcome === 'reject') return context.fail('planning', 'the decision model rejected the plan, and no repair was eligible');
       if (decision.continuationId !== 'repair-plan' || !canRepair) throw new Error('Native planner continuation is no longer eligible');
       decision.assertCurrent();
       if (!failedRun) rejectedPlans.add(checked.text);

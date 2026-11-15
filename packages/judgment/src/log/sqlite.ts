@@ -1,7 +1,7 @@
 import type { Database, Statement } from 'bun:sqlite';
 import type { JsonValue } from '../port/types.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
-import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionRetention, DecisionTruth, DecisionVolumeEntry, NewDecisionEntry } from './types.ts';
+import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionRetention, DecisionSummary, DecisionTruth, DecisionVolumeEntry, NewDecisionEntry } from './types.ts';
 import { decisionVolumeRow, type DecisionVolumeRow } from './volume-row.ts';
 import { COLUMNS, NOTES_TABLE, TABLE, openLog, rowsOf, type Params } from './sqlite-schema.ts';
 
@@ -10,6 +10,14 @@ interface Row {
   readonly id: string;
   readonly entry: string;
   readonly notes: string;
+}
+
+/** One row of the payload-free summary read. */
+interface SummaryRow {
+  readonly id: string;
+  readonly status: DecisionEntry['status'];
+  readonly requested_model: string | null;
+  readonly model: string | null;
 }
 
 /** The kinds of note; the ordered note table holds every one. */
@@ -60,6 +68,9 @@ const SQL = {
     ORDER BY at, id LIMIT $limit`,
   deleteNotes: `DELETE FROM ${NOTES_TABLE} WHERE decision_id IN (SELECT value FROM json_each($ids))`,
   deleteEntries: `DELETE FROM ${TABLE} WHERE id IN (SELECT value FROM json_each($ids))`,
+  /** Looked up by primary key; reads two small fields of the entry, never its questions, answers or notes. */
+  summaries: `SELECT id, status, json_extract(entry, '$.requestedModel') AS requested_model, json_extract(entry, '$.model') AS model
+    FROM ${TABLE} WHERE id IN (SELECT value FROM json_each($ids))`,
   /** Newest first, up to $limit, meeting every condition given. */
   matching: (conditions: readonly string[]) =>
     `SELECT ${TABLE}.id, ${TABLE}.entry,
@@ -218,6 +229,16 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100_001) throw new RangeError('Decision volume query requires a bounded limit.');
     const { where, params } = filterFor(query);
     return rowsOf<DecisionVolumeRow>(this.#db, SQL.volume(where), { ...params, limit }).map(decisionVolumeRow);
+  }
+
+  summaries(ids: readonly string[]): readonly DecisionSummary[] {
+    if (ids.length === 0) return [];
+    return rowsOf<SummaryRow>(this.#db, SQL.summaries, { ids: JSON.stringify(ids) }).map(row => ({
+      id: row.id as DecisionId,
+      status: row.status,
+      requestedModel: row.requested_model ?? '',
+      ...(row.model === null ? {} : { model: row.model }),
+    }));
   }
 
   #entries(sql: string, params: Params): DecisionEntry[] {

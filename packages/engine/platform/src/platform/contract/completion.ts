@@ -69,7 +69,7 @@ import { readContractConfig } from './config.js';
 import type { Correction } from './correction.js';
 import { nativeContractPort } from './native-decisions.js';
 import { assertNativeContractSource } from './native-source.js';
-import { CHECK_READING_RULES, collectChanges, commandsFromTurns, judgeEvidence, trimEvidence, type ContractTurnRecord, type EvidenceCommand } from './evidence.js';
+import { CHECK_READING_RULES, collectChanges, judgeEvidence, trimEvidence, type EvidenceCommand } from './evidence.js';
 import { failedGates, gateEventSummary, gateSourceKey, refreshGateResults, runContractGates, unverifiedGates, type QualityGateResult } from './gates.js';
 import { workingTreeIdentity } from './tree-identity.js';
 import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
@@ -318,9 +318,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     return operation;
   }
 
-  /** Every turn the given units' agents reported: evidence outside git. */
-  function turnsOf(run: ContractRun, unitIds: ReadonlySet<string>): ContractTurnRecord[] {
-    return [...unitIds].flatMap((id) => run.unitRuntimes.get(id)?.turns ?? []);
+  /** The paths the given units' write and edit calls named: changes outside git. */
+  function writtenPathsOf(run: ContractRun, unitIds: ReadonlySet<string>): Set<string> {
+    return new Set([...unitIds].flatMap((id) => [...run.unitRuntimes.get(id)?.writtenPaths ?? []]));
   }
 
   /**
@@ -349,7 +349,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     if (input.scope === 'deliverable') acceptedSources.delete(run);
     preserveDeclaredReadReceipts(contract, context.readOwnerEvidence?.(contract, ''));
     const paths = new Set(contract.units.filter((unit) => input.unitIds.has(unit.id)).flatMap((unit) => unit.touchedPaths));
-    const changes = (await collectChanges({ baseline: input.baseline }, { cwd: tree, turns: turnsOf(run, input.unitIds) })).filter((change) => paths.has(change.path));
+    const changes = (await collectChanges({ baseline: input.baseline }, { cwd: tree, writtenPaths: writtenPathsOf(run, input.unitIds) })).filter((change) => paths.has(change.path));
     const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope, signal: run.abort.signal });
     for (const unit of contract.units.filter(unit => input.unitIds.has(unit.id))) {
       const preservation = verifyPrivateReceiptPreservation(contract, unit, tree);
@@ -384,7 +384,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         meaning: 'Actual native host extraction of this exact output from the stored accepted unit completion report, with its complete other report fields and real passed unit check. The field text is supplied once as output. This establishes answer provenance and normal return of the candidate for host checking, not acceptance of this new root review, owner publication, external execution or substantive facts merely asserted in the report.' }
       : undefined;
     const evidence = trimEvidence({ output: input.output, changes, gates,
-      commands: evidenceUnits.flatMap<EvidenceCommand>(unit => unit.commandEvidence ?? commandsFromTurns(turnsOf(run, new Set([unit.id])))), orchestration: {
+      commands: evidenceUnits.flatMap<EvidenceCommand>(unit => unit.commandEvidence ?? []), orchestration: {
       contractId: contract.id, createdAt: contract.createdAt, origin: contract.origin, planChecks,
       continuationEvidence: contract.taskEvidence ?? '',
       ...(currentAnswerSource ? { currentAnswerSource } : {}),

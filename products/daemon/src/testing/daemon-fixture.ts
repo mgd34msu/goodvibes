@@ -194,7 +194,8 @@ export async function startDaemonFixture(options: DaemonFixtureOptions): Promise
       userAuth: new UserAuthManager({
         bootstrapFilePath: join(homeDirectory, 'auth-users.json'),
         bootstrapCredentialPath: join(homeDirectory, 'auth-bootstrap.txt'),
-        users: [{ username: 'admin', passwordHash: UserAuthManager.hashPassword('admin'), roles: ['admin'] }],
+        // The fixture authenticates by bearer token, so the password is never checked: hash it at the lowest cost.
+        users: [{ username: 'admin', passwordHash: UserAuthManager.hashPassword('admin', { N: 2, r: 1, p: 1 }), roles: ['admin'] }],
       }),
       runtimeServices: services,
       runtimeBus: services.runtimeBus,

@@ -59,8 +59,8 @@ import { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
-import { createTokenAuditBusEmitter, startPairingTokenAudit } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { bindPairingRotationLimit, createConfiguredTokenAuditor, startPairingTokenAudit } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry, ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -464,10 +464,13 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const closeMcpConnections = (): Promise<void> => mcpClosing ??= mcpRegistry.disconnectAll();
     closeExternalProtocols = closeMcpConnections;
     disposalScope.registry.add('MCP connections', closeMcpConnections);
-    // Advisory reporting only: `managed` is hardcoded false here, so excess-scope
-    // and overdue tokens are reported and never blocked.
-    const tokenAuditor = new ApiTokenAuditor({ managed: false, featureFlags }, { emitter: createTokenAuditBusEmitter(options.runtimeBus) });
+    // The security.tokenAudit.* settings decide the audit and, in managed mode, the
+    // pairing store refuses a device token past the rotation age where it authenticates.
+    const tokenAuditor = createConfiguredTokenAuditor({ configManager, featureFlags, runtimeBus: options.runtimeBus });
     disposalScope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens, tokenAuditor));
+    disposalScope.registry.add('pairing rotation limit', bindPairingRotationLimit(pairingTokens, { configManager, featureFlags }));
+    // Last-seen times are kept in memory between writes; the last ones are written at shutdown.
+    disposalScope.registry.add('pairing last-seen', () => pairingTokens.flushLastSeen());
     const componentHealthMonitor = new ComponentHealthMonitor();
     const healthSystem = createWiredHealthSystem(options.runtimeBus);
     disposalScope.registry.add('runtime health event bridge', bindHealthDomainEvents(options.runtimeBus, healthSystem.wiring));

@@ -28,6 +28,15 @@ device working. A device pairing while already at the `device.nodes.maxPaired` c
 re-pairing under its existing name supersedes its own prior token rather than being
 refused; a genuinely new device at the cap is refused with a named, actionable error.
 
+A minted token is an **offer** until a device first uses it: showing a pairing QR that is
+never scanned adds no device, an offer is not listed by `pairing.tokens.list` and does not
+count toward the cap, and an offer unused for 15 minutes stops working and is dropped at the
+store's next write (a request presenting it is told the code expired). The first use claims
+it (one write per device). After that, last-seen times are kept in memory and written with
+the next store write, by a timer every few minutes, or at daemon shutdown, never inside a
+request. Authenticating a request costs one `lstat` of the pairing file, which is read
+again only when it changed.
+
 A device still holding the legacy shared token calls `pairing.tokens.migrate` once to mint
 its own per-device token without disrupting other clients; `pairing.tokens.revokeShared`
 then turns the legacy shared token off entirely, after which only per-device tokens and
@@ -64,11 +73,11 @@ Users authenticate with a username and password via the login endpoint. On succe
 
 `UserAuthManager` manages the user store and sessions:
 - Passwords are hashed with **scrypt** (64-byte key, random salt). The stored hash format is `base64(salt):N:r:p:base64(derived)` (salt, the scrypt cost parameters, then the derived key); the legacy 2-part `salt:hash` form is still accepted on verify for backward compatibility
-- Default session TTL is **1 hour** (`DEFAULT_SESSION_TTL_MS = 3_600_000`)
+- A sign-in lasts **12 hours** without use (`OPERATOR_SESSION_TTL_MS`, the same value the control plane publishes as `sessionTtlMs`); each use moves its end 12 hours ahead (at most once a minute), and the login response carries `expiresAt`. Sessions are held in memory, so a daemon restart ends them
 - Sessions are pruned on access; expired sessions are rejected and cleaned up
 - Local auth status reports expose an independent opaque session `id`, username and expiry. Use that ID to revoke a session; raw session bearer tokens are not returned by status APIs
-- On first boot with no user store, the daemon bootstraps a default admin account and writes a plaintext credential file for initial login; this file should be deleted after the first login
-- Login failures are locked out per account and client address, independent of the per-address login rate limiter below, so repeated failures from one address never lock the owner out from another. Failures never leak whether the username exists; an unknown username still runs a constant-time password check against a dummy hash. The lockout escalates with repeated failures, 30 seconds at 6-9 failures, 5 minutes at 10-19, and 30 minutes at 20 or more. The thresholds are set above the default 5-per-minute IP login budget so the per-IP limiter throttles an attacker before the account lock engages for a normal in-budget attempt. A successful login clears the failure count.
+- On first boot with no user store, the daemon bootstraps a default admin account and writes a plaintext credential file for initial login; setting that user's password deletes the file, and the first sign-in with a real password retires it too
+- Login failures are locked out per account and client address, independent of the per-address login rate limiter below, so repeated failures from one address never lock the owner out from another. Failures never leak whether the username exists; an unknown username still runs a constant-time password check against a dummy hash. The lockout escalates with repeated failures, 30 seconds at 6-9 failures, 5 minutes at 10-19, and 30 minutes at 20 or more. The thresholds are set above the default 5-per-minute IP login budget so the per-IP limiter throttles an attacker before the account lock engages for a normal in-budget attempt. An attempt made while locked counts toward the address's rate limit only, never toward the lock, and the failure count starts again once the last failure (or the end of its lock) is a quiet period behind: the lock's own length, at least a minute. A successful login clears the failure count.
 
 Session tokens are carried as:
 1. `Authorization: Bearer <token>` header
@@ -106,6 +115,8 @@ There are no spawn tokens. Every agent spawn (a manual batch, a plan step, a rec
 |---|---|
 | `managed: true` | Tokens with scope violations or overdue rotation are **blocked** from use |
 | `managed: false` | Violations are reported via `SecurityEvent` emissions but tokens remain usable |
+
+The daemon builds its auditor from the `security.tokenAudit.*` settings (`managed`, `rotationCadenceDays`, `rotationWarningDays`). With `security.tokenAudit.managed` on, the pairing store itself refuses a paired-device token older than `rotationCadenceDays` where it authenticates, and the 401 names the token's age, the limit and the step (pair the device again, then revoke the old token). Reading security status never runs an audit or emits an event; the hourly audit and an explicit audit run do.
 
 > **Settings gate:** managed-mode blocking only takes effect while `security.tokenAudit.enabled` is on (its default). With the audit off, even `managed: true` instances behave as advisory. See [Feature settings](./feature-settings.md) for how capabilities are configured.
 
@@ -427,7 +438,7 @@ The `AuthenticatedPrincipal` type carries a `principalKind` (`user` | `bot` | `s
 
 ### Bootstrap credential file
 
-**Note:** The bootstrap credential file is written internally during first-boot bootstrap and by `rotatePassword('admin', …)`; the only public `UserAuthManager` method that touches it directly is `clearBootstrapCredentialFile()` (accessed as `authManager.clearBootstrapCredentialFile()`). The `UserAuthManager` class is importable from `@goodvibes-jev/engine/platform/platform/security`; host code reaches the configured, operational instance through daemon/runtime composition rather than instantiating it ad hoc.
+**Note:** The bootstrap credential file is written internally during first-boot bootstrap only (`rotatePassword()` deletes it); the only public `UserAuthManager` method that touches it directly is `clearBootstrapCredentialFile()` (accessed as `authManager.clearBootstrapCredentialFile()`). The `UserAuthManager` class is importable from `@goodvibes-jev/engine/platform/platform/security`; host code reaches the configured, operational instance through daemon/runtime composition rather than instantiating it ad hoc.
 
 #### What it is and when it is created
 
@@ -447,18 +458,11 @@ purpose=Use these credentials only for local daemon/http listener /login routes 
 note=Normal platform host usage does not require these credentials.
 ```
 
-This file is an **output**, not an authentication input. The runtime reads it only for drift detection and to recognize bootstrap-credential logins; the hash in `auth-users.json` is authoritative, so edits to this file do not change the stored password hash.
+This file is an **output**, not an authentication input. The runtime reads it only to recognize bootstrap-credential logins and to explain a failed one; the hash in `auth-users.json` is authoritative, so edits to this file do not change the stored password hash. It is written only when the first admin is generated, never with a password the owner chose.
 
-#### Drift detection
+#### A file that fell behind
 
-Every time `UserAuthManager` is constructed (daemon startup), `detectBootstrapCredentialDrift()` runs automatically when operating in file-backed mode. It reads the bootstrap file and verifies that the stored password still matches the hash in `auth-users.json`. If they have drifted, for example because someone manually edited the file, a `warn`-level log is emitted:
-
-```
-Bootstrap credential file password does not match the stored hash; /login with this password will fail.
-Rotate the password via UserAuthManager.rotatePassword() or regenerate the credential by deleting both files so they are re-created in sync.
-```
-
-Drift detection fires only on file-backed instances; test configs that pass explicit `users` are exempt.
+No password is derived at start to compare the file with the store. When a sign-in fails with exactly the username and password the file holds, the file has fallen behind (edited by hand, or left from an earlier store), and a `warn`-level log says so once, at that failed sign-in.
 
 #### Recommended lifecycle after first login
 
@@ -467,8 +471,8 @@ Drift detection fires only on file-backed instances; test configs that pass expl
    ```ts
    authManager.rotatePassword('admin', newPassword);
    ```
-   `rotatePassword()` updates the user store, revokes all active sessions for that user, and overwrites the bootstrap file with the new password.
-3. Delete the bootstrap file:
+   `rotatePassword()` updates the user store, revokes all active sessions for that user, and deletes the bootstrap file when it names that user. The chosen password is never written in clear.
+3. If the file is still there (another user's password was set), delete it:
    ```ts
    authManager.clearBootstrapCredentialFile(); // returns true if the file existed and was removed
    ```
@@ -490,9 +494,9 @@ Drift detection fires only on file-backed instances; test configs that pass expl
 | Situation | Outcome |
 |---|---|
 | Bootstrap file deleted before first login | Re-bootstrap by deleting both `auth-bootstrap.txt` **and** `auth-users.json`; both files are regenerated on next start |
-| `auth-users.json` deleted while `auth-bootstrap.txt` still exists | Daemon re-bootstraps with a new password; the previous bootstrap file becomes stale. Drift detection will warn on next start |
+| `auth-users.json` deleted while `auth-bootstrap.txt` still exists | Daemon re-bootstraps with a new password and writes it to a new bootstrap file |
 | Both files deleted | Clean re-bootstrap: a new admin account and new bootstrap file are created. All existing sessions are invalidated (sessions are in-memory) |
-| Bootstrap file manually edited | Password mismatch; `/login` will reject the edited password. Drift detection warns on next startup. Fix by calling `rotatePassword()` to bring both files back in sync |
+| Bootstrap file manually edited | Password mismatch; `/login` rejects the edited password and the failed sign-in logs that the file fell behind. Set a password with `rotatePassword()`, which deletes the file |
 
 There is no recovery path for a forgotten admin password beyond deleting both files to trigger a re-bootstrap.
 

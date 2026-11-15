@@ -4,13 +4,15 @@ import { isRuntimeEventDomain } from '../runtime/events/index.js';
 import type { ControlPlaneClientDescriptor } from './types.js';
 import type { ControlPlaneServerConfig } from './types.js';
 import { CHANNEL_REQUIRED_SCOPE, clientMayReceiveEventDomain, clientMaySeeScopedChannel } from './gateway-scope-enforcement.js';
+import { OPERATOR_SESSION_TTL_MS } from '../security/user-auth.js';
 
 export const DEFAULT_SERVER_CONFIG: ControlPlaneServerConfig = {
   enabled: false,
   host: '127.0.0.1',
   port: 3421,
   streamingMode: 'sse',
-  sessionTtlMs: 12 * 60 * 60 * 1000,
+  // The sign-in store's own value, so the published lifetime is the one that holds.
+  sessionTtlMs: OPERATOR_SESSION_TTL_MS,
 };
 
 export const DEFAULT_DOMAINS: readonly RuntimeEventDomain[] = [

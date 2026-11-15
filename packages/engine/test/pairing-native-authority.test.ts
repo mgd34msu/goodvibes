@@ -50,6 +50,7 @@ function fixture() {
   const file = join(dir, 'pairing.json');
   const manager = new PairingTokenManager(file);
   const paired = manager.mint({ name: 'Synthetic device' });
+  manager.authenticate(paired.token);
   const catalog = new GatewayMethodCatalog();
   const helper = new DaemonControlPlaneHelper({
     gatewayMethods: catalog, pairingTokens: manager, authToken: () => 'synthetic-shared',

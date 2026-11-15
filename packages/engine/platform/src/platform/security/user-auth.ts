@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 import { confirmFileDurable, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
-import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { ProcessLockBusyError, withProcessLockSync } from '../utils/process-lock.js';
 import { SettingsAuthorityUnavailableError } from './settings-authority.js';
 
 export interface AuthUser {
@@ -59,9 +59,18 @@ interface UserAuthConfig {
   nowFn?: (() => number) | undefined;
 }
 
-const DEFAULT_SESSION_TTL_MS = 3_600_000;
+/**
+ * How long a sign-in lasts without use: the one value, published by the
+ * control plane as `sessionTtlMs`. Each use moves the end this far ahead
+ * (at most once a minute), so a sign-in in use does not end mid-work.
+ */
+export const OPERATOR_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+/** A session's end moves forward on use at most this often. */
+const SESSION_EXTEND_STEP_MS = 60_000;
 const DEFAULT_MAX_SESSIONS = 1000;
 const DEFAULT_MAX_ACCOUNT_LOCKS = 10_000;
+/** The shortest quiet period after which a failure count starts again. */
+const MIN_LOCK_QUIET_MS = 60_000;
 const SCRYPT_KEY_LENGTH = 64;
 
 /** New hashes use the OWASP 128 MiB scrypt configuration. */
@@ -91,6 +100,16 @@ export interface ScryptParams {
 interface AccountLockState {
   failures: number;
   lockedUntil: number;
+  /** When the last counted failure happened; with `lockedUntil` it decides when the count starts again. */
+  lastFailureAt: number;
+}
+
+/** The lock a failure count reaches: 6-9 failures 30 s, 10-19 five minutes, 20 or more 30 minutes. */
+function lockDurationMs(failures: number): number {
+  if (failures >= 20) return 30 * 60_000;
+  if (failures >= 10) return 5 * 60_000;
+  if (failures >= 6) return 30_000;
+  return 0;
 }
 
 /**
@@ -300,8 +319,8 @@ function mergeUserStores(base: ReadonlyMap<string, AuthUser>, theirs: ReadonlyMa
 
 /** Session checks look at the user file at most this often. */
 const DISK_CHECK_INTERVAL_MS = 1_000;
-const USER_STORE_LOCK_ATTEMPTS = 50;
-const USER_STORE_LOCK_PAUSE_MS = 20;
+/** How long a user-store write waits for another process's write to finish. */
+const USER_STORE_LOCK_WAIT_MS = 1_000;
 
 function loadOrBootstrapUsers(filePath: string, credentialPath: string, observedRecovery?: () => void, freshAbsence = false, params = DEFAULT_SCRYPT_PARAMS): AuthUser[] {
   const existing = readBootstrapUsers(filePath, observedRecovery, freshAbsence);
@@ -357,42 +376,6 @@ function readBootstrapCredentialFile(filePath: string): BootstrapCredentialRecor
   }
 }
 
-/**
- * Detects when the bootstrap credential file has drifted from the persisted
- * user store, typically after someone manually edits `auth-bootstrap.txt`
- * without rotating the password through the UserAuthManager. The daemon's
- * /login route will reject the edited password because the hash in
- * `auth-users.json` no longer matches. Left silent, this wastes hours of
- * debugging; loudly warning is cheap.
- */
-function detectBootstrapCredentialDrift(
-  users: AuthUser[],
-  credentialPath: string,
-  userStorePath: string,
-): void {
-  const credential = readBootstrapCredentialFile(credentialPath);
-  if (!credential) return;
-  const storedUser = users.find((user) => user.username === credential.username);
-  if (!storedUser) {
-    logger.warn(
-      'Bootstrap credential file references a user not present in the auth store; /login with this username will fail',
-      { credentialPath, userStorePath, username: credential.username },
-    );
-    return;
-  }
-  if (!verifyPassword(credential.password, storedUser.passwordHash)) {
-    logger.warn(
-      'Bootstrap credential file password does not match the stored hash; /login with this password will fail. Rotate the password via UserAuthManager.rotatePassword() or regenerate the credential by deleting both files so they are re-created in sync.',
-      {
-        credentialPath,
-        userStorePath,
-        username: credential.username,
-        hint: 'Manual edits to auth-bootstrap.txt do not update auth-users.json. The bootstrap file is an output, not an input.',
-      },
-    );
-  }
-}
-
 /** Strict observation only: legacy bootstrap/recovery retains its own behavior. */
 function inspectSettingsUserStore(filePath: string): boolean {
   let raw: string;
@@ -421,12 +404,14 @@ function validateSettingsUserStore(parsed: Partial<AuthUserStore> | null): void 
 
 export class UserAuthManager {
   private users = new Map<string, AuthUser>();
-  /** The store could not be verified at startup, or the bootstrap credential file fell behind; held until restart. */
+  /** The store could not be verified at startup; held until restart. */
   private settingsFaulted = false;
   /** The last user-store write failed, so disk may differ from memory; cleared by the next successful write. */
   private persistFaulted = false;
   private readonly settingsAuthorities = new WeakMap<SettingsSessionAuthority, SettingsSessionAuthorityRecord>();
   private sessions = new Map<string, AuthSession>();
+  /** Whether the stale bootstrap credential file was already reported in this process. */
+  private staleBootstrapNoted = false;
   /** Failure counters for lockout, keyed by username (in-process checks) or username and client address (sign-ins). */
   private accountLocks = new Map<string, AccountLockState>();
   private sessionTtlMs: number;
@@ -454,7 +439,7 @@ export class UserAuthManager {
   constructor(config: UserAuthConfig) {
     if (!config.bootstrapFilePath) throw new Error('UserAuthManager requires an explicit bootstrapFilePath.');
     if (!config.bootstrapCredentialPath) throw new Error('UserAuthManager requires an explicit bootstrapCredentialPath.');
-    this.sessionTtlMs = config.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+    this.sessionTtlMs = config.sessionTtlMs ?? OPERATOR_SESSION_TTL_MS;
     this.maxSessions = config.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.maxAccountLocks = config.maxAccountLocks ?? DEFAULT_MAX_ACCOUNT_LOCKS;
     this.userStorePath = config.bootstrapFilePath;
@@ -474,13 +459,9 @@ export class UserAuthManager {
       this.users.set(user.username, user);
     }
 
-    // Only run drift detection when we own the file-backed store, test
-    // configs that pass explicit `users` opt out of filesystem bootstrap and
-    // should not trigger spurious warnings.
-    if (this.persistUsers) {
-      detectBootstrapCredentialDrift(seedUsers, this.bootstrapCredentialPath, this.userStorePath);
-      this.rememberStore(this.users.values());
-    }
+    // No password is derived at start: a bootstrap file that fell behind the
+    // store is explained at the failed sign-in that runs into it.
+    if (this.persistUsers) this.rememberStore(this.users.values());
   }
 
   /** Local accounts and their sessions as a revision source. */
@@ -519,13 +500,16 @@ export class UserAuthManager {
     this.rememberStore(onDisk);
   }
 
-  private lockUserStore(): () => void {
-    for (let attempt = 0; attempt < USER_STORE_LOCK_ATTEMPTS; attempt++) {
-      const release = tryAcquireCrossProcessLock(`${this.userStorePath}.lock`);
-      if (release) return release;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, USER_STORE_LOCK_PAUSE_MS);
+  /** Run `write` holding the user store's writer lock, which the kernel releases if this process dies. */
+  private withUserStoreLock<T>(write: () => T): T {
+    try {
+      return withProcessLockSync(`${this.userStorePath}.writer.sqlite`, write, { waitMs: USER_STORE_LOCK_WAIT_MS });
+    } catch (error) {
+      if (error instanceof ProcessLockBusyError) {
+        throw new Error('The local auth user store is being changed by another process. Nothing was saved; try again.', { cause: error });
+      }
+      throw error;
     }
-    throw new Error('The local auth user store is being changed by another process. Nothing was saved; try again.');
   }
 
   static hashPassword(password: string, params?: ScryptParams): string {
@@ -548,7 +532,7 @@ export class UserAuthManager {
     const attempt = this.beginAttempt(username, clientAddress);
     if ('result' in attempt) return attempt.result;
     const settled = this.settleAttempt(attempt, verifyPassword(password, attempt.hashToCheck));
-    if ('ok' in settled) return settled;
+    if ('ok' in settled) { this.noteStaleBootstrapCredential(username, password); return settled; }
     const user = settled.upgrade ? this.saveUpgradedHash(username, settled.user, hashPassword(password, settled.upgrade)) : settled.user;
     return this.completeAttempt(attempt, password, user);
   }
@@ -570,7 +554,7 @@ export class UserAuthManager {
       const attempt = this.beginAttempt(username, clientAddress);
       if ('result' in attempt) return attempt.result;
       const settled = this.settleAttempt(attempt, await verifyPasswordAsync(password, attempt.hashToCheck));
-      if ('ok' in settled) return settled;
+      if ('ok' in settled) { this.noteStaleBootstrapCredential(username, password); return settled; }
       let user = settled.user;
       if (settled.upgrade) {
         try { user = this.saveUpgradedHash(username, user, await hashPasswordAsync(password, settled.upgrade)); }
@@ -595,9 +579,9 @@ export class UserAuthManager {
     const lockState = this.accountLocks.get(lockKey);
 
     // Check the lock before touching the user store; avoids a user-existence side-channel.
+    // An attempt during a lock is not a failure of this account: it counts
+    // toward the address's sign-in limit only, so it cannot extend the lock.
     if (lockState && lockState.lockedUntil > now) {
-      // Still locked, record the attempt but keep the lock window intact.
-      lockState.failures++;
       return { result: { ok: false, lockedUntilMs: lockState.lockedUntil } };
     }
 
@@ -637,6 +621,25 @@ export class UserAuthManager {
     return stored;
   }
 
+  /**
+   * A sign-in failed with exactly the username and password the bootstrap
+   * credential file holds: the file fell behind the user store (edited by hand,
+   * or left from an earlier store). Said here, where the failure is, instead of
+   * deriving a password at every start to find out.
+   */
+  private noteStaleBootstrapCredential(username: string, password: string): void {
+    if (!this.persistUsers || this.staleBootstrapNoted) return;
+    const credential = readBootstrapCredentialFile(this.bootstrapCredentialPath);
+    if (!credential || credential.username !== username || credential.password !== password) return;
+    this.staleBootstrapNoted = true;
+    logger.warn('The bootstrap credential file does not match the user store, so its password does not sign in', {
+      credentialPath: this.bootstrapCredentialPath,
+      userStorePath: this.userStorePath,
+      username,
+      hint: 'Edits to the bootstrap file do not change a password. Set one with the auth rotate command, or delete both files to generate a new admin.',
+    });
+  }
+
   private completeAttempt(attempt: { readonly username: string; readonly lockKey: string }, password: string, user: AuthUser): AuthenticateResult {
     // Whether this login used the bootstrap credential (the password is already confirmed correct).
     const bootstrapCred = readBootstrapCredentialFile(this.bootstrapCredentialPath);
@@ -661,11 +664,10 @@ export class UserAuthManager {
    *   10-19 failures: 5-minute lock
    *   20+ failures:   30-minute lock
    *
-   * Note: failures also increment during an active lock window (when the account
-   * is already locked and another attempt arrives). This means a lock can expire
-   * with a failure count already in a higher tier, causing the next lock after
-   * expiry to jump directly to that tier. This is intentional: repeated attempts
-   * during a lock are themselves failures and escalate the penalty schedule.
+   * Attempts made while locked are not counted here (see beginAttempt). The
+   * count starts again once the last failure, or the end of the lock it
+   * caused, is a quiet period behind: the lock's own length, and at least a
+   * minute. So nobody can keep an account locked by one guess per lock.
    */
   private _recordLoginFailure(lockKey: string, now: number): void {
     const existing = this.accountLocks.get(lockKey);
@@ -673,14 +675,13 @@ export class UserAuthManager {
       // New entry, evict if at cap before inserting.
       this._evictAccountLockIfNeeded(now);
     }
-    const state = existing ?? { failures: 0, lockedUntil: 0 };
+    const state = existing ?? { failures: 0, lockedUntil: 0, lastFailureAt: 0 };
+    const quietSince = Math.max(state.lastFailureAt, state.lockedUntil);
+    if (existing && now - quietSince >= Math.max(lockDurationMs(state.failures), MIN_LOCK_QUIET_MS)) state.failures = 0;
     state.failures++;
-    const f = state.failures;
-    let lockDurationMs = 0;
-    if (f >= 20) lockDurationMs = 30 * 60_000;
-    else if (f >= 10) lockDurationMs = 5 * 60_000;
-    else if (f >= 6) lockDurationMs = 30_000;
-    state.lockedUntil = lockDurationMs > 0 ? now + lockDurationMs : 0;
+    state.lastFailureAt = now;
+    const lockMs = lockDurationMs(state.failures);
+    state.lockedUntil = lockMs > 0 ? now + lockMs : 0;
     this.accountLocks.set(lockKey, state);
   }
 
@@ -719,7 +720,7 @@ export class UserAuthManager {
    * Returns a defensive copy so callers cannot mutate internal state.
    * Use the injected nowFn (via UserAuthManager constructor) to advance time in tests.
    */
-  getAccountLockState(username: string, clientAddress?: string): AccountLockState | undefined {
+  getAccountLockState(username: string, clientAddress?: string): { failures: number; lockedUntil: number } | undefined {
     const state = this.accountLocks.get(this.lockKey(username, clientAddress));
     if (!state) return undefined;
     return { failures: state.failures, lockedUntil: state.lockedUntil };
@@ -762,15 +763,19 @@ export class UserAuthManager {
     return session;
   }
 
+  /** A live session, its end moved ahead by this use (at most once a minute; no write, no revision move). */
   validateSession(token: string): AuthSession | null {
     this.refreshFromDisk(true);
     const session = this.sessions.get(token);
     if (!session) return null;
-    if (this.nowFn() > session.expiresAt) {
+    const now = this.nowFn();
+    if (now > session.expiresAt) {
       this.sessions.delete(token);
       this.#revision++;
       return null;
     }
+    const extended = now + this.sessionTtlMs;
+    if (extended - session.expiresAt >= SESSION_EXTEND_STEP_MS) session.expiresAt = extended;
     return session;
   }
 
@@ -796,9 +801,10 @@ export class UserAuthManager {
     const session = this.sessions.get(expected.token);
     const user = this.users.get(expected.username);
     const roles = user?.roles ?? [];
+    // The session's end may have moved ahead by use since the capture; it must still be ahead now.
     if (session !== expected.session || user !== expected.user
       || session.token !== expected.token || session.username !== expected.username
-      || session.expiresAt !== expected.expiresAt || this.nowFn() >= expected.expiresAt
+      || this.nowFn() >= session.expiresAt
       || user.username !== expected.username || user.passwordHash !== expected.passwordHash
       || roles.length !== expected.roles.length || roles.some((role, index) => role !== expected.roles[index])) {
       throw new SettingsAuthorityUnavailableError();
@@ -899,6 +905,11 @@ export class UserAuthManager {
     return true;
   }
 
+  /**
+   * Set a user's password. When the bootstrap credential file names this user,
+   * it is deleted: the generated one-time password is retired the moment the
+   * owner sets their own, and the chosen password is never written in clear.
+   */
   rotatePassword(username: string, nextPassword: string): void {
     const normalized = username.trim();
     const existing = this.users.get(normalized);
@@ -909,14 +920,13 @@ export class UserAuthManager {
       passwordHash: hashPassword(nextPassword, this.scryptParams),
     }));
     this.revokeSessionsForUser(normalized);
-    if (normalized === 'admin') {
-      try { writeBootstrapCredentialFile(this.bootstrapCredentialPath, normalized, nextPassword); }
+    if (readBootstrapCredentialFile(this.bootstrapCredentialPath)?.username === normalized) {
+      // The file now holds a password that no longer signs in; failing to delete it exposes nothing that works.
+      try { rmSync(this.bootstrapCredentialPath, { force: true }); }
       catch (error) {
-        this.settingsFaulted = true;
-        this.#revision++;
-        throw new Error(`The admin password was changed and saved, but the bootstrap credential file ${this.bootstrapCredentialPath} `
-          + `could not be updated (${error instanceof Error ? error.message : String(error)}); it still holds the old password. `
-          + 'Remove that file or rewrite it; settings changes from web sessions stay refused until the daemon restarts.', { cause: error });
+        logger.warn('The bootstrap credential file could not be deleted after the password change; it holds the old password, which no longer signs in', {
+          credentialPath: this.bootstrapCredentialPath, error: String(error),
+        });
       }
     }
   }
@@ -980,26 +990,33 @@ export class UserAuthManager {
     }
   }
 
-  /** Write the candidate users, then make them live; a failed write changes nothing in memory. */
+  /**
+   * Write the candidate users, then make them live; a failed write changes nothing in memory.
+   * The writer lock and the merge keep another process's change (the CLI adding or deleting
+   * a user while this one upgrades a hash) from being written over; they cost one lock and,
+   * only when the file changed, one read, on a user write (rare), never on a sign-in check.
+   */
   private persist(next: Map<string, AuthUser>, onlyIfHash?: { readonly username: string; readonly passwordHash: string }): boolean {
     if (this.persistUsers) {
+      let written: Map<string, AuthUser> | null;
       try {
-        const release = this.lockUserStore();
-        try {
+        written = this.withUserStoreLock(() => {
           // Another process may have changed the file since this one read it: its changes to
           // users this call does not touch are kept rather than written over.
           let identity: string | undefined;
           try { identity = fileObservationIdentity(this.userStorePath); } catch { identity = undefined; }
           const onDisk = identity !== undefined && identity !== this.storedIdentity ? readBootstrapUsers(this.userStorePath) : null;
-          if (onlyIfHash && onDisk && onDisk.find(user => user.username === onlyIfHash.username)?.passwordHash !== onlyIfHash.passwordHash) return false;
+          if (onlyIfHash && onDisk && onDisk.find(user => user.username === onlyIfHash.username)?.passwordHash !== onlyIfHash.passwordHash) return null;
           const merged = onDisk ? mergeUserStores(this.storedUsers, new Map(onDisk.map(user => [user.username, user])), next) : next;
           writeBootstrapUsers(this.userStorePath, [...merged.values()]);
           this.rememberStore(merged.values());
           // What the other writer changed ends this process's sessions for those users; what this call changed is the caller's to revoke.
           for (const username of this.foreignlyChangedUsers(merged)) if (!sameUser(merged.get(username), next.get(username))) this.revokeSessionsForUser(username);
-          next = merged;
-        } finally { release(); }
+          return merged;
+        });
       } catch (error) { this.persistFaulted = true; this.#revision++; throw error; }
+      if (written === null) return false;
+      next = written;
       this.persistFaulted = false;
     }
     this.users = next;

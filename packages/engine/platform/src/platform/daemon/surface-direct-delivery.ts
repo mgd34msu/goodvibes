@@ -28,7 +28,7 @@ import { logger } from '../utils/logger.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
 import type { HostResolver } from '../tools/fetch/pinned-request.js';
-import { resolveReachableBaseUrl } from '../utils/reachable-base-url.js';
+import { webAppLink } from './web-app-link.js';
 import type { PendingSurfaceReply } from './types.js';
 
 export interface SurfaceDirectDeliveryDeps {
@@ -191,18 +191,14 @@ export async function deliverNtfyAgentReply(
     await ntfyToken(deps),
   );
   // undefined = nothing configured resolves to an address a phone could
-  // reach; publish without a click target rather than with a dead one.
-  const baseAction = resolveReachableBaseUrl(deps.configManager as ConfigManager, 'off-host');
+  // reach; publish without a click target rather than with a dead one. The
+  // tap opens the web app on this session (web-app-link.ts).
+  const sessionLink = webAppLink(deps.configManager, { sessionId: pending.sessionId });
   await ntfy.publish(topic, message, {
     title: `Agent ${pending.agentId}`,
     ...ntfyPriority(deps),
-    ...(baseAction
-      ? {
-          click: `${baseAction}/api/control-plane/web`,
-          actions: [
-            `${pending.sessionId ? `view,Session,${baseAction}/api/control-plane/web?session=${encodeURIComponent(pending.sessionId)}` : `view,Control Plane,${baseAction}/api/control-plane/web`}`,
-          ],
-        }
+    ...(sessionLink
+      ? { click: sessionLink, actions: [`view,${pending.sessionId ? 'Session' : 'Open app'},${sessionLink}`] }
       : {}),
     markGoodVibesOrigin: true,
   });

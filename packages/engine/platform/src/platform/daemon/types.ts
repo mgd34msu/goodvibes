@@ -174,7 +174,6 @@ export interface PendingSurfaceReply {
   readonly interactionToken?: string | undefined;
   readonly topic?: string | undefined;
   readonly callbackUrl?: string | undefined;
-  readonly callbackSecret?: string | undefined;
   readonly callbackSignature?: 'shared-secret' | 'hmac-sha256' | undefined;
   readonly callbackCorrelationId?: string | undefined;
   readonly targetAddress?: string | undefined;

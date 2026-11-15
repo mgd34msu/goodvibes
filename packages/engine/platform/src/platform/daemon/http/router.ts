@@ -1,4 +1,4 @@
-import { answerDaemonChallenge, DAEMON_PROOF_HEADER } from '../identity-proof.js';
+import { answerDaemonChallenge, DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER } from '../identity-proof.js';
 import { createServingSettingsPrecondition } from './settings-precondition.js';
 import { createServingSettingsImportPrecondition } from './settings-import-precondition.js';
 import type { ConfigManager } from '../../config/manager.js';
@@ -15,7 +15,8 @@ import { summarizeError } from '../../utils/error-display.js';
 import { createCredentialStatusProvider } from '../../config/credential-status.js';
 import { buildAutomationEmptyState } from '../../runtime/feature-announcements.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
-import { OPERATOR_SESSION_COOKIE_NAME } from '../../security/http-auth.js';
+import { OPERATOR_SESSION_COOKIE_NAME, type CredentialRefusal } from '../../security/http-auth.js';
+import { webAppLink } from '../web-app-link.js';
 import type { AgentManager } from '../../tools/agent/index.js';
 import {
   normalizeAtSchedule,
@@ -179,6 +180,12 @@ interface DaemonHttpRouterContext {
    * credential changed). Null when the request carries no valid credential.
    */
   readonly authenticateRequest: (req: Request) => RequestContext | null;
+  /**
+   * Why a presented credential the daemon knows is refused, with the next step
+   * (a device token over its rotation age, an unused pairing offer that expired).
+   * Asked only on the 401 path. Absent or null: the plain authentication refusal.
+   */
+  readonly describeCredentialRefusal?: ((token: string) => CredentialRefusal | null) | undefined;
   readonly extractAuthToken: (req: Request) => string;
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
   readonly requireAdmin: (req: Request) => Response | null;
@@ -324,6 +331,11 @@ export class DaemonHttpRouter {
     return posture;
   }
 
+  /** The port this daemon listens on: the bound listener's, else the configured one. */
+  private listeningPort(): number {
+    return this.context.listenerBinding?.().port ?? readControlPlaneBinding((key) => this.getConfigValue(key)).port;
+  }
+
   private getConfigValue(key: string): unknown {
     const getter = (this.context.configManager as { readonly get?: unknown }).get;
     return typeof getter === 'function' ? getter.call(this.context.configManager, key) : undefined;
@@ -369,6 +381,10 @@ export class DaemonHttpRouter {
         });
         if (response.status === 101) return response;
         const observed = new Response(response.body, response);
+        // Every answer to a host's identity challenge carries the proof, whatever its
+        // status, so a host never takes a proof-less answer (a 200 included) for the daemon.
+        const proof = req.headers.has(DAEMON_CHALLENGE_HEADER) ? answerDaemonChallenge(req, this.context.authToken(), this.listeningPort()) : null;
+        if (proof) observed.headers.set(DAEMON_PROOF_HEADER, proof);
         try { observed.headers.set(DECISION_MODEL_POLICY_HEADER, JSON.stringify(decisionModelPolicyState())); }
         catch (error) {
           // An explicit policy setting write can retire its own request scope
@@ -390,8 +406,15 @@ export class DaemonHttpRouter {
     if (!this.context.authenticateRequest(req)) {
       // Only a presented credential that was refused is a failed sign-in; a
       // request with none is a probe (a starting host's identity challenge is one).
-      if (this.context.extractAuthToken(req)) this.authFailures.record(this.clientIpOf(req), 'control-plane-router');
-      const refusal = jsonErrorResponse(
+      const presented = this.context.extractAuthToken(req);
+      if (presented) this.authFailures.record(this.clientIpOf(req), 'control-plane-router');
+      // A device token the pairing store knows but refuses (over its rotation age,
+      // or an offer that expired unused) is told why and what to do.
+      const known = presented ? this.context.describeCredentialRefusal?.(presented) ?? null : null;
+      if (known) {
+        return jsonErrorResponse({ error: known.reason, code: known.code, state: known.state, next: known.next }, { status: 401 });
+      }
+      return jsonErrorResponse(
         new AppError('Authentication required', 'AUTH_REQUIRED', false, {
           category: 'authentication',
           source: 'runtime',
@@ -399,10 +422,6 @@ export class DaemonHttpRouter {
         }),
         { status: 401 },
       );
-      // Lets a starting host confirm this is the daemon before it sends the token.
-      const proof = answerDaemonChallenge(req, this.context.authToken());
-      if (proof) refusal.headers.set(DAEMON_PROOF_HEADER, proof);
-      return refusal;
     }
 
     const gateRefusal = gateGatewayBinding(req, this.context);
@@ -493,7 +512,17 @@ export class DaemonHttpRouter {
     }
 
     if (url.pathname === '/api/control-plane/web' && req.method === 'GET') {
-      return this.context.controlPlaneGateway.renderWebUi();
+      // Links sent before approvals opened the web app still land there, on the approval or session they name.
+      const target = webAppLink(this.context.configManager, {
+        approvalId: url.searchParams.get('approval') ?? undefined,
+        sessionId: url.searchParams.get('session') ?? undefined,
+      }, { reachableOffHost: false });
+      if (target) return new Response(null, { status: 302, headers: { Location: target } });
+      return jsonErrorResponse({
+        error: 'The web app is not served at a known address', code: 'WEB_APP_UNAVAILABLE',
+        state: 'neither the daemon nor a web server is set up to serve the web app',
+        next: ['Set controlPlane.webui.serve to true, or set web.publicBaseUrl to where the web app is served'],
+      }, { status: 404 });
     }
     if (url.pathname === '/api/control-plane/auth' && req.method === 'GET') {
       const apiResponse = await this.dispatchApiRoutes(req);

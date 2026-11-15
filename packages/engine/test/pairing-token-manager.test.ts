@@ -56,7 +56,8 @@ describe('PairingTokenManager', () => {
     expect(raw).not.toContain(minted.token);
     expect(raw).toContain('tokenHash');
 
-    // The listable view never carries the secret or the hash.
+    // The listable view never carries the secret or the hash. A token is listed as a device once it was used.
+    expect(mgr.authenticate(minted.token)?.id).toBe(minted.id);
     const list = mgr.list();
     expect(list).toHaveLength(1);
     expect(JSON.stringify(list)).not.toContain(minted.token);
@@ -88,6 +89,7 @@ describe('PairingTokenManager', () => {
     const minted = mgr.mint({ name: 'tablet', mintedBy: phone.id });
     const grandchild = mgr.mint({ name: 'laptop', mintedBy: minted.id });
     const unrelated = mgr.mint({ name: 'desk' });
+    expect(mgr.authenticate(minted.token)?.id).toBe(minted.id);
     expect(mgr.list().find((entry) => entry.id === minted.id)?.mintedBy).toBe(phone.id);
 
     expect(mgr.revokeWithMinted(phone.id)).toEqual({ revoked: true, alsoRevoked: [minted.id, grandchild.id] });
@@ -115,6 +117,7 @@ describe('PairingTokenManager', () => {
   test('rename changes the visible name; the principal id is stable per token', () => {
     const mgr = new PairingTokenManager(tempFile());
     const a = mgr.mint({ name: 'Old' });
+    expect(mgr.authenticate(a.token)?.id).toBe(a.id);
     expect(mgr.rename(a.id, 'New')).toBe(true);
     expect(mgr.list()[0]?.name).toBe('New');
     expect(mgr.authenticate(a.token)?.principalId).toBe(`pairing:${a.id}`);

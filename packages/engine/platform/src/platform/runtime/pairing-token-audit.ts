@@ -5,6 +5,7 @@ import type { RuntimeEventBus } from './events/index.js';
 import { ApiTokenAuditor } from '../security/token-audit.js';
 import { createTokenAuditBusEmitter } from './token-audit-events.js';
 import { logger } from '../utils/logger.js';
+import { isFeatureGateEnabled } from './feature-flags/gates.js';
 
 /** Policy every per-device pairing token is audited under: no provider scopes, rotation by age only. */
 export const PAIRING_TOKEN_AUDIT_POLICY_ID = 'pairing-token';
@@ -35,6 +36,29 @@ export function createConfiguredTokenAuditor(options: {
     defaultRotationCadenceMs: Number(configManager.get('security.tokenAudit.rotationCadenceDays')) * DAY_MS,
     defaultRotationWarningThresholdMs: Number(configManager.get('security.tokenAudit.rotationWarningDays')) * DAY_MS,
   }, options.runtimeBus ? { emitter: createTokenAuditBusEmitter(options.runtimeBus) } : undefined);
+}
+
+/**
+ * Managed rotation, enforced where a device token authenticates: with
+ * `security.tokenAudit.managed` on (and the token audit feature enabled) the
+ * pairing store refuses a device token older than `rotationCadenceDays`, and
+ * says its age and the re-pair step. The settings are read at each
+ * authentication, so a change applies on the next request. Returns the unbind.
+ */
+export function bindPairingRotationLimit(
+  pairingTokens: Pick<PairingTokenManager, 'setRotationLimit'>,
+  options: {
+    readonly configManager: Pick<ConfigManager, 'get'>;
+    readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
+  },
+): () => void {
+  pairingTokens.setRotationLimit(() => {
+    if (options.configManager.get('security.tokenAudit.managed') !== true) return null;
+    if (!isFeatureGateEnabled(options.featureFlags, 'token-scope-rotation-audit')) return null;
+    const days = Number(options.configManager.get('security.tokenAudit.rotationCadenceDays'));
+    return Number.isFinite(days) && days > 0 ? days * DAY_MS : null;
+  });
+  return () => pairingTokens.setRotationLimit(undefined);
 }
 
 /**

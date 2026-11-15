@@ -73,7 +73,7 @@ Key entrypoints include:
 | --- | --- |
 | `GET /status` | Daemon liveness and posture |
 | `GET /api/control-plane` | The control-plane descriptor |
-| `GET /api/control-plane/web` | The web-surface descriptor |
+| `GET /api/control-plane/web` | Redirects to the web app, opened on the approval (`?approval=<id>`) or session (`?session=<id>`) it names |
 | `GET /api/control-plane/methods` | The typed method catalog |
 | `GET /api/control-plane/events/catalog` | The event catalog |
 | `GET /api/control-plane/events` | The SSE event stream |

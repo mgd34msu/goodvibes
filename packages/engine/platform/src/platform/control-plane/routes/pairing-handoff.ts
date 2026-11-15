@@ -102,7 +102,8 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     // The QR path is where a phone actually pairs, so this is where
     // `device.nodes.maxPaired` has to hold. The refusal names the setting and
     // the live count (see PairingLimitReachedError), 409, because the request
-    // is fine and the state is what refuses it.
+    // is fine and the state is what refuses it. The token is an offer until
+    // the phone uses it: unused, it is not a device and expires.
     const minted: MintedPairingToken = ((): MintedPairingToken => {
       try {
         return deps.tokens.mint({ name });

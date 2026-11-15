@@ -110,7 +110,12 @@ a port probe and an identity probe onto one of these outcomes, reported as
 - **`disabled`**: `daemon.enabled` (or the caller's own gate) is false.
 
 The identity probe sends the shared token only to a process that has proved,
-by answering a challenge, that it already holds the same token.
+by answering a challenge, that it already holds the same token and listens on
+the port the host dialled (the proof covers the port, so a process elsewhere
+that relays the challenge to the real daemon gets nothing usable). With a token
+configured, an answer without a valid proof, a 200 included, is not the daemon.
+With no token configured, a daemon that answers is adopted but reported
+`authenticated: false`.
 
 Hosts read `daemonStatus`; the returned handle holds no daemon object.
 

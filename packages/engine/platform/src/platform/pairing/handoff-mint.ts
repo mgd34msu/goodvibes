@@ -9,6 +9,10 @@
  * JSON connection blob: a camera scan of the QR opens the web app already
  * carrying the one-time token, so the device lands signed in.
  *
+ * The minted token is an offer until the device uses it: showing a QR that is
+ * never scanned adds no device, and an unused offer stops working after
+ * PAIRING_OFFER_LIFETIME_MS (pairing-token-store.ts).
+ *
  * The token rides in the URL fragment, never the query, so it is never sent to a
  * server (no access-log / Referer exposure). The offer set rides alongside so a
  * bundle-aware surface can present the notifications/relay/passkey steps.

@@ -24,24 +24,25 @@ describe('the identity probe and the daemon token', () => {
   }
   const running = (): Response => Response.json({ status: 'running', version: '1.0.0' });
 
-  test('the first request carries no token, and a daemon that answers without one never receives it', async () => {
+  test('the first request carries no token, and a process that answers 200 without a proof is not adopted', async () => {
     await withStatusServer(() => running(), async (port, seen) => {
       const handle = await startHostServices(baseConfig({ 'controlPlane.port': port }), hookDispatcher, runtimeServices, {
         sharedDaemonToken: 'secret-token',
         isDaemonVersionCompatible: () => true,
         probeDaemonPortInUse: async () => true,
       });
-      expect(handle.daemonStatus.mode).toBe('external');
+      expect(handle.daemonStatus.mode).toBe('blocked');
+      expect(handle.daemonStatus.authenticated).toBe(false);
       expect(seen).toEqual([null]);
     });
   });
 
   /** What the real daemon does: refuse an unauthenticated request, proving it holds the token when challenged. */
-  const daemon = (token: string) => (authorization: string | null, request: Request): Response => {
+  const daemon = (token: string, provePort?: number) => (authorization: string | null, request: Request): Response => {
     if (authorization === `Bearer ${token}`) return running();
     const refusal = new Response('no', { status: 401 });
     const challenge = request.headers.get(DAEMON_CHALLENGE_HEADER);
-    if (challenge) refusal.headers.set(DAEMON_PROOF_HEADER, createDaemonIdentityProof(token, challenge));
+    if (challenge) refusal.headers.set(DAEMON_PROOF_HEADER, createDaemonIdentityProof(token, challenge, provePort ?? Number(new URL(request.url).port)));
     return refusal;
   };
   const adopt = (port: number) => startHostServices(baseConfig({ 'controlPlane.port': port }), hookDispatcher, runtimeServices, {
@@ -72,6 +73,14 @@ describe('the identity probe and the daemon token', () => {
       expect(handle.daemonStatus.mode).toBe('blocked');
       expect(handle.daemonStatus.reason).toContain('older version');
       expect(handle.daemonStatus.reason).toContain('stop it');
+    });
+  });
+
+  test('a process that relays the proof a daemon on another port made never receives the token', async () => {
+    await withStatusServer(daemon('secret-token', 1), async (port, seen) => {
+      const handle = await adopt(port);
+      expect(handle.daemonStatus.mode).toBe('blocked');
+      expect(seen).toEqual([null]);
     });
   });
 

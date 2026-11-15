@@ -8,15 +8,16 @@
  *                       and emits warnings at the warning threshold, errors
  *                       when rotation is overdue
  *
- * In managed mode, out-of-policy tokens are blocked from use.
- * In advisory mode, violations are reported but not blocked.
+ * In managed mode, out-of-policy tokens are reported as blocked. In advisory
+ * mode, violations are reported but not blocked.
  *
  * The auditor only knows the tokens and policies a caller registers with it.
- * No runtime service registers any today, and every service constructs it with
- * `managed: false`, so in a running product it audits nothing and blocks
- * nothing: an empty report means "nothing was registered", not "every
- * credential passed". Blocking exists only for a caller that registers tokens
- * and opts into managed mode itself.
+ * Every product builds it from the `security.tokenAudit.*` settings
+ * (createConfiguredTokenAuditor); where a product keeps a pairing store, the
+ * paired-device tokens are registered with it (pairing-token-audit.ts). It reports; it does not stand in any request path.
+ * Whether a device token may authenticate is the pairing store's decision: in
+ * managed mode it refuses a token past the rotation age itself
+ * (bindPairingRotationLimit), so `blocked` here describes what that store does.
  */
 
 import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadMap } from './read-source.js';

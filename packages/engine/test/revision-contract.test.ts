@@ -208,12 +208,16 @@ describe('owners move their revision on every change and not on reads', () => {
     const revision = watch(pairing.revisionSource);
     const minted = pairing.mint({ name: 'Synthetic device' });
     expect(revision.moved()).toBe(true);
+    // The first use claims the offer, which changes who may authenticate.
+    expect(pairing.authenticate(minted.token)?.id).toBe(minted.id);
+    expect(revision.moved()).toBe(true);
     expect(pairing.authenticate(minted.token)?.id).toBe(minted.id);
     expect(pairing.list()[0]?.lastSeenAt).toBeDefined();
     expect(revision.moved()).toBe(false);
 
     const other = new PairingTokenManager(file);
-    other.mint({ name: 'Synthetic second device' });
+    const second = other.mint({ name: 'Synthetic second device' });
+    other.authenticate(second.token);
     expect(revision.moved()).toBe(false);
     expect(pairing.list()).toHaveLength(2);
     expect(revision.moved()).toBe(true);

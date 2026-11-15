@@ -173,29 +173,39 @@ describe('per-account lockout', () => {
     expect(wrongPwResult.lockedUntilMs).toBeUndefined();
   });
 
-  test('10 un-locked failures upgrades lock to 5 minutes (clock injection)', () => {
-    // Use the injected clock so we can fast-forward past lock windows
-    // without mutating internal lock state directly.
+  test('10 failures made between locks upgrade the lock to 5 minutes (clock injection)', () => {
     let fakeNow = Date.now();
     const mgr = makeManager(dir, { nowFn: () => fakeNow });
-    // First 5 failures, no lock
-    for (let i = 0; i < 5; i++) mgr.authenticate('admin', 'wrong');
-    // 6th failure sets 30s lock
-    mgr.authenticate('admin', 'wrong');
-    // Fast-forward past the 30s lock
-    fakeNow += 31_000;
-    // Failures 7-9 pass through (lock expired)
-    for (let i = 0; i < 3; i++) mgr.authenticate('admin', 'wrong');
-    // Fast-forward again
-    fakeNow += 31_000;
-    // 10th failure tips to >= 10 => 5-minute lock
-    mgr.authenticate('admin', 'wrong'); // failure count = 10
+    for (let i = 0; i < 10; i++) {
+      // Attempts during a lock are not counted, so each failure waits out the lock before it.
+      const s = mgr.getAccountLockState('admin');
+      if (s && s.lockedUntil > fakeNow) fakeNow = s.lockedUntil + 1;
+      mgr.authenticate('admin', 'wrong');
+    }
     const state = mgr.getAccountLockState('admin');
-    expect(state).toBeDefined();
+    expect(state?.failures).toBe(10);
     const remainingMs = state!.lockedUntil - fakeNow;
-    // Should be ~5 minutes (300_000ms)
     expect(remainingMs).toBeGreaterThan(250_000);
     expect(remainingMs).toBeLessThanOrEqual(302_000);
+  });
+
+  test('a stranger cannot keep the account locked: attempts during a lock do not count, and the count restarts after a quiet period', () => {
+    let fakeNow = Date.now();
+    const mgr = makeManager(dir, { nowFn: () => fakeNow });
+    for (let i = 0; i < 20; i++) {
+      const s = mgr.getAccountLockState('admin');
+      if (s && s.lockedUntil > fakeNow) fakeNow = s.lockedUntil + 1;
+      mgr.authenticate('admin', 'wrong');
+    }
+    const locked = mgr.getAccountLockState('admin')!;
+    // Guessing during the lock neither counts nor extends it.
+    mgr.authenticate('admin', 'wrong');
+    expect(mgr.getAccountLockState('admin')).toEqual(locked);
+    // The 30-minute lock ends, then as long again passes: one more wrong password does not re-lock.
+    fakeNow = locked.lockedUntil + 30 * 60_000 + 1;
+    const result = mgr.authenticate('admin', 'wrong');
+    expect(result.lockedUntilMs).toBeUndefined();
+    expect(mgr.getAccountLockState('admin')?.failures).toBe(1);
   });
 
   test('20+ un-locked failures upgrades lock to 30 minutes (clock injection)', () => {

@@ -32,6 +32,14 @@ export function credentialKindOf(authenticated: AuthenticatedOperatorRequest): '
   return authenticated.kind === 'pairing-token' ? 'device-token' : authenticated.kind === 'session' ? 'user-session' : authenticated.kind;
 }
 
+/** Why a credential the daemon knows is refused, in the refusal shape: what holds, why, and what to do. */
+export interface CredentialRefusal {
+  readonly code: string;
+  readonly state: string;
+  readonly reason: string;
+  readonly next: readonly string[];
+}
+
 /** Construction-only transport capability, never accepted from a wire payload. */
 export interface NativePairedSnapshot extends AuthenticatedNativePairingToken {
   readonly scopes: readonly string[];
@@ -69,6 +77,11 @@ export interface PairingTokenAuthenticator {
   authenticate(token: string): { readonly id: string; readonly name: string } | null;
   /** Whether the legacy single shared token has been revoked. */
   isLegacyRevoked(): boolean;
+  /**
+   * Why a token this store knows does not authenticate (over its rotation age,
+   * or an offer that expired unused), or null. Asked only after a refusal.
+   */
+  describeRefusal?(token: string): CredentialRefusal | null;
   /** Moves whenever a pairing, a grant or the legacy revocation changes. Absent: every check re-authenticates. */
   readonly revisionSource?: RevisionSource;
   /**
@@ -158,13 +171,14 @@ export function authenticateOperatorToken(
     return { kind: 'pairing-token', token: normalized, tokenId: pairing.id, name: pairing.name };
   }
 
-  // Then the legacy shared token, unless it has been revoked. A non-match must
-  // still be checked as a user session so session cookies remain valid when
-  // operator tooling also uses a bearer token.
+  // Then the legacy shared token, unless it has been revoked. The revocation is
+  // asked only for a token that is the shared token, so a session request never
+  // pays for it. A non-match must still be checked as a user session so session
+  // cookies remain valid when operator tooling also uses a bearer token.
   if (
     context.sharedToken &&
-    context.pairingTokens?.isLegacyRevoked() !== true &&
-    matchesSharedToken(normalized, context.sharedToken)
+    matchesSharedToken(normalized, context.sharedToken) &&
+    context.pairingTokens?.isLegacyRevoked() !== true
   ) {
     return { kind: 'shared-token', token: normalized };
   }

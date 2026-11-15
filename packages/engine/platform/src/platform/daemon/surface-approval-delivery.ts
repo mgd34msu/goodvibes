@@ -65,7 +65,7 @@ export async function deliverSlackApprovalUpdate(
           elements: [
             { type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Approve' }, action_id: `gv:approval:approve:${approval.id}` },
             { type: 'button', style: 'danger', text: { type: 'plain_text', text: 'Deny' }, action_id: `gv:approval:deny:${approval.id}` },
-            ...(webUrl ? [{ type: 'button', text: { type: 'plain_text', text: 'Open Console' }, url: webUrl }] : []),
+            ...(webUrl ? [{ type: 'button', text: { type: 'plain_text', text: 'Review in the app' }, url: webUrl }] : []),
           ],
         },
       ]

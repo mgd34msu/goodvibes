@@ -33,6 +33,13 @@ interface Fixture {
   cleanup(): void;
 }
 
+/** Mint and use once: a minted token is an offer, and becomes a paired device at its first use. */
+function pair(manager: PairingTokenManager, name: string): ReturnType<PairingTokenManager['mint']> {
+  const minted = manager.mint({ name });
+  if (!manager.authenticate(minted.token)) throw new Error(`${name} did not pair`);
+  return minted;
+}
+
 function makeFixture(initialCap: number | undefined): Fixture {
   const filePath = tempFile();
   const cap: { value: number | undefined } = { value: initialCap };
@@ -49,8 +56,8 @@ describe('device.nodes.maxPaired bounds pairing', () => {
   test('pairing below the cap behaves exactly as before', () => {
     const f = makeFixture(3);
     try {
-      f.manager.mint({ name: 'Pixel' });
-      f.manager.mint({ name: 'Laptop' });
+      pair(f.manager, 'Pixel');
+      pair(f.manager, 'Laptop');
       expect(f.manager.pairedCount()).toBe(2);
       expect(f.manager.list().map((token) => token.name).sort()).toEqual(['Laptop', 'Pixel']);
     } finally {
@@ -61,12 +68,12 @@ describe('device.nodes.maxPaired bounds pairing', () => {
   test('a new device at the cap is refused, and the refusal names the setting and the count', () => {
     const f = makeFixture(2);
     try {
-      f.manager.mint({ name: 'Pixel' });
-      f.manager.mint({ name: 'Laptop' });
+      pair(f.manager, 'Pixel');
+      pair(f.manager, 'Laptop');
 
       let thrown: unknown = null;
       try {
-        f.manager.mint({ name: 'iPad' });
+        pair(f.manager, 'iPad');
       } catch (error) {
         thrown = error;
       }
@@ -94,13 +101,13 @@ describe('device.nodes.maxPaired bounds pairing', () => {
   test('an already-paired node re-pairing at the cap is NOT refused', () => {
     const f = makeFixture(2);
     try {
-      const pixel = f.manager.mint({ name: 'Pixel' });
-      f.manager.mint({ name: 'Laptop' });
+      const pixel = pair(f.manager, 'Pixel');
+      pair(f.manager, 'Laptop');
       expect(f.manager.pairedCount()).toBe(2);
 
       // Same device, pairing again (name match is the only identity a pairing
       // exchange carries). It supersedes its OWN record.
-      const rePaired = f.manager.mint({ name: '  pixel  ' });
+      const rePaired = pair(f.manager, '  pixel  ');
       expect(rePaired.token).not.toBe(pixel.token);
       expect(f.manager.pairedCount()).toBe(2);
       // The other device is untouched, re-pairing one node never unpairs another.
@@ -116,9 +123,9 @@ describe('device.nodes.maxPaired bounds pairing', () => {
   test('lowering the cap below the current count unpairs nobody', () => {
     const f = makeFixture(4);
     try {
-      const pixel = f.manager.mint({ name: 'Pixel' });
-      const laptop = f.manager.mint({ name: 'Laptop' });
-      const tablet = f.manager.mint({ name: 'Tablet' });
+      const pixel = pair(f.manager, 'Pixel');
+      const laptop = pair(f.manager, 'Laptop');
+      const tablet = pair(f.manager, 'Tablet');
       expect(f.manager.pairedCount()).toBe(3);
 
       f.cap.value = 1; // the operator tightens the cap
@@ -133,7 +140,7 @@ describe('device.nodes.maxPaired bounds pairing', () => {
       expect(() => f.manager.mint({ name: 'Watch' })).toThrow(PairingLimitReachedError);
       // And an existing device can still re-pair, which is what keeps a tightened
       // cap from bricking a phone that needs a fresh token.
-      expect(() => f.manager.mint({ name: 'Pixel' })).not.toThrow();
+      expect(() => pair(f.manager, 'Pixel')).not.toThrow();
       expect(f.manager.pairedCount()).toBe(3);
     } finally {
       f.cleanup();
@@ -143,12 +150,12 @@ describe('device.nodes.maxPaired bounds pairing', () => {
   test('room freed by unpairing makes the next new pairing succeed again', () => {
     const f = makeFixture(2);
     try {
-      const pixel = f.manager.mint({ name: 'Pixel' });
-      f.manager.mint({ name: 'Laptop' });
+      const pixel = pair(f.manager, 'Pixel');
+      pair(f.manager, 'Laptop');
       expect(() => f.manager.mint({ name: 'iPad' })).toThrow(PairingLimitReachedError);
 
       expect(f.manager.revoke(pixel.id)).toBe(true);
-      expect(() => f.manager.mint({ name: 'iPad' })).not.toThrow();
+      expect(() => pair(f.manager, 'iPad')).not.toThrow();
       expect(f.manager.pairedCount()).toBe(2);
     } finally {
       f.cleanup();
@@ -158,10 +165,10 @@ describe('device.nodes.maxPaired bounds pairing', () => {
   test('the cap is re-read per pairing, so raising it takes effect without a restart', () => {
     const f = makeFixture(1);
     try {
-      f.manager.mint({ name: 'Pixel' });
+      pair(f.manager, 'Pixel');
       expect(() => f.manager.mint({ name: 'Laptop' })).toThrow(PairingLimitReachedError);
       f.cap.value = 5;
-      expect(() => f.manager.mint({ name: 'Laptop' })).not.toThrow();
+      expect(() => pair(f.manager, 'Laptop')).not.toThrow();
       expect(f.manager.pairedCount()).toBe(2);
     } finally {
       f.cleanup();
@@ -171,7 +178,7 @@ describe('device.nodes.maxPaired bounds pairing', () => {
   test('a migration off the legacy shared token is exempt: it is not a new device', () => {
     const f = makeFixture(1);
     try {
-      f.manager.mint({ name: 'Pixel' });
+      pair(f.manager, 'Pixel');
       // Refusing this would strand a working device on a credential it is being
       // asked to give up.
       const migrated = f.manager.mintForMigration({ name: 'Laptop on the shared token' });
@@ -186,7 +193,7 @@ describe('device.nodes.maxPaired bounds pairing', () => {
     for (const broken of [undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       const f = makeFixture(broken as number | undefined);
       try {
-        for (let i = 0; i < 12; i++) f.manager.mint({ name: `device-${i}` });
+        for (let i = 0; i < 12; i++) pair(f.manager, `device-${i}`);
         expect(f.manager.pairedCount()).toBe(12);
       } finally {
         f.cleanup();
@@ -198,10 +205,23 @@ describe('device.nodes.maxPaired bounds pairing', () => {
     const filePath = tempFile();
     const manager = new PairingTokenManager(filePath);
     try {
-      for (let i = 0; i < 20; i++) manager.mint({ name: `device-${i}` });
+      for (let i = 0; i < 20; i++) pair(manager, `device-${i}`);
       expect(manager.pairedCount()).toBe(20);
     } finally {
       rmSync(join(filePath, '..'), { recursive: true, force: true });
+    }
+  });
+
+  test('a token nobody has used is an offer: not listed, not counted, and no bar to the next pairing', () => {
+    const f = makeFixture(2);
+    try {
+      for (let i = 0; i < 9; i++) f.manager.mint({ name: `shown-${i}` });
+      expect(f.manager.list()).toEqual([]);
+      expect(f.manager.pairedCount()).toBe(0);
+      expect(() => pair(f.manager, 'Pixel')).not.toThrow();
+      expect(f.manager.list().map((token) => token.name)).toEqual(['Pixel']);
+    } finally {
+      f.cleanup();
     }
   });
 
@@ -210,8 +230,8 @@ describe('device.nodes.maxPaired bounds pairing', () => {
     const cap = { value: 2 };
     try {
       const first = new PairingTokenManager(filePath, { maxPaired: () => cap.value });
-      first.mint({ name: 'Pixel' });
-      first.mint({ name: 'Laptop' });
+      pair(first, 'Pixel');
+      pair(first, 'Laptop');
 
       const reloaded = new PairingTokenManager(filePath, { maxPaired: () => cap.value });
       expect(reloaded.pairedCount()).toBe(2);

@@ -21,6 +21,16 @@
  * it is revoked here via `revokeLegacyShared()`; a client on the shared token
  * calls `mintForMigration()` once to move to its own per-device token.
  *
+ * A minted token is an offer until its first use: it is not listed as a
+ * device and does not count toward `device.nodes.maxPaired`, and when nobody
+ * uses it within {@link PAIRING_OFFER_LIFETIME_MS} it stops authenticating and
+ * is dropped at the next write. The first authentication claims it (one write
+ * per device). After that, last-seen is stamped in memory and written with the
+ * next write or by a timer, never inside a request. With managed token rotation
+ * on ({@link PairingTokenManager.setRotationLimit}), a device token older than
+ * the limit is refused here, the owner of "may this token authenticate", and
+ * {@link PairingTokenManager.describeRefusal} names its age and the re-pair step.
+ *
  * Storage is synchronous JSON at mode 0600 (the same custody posture as the
  * shared operator token file), because the auth path that consults it is itself
  * synchronous. Every writer reloads under a shared ownership lock, persists
@@ -40,6 +50,7 @@ import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibilit
 import { describeOwnerLock, reclaimDeadOwnerLock, recordOwnerLockHolder, removeOwnerLockDirectory, waitWhileLockIsBeingTaken } from '../config/durable-policy-epoch.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
+import type { CredentialRefusal } from '../security/http-auth.js';
 
 const TOKEN_PREFIX = 'gvp_';
 /** The identity recorded for a pairing file that does not exist. */
@@ -49,8 +60,11 @@ const ABSENT_FILE = 'absent';
 export function isPairingTokenShape(token: string): boolean {
   return token.trim().startsWith(TOKEN_PREFIX);
 }
-/** Do not thrash the disk stamping last-seen on every request. */
-const LAST_SEEN_FLUSH_INTERVAL_MS = 10_000;
+/** Stamped last-seen times are written with the next write, or after this long when nothing else writes. */
+const LAST_SEEN_FLUSH_INTERVAL_MS = 5 * 60_000;
+/** How long a minted token waits for its first use before it expires unused. */
+export const PAIRING_OFFER_LIFETIME_MS = 15 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
 const OWNER_LOCK_NAMESPACE_VERSION = 'goodvibes-pairing-owner-lock-v2\n';
 
 /** A per-pairing token as stored on disk, the hash, never the secret. */
@@ -61,6 +75,8 @@ interface StoredPairingToken {
   readonly tokenHash: string;
   readonly createdAt: number;
   lastSeenAt?: number | undefined;
+  /** Set while the token is an offer nobody has used; it expires unused at this time. Cleared by the first use. */
+  offeredUntil?: number | undefined;
   /** The pairing that minted this one, when a paired device (not the owner's own machine) asked. */
   mintedBy?: string | undefined;
   /** Issued once per exact credential incarnation; never derived by hashing
@@ -201,6 +217,7 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
       || typeof record.tokenHash !== 'string' || !/^[0-9a-f]{64}$/.test(record.tokenHash)
       || typeof record.name !== 'string' || !record.name.trim()
       || typeof record.createdAt !== 'number' || !Number.isFinite(record.createdAt)
+      || (record.offeredUntil !== undefined && (typeof record.offeredUntil !== 'number' || !Number.isFinite(record.offeredUntil)))
       || (record.lastSeenAt !== undefined && (typeof record.lastSeenAt !== 'number' || !Number.isFinite(record.lastSeenAt)))
       || (record.mintedBy !== undefined && (typeof record.mintedBy !== 'string' || !PAIRING_ID_PATTERN.test(record.mintedBy)))
       || ids.has(record.id) || hashes.has(record.tokenHash)) {
@@ -262,6 +279,24 @@ function authorityText(snapshot: PairingTokenSnapshot): string {
   return JSON.stringify(snapshot, (key, value: unknown) => key === 'lastSeenAt'
     || (key === 'legacyRevoked' && value !== true)
     || (key === 'continuations' && Array.isArray(value) && value.length === 0) ? undefined : value);
+}
+
+/** An offer nobody used in time: it never authenticates and goes at the next write. */
+function isExpiredOffer(record: StoredPairingToken, now: number): boolean {
+  return record.offeredUntil !== undefined && record.offeredUntil <= now;
+}
+
+/** Drop expired offers; rides on a write that is happening anyway. */
+function dropExpiredOffers(snapshot: PairingTokenSnapshot, now: number): void {
+  if (snapshot.tokens.some(record => isExpiredOffer(record, now))) {
+    snapshot.tokens = snapshot.tokens.filter(record => !isExpiredOffer(record, now));
+  }
+}
+
+/** The later of the written and the not yet written last-seen time, as an optional field. */
+function lastSeenField(written: number | undefined, pending: number | undefined): { readonly lastSeenAt?: number } {
+  const latest = Math.max(written ?? 0, pending ?? 0);
+  return latest > 0 ? { lastSeenAt: latest } : {};
 }
 
 function generateTokenValue(): string {
@@ -346,8 +381,14 @@ export class PairingTokenManager {
   private snapshot: PairingTokenSnapshot;
   /** Live hash -> identity index, paired with fresh disk proof for native auth. */
   private index = new Map<string, StoredPairingToken>();
-  private lastSeenFlushAt = 0;
   private lastSeenFailureLogged = false;
+  /** Last-seen times stamped in memory since the last write, by pairing id. */
+  readonly #pendingLastSeen = new Map<string, number>();
+  #lastSeenTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Device tokens whose rotation refusal was already logged in this process. */
+  readonly #rotationRefusalsLogged = new Set<string>();
+  /** The managed rotation limit in ms, read at each authentication; null or absent: no limit. */
+  #rotationLimit: (() => number | null) | undefined;
   /**
    * Any failed write blocks native admission. A failed owner write (revoke,
    * mint, rename, native grants) or an unconfirmed native read clears only on
@@ -485,9 +526,94 @@ export class PairingTokenManager {
     return Math.floor(raw);
   }
 
-  /** How many paired device nodes exist right now, one record per node. */
+  /** How many paired device nodes exist right now, one record per node; an offer nobody has used is not one. */
   pairedCount(): number {
-    return this.snapshot.tokens.length;
+    return this.snapshot.tokens.filter(record => record.offeredUntil === undefined).length;
+  }
+
+  /**
+   * Managed token rotation: `read` returns the oldest a device token may be (ms)
+   * to authenticate, or null for no limit. Read at each authentication, so a
+   * settings change applies on the next request. Undefined removes the limit.
+   */
+  setRotationLimit(read: (() => number | null) | undefined): void {
+    this.#rotationLimit = read;
+  }
+
+  /** Why this record does not authenticate now, or null when it does. */
+  private refusalOf(record: StoredPairingToken, now: number): CredentialRefusal | null {
+    if (isExpiredOffer(record, now)) {
+      return {
+        code: 'PAIRING_OFFER_EXPIRED',
+        state: `this pairing code was not used within ${Math.round(PAIRING_OFFER_LIFETIME_MS / 60_000)} minutes of being made, so it expired`,
+        reason: 'The pairing code expired unused',
+        next: ["Show a new pairing code on the owner's machine and use it right away"],
+      };
+    }
+    if (record.offeredUntil !== undefined) return null;
+    let limit: number | null = null;
+    try { limit = this.#rotationLimit?.() ?? null; } catch { limit = null; }
+    if (limit === null || !Number.isFinite(limit) || limit <= 0 || now - record.createdAt <= limit) return null;
+    const ageDays = Math.floor((now - record.createdAt) / DAY_MS);
+    return {
+      code: 'PAIRING_TOKEN_ROTATION_DUE',
+      state: `the token of "${record.name}" is ${ageDays} days old and managed token rotation (security.tokenAudit.managed) allows ${Math.floor(limit / DAY_MS)} days`,
+      reason: 'This device token is past its rotation age and no longer authenticates',
+      next: ["Pair this device again from the owner's machine to get a new token, then revoke the old one"],
+    };
+  }
+
+  /**
+   * Why a token this store knows does not authenticate (an offer that expired
+   * unused, or a device token past the managed rotation age), or null. For the
+   * refusal a caller answers after authentication failed; never grants access.
+   */
+  describeRefusal(token: string): CredentialRefusal | null {
+    const normalized = token.trim();
+    if (!normalized.startsWith(TOKEN_PREFIX)) return null;
+    const record = this.index.get(hashToken(normalized));
+    return record ? this.refusalOf(record, Date.now()) : null;
+  }
+
+  /** Take in the last-seen times stamped since the last write; true when a record moved. */
+  #applyPendingLastSeen(snapshot: PairingTokenSnapshot): boolean {
+    let moved = false;
+    for (const record of snapshot.tokens) {
+      const seen = this.#pendingLastSeen.get(record.id);
+      if (seen !== undefined && (record.lastSeenAt ?? 0) < seen) { record.lastSeenAt = seen; moved = true; }
+    }
+    return moved;
+  }
+
+  #stampLastSeen(record: StoredPairingToken, now: number): void {
+    record.lastSeenAt = now;
+    this.#pendingLastSeen.set(record.id, now);
+    if (this.#lastSeenTimer !== undefined) return;
+    this.#lastSeenTimer = setTimeout(() => { this.#lastSeenTimer = undefined; this.flushLastSeen(); }, LAST_SEEN_FLUSH_INTERVAL_MS);
+    this.#lastSeenTimer.unref?.();
+  }
+
+  /**
+   * Write the last-seen times stamped in memory. Runs on a timer when nothing
+   * else wrote; a host may call it at shutdown. A failure keeps the stamps for
+   * the next try and is logged once per run of failures.
+   */
+  flushLastSeen(): void {
+    if (this.#pendingLastSeen.size === 0) return;
+    try {
+      this.mutate(current => ({ value: undefined, changed: this.#applyPendingLastSeen(current) }), false);
+      this.#pendingLastSeen.clear();
+      this.lastSeenFailureLogged = false;
+    } catch (error) {
+      if (!this.lastSeenFailureLogged) {
+        logger.warn('Pairing token last-seen update failed', { path: this.filePath, error: String(error) });
+        this.lastSeenFailureLogged = true;
+      }
+      if (this.#lastSeenTimer === undefined) {
+        this.#lastSeenTimer = setTimeout(() => { this.#lastSeenTimer = undefined; this.flushLastSeen(); }, LAST_SEEN_FLUSH_INTERVAL_MS);
+        this.#lastSeenTimer.unref?.();
+      }
+    }
   }
 
   private load(): PairingTokenSnapshot {
@@ -620,7 +746,11 @@ export class PairingTokenManager {
       const snapshot = persisted ?? { tokens: [] };
       const result = operation(snapshot);
       // Rides on a write that is happening anyway; a read never rewrites the file.
-      if (result.changed) pruneUnpresentableContinuations(snapshot);
+      if (result.changed) {
+        pruneUnpresentableContinuations(snapshot);
+        dropExpiredOffers(snapshot, Date.now());
+        this.#applyPendingLastSeen(snapshot);
+      }
       try {
         lock.assertOwned();
         if (result.changed) {
@@ -633,6 +763,7 @@ export class PairingTokenManager {
           }
           writeJsonFileAtomic(this.filePath, snapshot, { mode: 0o600, trailingNewline: false, durable: true });
           this.settingsObservedStore = true;
+          this.#pendingLastSeen.clear();
         } else if (nativeRecovery && persisted !== null) {
           // Retrying an indeterminate revoke can find the record already absent.
           // Readable bytes alone do not clear uncertainty; confirm the full
@@ -707,7 +838,7 @@ export class PairingTokenManager {
         if (!snapshot?.tokens.length) return null;
         const hash = hashToken(input.token.trim());
         const paired = snapshot?.tokens.find(item => item.tokenHash === hash);
-        if (!paired) return null;
+        if (!paired || this.refusalOf(paired, Date.now())) return null;
         record = { kind: 'pairing-token', hash, id: paired.id, createdAt: paired.createdAt };
       }
       lock.assertOwned();
@@ -770,7 +901,7 @@ export class PairingTokenManager {
     if (this.nativePersistenceFailed || !normalized.startsWith(TOKEN_PREFIX) || this.index.size === 0) return null;
     const hash = hashToken(normalized);
     const live = this.index.get(hash);
-    if (!live) return null;
+    if (!live || this.refusalOf(live, Date.now())) return null;
     let persisted: StoredPairingToken | undefined;
     try {
       // A fresh manager cannot treat post-rename, unconfirmed bytes as durable
@@ -1053,13 +1184,17 @@ export class PairingTokenManager {
         throw new PairingMinterRevokedError();
       }
       let replacedId: string | undefined;
+      const now = Date.now();
+      dropExpiredOffers(snapshot, now);
       const cap = options.enforceCap ? this.currentCap() : null;
-      if (cap !== null && snapshot.tokens.length >= cap) {
+      // An offer nobody has used yet is not a paired device and does not count toward the cap.
+      const paired = snapshot.tokens.filter(record => record.offeredUntil === undefined);
+      if (cap !== null && paired.length >= cap) {
         const normalized = input.name.trim().toLowerCase();
-        const existing = normalized ? snapshot.tokens.find(record => record.name.trim().toLowerCase() === normalized) : undefined;
-        if (!existing) throw new PairingLimitReachedError(cap, snapshot.tokens.length);
+        const existing = normalized ? paired.find(record => record.name.trim().toLowerCase() === normalized) : undefined;
+        if (!existing) throw new PairingLimitReachedError(cap, paired.length);
         logger.info('Pairing at the device.nodes.maxPaired cap: re-pairing an already paired node', {
-          name: existing.name, maxPaired: cap, pairedCount: snapshot.tokens.length,
+          name: existing.name, maxPaired: cap, pairedCount: paired.length,
         });
         snapshot.tokens = snapshot.tokens.filter(record => record.id !== existing.id);
         replacedId = existing.id;
@@ -1068,7 +1203,7 @@ export class PairingTokenManager {
       const token = generateTokenValue();
       const record: StoredPairingToken = {
         id: `pair-${randomUUID()}`, name: input.name.trim() || 'Unnamed device',
-        tokenHash: hashToken(token), createdAt: Date.now(),
+        tokenHash: hashToken(token), createdAt: now, offeredUntil: now + PAIRING_OFFER_LIFETIME_MS,
         ...(input.mintedBy !== undefined && input.mintedBy !== replacedId ? { mintedBy: input.mintedBy } : {}),
       };
       // A device paired again keeps answering for what its old pairing minted.
@@ -1096,7 +1231,10 @@ export class PairingTokenManager {
   /**
    * Authenticate a presented token by hashing it and looking the hash up.
    * Immediate revocation: a revoked (deleted) token misses here and the caller
-   * treats the request as unauthorized. Stamps last-seen (throttled to disk).
+   * treats the request as unauthorized. An expired offer or a token past the
+   * managed rotation age is refused ({@link describeRefusal} says why). The
+   * first use of an offer claims it, written at once (one write per device);
+   * later uses stamp last-seen in memory only.
    */
   authenticate(token: string): AuthenticatedPairingToken | null {
     const normalized = token.trim();
@@ -1106,28 +1244,33 @@ export class PairingTokenManager {
     let record = this.index.get(hash);
     if (!record) return null;
     const now = Date.now();
-    if (now - this.lastSeenFlushAt >= LAST_SEEN_FLUSH_INTERVAL_MS) {
+    const refusal = this.refusalOf(record, now);
+    if (refusal) {
+      if (refusal.code === 'PAIRING_TOKEN_ROTATION_DUE' && !this.#rotationRefusalsLogged.has(record.id)) {
+        this.#rotationRefusalsLogged.add(record.id);
+        logger.warn('A paired device token past its rotation age was refused', { tokenId: record.id, state: refusal.state, next: refusal.next[0] });
+      }
+      return null;
+    }
+    if (record.offeredUntil !== undefined) {
       try {
+        // Only adds a device, so a failed claim is re-verifiable like a mint.
         record = this.mutate(current => {
           const found = current.tokens.find(item => item.tokenHash === hash);
-          if (found) found.lastSeenAt = now;
-          return { value: found, changed: found !== undefined };
-        }, false);
-        this.lastSeenFlushAt = now;
-        this.lastSeenFailureLogged = false;
+          if (!found || isExpiredOffer(found, now)) return { value: undefined, changed: false };
+          found.offeredUntil = undefined;
+          found.lastSeenAt = now;
+          return { value: found, changed: true };
+        }, true, () => true);
       } catch (error) {
-        // Telemetry persistence never grants access or resurrects cached records. The stamp is
-        // retried on the next request (a clean stamp is what re-admits native auth), so the
-        // warning is logged once per run of failures rather than on every request.
-        if (!this.lastSeenFailureLogged) {
-          logger.warn('Pairing token last-seen update failed', { path: this.filePath, error: String(error) });
-          this.lastSeenFailureLogged = true;
-        }
-        try { record = this.readPersisted()?.tokens.find(item => item.tokenHash === hash); }
-        catch { return null; }
+        // Unclaimed, the offer would expire under a device that is using it; refuse instead.
+        logger.warn('Pairing token first use could not be recorded; the request is refused', { path: this.filePath, error: String(error) });
+        return null;
       }
+      if (!record) return null;
+    } else {
+      this.#stampLastSeen(record, now);
     }
-    if (!record) return null;
     return { id: record.id, name: record.name, principalId: pairingPrincipalId(record.id) };
   }
 
@@ -1135,11 +1278,11 @@ export class PairingTokenManager {
   list(): PublicPairingToken[] {
     // Pick up a mint or revoke made by another process; an unreadable file keeps the last good view.
     this.refreshIfChanged();
-    return this.snapshot.tokens.map((t) => ({
+    return this.snapshot.tokens.filter(t => t.offeredUntil === undefined).map((t) => ({
       id: t.id,
       name: t.name,
       createdAt: t.createdAt,
-      ...(t.lastSeenAt !== undefined ? { lastSeenAt: t.lastSeenAt } : {}),
+      ...lastSeenField(t.lastSeenAt, this.#pendingLastSeen.get(t.id)),
       ...(t.mintedBy !== undefined ? { mintedBy: t.mintedBy } : {}),
     }));
   }

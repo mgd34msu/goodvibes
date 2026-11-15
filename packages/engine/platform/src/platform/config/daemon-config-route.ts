@@ -45,7 +45,7 @@ import {
   type ProcessAliveCheck,
 } from '../runtime/detached-daemon-runtime.js';
 import { deriveControlPlaneBaseUrl, type ControlPlaneBinding } from './control-plane-base-url.js';
-import { DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER, isValidDaemonIdentityProof } from '../daemon/identity-proof.js';
+import { DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER, dialledPort, isValidDaemonIdentityProof } from '../daemon/identity-proof.js';
 import { randomBytes } from 'node:crypto';
 
 /** How to reach a daemon's control plane for config reads and writes. */
@@ -400,7 +400,8 @@ export async function resolveLiveConfigWriteRoute(
  * unrelated local program, and the operator token goes only to a listener that
  * proved it holds the same token. The probe sends a fresh random challenge; a
  * daemon answers its anonymous 401 with an HMAC of the challenge keyed by the
- * token (identity-proof.ts), which nothing without the token can produce.
+ * token and bound to the port dialled (identity-proof.ts), which nothing
+ * without the token, or listening on another port, can produce.
  *
  *   - `proven`: the proof checks out (or there is no token to protect and the
  *     daemon's own authentication error came back).
@@ -423,7 +424,8 @@ export async function probeDaemonIdentity(
     });
     if (response.status !== 401 && response.status !== 403) return 'absent';
     const token = endpoint.token?.trim();
-    if (token && isValidDaemonIdentityProof(token, challenge, response.headers.get(DAEMON_PROOF_HEADER))) return 'proven';
+    const port = dialledPort(endpoint.baseUrl);
+    if (token && port !== undefined && isValidDaemonIdentityProof(token, challenge, response.headers.get(DAEMON_PROOF_HEADER), port)) return 'proven';
     if (!refusesWithDaemonAuthError(await response.text().catch(() => ''))) return 'absent';
     return token ? 'unproven' : 'proven';
   } catch {

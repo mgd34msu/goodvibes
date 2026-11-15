@@ -254,23 +254,25 @@ async function probeGoodVibesDaemonIdentity(
   try {
     // Whatever answers the port has not shown it is the daemon yet, so the token is not sent to it first.
     let response = await request(false);
-    if ((response.status === 401 || response.status === 403) && bearer) {
-      // Only a process that holds the token can answer the challenge; anything else on the port never receives it.
+    if (bearer) {
+      // The daemon proves on every answer, whatever its status, that it holds the
+      // token and listens on the port dialled here; anything else on the port never
+      // receives the token, and a proof-less answer (a 200 included) is not the daemon.
       const proof = response.headers.get(DAEMON_PROOF_HEADER);
       if (!proof) {
         // A daemon started before proofs existed keeps running across a host upgrade; it cannot be told apart from a stranger, so the token stays unsent.
         return {
           kind: 'unauthorized',
-          reason: `The configured token was not sent: whatever answers ${host}:${port} refused the request without an identity proof, which a GoodVibes daemon started by an older version does not give. If that is the daemon, stop it so this host can start a current one`,
+          reason: `The configured token was not sent: whatever answers ${host}:${port} gave no identity proof, which a GoodVibes daemon started by an older version does not give either. If that is the daemon, stop it so this host can start a current one`,
         };
       }
-      if (!isValidDaemonIdentityProof(bearer, challenge, proof)) {
+      if (!isValidDaemonIdentityProof(bearer, challenge, proof, port)) {
         return {
           kind: 'unauthorized',
-          reason: `The configured token was not sent: whatever answers ${host}:${port} did not prove it is the GoodVibes daemon that holds it`,
+          reason: `The configured token was not sent: whatever answers ${host}:${port} did not prove it is the GoodVibes daemon listening there that holds it`,
         };
       }
-      response = await request(true);
+      if (response.status === 401 || response.status === 403) response = await request(true);
     }
     if (response.status === 401 || response.status === 403) {
       return {
@@ -414,12 +416,16 @@ export async function startHostServices(
       case 'adopt':
       case 'incompatible': {
         const found = decision.identity!;
+        // With a token configured the probe adopts only a daemon that proved it holds it; without one nothing was proven.
+        const authenticated = Boolean(factories.sharedDaemonToken?.trim());
         if (classifyDaemonProbe({ identity: found, localVersion: localDaemonVersion, versionCompatible }) === 'adopt') {
           daemonStatus = createServiceStatus('external', daemonHost, daemonPort, {
-            authenticated: true,
+            authenticated,
             status: found.status,
             version: found.version,
-            reason: 'Existing GoodVibes daemon verified on configured host/port',
+            reason: authenticated
+              ? 'Existing GoodVibes daemon verified on configured host/port'
+              : 'A GoodVibes daemon answers on the configured host/port; with no operator token configured its identity was not proven',
           });
           logger.info('Existing GoodVibes daemon detected; using it', { host: daemonHost, port: daemonPort, version: found.version });
         } else {
@@ -430,7 +436,7 @@ export async function startHostServices(
             localVersion: localDaemonVersion,
           });
           daemonStatus = createServiceStatus('incompatible', daemonHost, daemonPort, {
-            authenticated: true,
+            authenticated,
             status: found.status,
             version: found.version,
             reason: describeVersionIncompatibility(daemonHost, daemonPort, localDaemonVersion, found.platformVersion ?? found.version),

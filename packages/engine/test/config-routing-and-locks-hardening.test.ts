@@ -75,7 +75,7 @@ describe('probing a daemon address found in configuration', () => {
     const daemon = (async (_url: string, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       seen.push(headers.get('authorization'));
-      const proof = createDaemonIdentityProof('operator-secret-token', headers.get(DAEMON_CHALLENGE_HEADER) ?? '');
+      const proof = createDaemonIdentityProof('operator-secret-token', headers.get(DAEMON_CHALLENGE_HEADER) ?? '', Number(new URL(_url).port) || 80);
       return Response.json({ error: 'Authentication required', code: 'AUTH_REQUIRED' }, { status: 401, headers: { [DAEMON_PROOF_HEADER]: proof } });
     }) as unknown as typeof fetch;
     const route = await resolveLiveConfigWriteRoute('controlPlane.port', deps(daemon));

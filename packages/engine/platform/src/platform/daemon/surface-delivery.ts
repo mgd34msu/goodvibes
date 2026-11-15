@@ -10,7 +10,7 @@ import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
 import type { DeliveredChannelReply, UndeliveredChannelReply } from '../channels/reply-pipeline.js';
 import type { SharedSessionSurfaceReplyBinding } from '../control-plane/session-intents.js';
 import { logger } from '../utils/logger.js';
-import { resolveReachableBaseUrl } from '../utils/reachable-base-url.js';
+import { webAppLink } from './web-app-link.js';
 import type { SharedApprovalRecord } from '../control-plane/index.js';
 import type { PendingSurfaceReply, SurfaceNoticeDelivery, SurfaceNoticeRefusal } from './types.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -368,13 +368,12 @@ export class DaemonSurfaceDeliveryHelper {
   }
 
   /**
-   * The surface's owner: the policy's accepted owner, else the first user it
-   * admits (a policy written before owners were recorded). Undefined when the
-   * surface names no user.
+   * The surface's owner: the policy's explicit owner (a policy saved before
+   * owners were recorded is given its first allowlisted user when it loads).
+   * Undefined when the surface has no owner.
    */
   channelOwner(surface: string): string | undefined {
-    const policy = this.context.channelPolicy?.getPolicy(surface as ChannelSurface);
-    return policy?.ownerId ?? policy?.allowlistUserIds[0];
+    return this.context.channelPolicy?.getPolicy(surface as ChannelSurface).ownerId;
   }
 
   /** Keeps an owner alert that reached no conversation, for the next attached terminal or web UI to show. */
@@ -779,13 +778,9 @@ export class DaemonSurfaceDeliveryHelper {
     }
   }
 
+  /** The web app opened on this approval or session (web-app-link.ts); undefined when no address a phone can reach is known. */
   controlPlaneWebUrl(input: { readonly approvalId?: string; readonly sessionId?: string | undefined }): string | undefined {
-    const base = resolveReachableBaseUrl(this.context.configManager, 'off-host');
-    if (!base) return undefined;
-    const url = new URL(`${base}/api/control-plane/web`);
-    if (input.approvalId) url.searchParams.set('approval', input.approvalId);
-    if (input.sessionId) url.searchParams.set('session', input.sessionId);
-    return url.toString();
+    return webAppLink(this.context.configManager, input);
   }
 
   signWebhookPayload(body: string, secret: string): string {

@@ -11,7 +11,6 @@ import { spawnSync } from 'node:child_process';
 import { PairingTokenManager, PairingTokenStoreBusyError } from '../platform/src/platform/pairing/pairing-token-store.js';
 import { setOwnerLockWaitForTest } from '../platform/src/platform/config/durable-policy-epoch.js';
 import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
-import { logger } from '../platform/src/platform/utils/logger.js';
 
 const dirs: string[] = [];
 const restores: (() => void)[] = [];
@@ -79,16 +78,14 @@ describe('pairing owner lock being taken', () => {
 });
 
 describe('pairing store faults', () => {
-  test('a failed last-seen stamp blocks native authentication only until the next stamp writes', () => {
+  test('a first use whose claim cannot be written is refused, and the next use claims', () => {
     const file = join(directory(), 'pairing.json');
     const manager = new PairingTokenManager(file);
     const minted = manager.mint({ name: 'Device' });
     const write = spyOn(atomic, 'writeJsonFileAtomic').mockImplementationOnce(() => { throw new Error('synthetic ENOSPC'); });
     restores.push(() => write.mockRestore());
-    expect(manager.authenticate(minted.token)?.id).toBe(minted.id);
-    expect(manager.authenticateNative(minted.token)).toBeNull();
+    expect(manager.authenticate(minted.token)).toBeNull();
     write.mockRestore();
-    // The failed stamp was not counted, so the next request stamps again.
     expect(manager.authenticate(minted.token)?.id).toBe(minted.id);
     expect(manager.authenticateNative(minted.token)?.tokenId).toBe(minted.id);
   });
@@ -121,27 +118,28 @@ describe('pairing store faults', () => {
     expect(capture()).toBeNull();
   });
 
-  test('a failed last-seen stamp does not hold settings authority', () => {
+  test('a failed first-use claim does not hold settings authority', () => {
     const file = join(directory(), 'pairing.json');
     const manager = new PairingTokenManager(file);
     const device = manager.mint({ name: 'Device' });
     const write = spyOn(atomic, 'writeJsonFileAtomic').mockImplementation(() => { throw new Error('synthetic ENOSPC'); });
     restores.push(() => write.mockRestore());
-    expect(manager.authenticate(device.token)?.id).toBe(device.id);
+    expect(manager.authenticate(device.token)).toBeNull();
     write.mockRestore();
     expect(manager.captureSettingsAuthority({ kind: 'pairing-token', token: device.token })).not.toBeNull();
   });
 
-  test('repeated failed last-seen stamps are retried each request but warned about once per run of failures', () => {
+  test('after its first use a device token authenticates with no write to the store', () => {
     const file = join(directory(), 'pairing.json');
     const manager = new PairingTokenManager(file);
     const device = manager.mint({ name: 'Device' });
-    const write = spyOn(atomic, 'writeJsonFileAtomic').mockImplementation(() => { throw new Error('synthetic ENOSPC'); });
-    const warn = spyOn(logger, 'warn').mockImplementation(() => {});
-    restores.push(() => { write.mockRestore(); warn.mockRestore(); });
-    manager.authenticate(device.token); manager.authenticate(device.token); manager.authenticate(device.token);
-    expect(write).toHaveBeenCalledTimes(3);
-    expect(warn.mock.calls.filter(call => String(call[0]).includes('last-seen'))).toHaveLength(1);
+    expect(manager.authenticate(device.token)?.id).toBe(device.id);
+    const write = spyOn(atomic, 'writeJsonFileAtomic');
+    restores.push(() => write.mockRestore());
+    for (let i = 0; i < 5; i++) expect(manager.authenticate(device.token)?.id).toBe(device.id);
+    expect(write).toHaveBeenCalledTimes(0);
+    manager.flushLastSeen();
+    expect(write).toHaveBeenCalledTimes(1);
   });
 
   test('a store opened while another owner held the lock verifies itself at the next capture', () => {
@@ -161,6 +159,7 @@ describe('pairing device list', () => {
     first.mint({ name: 'Phone' });
     const second = new PairingTokenManager(file);
     const tablet = second.mint({ name: 'Tablet' });
+    expect(second.authenticate(tablet.token)?.id).toBe(tablet.id);
     expect(first.list().map(device => device.id)).toContain(tablet.id);
   });
 });

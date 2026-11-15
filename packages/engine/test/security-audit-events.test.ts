@@ -103,7 +103,7 @@ describe('revoking a paired device token', () => {
     const context = { principalId: 'owner' };
     await expect(catalog.invoke('pairing.tokens.delete', { body: { id: 'missing' }, context })).rejects.toThrow();
     expect(revoked).toEqual([]);
-    const id = pairing.list()[0]!.id;
+    const id = minted.id;
     await catalog.invoke('pairing.tokens.delete', { body: { id }, context });
     expect(revoked).toEqual([id]);
     expect(minted).toBeDefined();

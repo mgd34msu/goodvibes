@@ -3,68 +3,9 @@ import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
 
 // ---------------------------------------------------------------------------
-// Precision tool verbosity modes (original API, preserved)
-// ---------------------------------------------------------------------------
-
-export type ModePreset = 'default' | 'vibecoding' | 'justvibes' | (string & Record<never, never>);
-
-export interface VerbosityDefaults {
-  write: string;
-  edit: string;
-  read: string;
-  grep: string;
-  glob: string;
-  exec: string;
-}
-
-export interface ModeDefinition {
-  name: ModePreset;
-  description: string;
-  verbosityDefaults: Partial<VerbosityDefaults>;
-  enforcement: 'strict' | 'advisory';
-}
-
-const DEFAULT_VERBOSITY: VerbosityDefaults = {
-  write: 'standard',
-  edit: 'with_diff',
-  read: 'standard',
-  grep: 'matches',
-  glob: 'paths_only',
-  exec: 'standard',
-};
-
-const VIBECODING_VERBOSITY: VerbosityDefaults = {
-  write: 'count_only',
-  edit: 'minimal',
-  read: 'standard',
-  grep: 'files_only',
-  glob: 'paths_only',
-  exec: 'minimal',
-};
-
-const BUILT_IN_MODES: ModeDefinition[] = [
-  {
-    name: 'default',
-    description: 'Standard precision tool verbosity. Sets output detail only; it does not change what asks for confirmation.',
-    verbosityDefaults: DEFAULT_VERBOSITY,
-    enforcement: 'advisory',
-  },
-  {
-    name: 'vibecoding',
-    description: 'Reduced tool verbosity for rapid iteration. Sets output detail only; it does not change what asks for confirmation.',
-    verbosityDefaults: VIBECODING_VERBOSITY,
-    enforcement: 'advisory',
-  },
-  {
-    name: 'justvibes',
-    description: 'Same reduced tool verbosity as vibecoding. Sets output detail only; it does not skip confirmations (those follow the permission settings).',
-    verbosityDefaults: VIBECODING_VERBOSITY,
-    enforcement: 'advisory',
-  },
-];
-
-// ---------------------------------------------------------------------------
-// HITL UX modes.
+// How much the terminal apps print: the one setting `behavior.hitlMode`.
+// quiet prints less (only warnings and errors toast; routine notifications
+// wait in the history), balanced is the default, operator prints everything.
 // ---------------------------------------------------------------------------
 
 export type HITLMode = 'quiet' | 'balanced' | 'operator';
@@ -79,7 +20,7 @@ export interface HITLModeDefinition {
 
 export const HITL_QUIET: HITLModeDefinition = {
   name: 'quiet',
-  description: 'Minimal verbosity. Suppresses most notifications. Batches updates in 5s windows.',
+  description: 'Prints less: only warnings and errors toast; routine notices and notifications go to the history (/notifications). Batches updates in 5s windows.',
   defaultDomainVerbosity: 'minimal',
   quietWhileTyping: true,
   batchWindowMs: 5_000,
@@ -87,7 +28,7 @@ export const HITL_QUIET: HITLModeDefinition = {
 
 export const HITL_BALANCED: HITLModeDefinition = {
   name: 'balanced',
-  description: 'Normal verbosity. Standard notification flow. Batches updates in 2s windows.',
+  description: 'Default: notices toast, routine notifications go to the history. Batches updates in 2s windows.',
   defaultDomainVerbosity: 'normal',
   quietWhileTyping: true,
   batchWindowMs: 2_000,
@@ -95,7 +36,7 @@ export const HITL_BALANCED: HITLModeDefinition = {
 
 export const HITL_OPERATOR: HITLModeDefinition = {
   name: 'operator',
-  description: 'Verbose. All notifications shown immediately. No quiet-while-typing suppression.',
+  description: 'Prints everything: every notice and notification toasts, immediately, even while you type.',
   defaultDomainVerbosity: 'verbose',
   quietWhileTyping: false,
   batchWindowMs: 500,
@@ -103,17 +44,27 @@ export const HITL_OPERATOR: HITLModeDefinition = {
 
 const HITL_PRESETS: HITLModeDefinition[] = [HITL_QUIET, HITL_BALANCED, HITL_OPERATOR];
 
+/** The router setters a print level reaches. */
+export interface PrintLevelRouter {
+  setQuietWhileTyping(enabled: boolean): void;
+  setBatchWindowMs?(ms: number): void;
+  setDefaultDomainVerbosity?(verbosity: DomainVerbosity): void;
+  setDomainVerbosity(domain: string, verbosity: DomainVerbosity): void;
+}
+
 // ---------------------------------------------------------------------------
 // ModeManager
 // ---------------------------------------------------------------------------
 
 export class ModeManager {
-  private currentMode: ModePreset = 'default';
-  private modes: ModeDefinition[] = [...BUILT_IN_MODES];
   private readonly featureFlags: FeatureFlagReader;
 
   private hitlMode: HITLMode = 'balanced';
   private domainOverrides: Map<string, DomainVerbosity> = new Map();
+  /** Routers kept on this mode: applied when attached and after every change. */
+  private readonly routers = new Set<PrintLevelRouter>();
+  /** Domains given their own verbosity on the routers, so a later mode puts them back on its default. */
+  private readonly routedDomains = new Set<string>();
 
   constructor(options: { readonly featureFlags?: FeatureFlagReader } = {}) {
     this.featureFlags = options.featureFlags ?? null;
@@ -125,44 +76,6 @@ export class ModeManager {
 
   private requireHitlEnabled(operation: string): void {
     requireFeatureGate(this.featureFlags, 'hitl-ux-modes', operation);
-  }
-
-  // -------------------------------------------------------------------------
-  // Precision tool verbosity mode API
-  // -------------------------------------------------------------------------
-
-  getMode(): ModePreset {
-    return this.currentMode;
-  }
-
-  getModeDefinition(): ModeDefinition {
-    return this.modes.find((m) => m.name === this.currentMode) ?? this.modes[0]!;
-  }
-
-  setMode(mode: ModePreset): void {
-    const found = this.modes.find((m) => m.name === mode);
-    if (!found) {
-      const available = this.modes.map((m) => `"${m.name}"`).join(', ');
-      throw new Error(`Unknown mode: "${mode}". Available modes: ${available}`);
-    }
-    this.currentMode = mode;
-  }
-
-  listModes(): ModeDefinition[] {
-    return [...this.modes];
-  }
-
-  registerMode(def: ModeDefinition): void {
-    const idx = this.modes.findIndex((m) => m.name === def.name);
-    if (idx >= 0) {
-      this.modes[idx] = def;
-    } else {
-      this.modes.push(def);
-    }
-  }
-
-  getVerbosityDefaults(): Partial<VerbosityDefaults> {
-    return { ...this.getModeDefinition().verbosityDefaults };
   }
 
   // -------------------------------------------------------------------------
@@ -196,6 +109,7 @@ export class ModeManager {
     }
     this.hitlMode = mode;
     this.domainOverrides.clear();
+    this.applyToRouters();
   }
 
   listHITLPresets(): HITLModeDefinition[] {
@@ -206,6 +120,18 @@ export class ModeManager {
   setDomainVerbosity(domain: string, verbosity: DomainVerbosity): void {
     this.requireHitlEnabled('set HITL domain verbosity');
     this.domainOverrides.set(domain, verbosity);
+    this.applyToRouters();
+  }
+
+  /** Keep a notification router on this mode: applied now and after every change. Returns the detach function. */
+  attachRouter(router: PrintLevelRouter): () => void {
+    this.routers.add(router);
+    this.applyToRouter(router);
+    return () => { this.routers.delete(router); };
+  }
+
+  private applyToRouters(): void {
+    for (const router of this.routers) this.applyToRouter(router);
   }
 
   getDomainVerbosity(domain: string): DomainVerbosity {
@@ -218,19 +144,25 @@ export class ModeManager {
     return Object.fromEntries(this.domainOverrides);
   }
 
-  applyToRouter(router: {
-    setQuietWhileTyping(enabled: boolean): void;
-    setBatchWindowMs?(ms: number): void;
-    setDefaultDomainVerbosity?(verbosity: DomainVerbosity): void;
-    setDomainVerbosity(domain: string, verbosity: DomainVerbosity): void;
-  }): void {
-    if (!this.hitlEnabled()) return;
+  /**
+   * Push the mode into a notification router: batch window, default and
+   * per-domain verbosity. Quiet-while-typing is not a per-mode constant: the
+   * host sets it from the prompt's real typing state at each notification
+   * (getHITLPreset().quietWhileTyping says whether this mode allows it), so
+   * here it is cleared.
+   */
+  applyToRouter(router: PrintLevelRouter): void {
     const preset = this.getHITLPreset();
-    router.setQuietWhileTyping(preset.quietWhileTyping);
+    const overrides = this.getDomainOverrides();
+    router.setQuietWhileTyping(false);
     router.setBatchWindowMs?.(preset.batchWindowMs);
     router.setDefaultDomainVerbosity?.(preset.defaultDomainVerbosity);
-    for (const [domain, verbosity] of this.domainOverrides) {
+    for (const domain of this.routedDomains) {
+      if (!(domain in overrides)) router.setDomainVerbosity(domain, preset.defaultDomainVerbosity);
+    }
+    for (const [domain, verbosity] of Object.entries(overrides)) {
       router.setDomainVerbosity(domain, verbosity);
+      this.routedDomains.add(domain);
     }
   }
 }

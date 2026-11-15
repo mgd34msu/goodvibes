@@ -355,7 +355,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 | --- | --- | --- | --- |
 | `/context` | `/ctx` | `[window [<size>\|clear]]` | Inspect context usage, or set/clear a custom context window for the current model |
 | `/forensics` | `/foren` | `[latest \| show <id> \| export <id> [path] [--overwrite]]` | Failure Forensics: view, inspect, and export auto-classified failure reports |
-| `/mode` | `/hitl` | `[quiet\|balanced\|operator\|show\|set-domain <domain> <verbosity>]` | Manage HITL UX notification mode (quiet/balanced/operator) |
+| `/mode` | `/hitl` | `[quiet\|balanced\|operator\|show\|set-domain <domain> <verbosity>]` | Set how much the app prints: quiet, balanced or operator |
 | `/next-error` | `/ne` | None | Jump to the next error message in the conversation |
 | `/ops` | None | `view \| task <cancel\|pause\|resume\|retry> <id> [note] \| agent cancel <id> [note]` | Operator Control Plane: view audit log, cancel/pause/resume/retry tasks and agents |
 | `/panel` | `/panels` | `[<name> \| open <name> [--target <id>[:<kind>]] \| list]` | Open a view by its old pane name (fleet, tokens, git, …) in its modal; /panel list shows where each goes |

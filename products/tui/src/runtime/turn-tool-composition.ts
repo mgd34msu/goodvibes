@@ -47,6 +47,7 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
     sandboxSessionRegistry: services.sandboxSessionRegistry,
     workingDirectory: services.workingDirectory,
     configManager: services.configManager,
+    runtimeBus: services.runtimeBus,
     providerRegistry: services.providerRegistry,
     toolLLM: services.toolLLM,
     featureFlags: services.featureFlags,

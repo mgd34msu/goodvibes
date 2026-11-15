@@ -560,6 +560,7 @@ export class AgentOrchestrator {
         contractRunner: this.toolDeps.contractRunner,
         projectRoot: defaultCwd,
         workingDirectory: cwd,
+        ...(this.runtimeBus ? { runtimeBus: this.runtimeBus } : {}),
         fileCache: isDefaultCwd && !authority ? this.toolDeps.fileCache : undefined,
         projectIndex: isDefaultCwd && !authority ? this.toolDeps.projectIndex : undefined,
         readAccessFilter,

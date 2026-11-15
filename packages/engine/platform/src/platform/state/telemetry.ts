@@ -1,21 +1,30 @@
-import { SQLiteStore } from './sqlite-store.js';
-import { logger } from '../utils/logger.js';
-import { summarizeError } from '../utils/error-display.js';
+/**
+ * Tool-call analytics for the `state` tool's analytics mode.
+ *
+ * Each tool call is recorded once, where tools run: the tool runtime emits
+ * TOOL_SUCCEEDED, TOOL_FAILED or TOOL_CANCELLED on the runtime event bus, and
+ * {@link toolCallTelemetryFor} subscribes one log per bus to those events. A
+ * row holds the tool name, status, duration, result size and an estimate of
+ * its tokens, never the arguments or the result itself. The log lives in
+ * memory for the life of the process and keeps the newest
+ * {@link TOOL_CALL_TELEMETRY_ROW_CAP} rows.
+ */
+import type { RuntimeEventBus } from '../runtime/events/index.js';
 
 export interface ToolCallRecord {
   id: number;
   tool: string;
-  args: string;
-  result: string;
-  status: 'ok' | 'error';
+  status: 'ok' | 'error' | 'cancelled';
   duration_ms: number;
+  /** Estimated from the result size (about four bytes per token). */
   tokens: number;
+  result_bytes: number;
   timestamp: number;
 }
 
 export interface TelemetryFilter {
   tool?: string | undefined;
-  status?: 'ok' | 'error' | undefined;
+  status?: ToolCallRecord['status'] | undefined;
   since?: number | undefined;
   until?: number | undefined;
   limit?: number | undefined;
@@ -25,172 +34,121 @@ export interface TelemetrySummary {
   total_calls: number;
   total_tokens: number;
   total_errors: number;
+  total_cancelled: number;
   total_duration_ms: number;
+  /** Calls dropped from the start of the log once it held the row cap. */
+  dropped_calls: number;
   by_tool: Record<string, { calls: number; tokens: number; errors: number; avg_duration_ms: number }>;
 }
 
+/** Rows kept; the oldest leave first. */
+export const TOOL_CALL_TELEMETRY_ROW_CAP = 10_000;
+
+const BYTES_PER_TOKEN = 4;
+
 export class TelemetryDB {
-  private readonly store: SQLiteStore;
+  private readonly rows: ToolCallRecord[] = [];
+  private nextId = 1;
+  private dropped = 0;
 
-  constructor(dbPath?: string) {
-    this.store = new SQLiteStore(dbPath);
-  }
+  constructor(private readonly rowCap = TOOL_CALL_TELEMETRY_ROW_CAP) {}
 
-  async init(): Promise<void> {
-    await this.store.init((db) => {
-      db.run(`
-        CREATE TABLE IF NOT EXISTS tool_calls (
-          id          INTEGER PRIMARY KEY AUTOINCREMENT,
-          tool        TEXT    NOT NULL,
-          args        TEXT    NOT NULL DEFAULT '{}',
-          result      TEXT    NOT NULL DEFAULT '{}',
-          status      TEXT    NOT NULL DEFAULT 'ok',
-          duration_ms INTEGER NOT NULL DEFAULT 0,
-          tokens      INTEGER NOT NULL DEFAULT 0,
-          timestamp   INTEGER NOT NULL
-        )
-      `);
-      db.run(`CREATE INDEX IF NOT EXISTS idx_tool ON tool_calls(tool)`);
-      db.run(`CREATE INDEX IF NOT EXISTS idx_timestamp ON tool_calls(timestamp)`);
-      db.run(`CREATE INDEX IF NOT EXISTS idx_status ON tool_calls(status)`);
+  /** One row per finished call: name, status, duration and sizes only. */
+  recordToolCall(call: { tool: string; status: ToolCallRecord['status']; durationMs: number; resultBytes?: number | undefined; timestamp?: number | undefined }): void {
+    const resultBytes = Math.max(0, Math.round(call.resultBytes ?? 0));
+    this.rows.push({
+      id: this.nextId++,
+      tool: call.tool,
+      status: call.status,
+      duration_ms: Math.max(0, Math.round(call.durationMs)),
+      tokens: Math.ceil(resultBytes / BYTES_PER_TOKEN),
+      result_bytes: resultBytes,
+      timestamp: call.timestamp ?? Date.now(),
     });
+    if (this.rows.length > this.rowCap) {
+      const excess = this.rows.length - this.rowCap;
+      this.rows.splice(0, excess);
+      this.dropped += excess;
+    }
   }
 
-  recordToolCall(
-    tool: string,
-    args: Record<string, unknown>,
-    result: Record<string, unknown>,
-    duration: number,
-    tokens: number,
-  ): void {
-    const status = (result.success === false || result.error !== undefined) ? 'error' : 'ok';
-    this.store.run(
-      `INSERT INTO tool_calls (tool, args, result, status, duration_ms, tokens, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        tool,
-        JSON.stringify(args),
-        JSON.stringify(result),
-        status,
-        Math.round(duration),
-        Math.max(0, Math.round(tokens)),
-        Date.now(),
-      ],
-    );
-  }
-
+  /** Newest first. */
   query(filter: TelemetryFilter = {}): ToolCallRecord[] {
-    const conditions: string[] = [];
-    const params: (string | number)[] = [];
-
-    if (filter.tool) {
-      conditions.push('tool = ?');
-      params.push(filter.tool);
+    const matched: ToolCallRecord[] = [];
+    const limit = filter.limit !== undefined && Number.isFinite(filter.limit) ? Math.max(0, Math.floor(filter.limit)) : Number.POSITIVE_INFINITY;
+    for (let index = this.rows.length - 1; index >= 0 && matched.length < limit; index--) {
+      const row = this.rows[index]!;
+      if (filter.tool && row.tool !== filter.tool) continue;
+      if (filter.status && row.status !== filter.status) continue;
+      if (filter.since !== undefined && row.timestamp < filter.since) continue;
+      if (filter.until !== undefined && row.timestamp > filter.until) continue;
+      matched.push({ ...row });
     }
-    if (filter.status) {
-      conditions.push('status = ?');
-      params.push(filter.status);
-    }
-    if (filter.since !== undefined) {
-      conditions.push('timestamp >= ?');
-      params.push(filter.since);
-    }
-    if (filter.until !== undefined) {
-      conditions.push('timestamp <= ?');
-      params.push(filter.until);
-    }
-
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const limit = filter.limit !== undefined ? `LIMIT ${filter.limit}` : '';
-    const sql = `SELECT * FROM tool_calls ${where} ORDER BY timestamp DESC ${limit}`;
-
-    const result = this.store.exec(sql, params);
-    if (!result.length) return [];
-
-    const { columns, values } = result[0] as { columns: string[]; values: unknown[][] };
-    return values.map((row) => {
-      const obj: Record<string, unknown> = {};
-      columns.forEach((col, i) => {
-        obj[col] = row[i];
-      });
-      // Safe cast: the SQL schema defines exactly the columns that
-      // ToolCallRecord expects, so the shape is guaranteed at the DB level.
-      return obj as unknown as ToolCallRecord;
-    });
+    return matched;
   }
 
   getSummary(): TelemetrySummary {
-    const totalResult = this.store.exec(
-      `SELECT COUNT(*) as total_calls,
-              COALESCE(SUM(tokens), 0) as total_tokens,
-              COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END), 0) as total_errors,
-              COALESCE(SUM(duration_ms), 0) as total_duration_ms
-       FROM tool_calls`,
-    );
-
-    let total_calls = 0, total_tokens = 0, total_errors = 0, total_duration_ms = 0;
-    if (totalResult.length > 0) {
-      const row = (totalResult[0]?.values[0] ?? []) as number[];
-      total_calls = row[0] ?? 0;
-      total_tokens = row[1] ?? 0;
-      total_errors = row[2] ?? 0;
-      total_duration_ms = row[3] ?? 0;
+    const summary: TelemetrySummary = {
+      total_calls: 0, total_tokens: 0, total_errors: 0, total_cancelled: 0, total_duration_ms: 0,
+      dropped_calls: this.dropped, by_tool: {},
+    };
+    const durations: Record<string, number> = {};
+    for (const row of this.rows) {
+      summary.total_calls++;
+      summary.total_tokens += row.tokens;
+      summary.total_duration_ms += row.duration_ms;
+      if (row.status === 'error') summary.total_errors++;
+      if (row.status === 'cancelled') summary.total_cancelled++;
+      const entry = summary.by_tool[row.tool] ??= { calls: 0, tokens: 0, errors: 0, avg_duration_ms: 0 };
+      entry.calls++;
+      entry.tokens += row.tokens;
+      if (row.status === 'error') entry.errors++;
+      durations[row.tool] = (durations[row.tool] ?? 0) + row.duration_ms;
     }
-
-    const byToolResult = this.store.exec(
-      `SELECT tool,
-              COUNT(*) as calls,
-              COALESCE(SUM(tokens), 0) as tokens,
-              COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END), 0) as errors,
-              COALESCE(AVG(duration_ms), 0) as avg_duration_ms
-       FROM tool_calls
-       GROUP BY tool
-       ORDER BY calls DESC`,
-    );
-
-    const by_tool: TelemetrySummary['by_tool'] = {};
-    if (byToolResult.length > 0) {
-      for (const row of (byToolResult[0]?.values ?? []) as unknown[][]) {
-        const [tool, calls, tokens, errors, avg_duration_ms] = row as [string, number, number, number, number];
-        by_tool[tool] = { calls, tokens, errors, avg_duration_ms: Math.round(avg_duration_ms) };
-      }
+    for (const [tool, entry] of Object.entries(summary.by_tool)) {
+      entry.avg_duration_ms = Math.round((durations[tool] ?? 0) / entry.calls);
     }
-
-    return { total_calls, total_tokens, total_errors, total_duration_ms, by_tool };
+    return summary;
   }
 
   export(format: 'json' | 'csv' = 'json'): string {
     const records = this.query({});
-
     if (format === 'csv') {
-      const header = 'id,tool,status,duration_ms,tokens,timestamp';
+      const header = 'id,tool,status,duration_ms,tokens,result_bytes,timestamp';
       const rows = records.map((r) =>
-        `${r.id},${JSON.stringify(r.tool)},${r.status},${r.duration_ms},${r.tokens},${r.timestamp}`,
+        `${r.id},${JSON.stringify(r.tool)},${r.status},${r.duration_ms},${r.tokens},${r.result_bytes},${r.timestamp}`,
       );
       return [header, ...rows].join('\n');
     }
-
     return JSON.stringify(records, null, 2);
   }
+}
 
-  async save(): Promise<boolean> {
-    return this.store.save();
-  }
+const logsByBus = new WeakMap<RuntimeEventBus, TelemetryDB>();
 
-  /**
-   * Calls are recorded in memory and written only by save(), so closing writes them first: a
-   * file-backed store's save runs synchronously up to its write, before the handle is released.
-   */
-  close(): void {
-    if (this.store.isReady) {
-      this.store.save().catch((error: unknown) => {
-        logger.warn('TelemetryDB: recorded calls could not be saved on close', { error: summarizeError(error) });
+/**
+ * The process's tool-call log for this bus, subscribed on first use, so every
+ * tool registry built on the same bus shares one log and one subscription.
+ * Cost per tool call: one array push.
+ */
+export function toolCallTelemetryFor(bus: RuntimeEventBus): TelemetryDB {
+  const existing = logsByBus.get(bus);
+  if (existing) return existing;
+  const log = new TelemetryDB();
+  logsByBus.set(bus, log);
+  bus.onDomain('tools', (envelope) => {
+    const event = envelope.payload;
+    if (event.type === 'TOOL_SUCCEEDED' || event.type === 'TOOL_FAILED') {
+      log.recordToolCall({
+        tool: event.tool,
+        status: event.type === 'TOOL_SUCCEEDED' ? 'ok' : 'error',
+        durationMs: event.durationMs,
+        resultBytes: event.result?.byteSize,
+        timestamp: envelope.ts,
       });
+    } else if (event.type === 'TOOL_CANCELLED') {
+      log.recordToolCall({ tool: event.tool, status: 'cancelled', durationMs: 0, timestamp: envelope.ts });
     }
-    this.store.close();
-  }
-
-  get isReady(): boolean {
-    return this.store.isReady;
-  }
+  });
+  return log;
 }

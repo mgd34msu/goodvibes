@@ -12,7 +12,6 @@ import { loadSqlJsEngine, SQLiteStore } from '../platform/src/platform/state/sql
 import { SQLitePublicationError } from '../platform/src/platform/state/sqlite-store-persistence.js';
 import { restoreStoreSnapshot, snapshotStoreFile, snapshotStoreFileAsync, StoreSnapshotScheduler } from '../platform/src/platform/state/store-snapshots.js';
 import { openVersionedBunSqliteStore } from '../platform/src/platform/state/store-versioning.js';
-import { TelemetryDB } from '../platform/src/platform/state/telemetry.js';
 import { selectVibeRecords, VIBE_PERSONA_TAG } from '../platform/src/platform/state/vibe-projection.js';
 import type { MemoryRecord } from '../platform/src/platform/state/memory-store.js';
 import { TemplateManager } from '../platform/src/platform/templates/manager.js';
@@ -214,19 +213,6 @@ describe('SQLiteStore', () => {
     const result = await store.transactPersisted((db) => { db.run("INSERT INTO t VALUES ('x')"); return { changed: true, value: 'v' }; }, () => { throw new Error('mirror refresh failed'); });
     expect(result).toEqual({ kind: 'completed', value: 'v', fenced: true });
     expect(store.isReady).toBe(false);
-  });
-});
-
-describe('TelemetryDB', () => {
-  test('calls recorded before close are on disk afterwards', async () => {
-    const file = join(tempDir(), 'telemetry.sqlite');
-    const first = new TelemetryDB(file);
-    await first.init();
-    first.recordToolCall('read', { path: 'a' }, { success: true }, 5, 10);
-    first.close();
-    const second = new TelemetryDB(file);
-    await second.init();
-    expect(second.query().map((row) => row.tool)).toEqual(['read']);
   });
 });
 

@@ -7,7 +7,6 @@ import { JsonFileStore, JsonFileStoreParseError } from '../platform/src/platform
 import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
 import { ProjectIndex } from '../platform/src/platform/state/project-index.ts';
 import { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
-import { TelemetryDB } from '../platform/src/platform/state/telemetry.ts';
 import { KVState } from '../platform/src/platform/state/kv-state.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
@@ -120,19 +119,6 @@ describe('state persistence failures', () => {
 
     await expect(store.save()).rejects.toThrow();
     store.close();
-  });
-
-  test('TelemetryDB throws on file-backed save failures', async () => {
-    const dir = tempDir('telemetry-db-save');
-    mkdirSync(dir, { recursive: true });
-    const dbPath = join(dir, 'telemetry.db');
-    const db = new TelemetryDB(dbPath);
-    await db.init();
-    db.recordToolCall('tool', {}, { success: true }, 1, 1);
-    mkdirSync(dbPath);
-
-    await expect(db.save()).rejects.toThrow();
-    db.close();
   });
 
   test('KVState rejects corrupt session files instead of starting a replacement session', async () => {

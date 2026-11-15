@@ -30,6 +30,12 @@ export interface NotificationDispatcher {
   dispatch(notification: Notification, eventKey?: string): RoutingDecision;
   /** Surface batch-held notifications (call on a timer / when quiet-typing ends). */
   flush(): void;
+  /**
+   * Whether the person is typing right now and the print level allows holding
+   * routine notifications meanwhile. Read at each notification; a held one
+   * goes to the history, where it can be read once typing stops.
+   */
+  setTypingProbe(probe: () => boolean): void;
   readonly router: NotificationRouter;
 }
 
@@ -83,7 +89,6 @@ export const PERSON_FACING_EVENTS: Readonly<Record<string, PersonFacingEvent>> =
   AUTOMATION_RUN_COMPLETED: { title: 'Scheduled job finished', level: 'info' },
   AUTOMATION_RUN_FAILED: { title: 'Scheduled job failed', level: 'warning' },
   AUTOMATION_JOB_AUTO_DISABLED: { title: 'Scheduled job turned off after repeated failures', level: 'warning' },
-  AUTOMATION_SCHEDULE_ERROR: { title: 'Schedule could not be read', level: 'warning' },
   // deliveries (outgoing channel messages)
   DELIVERY_FAILED: { title: 'Message delivery failed', level: 'warning' },
   DELIVERY_DEAD_LETTERED: { title: 'Message could not be delivered', level: 'warning' },
@@ -137,6 +142,7 @@ export function createNotificationDispatcher(
   const heldEventKeys = new WeakMap<Notification, string>();
   /** Notifications already in the feed, so a periodic flush does not count a batch head twice. */
   const recorded = new WeakSet<Notification>();
+  let typing: () => boolean = () => false;
   const recordIfFeedTarget = (notification: Notification, decision: RoutingDecision, eventKey: string | undefined): void => {
     // A notification held back from the screen (quiet while typing, a quiet
     // mode) is still something that happened: it goes to the history, where it
@@ -154,7 +160,11 @@ export function createNotificationDispatcher(
   };
   return {
     router,
+    setTypingProbe(probe) {
+      typing = probe;
+    },
     dispatch(notification, eventKey) {
+      router.setQuietWhileTyping(typing());
       const decision = router.route(notification);
       if (eventKey) heldEventKeys.set(notification, eventKey);
       recordIfFeedTarget(notification, decision, eventKey);

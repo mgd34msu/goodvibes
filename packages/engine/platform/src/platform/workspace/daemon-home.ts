@@ -28,12 +28,13 @@
  * import identity state from other surfaces or workspace-scoped paths.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync, unlinkSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, isAbsolute, resolve } from 'node:path';
 import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../config/goodvibes-home.js';
 import { operatorTokenPath } from '../pairing/companion-token.js';
 import { logger } from '../utils/logger.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { withProcessLockSync } from '../utils/process-lock.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -114,15 +115,6 @@ export function ensureDaemonHome(daemonHomeDir: string): DaemonHomeDirs {
 // Operator token file read, daemon settings write
 // ---------------------------------------------------------------------------
 
-/** A temp name no other writer shares, so two writers cannot rename each other's file away. */
-function uniqueTmpPath(path: string): string {
-  return `${path}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
-}
-
-function removeQuietly(path: string): void {
-  try { unlinkSync(path); } catch { /* already gone */ }
-}
-
 /**
  * Read operator tokens from the global daemon-home path.
  * Returns undefined when the file does not exist or cannot be parsed.
@@ -160,52 +152,32 @@ export function readDaemonSetting(daemonHomeDir: string, key: string): string | 
 /**
  * Write a single key into daemon-settings.json (merge, not replace).
  *
- * Uses a write-to-tmp-then-rename pattern for atomicity:
- * a crash between write and rename leaves a .tmp file, never a corrupt target.
+ * Through the one atomic writer, durably (file and directory synced before it
+ * returns), at 0600: the file holds pairing state, and a power loss must not
+ * leave it empty. The read-merge-write runs under the file's process lock so
+ * two processes setting different keys keep both.
  */
 export function writeDaemonSetting(daemonHomeDir: string, key: string, value: string): void {
-  mkdirSync(daemonHomeDir, { recursive: true });
   const settingsPath = join(daemonHomeDir, 'daemon-settings.json');
-  const tmpPath = uniqueTmpPath(settingsPath);
-  let existing: Record<string, unknown> = {};
-  if (existsSync(settingsPath)) {
-    try {
-      existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
-    } catch (err: unknown) {
-      // Keep the unreadable bytes: the file may hold other keys (pairing
-      // state) that an operator can still recover. If they cannot be set
-      // aside, refuse the write rather than destroy them.
-      const aside = `${settingsPath}.corrupt-${Date.now()}`;
-      renameSync(settingsPath, aside);
-      logger.warn('[DaemonHome] daemon-settings.json could not be parsed; it was moved aside and a fresh file is being written', {
-        path: settingsPath,
-        movedTo: aside,
-        error: String(err),
-      });
+  mkdirSync(daemonHomeDir, { recursive: true, mode: 0o700 });
+  withProcessLockSync(`${settingsPath}.writer.sqlite`, () => {
+    let existing: Record<string, unknown> = {};
+    if (existsSync(settingsPath)) {
+      try {
+        existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
+      } catch (err: unknown) {
+        // Keep the unreadable bytes: the file may hold other keys (pairing
+        // state) that an operator can still recover. If they cannot be set
+        // aside, refuse the write rather than destroy them.
+        const aside = `${settingsPath}.corrupt-${Date.now()}`;
+        renameSync(settingsPath, aside);
+        logger.warn('[DaemonHome] daemon-settings.json could not be parsed; it was moved aside and a fresh file is being written', {
+          path: settingsPath,
+          movedTo: aside,
+          error: String(err),
+        });
+      }
     }
-  }
-  // daemon-settings.json may contain sensitive pairing state; write at 0600.
-  try {
-    writeFileSync(tmpPath, JSON.stringify({ ...existing, [key]: value }, null, 2), { encoding: 'utf-8', mode: 0o600 });
-    try {
-      chmodSync(tmpPath, 0o600);
-    } catch (error) {
-      logger.warn('daemon-home: failed to chmod temporary daemon settings file', {
-        path: tmpPath,
-        error: String(error),
-      });
-    }
-    renameSync(tmpPath, settingsPath);
-  } catch (error) {
-    removeQuietly(tmpPath);
-    throw error;
-  }
-  try {
-    chmodSync(settingsPath, 0o600);
-  } catch (error) {
-    logger.warn('daemon-home: failed to chmod daemon settings file after rename', {
-      path: settingsPath,
-      error: String(error),
-    });
-  }
+    writeJsonFileAtomic(settingsPath, { ...existing, [key]: value }, { mode: 0o600, durable: true, trailingNewline: false });
+  });
 }

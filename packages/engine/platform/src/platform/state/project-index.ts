@@ -50,10 +50,13 @@ function readIndexFile(indexPath: string): { readonly createdAt: string | undefi
 }
 
 /**
- * ProjectIndex, In-memory project file index with token counts.
+ * ProjectIndex, the files this product has read or written in a workspace,
+ * with estimated token counts.
  *
- * Singleton per process. Loaded at startup from disk in the background.
- * Mutations are debounced: flush happens 5 seconds after last write.
+ * The saved index is read when the index is constructed (one file read), so
+ * files an earlier run saw are known (and watched) after a restart, and the
+ * next save keeps them instead of replacing the file with only this run's
+ * files. Mutations are debounced: flush happens 5 seconds after last write.
  *
  * Disk format: v4 tree (see DiskFormat above).
  */
@@ -71,6 +74,16 @@ export class ProjectIndex {
     this.projectRoot = baseDir;
     this.baseDir = this.projectRoot;
     this.indexPath = join(this.projectRoot, '.goodvibes', 'project-index.json');
+    try {
+      const read = readIndexFile(this.indexPath);
+      if (read) {
+        this.createdAt = read.createdAt ?? this.createdAt;
+        this.files = read.files;
+      }
+    } catch (err) {
+      // A damaged index is a cache: start from what this run sees; the next save replaces it.
+      logger.warn('ProjectIndex: the saved index could not be read; starting empty', { path: this.indexPath, error: summarizeError(err) });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -78,15 +91,15 @@ export class ProjectIndex {
   // ---------------------------------------------------------------------------
 
   /**
-   * Load the index from disk.
-   * Called at startup, safe to call multiple times.
+   * Read the saved index again and merge it in: an entry this process
+   * recorded since keeps its own token count. Safe to call more than once.
    */
   async load(): Promise<void> {
     this.assertOpen();
     const read = readIndexFile(this.indexPath);
     if (read) {
       this.createdAt = read.createdAt ?? this.createdAt;
-      this.files = read.files;
+      for (const [path, tokens] of read.files) if (!this.files.has(path)) this.files.set(path, tokens);
       logger.debug('ProjectIndex: loaded', { files: this.files.size });
     }
   }

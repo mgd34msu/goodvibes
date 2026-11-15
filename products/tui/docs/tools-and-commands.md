@@ -189,14 +189,14 @@ In-process subagent management. See [Agent system](#agent-system) below for arch
 
 ### state
 
-Session state, persistent memory, telemetry, hooks, and output modes, all in one tool.
+Session state, persistent memory, telemetry, hooks, and the print level, all in one tool.
 
 - KV state: session-scoped key-value store with atomic persistence
 - Durable memory posture: inspect the reviewed knowledge store and related runtime state (the full durable-memory workflow lives under `/recall` and the knowledge modals)
 - Hook management: list, enable, disable, add, and remove hooks at runtime
-- Output mode switching: switch between `default`, `vibecoding`, and `justvibes` verbosity presets
-- Analytics: record tool calls, query by filter, export as JSON/CSV, dashboard view, backed by WASM SQLite
-- Context and budget reporting for token usage awareness
+- Print level: read or set how much the app prints (`quiet`, `balanced`, `operator`), the same setting as `/mode` (`behavior.hitlMode`)
+- Analytics: every tool call this process ran (name, status, duration, result size; never arguments or results), queried by filter, exported as JSON/CSV, or summarized; kept in memory, the newest 10,000
+- Context and budget reporting: how many files this product has read or written in the workspace and their estimated tokens (kept across restarts; not the size of the project)
 
 ### workflow
 

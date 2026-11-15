@@ -12,6 +12,11 @@
  * core/notices.ts), and of the routed notifications only warning and critical
  * ones do. Everything that toasts stays in the feed, which /notifications
  * shows in full.
+ *
+ * The print level (`behavior.hitlMode`) moves that line: quiet toasts only
+ * warnings and errors (an information notice goes to the history only),
+ * operator also toasts routed information notifications, balanced (and off)
+ * is the rule above.
  */
 import type { NotificationFeedEntry, NotificationFeed } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
 import type { ToastSpec, ToastTone } from './surface-kit-parts.js';
@@ -79,12 +84,25 @@ function toneForLevel(level: NotificationFeedEntry['level']): ToastTone | null {
 function toneForNotice(level: NotificationFeedEntry['level']): ToastTone {
     return toneForLevel(level) ?? 'info';
 }
+/** The print level the toast bridge reads at each feed change: one setting read, no other state. */
+export type ToastPrintLevel = () => unknown;
+
+function toneFor(entry: NotificationFeedEntry, level: unknown): ToastTone | null {
+    if (entry.severityPending || entry.toast === 'never')
+        return null;
+    if (level === 'quiet')
+        return toneForLevel(entry.level);
+    if (entry.toast === 'always' || level === 'operator')
+        return toneForNotice(entry.level);
+    return toneForLevel(entry.level);
+}
 /**
- * Toast every new warning or critical entry of the notification feed. A
- * collapsed burst toasts once per growth of its running count, with the count
- * in the title. Returns an unsubscribe function.
+ * Toast every new warning or critical entry of the notification feed, and
+ * every system notice, as the print level allows. A collapsed burst toasts
+ * once per growth of its running count, with the count in the title. Returns
+ * an unsubscribe function.
  */
-export function bridgeNotificationFeedToToasts(feed: NotificationFeed, toasts: ToastCenter): () => void {
+export function bridgeNotificationFeedToToasts(feed: NotificationFeed, toasts: ToastCenter, printLevel: ToastPrintLevel = () => 'balanced'): () => void {
     // Per entry: the count last toasted for, and whether it has toasted at that
     // count. An entry toasts when its count grows, or once when a second arrival
     // of the same event (feed eventKey folding) makes a quiet entry one that
@@ -97,13 +115,14 @@ export function bridgeNotificationFeedToToasts(feed: NotificationFeed, toasts: T
         seen.set(entry.key, { count: entry.collapsedCount, toasted: true });
     return feed.subscribe(() => {
         const entries = feed.list();
+        const level = printLevel();
         const retained = new Set(entries.map((entry) => entry.key));
         for (const key of seen.keys())
             if (!retained.has(key))
                 seen.delete(key);
         for (const entry of entries) {
             const previous = seen.get(entry.key);
-            const tone = entry.severityPending || entry.toast === 'never' ? null : entry.toast === 'always' ? toneForNotice(entry.level) : toneForLevel(entry.level);
+            const tone = toneFor(entry, level);
             if (previous && previous.count === entry.collapsedCount && (previous.toasted || !tone))
                 continue;
             seen.set(entry.key, { count: entry.collapsedCount, toasted: Boolean(tone) });

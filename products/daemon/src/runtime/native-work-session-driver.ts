@@ -83,6 +83,7 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
     const tools = registerAllTools(registry, {
       ...options.toolDependencies,
       configManager: options.configManager,
+      runtimeBus: options.runtimeBus,
       providerRegistry: options.providerRegistry,
       contractRunner: options.runner,
       projectRoot: options.projectRoot,

@@ -12,8 +12,8 @@ export const STATE_TOOL_SCHEMA = {
         + ' context returns conversation info; memory accesses persistent .goodvibes/memory files;'
         + ' telemetry returns session telemetry summary;'
         + ' hooks manages registered hooks (list/enable/disable/add/remove);'
-        + ' mode manages output verbosity mode (get/set/list);'
-        + ' analytics reads TelemetryDB (query/summary/export/dashboard/sync).',
+        + ' mode reads or sets how much the terminal app prints (quiet/balanced/operator; get/set/list);'
+        + ' analytics reads the tool calls this process ran (query/summary/export/dashboard).',
     },
     keys: {
       type: 'array',
@@ -79,21 +79,21 @@ export const STATE_TOOL_SCHEMA = {
     modeAction: {
       type: 'string',
       enum: ['get', 'set', 'list'],
-      description: '(mode: mode) Sub-action: get returns current mode; set switches to a named mode; list returns all modes.',
+      description: '(mode: mode) Sub-action: get returns the current print level; set saves a new one; list returns the levels.',
     },
     modeName: {
       type: 'string',
-      description: '(mode: mode, action: set) Name of the mode to switch to (e.g. default, vibecoding, justvibes).',
+      description: '(mode: mode, action: set) The print level: quiet (only warnings and errors toast), balanced (the default) or operator (everything toasts).',
     },
     analyticsAction: {
       type: 'string',
-      enum: ['query', 'summary', 'export', 'dashboard', 'sync'],
-      description: '(mode: analytics) Sub-action: query recorded calls by filter; summary aggregation; export as JSON/CSV; dashboard top-level view; sync/persist to disk.',
+      enum: ['query', 'summary', 'export', 'dashboard'],
+      description: '(mode: analytics) Sub-action: query recorded calls by filter; summary aggregation; export as JSON/CSV; dashboard top-level view. Calls are kept in memory for this process, the newest 10,000.',
     },
     analyticsFilter: {
       type: 'object',
       additionalProperties: true,
-      description: '(mode: analytics, action: query) Filter object: { tool?, status?, since?, until?, limit? }',
+      description: '(mode: analytics, action: query) Filter object: { tool?, status? (ok, error or cancelled), since?, until?, limit? }',
     },
     analyticsFormat: {
       type: 'string',
@@ -129,7 +129,7 @@ export type HookAction = 'list' | 'enable' | 'disable' | 'add' | 'remove';
 export type ModeAction = 'get' | 'set' | 'list';
 
 /** Analytics sub-action. */
-export type AnalyticsAction = 'query' | 'summary' | 'export' | 'dashboard' | 'sync';
+export type AnalyticsAction = 'query' | 'summary' | 'export' | 'dashboard';
 
 /** Full input shape for the state tool. */
 export interface StateInput {

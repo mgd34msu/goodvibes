@@ -214,6 +214,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     projectIndex: services.projectIndex,
     fileUndoManager: services.fileUndoManager,
     modeManager: services.modeManager,
+    runtimeBus: services.runtimeBus,
     processManager: services.processManager,
     agentManager: services.agentManager,
     agentMessageBus: services.agentMessageBus,

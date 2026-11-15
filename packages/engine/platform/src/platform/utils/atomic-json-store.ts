@@ -606,29 +606,11 @@ export interface DocumentWriteOptions {
   readonly indent?: number | null;
 }
 
-/** Parent directories this process already created or found, so a write does not ask again. */
-const documentParents = new Set<string>();
-
-function openDocumentTemp(temp: string, parent: string, mode: number): number {
-  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
-  if (!documentParents.has(parent)) {
-    mkdirSync(parent, { recursive: true });
-    documentParents.add(parent);
-  }
-  try {
-    return openSync(temp, flags, mode);
-  } catch (error) {
-    if (!atomicMissing(error)) throw error;
-    // The directory was removed since it was first seen; make it once more.
-    mkdirSync(parent, { recursive: true });
-    return openSync(temp, flags, mode);
-  }
-}
-
 /**
  * The document writer: a small JSON document held in memory by its owner and
- * written whole on a real change. One temp file beside the target, one write,
- * one data sync, one rename; the parent directory is resolved once per process.
+ * written whole on a real change, through {@link writeFileAtomic}. One temp
+ * file beside the target, one write, one data sync, one rename; the parent
+ * directory is resolved once per process.
  *
  * A reader sees the old document or the new one, never part of either, and a
  * crash leaves one of the two. The rename itself is not synced to the
@@ -641,26 +623,7 @@ export function writeDocument(filePath: string, value: unknown, options: Documen
   const indent = options.indent === undefined ? 2 : options.indent;
   const serialized = indent === null ? JSON.stringify(value) : JSON.stringify(value, null, indent);
   if (serialized === undefined) throw new Error('Document value did not serialize to JSON');
-  const contents = Buffer.from(`${serialized}\n`, 'utf8');
-  const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
-  const mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
-  const temp = createAtomicTempPath(absolute);
-  let fd: number | undefined = openDocumentTemp(temp, dirname(absolute), mode);
-  let renamed = false;
-  try {
-    fchmodSync(fd, mode);
-    const written = writeSync(fd, contents, 0, contents.length);
-    if (written !== contents.length) throw new Error(`Document write was short: ${written} of ${contents.length} bytes`);
-    fdatasyncSync(fd);
-    const done = fd;
-    fd = undefined;
-    closeSync(done);
-    renameSync(temp, absolute);
-    renamed = true;
-  } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch { /* the write error is the one reported */ } }
-    if (!renamed) { try { unlinkSync(temp); } catch { /* nothing was published */ } }
-  }
+  writeFileAtomic(filePath, `${serialized}\n`, { mode: options.mode ?? DEFAULT_STORE_FILE_MODE, cleanupStaleTemps: false });
 }
 
 /**

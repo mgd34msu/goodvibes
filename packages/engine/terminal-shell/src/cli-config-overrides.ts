@@ -9,6 +9,8 @@ import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtim
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './cli-types.js';
 import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './cli-endpoints.js';
 import type { RuntimeEndpointId } from './cli-endpoints.js';
+import type { ModeManager, PrintLevelRouter } from '@goodvibes-jev/engine/platform/platform/state';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * Read a settings value as a command line writes it.
@@ -54,17 +56,30 @@ export function applyTerminalRuntimeConfigDefaults(configManager: ConfigManager)
 }
 
 /**
- * Applies the persisted `behavior.hitlMode` config value to the live mode
- * manager at startup, ignoring unset or unrecognized values.
+ * Keeps the live mode manager, and the notification router when the app has
+ * one, on the one print-less setting `behavior.hitlMode`: applied now and on
+ * every change, whoever made it (/mode, the settings modal, the state tool,
+ * the web UI). Unset or unrecognized values (and `off`) leave the default.
+ * Returns the unsubscribe function.
  */
 export function applyConfiguredHitlMode(
   configManager: ConfigManager,
-  modeManager: { setHITLMode(mode: 'quiet' | 'balanced' | 'operator'): void },
-): void {
-  const hitlMode = configManager.get('behavior.hitlMode');
-  if (hitlMode === 'quiet' || hitlMode === 'balanced' || hitlMode === 'operator') {
-    modeManager.setHITLMode(hitlMode);
-  }
+  modeManager: Pick<ModeManager, 'setHITLMode' | 'attachRouter'>,
+  router?: PrintLevelRouter,
+): () => void {
+  const apply = (): void => {
+    const hitlMode = configManager.get('behavior.hitlMode');
+    try {
+      if (hitlMode === 'quiet' || hitlMode === 'balanced' || hitlMode === 'operator') modeManager.setHITLMode(hitlMode);
+    } catch (error) {
+      logger.warn('The print level could not be applied', { hitlMode, error: summarizeError(error) });
+    }
+  };
+  apply();
+  // The mode manager re-applies itself to the router after every change, /mode set-domain included.
+  const detach = router ? modeManager.attachRouter(router) : () => {};
+  const unsubscribe = configManager.subscribe('behavior.hitlMode', apply);
+  return () => { unsubscribe(); detach(); };
 }
 
 export function applyRuntimeConfigValue(configManager: ConfigManager, key: ConfigKey, value: unknown): void {

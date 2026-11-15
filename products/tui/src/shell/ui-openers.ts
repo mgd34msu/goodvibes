@@ -378,7 +378,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   const toasts = getSharedToastCenter();
   toasts.onChange = render;
   commandContext.showToast = (toast) => toasts.show(toast);
-  bridgeNotificationFeedToToasts(getSharedNotificationFeed(), toasts);
+  // The one print-less setting decides which entries toast (renderer/toast-center.ts).
+  bridgeNotificationFeedToToasts(getSharedNotificationFeed(), toasts, () => configManager.get('behavior.hitlMode'));
 
   commandContext.openCommandPalette = () => {
     // The palette is built live from the command registry, never a hardcoded

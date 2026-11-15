@@ -1,14 +1,14 @@
-import { writeJsonFileAtomicAsync } from '../utils/atomic-json-write-async.js';
-import { captureQuarantineSource, readCapturedQuarantineSourceAsync, QuarantineEncodingError, type QuarantineSource } from '../utils/atomic-json-store.js';
+import { captureQuarantineSource, readCapturedQuarantineSourceAsync, QuarantineEncodingError, writeJsonFileAtomic, type QuarantineSource } from '../utils/atomic-json-store.js';
 
 export class JsonFileStoreParseError extends Error { override readonly name = 'JsonFileStoreParseError'; constructor() { super('JsonFileStore original source is not valid JSON.'); } }
 const parseSavedJson = JSON.parse;
 
 /**
- * JsonFileStore, generic JSON file persistence with atomic writes.
+ * JsonFileStore, a JSON file read through the quarantine reader and written
+ * through the one atomic writer (utils/atomic-json-store.ts).
  *
- * Handles lazy loading, atomic writes via a temporary file, and ensures the
- * directory hierarchy exists. Invalid JSON and write failures are thrown so
+ * Handles lazy loading, atomic durable writes, and ensures the directory
+ * hierarchy exists. Invalid JSON and write failures are thrown so
  * callers do not mistake corrupted state for an empty store or persisted write.
  */
 export class JsonFileStore<T> {
@@ -28,17 +28,12 @@ export class JsonFileStore<T> {
   }
 
   /**
-   * Atomically and durably persist data to disk.
-   *
-   * `rename(2)` alone only makes the swap atomic for concurrent readers; it
-   * does not make it survive a power loss. Both fsyncs are what turn the
-   * temp+rename into a crash-safe write: the first flushes the temp file's
-   * bytes before it is ever named, the second flushes the directory entry so
-   * the rename itself is durable. Without them a hard crash can leave the
-   * renamed file with unwritten (zero-filled or truncated) contents, which the
-   * next `load()` sees as unparseable JSON.
+   * Atomically and durably persist data to disk through the one writer
+   * (`writeFileAtomic`): the bytes are synced before the rename and the
+   * directories after it, so neither a crash nor a power loss leaves an empty
+   * or half-written file. Each save completes before the next one starts.
    */
   async save(data: T): Promise<void> {
-    await writeJsonFileAtomicAsync(this.filePath, data);
+    writeJsonFileAtomic(this.filePath, data, { durable: true });
   }
 }

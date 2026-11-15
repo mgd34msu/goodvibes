@@ -29,7 +29,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
     handler(args, ctx) {
       const mgr = ctx.ops.modeManager;
       if (!mgr) {
-        ctx.print('Interaction mode manager is not available in this runtime.');
+        ctx.print('The print level is not available in this runtime.');
         return;
       }
       const parsed = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
@@ -38,7 +38,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
 
       if (sub === 'quiet' || sub === 'balanced' || sub === 'operator') {
         if (!parsed.yes) {
-          requireYesFlag(ctx, `set HITL mode to ${sub}`, '/mode <quiet|balanced|operator> --yes');
+          requireYesFlag(ctx, `set the print level to ${sub}`, '/mode <quiet|balanced|operator> --yes');
           return;
         }
         const newMode = sub as 'quiet' | 'balanced' | 'operator';
@@ -55,8 +55,8 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         }
         const preset = mgr.getHITLPreset();
         ctx.print(saveFailure === null
-          ? `HITL mode set to: ${preset.name}\n${preset.description}`
-          : `HITL mode set to: ${preset.name} for this session only. It could not be saved (${saveFailure}), so it reverts on restart.\n${preset.description}`);
+          ? `Print level set to: ${preset.name}\n${preset.description}`
+          : `Print level set to: ${preset.name} for this session only. It could not be saved (${saveFailure}), so it reverts on restart.\n${preset.description}`);
         ctx.renderRequest();
         return;
       }
@@ -66,7 +66,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         const preset = mgr.getHITLPreset();
         const overrides = mgr.getDomainOverrides();
         const lines: string[] = [
-          `HITL mode: ${current}`,
+          `Print level: ${current}`,
           `  ${preset.description}`,
           `  Default domain verbosity: ${preset.defaultDomainVerbosity}`,
           `  Quiet-while-typing: ${preset.quietWhileTyping}`,
@@ -101,7 +101,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
           return;
         }
         if (!parsed.yes) {
-          requireYesFlag(ctx, `set HITL verbosity for ${domain}`, '/mode set-domain <domain> <minimal|normal|verbose> --yes');
+          requireYesFlag(ctx, `set notification verbosity for ${domain}`, '/mode set-domain <domain> <minimal|normal|verbose> --yes');
           return;
         }
         mgr.setDomainVerbosity(domain, verbosity as 'minimal' | 'normal' | 'verbose');

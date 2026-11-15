@@ -226,8 +226,8 @@ async function main() {
   });
   let activeConversationWidth = stdout.columns || 80;
   conversation.setWidthProvider(() => activeConversationWidth);
-  // Persisted HITL mode + TUI-side config defaults (doc'd at their definitions).
-  applyConfiguredHitlMode(configManager, modeManager);
+  // The print level (behavior.hitlMode) follows the setting into the mode manager and the notification router; TUI-side config defaults.
+  applyConfiguredHitlMode(configManager, modeManager, ctx.services.notificationDispatcher.router);
   applyTerminalRuntimeConfigDefaults(configManager);
 
   // Re-surface pre-TUI launch-update lines in-session (the alt screen wipes
@@ -720,6 +720,8 @@ async function main() {
     },
   );
 
+  // Routine notifications wait in the history while the person types, when the print level allows it.
+  ctx.services.notificationDispatcher.setTypingProbe(() => modeManager.getHITLPreset().quietWhileTyping && input.prompt.length > 0);
   orchestratorRefs.getViewportHeight = getViewportHeight;
   orchestratorRefs.scrollToEnd = scrollToEnd;
   const views = new SessionViews({

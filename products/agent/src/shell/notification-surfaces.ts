@@ -18,13 +18,15 @@ export interface NotificationSurfaceOptions {
   readonly commandContext: CommandContext;
   readonly input: InputHandler;
   readonly render: () => void;
+  /** The print level (`behavior.hitlMode`) that decides which entries toast. */
+  readonly printLevel?: (() => unknown) | undefined;
 }
 
 export function wireNotificationSurfaces(options: NotificationSurfaceOptions): void {
   const { commandContext, input, render } = options;
   const toasts = getSharedToastCenter();
   toasts.onChange = render;
-  bridgeNotificationFeedToToasts(getSharedNotificationFeed(), toasts);
+  bridgeNotificationFeedToToasts(getSharedNotificationFeed(), toasts, options.printLevel);
 
   commandContext.openNotifications = () => {
     const open = input.surfaceModals.modals().find((modal) => modal instanceof NotificationsModal);

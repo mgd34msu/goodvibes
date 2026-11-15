@@ -222,20 +222,21 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
 }
 
 const interactionModeCommand = createInteractionModeCommand<CommandContext>({
-  description: 'Manage HITL UX notification mode (quiet/balanced/operator)',
-  usage: '[quiet|balanced|operator --yes|show|set-domain <domain> <verbosity> --yes]',
-  argsHint: '[preset|show|set-domain]',
-  confirmMutations: true,
+  description: 'Set how much the app prints: quiet, balanced or operator',
+  usage: '[quiet|balanced|operator|show|set-domain <domain> <verbosity>]',
+  argsHint: '[level|show|set-domain]',
+  confirmMutations: false,
   help:
-    'Usage: /mode [quiet|balanced|operator --yes|show|set-domain <domain> <verbosity> --yes]\n' +
-    '  /mode                         , show current mode and settings\n' +
-    '  /mode show                    , show current mode and settings\n' +
-    '  /mode quiet --yes             , suppress all non-critical notifications\n' +
-    '  /mode balanced --yes          , show warnings, batch info noise (default)\n' +
-    '  /mode operator --yes          , full verbosity, no suppression\n' +
-    '  /mode set-domain <d> <v> --yes, per-domain verbosity override (minimal|normal|verbose)',
-  invalidVerbosity: (verbosity) => `Invalid verbosity "${verbosity}". Valid values minimal, normal, verbose.`,
-  domainSet: (domain, verbosity) => ['Domain verbosity set', `  domain ${domain}`, `  verbosity ${verbosity}`].join('\n'),
+    'Usage: /mode [quiet|balanced|operator|show|set-domain <domain> <verbosity>]\n' +
+    '  /mode                          show the print level\n' +
+    '  /mode show                     show the print level\n' +
+    '  /mode quiet                    print less: only warnings and errors toast; the rest waits in /notifications\n' +
+    '  /mode balanced                 notices toast, routine notifications wait in /notifications (default)\n' +
+    '  /mode operator                 print everything: every notice and notification toasts\n' +
+    '  /mode set-domain <d> <v>       one domain\'s notification verbosity (minimal|normal|verbose)\n' +
+    'Saved as the behavior.hitlMode setting.',
+  invalidVerbosity: (verbosity) => `Invalid verbosity "${verbosity}". Valid values: minimal, normal, verbose`,
+  domainSet: (domain, verbosity) => `Domain "${domain}" verbosity set to: ${verbosity}`,
 });
 
 const contextInspectionCommand = createContextInspectionCommand<CommandContext>({

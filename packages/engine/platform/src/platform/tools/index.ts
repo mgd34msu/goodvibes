@@ -7,6 +7,8 @@ import { ToolRegistry } from './registry.js';
 import type { Tool } from '../types/tools.js';
 import { FileStateCache } from '../state/file-cache.js';
 import { ProjectIndex } from '../state/project-index.js';
+import { toolCallTelemetryFor } from '../state/telemetry.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { ModeManager } from '../state/mode-manager.js';
 import { FileUndoManager } from '../state/file-undo.js';
 import type { ConfigManager } from '../config/manager.js';
@@ -296,6 +298,8 @@ export function registerAllTools(
     cloudflareAuthToken?: (() => string | null) | undefined;
     archetypeLoader?: Pick<ArchetypeLoader, 'loadArchetype'> | undefined;
     configManager?: ConfigManager | undefined;
+    /** The runtime event bus the tool runtime reports on; the state tool's analytics mode reads the calls it reports. */
+    runtimeBus?: RuntimeEventBus | undefined;
     providerRegistry?: ProviderRegistry | undefined;
     toolLLM?: ToolLLM | undefined;
     featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
@@ -654,6 +658,7 @@ export function registerAllTools(
   };
   // Only the host's real dispatcher is ever handed over (a private one would accept hooks nothing fires).
   // Without one the state tool does not offer mode=hooks. With one but no gate it lists hooks and refuses changes.
+  const printLevelConfig = deps.configManager;
   registerTool(
     createStateTool(kvState, projectIndex, {
       ...(deps.hookDispatcher ? { hookDispatcher: deps.hookDispatcher } : {}),
@@ -662,6 +667,8 @@ export function registerAllTools(
       workingDir: workingDirectory,
       daemonHomeDir: deps.configManager.getHomeDirectory() ?? undefined,
       modeManager,
+      setPrintLevel: (level) => printLevelConfig.setDynamic('behavior.hitlMode', level),
+      ...(deps.runtimeBus ? { telemetryDB: toolCallTelemetryFor(deps.runtimeBus) } : {}),
       ...(deps.memoryRegistry ? { memoryRegistry: deps.memoryRegistry } : {}),
       ...(deps.memoryRoutedOverWire ? { memoryRoutedOverWire: deps.memoryRoutedOverWire } : {}),
     }),

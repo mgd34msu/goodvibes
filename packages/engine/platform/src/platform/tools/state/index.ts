@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync,
 import { join } from 'node:path';
 import { KVState } from '../../state/kv-state.js';
 import { ProjectIndex } from '../../state/project-index.js';
-import { ModeManager } from '../../state/mode-manager.js';
+import { ModeManager, type HITLMode } from '../../state/mode-manager.js';
 import type { MemoryRegistry } from '../../state/memory-registry.js';
 import { HookDispatcher } from '../../hooks/dispatcher.js';
 import { TelemetryDB } from '../../state/telemetry.js';
@@ -72,7 +72,11 @@ export interface StateToolOptions {
   readonly hookDispatcher?: HookDispatcher | undefined;
   /** Approval for hook changes (add/enable/disable/remove). Absent: `mode=hooks` can list but not change. */
   readonly hookGate?: HookChangeGate | undefined;
+  /** How much the terminal apps print (`behavior.hitlMode`): read by `mode=mode`. */
   readonly modeManager?: ModeManager | undefined;
+  /** Saves a new print level for the host (the `behavior.hitlMode` setting). Absent: `mode=mode` can read but not change it. */
+  readonly setPrintLevel?: ((level: HITLMode) => void) | undefined;
+  /** The process's tool-call log (state/telemetry.ts), fed where tools run. Absent: `mode=analytics` is not offered. */
   readonly telemetryDB?: TelemetryDB | undefined;
   /**
    * Current working directory at session start. Exposed as the well-known
@@ -153,16 +157,16 @@ export function createStateTool(
     name: 'state',
     description:
       'Access and manipulate session state. Modes: get/set/list/clear operate on KVState;'
-      + ' budget and context report project-index size (files and estimated tokens), not conversation token usage:'
+      + ' budget and context report the files this product has read or written in this workspace (count and estimated tokens), not the size of the project and not conversation token usage:'
       + ' for context-window and token state use the context_accounting tool;'
       + ' memory reads/writes/deletes persistent .goodvibes/memory files; telemetry reports this tool\'s call counts and how many of them failed or were refused;'
       + (hookDispatcher ? ' hooks lists registered hooks and, with the same approval running their command would need, changes them (enable/disable/add/remove);' : '')
-      + ' mode manages output verbosity mode (get/set/list).'
+      + ' mode reads or sets how much the terminal app prints: quiet, balanced or operator (get/set/list).'
       + ' Discovery: use mode=list to see existing KV keys,'
       + (hookDispatcher ? ' mode=hooks hookAction=list to see registered hooks,' : '')
-      + ' mode=mode modeAction=get to see the current output mode.'
+      + ' mode=mode modeAction=get to see the current print level.'
       + ' Also: mode=memory memoryAction=list to list persistent memory keys'
-      + (telemetryDB ? ', mode=analytics analyticsAction=summary for session metrics.' : '.'),
+      + (telemetryDB ? ', mode=analytics analyticsAction=summary for the tool calls this process ran (name, status, duration, result size).' : '.'),
     parameters: narrowStateModes(toRecord(STATE_TOOL_SCHEMA), unavailableModes),
     sideEffects: ['state'],
     concurrency: 'serial',
@@ -214,10 +218,10 @@ export function createStateTool(
         case 'hooks':
           if (!hookDispatcher) return unavailableMode('hooks', 'hook registration belongs to the user\'s hook settings, not this tool', availableModes);
           return await runHooks(input, hookDispatcher, hookGate, signal);
-        case 'mode': return await runMode(input, modeManager);
+        case 'mode': return runMode(input, modeManager, options.setPrintLevel);
         case 'analytics':
           if (!telemetryDB) return unavailableMode('analytics', 'this session has no telemetry store; mode=telemetry reports this tool\'s call counts', availableModes);
-          return await runAnalytics(input, telemetryDB);
+          return runAnalytics(input, telemetryDB);
         default:
           return { success: false, error: `Unknown mode: ${String(mode)}` };
       }
@@ -262,43 +266,18 @@ function narrowStateModes(parameters: Record<string, unknown>, unavailable: Read
 
 const ANALYTICS_EXPORT_MAX_CHARS = 50_000;
 
-async function runAnalytics(
+function runAnalytics(
   input: StateInput,
-  db: TelemetryDB | undefined,
-): Promise<{ success: boolean; output?: string; error?: string }> {
-  if (!db) {
-    return {
-      success: false,
-      error: 'analytics mode requires a TelemetryDB instance (not provided at startup)',
-    };
-  }
-
-  if (!db.isReady) {
-    try {
-      await db.init();
-    } catch (err) {
-      return {
-        success: false,
-        error: `TelemetryDB init failed: ${summarizeError(err)}`,
-      };
-    }
-  }
-
+  db: TelemetryDB,
+): { success: boolean; output?: string; error?: string } {
   const action = input.analyticsAction ?? 'summary';
   const view = input.view ?? 'summary';
-
-  if ((action as string) === 'record') {
-    return {
-      success: false,
-      error: 'analytics action "record" is not available: the runtime records every tool call itself, and rows written by the model would be forged telemetry. Nothing was recorded. Use action=query or action=summary to read the recorded calls.',
-    };
-  }
 
   if (action === 'query') {
     const rawFilter = input.analyticsFilter ?? {};
     const filter: TelemetryFilter = {
       tool: typeof rawFilter.tool === 'string' ? rawFilter.tool : undefined,
-      status: rawFilter.status === 'ok' || rawFilter.status === 'error' ? rawFilter.status : undefined,
+      status: rawFilter.status === 'ok' || rawFilter.status === 'error' || rawFilter.status === 'cancelled' ? rawFilter.status : undefined,
       since: typeof rawFilter.since === 'number' ? rawFilter.since : undefined,
       until: typeof rawFilter.until === 'number' ? rawFilter.until : undefined,
       limit: typeof rawFilter.limit === 'number' ? rawFilter.limit : undefined,
@@ -319,6 +298,7 @@ async function runAnalytics(
               status: record.status,
               durationMs: record.duration_ms,
               tokenCount: record.tokens,
+              resultBytes: record.result_bytes,
               timestamp: record.timestamp,
             })),
         }),
@@ -344,7 +324,7 @@ async function runAnalytics(
     const format = input.analyticsFormat ?? 'json';
     try {
       const exported = db.export(format);
-      // Stored calls include their arguments and results, so a bounded slice is returned, not the whole history.
+      // Up to the row cap of calls: a bounded slice is returned, not the whole history.
       const truncated = exported.length > ANALYTICS_EXPORT_MAX_CHARS;
       const data = truncated ? exported.slice(0, ANALYTICS_EXPORT_MAX_CHARS) : exported;
       return {
@@ -383,18 +363,6 @@ async function runAnalytics(
       };
     } catch (err) {
       return { success: false, error: `dashboard failed: ${summarizeError(err)}` };
-    }
-  }
-
-  if (action === 'sync') {
-    try {
-      const saved = await db.save();
-      return {
-        success: true,
-        output: JSON.stringify({ mode: 'analytics', action: 'sync', persisted: saved }),
-      };
-    } catch (err) {
-      return { success: false, error: `sync failed: ${summarizeError(err)}` };
     }
   }
 
@@ -528,70 +496,59 @@ async function runHooks(
   return { success: false, error: `Unknown hooks action: ${String(action)}` };
 }
 
+const PRINT_LEVELS: readonly HITLMode[] = ['quiet', 'balanced', 'operator'];
+
+/**
+ * The one print-less setting of the terminal apps (`behavior.hitlMode`):
+ * quiet, balanced or operator. `set` saves the setting through the host;
+ * the apps apply it at once.
+ */
 function runMode(
   input: StateInput,
   manager: ModeManager | undefined,
+  setPrintLevel: ((level: HITLMode) => void) | undefined,
 ): { success: boolean; output?: string; error?: string } {
   if (!manager) {
-    return {
-      success: false,
-      error: 'mode mode requires a ModeManager instance (not provided at startup)',
-    };
+    return { success: false, error: 'mode=mode is not available in this session: this host has no terminal print level. Nothing was read or changed.' };
   }
-  const mm = manager;
   const action = input.modeAction ?? 'get';
+  const describe = () => {
+    const preset = manager.getHITLPreset();
+    return { level: preset.name, description: preset.description };
+  };
 
   if (action === 'get') {
-    const name = mm.getMode();
-    const verbosityDefaults = mm.getVerbosityDefaults();
-    return {
-      success: true,
-      output: JSON.stringify({ mode: 'mode', action: 'get', name, verbosityDefaults }),
-    };
+    return { success: true, output: JSON.stringify({ mode: 'mode', action: 'get', ...describe() }) };
   }
 
   if (action === 'list') {
-    const modes = mm.listModes();
-    const view = input.view ?? 'full';
+    const current = manager.getHITLMode();
     return {
       success: true,
       output: JSON.stringify({
-        mode: 'mode',
-        action: 'list',
-        view,
-        count: modes.length,
-        modes: modes.map((m) => view === 'full'
-          ? {
-            name: m.name,
-            description: m.description,
-            verbosityDefaults: m.verbosityDefaults,
-            enforcement: m.enforcement,
-          }
-          : {
-            name: m.name,
-            description: m.description,
-            enforcement: m.enforcement,
-          }),
+        mode: 'mode', action: 'list', current,
+        levels: PRINT_LEVELS.map((name) => ({ name, description: manager.listHITLPresets().find((preset) => preset.name === name)?.description ?? '' })),
       }),
     };
   }
 
   if (action === 'set') {
     const name = input.modeName;
-    if (!name) return { success: false, error: 'mode action "set" requires "modeName"' };
-    try {
-      mm.setMode(name);
-    } catch (err) {
-      return { success: false, error: summarizeError(err) };
+    if (!name || !PRINT_LEVELS.includes(name as HITLMode)) {
+      return { success: false, error: `mode action "set" needs modeName quiet, balanced or operator${name ? ` (got "${name}")` : ''}. Nothing was changed.` };
     }
-    const verbosityDefaults = mm.getVerbosityDefaults();
-    return {
-      success: true,
-      output: JSON.stringify({ mode: 'mode', action: 'set', name, verbosityDefaults }),
-    };
+    if (!setPrintLevel) {
+      return { success: false, error: 'This host cannot save the print level from a tool. Nothing was changed. The person can run /mode ' + name + ' in the terminal app.' };
+    }
+    try {
+      setPrintLevel(name as HITLMode);
+    } catch (err) {
+      return { success: false, error: `The print level was not saved: ${summarizeError(err)}. Nothing was changed.` };
+    }
+    return { success: true, output: JSON.stringify({ mode: 'mode', action: 'set', ...describe(), saved: true }) };
   }
 
-  return { success: false, error: `Unknown mode action: ${String(action)}` };
+  return { success: false, error: `Unknown mode action: ${String(action)}. Use get, list or set.` };
 }
 
 /**
@@ -754,11 +711,11 @@ async function runBudget(
     output: JSON.stringify({
       mode: 'budget',
       session_id: kvState.getSessionId(),
-      project_index: {
-        file_count: fileCount,
-        total_tokens: totalProjectTokens,
+      files_seen: {
+        count: fileCount,
+        estimated_tokens: totalProjectTokens,
       },
-      note: 'project_index counts the indexed project files. session_metrics are null unless a host records them; for conversation token and context-window usage call the context_accounting tool.',
+      note: 'files_seen counts the files this product has read or written in this workspace (kept across restarts), not every file in the project. session_metrics are null unless a host records them; for conversation token and context-window usage call the context_accounting tool.',
       session_metrics: {
         tokens_used: (metrics.tokens_used as number | undefined) ?? null,
         files_modified: (metrics.files_modified as number | undefined) ?? null,
@@ -781,10 +738,11 @@ async function runContext(
     output: JSON.stringify({
       mode: 'context',
       session_id: kvState.getSessionId(),
-      project_index: {
-        file_count: fileCount,
-        total_tokens: totalTokens,
+      files_seen: {
+        count: fileCount,
+        estimated_tokens: totalTokens,
       },
+      note: 'files_seen counts the files this product has read or written in this workspace, not every file in the project.',
     }),
   };
 }

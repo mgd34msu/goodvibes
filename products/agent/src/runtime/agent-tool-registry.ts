@@ -144,6 +144,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     sandboxSessionRegistry: services.sandboxSessionRegistry,
     workingDirectory: services.workingDirectory,
     configManager,
+    runtimeBus: services.runtimeBus,
     providerRegistry: services.providerRegistry,
     toolLLM: services.toolLLM,
     featureFlags: services.featureFlags,

@@ -671,8 +671,7 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     admitExpensiveWorkRef.current?.(label) ?? { allowed: true };
   const codeIndexStore = new CodeIndexStore(workingDirectory, codeIndexDbPath, memoryEmbeddingRegistry);
   disposalScope.registry.add('code index store', () => codeIndexStore.close());
-  // init never rejects; it is async because a failed extension load is read
-  // by Jev (sqlite-vec-loader.ts). The build starts once the store is open.
+  // init never rejects. The build starts once the store is open.
   void codeIndexStore.init().then(() => {
     if (options.autoStartCodeIndex) codeIndexStore.scheduleBuild();
   });

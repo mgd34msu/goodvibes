@@ -1,111 +1,14 @@
-import { builtinDelegatedInboundMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-delegated-inbound.js';
-import { builtinGatewayNativeHostedTurnMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-native-hosted-turn.ts';
-import { builtinGatewayNativeConversationIntakeMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-native-intake.ts';
-import { builtinGatewayNativeWorkSubmissionMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-native-work-submission.ts';
-import { builtinGatewayWorkLedgerMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-work-ledger.ts';
-import { builtinGatewayNativeWorkExecutionMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-native-work-execution.ts';
-import { builtinTriggerSupervisorMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-trigger-supervisor.js';
 // foundation-io-catalog.ts
 //
-// The one composition of every builtin gateway method descriptor, used by both
-// the typed-IO drift check (check-foundation-io-types.ts) and the typed-IO
-// entry generator (generate-foundation-io-entries.ts).
-//
-// It mirrors BUILTIN_GATEWAY_METHODS in
-// engine/src/platform/control-plane/method-catalog.ts exactly, the same
-// descriptor arrays in the same order. That constant is module-private, so
-// this file re-composes it from the exported arrays rather than duplicating any
-// descriptor. `assertCoversMethodIds` below proves the composition has not
-// fallen behind the generated operator method id list, so a new catalog module
-// that is wired into method-catalog.ts but not into this file FAILS the gate
-// instead of silently dropping its verbs out of typed-IO coverage.
+// Schema lookup over the builtin gateway method catalog, used by the typed-IO
+// drift check (check-foundation-io-types.ts) and the typed-IO entry generator
+// (generate-foundation-io-entries.ts). The descriptor list is the catalog's own,
+// so a new catalog module is covered the moment method-catalog.ts composes it.
 
-import { builtinGatewayAdminMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-admin.ts';
-import { builtinBrowserJudgmentMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-browser-judgment.ts';
-import { builtinGatewayChannelMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-channels.ts';
-import { builtinGatewayChannelTestMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-channels-test.ts';
-import { builtinGatewayCostMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-cost.ts';
-import { builtinGatewayPermissionRuleMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-permission-rules.ts';
-import { builtinGatewayControlMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-control.ts';
-import { builtinGatewayEmailMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-email.ts';
-import { builtinGatewayHomeAssistantMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-homeassistant.ts';
-import { builtinGatewayPaymentsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-payments.ts';
-import { builtinGatewayOwnerProfileMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-owner-profile.ts';
-import { builtinGatewayOccasionsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-occasions.ts';
-import { builtinGatewayCalendarMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-calendar.ts';
-import { builtinGatewayBrowserMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-browser.ts';
-import { builtinGatewayRuntimeMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-runtime.ts';
-import { builtinGatewayModelMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-models.ts';
-import { builtinGatewayBatchMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-batch.ts';
-import { builtinGatewayCloudflareMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-cloudflare.ts';
-import { builtinGatewayUpdateMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-update.ts';
-import { builtinGatewayRelayMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-relay.ts';
-import { builtinGatewayKnowledgeMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-knowledge.ts';
-import { builtinGatewayMediaMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-media.ts';
-import { builtinGatewayPushMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-push.ts';
-import { builtinGatewayPairingMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-pairing.ts';
-import { builtinGatewayTailscaleMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-tailscale.ts';
-import { builtinGatewayAcpMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-acp.ts';
-import { builtinGatewaySkillsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-skills.ts';
-import { builtinGatewayPrincipalsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-principals.ts';
-import { builtinGatewayChannelProfilesMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-channel-profiles.ts';
-import { builtinGatewayCheckinMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-checkin.ts';
-import { builtinGatewayCiMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-ci.ts';
-import { builtinGatewayFlagsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-flags.ts';
-import { builtinGatewayRewindMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-rewind.ts';
-import { builtinGatewayWorkspacesMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-workspaces.ts';
-import { builtinGatewayStepUpMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-stepup.ts';
-
+import { BUILTIN_GATEWAY_METHODS } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { EMPTY_OBJECT_SCHEMA } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
-import type { GatewayMethodDescriptor } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
-/** Every builtin gateway method descriptor, in method-catalog.ts's own order. */
-export const ALL_GATEWAY_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] = [
-  ...builtinGatewayWorkLedgerMethodDescriptors,
-  ...builtinGatewayNativeWorkExecutionMethodDescriptors,
-  ...builtinGatewayNativeWorkSubmissionMethodDescriptors,
-  ...builtinDelegatedInboundMethodDescriptors,
-  ...builtinGatewayNativeConversationIntakeMethodDescriptors,
-  ...builtinGatewayNativeHostedTurnMethodDescriptors,
-  ...builtinGatewayControlMethodDescriptors,
-  ...builtinBrowserJudgmentMethodDescriptors,
-  ...builtinGatewayChannelMethodDescriptors,
-  ...builtinGatewayHomeAssistantMethodDescriptors,
-  ...builtinTriggerSupervisorMethodDescriptors,
-  ...builtinGatewayChannelTestMethodDescriptors,
-  ...builtinGatewayCostMethodDescriptors,
-  ...builtinGatewayPermissionRuleMethodDescriptors,
-  ...builtinGatewayEmailMethodDescriptors,
-  ...builtinGatewayPaymentsMethodDescriptors,
-  ...builtinGatewayCalendarMethodDescriptors,
-  ...builtinGatewayBrowserMethodDescriptors,
-  ...builtinGatewayRuntimeMethodDescriptors,
-  ...builtinGatewayModelMethodDescriptors,
-  ...builtinGatewayBatchMethodDescriptors,
-  ...builtinGatewayCloudflareMethodDescriptors,
-  ...builtinGatewayUpdateMethodDescriptors,
-  ...builtinGatewayRelayMethodDescriptors,
-  ...builtinGatewayKnowledgeMethodDescriptors,
-  ...builtinGatewayMediaMethodDescriptors,
-  ...builtinGatewayAdminMethodDescriptors,
-  ...builtinGatewayPushMethodDescriptors,
-  ...builtinGatewayPairingMethodDescriptors,
-  ...builtinGatewayTailscaleMethodDescriptors,
-  ...builtinGatewayAcpMethodDescriptors,
-  ...builtinGatewaySkillsMethodDescriptors,
-  ...builtinGatewayPrincipalsMethodDescriptors,
-  ...builtinGatewayOwnerProfileMethodDescriptors,
-  ...builtinGatewayOccasionsMethodDescriptors,
-  ...builtinGatewayChannelProfilesMethodDescriptors,
-  ...builtinGatewayCheckinMethodDescriptors,
-  ...builtinGatewayCiMethodDescriptors,
-  ...builtinGatewayFlagsMethodDescriptors,
-  ...builtinGatewayRewindMethodDescriptors,
-  ...builtinGatewayWorkspacesMethodDescriptors,
-  ...builtinGatewayStepUpMethodDescriptors,
-];
-
-const DESCRIPTORS_BY_ID = new Map(ALL_GATEWAY_METHOD_DESCRIPTORS.map((d) => [d.id, d]));
+const DESCRIPTORS_BY_ID = new Map(BUILTIN_GATEWAY_METHODS.map((d) => [d.id, d]));
 
 /**
  * The verbs whose `anyOf` requirement branches are dropped from the CLIENT TYPE
@@ -160,18 +63,3 @@ export function parseMethodIds(idsFileText: string): string[] {
   return [...idsFileText.matchAll(/^ {2}"([^"]+)",/gm)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
 }
 
-/**
- * Fail loudly if the generated method id list contains an id this composition
- * cannot resolve, the signal that a new catalog module was wired into
- * method-catalog.ts but not into ALL_GATEWAY_METHOD_DESCRIPTORS above.
- */
-export function assertCoversMethodIds(methodIds: readonly string[]): void {
-  const unresolved = methodIds.filter((id) => !DESCRIPTORS_BY_ID.has(id));
-  if (unresolved.length > 0) {
-    throw new Error(
-      `foundation-io-catalog.ts does not compose the descriptor arrays for ${unresolved.length} ` +
-        `operator method id(s), add the missing method-catalog-*.ts module to ` +
-        `ALL_GATEWAY_METHOD_DESCRIPTORS:\n  ${unresolved.join('\n  ')}`,
-    );
-  }
-}

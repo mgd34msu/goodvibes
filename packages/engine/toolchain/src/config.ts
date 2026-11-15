@@ -1,14 +1,11 @@
 /**
  * toolchain.config contract.
  *
- * Every GoodVibes repo keeps a small `toolchain.config.json` (or a
+ * Every GoodVibes product keeps a small `toolchain.config.json` (or a
  * `toolchain.config.ts` that default-exports a {@link ToolchainConfig}) at its
  * root. The `@goodvibes-jev/engine` toolchain holds the behavior;
  * the config holds the repo-specific values (package names, binary matrix,
- * coverage floors, publish ordering) so one implementation serves every repo.
- *
- * The full contract and per-repo examples are documented in
- * `docs/release-and-publishing.md` (engine repo).
+ * smoke banner, packed-tarball rules) so one implementation serves every repo.
  */
 
 import { z } from 'zod/v4';
@@ -21,8 +18,6 @@ export interface EnginePinConfig {
   readonly pinSource: 'dependencies' | 'devDependencies';
   /** Lockfile whose text must resolve the pin, e.g. `bun.lock`. */
   readonly lockfile: string;
-  /** Path (relative to repo root) of the dev-link overlay marker whose presence blocks a cut. */
-  readonly overlayMarker: string;
   /** Source roots scanned for non-npm engine imports. */
   readonly sourceRoots: readonly string[];
   /** When true, also assert every engine subpath import resolves to a key in the installed package's `exports` map (webui browser-bundle gate). */
@@ -73,14 +68,6 @@ export interface BuildConfig {
   readonly prebuild: readonly (readonly string[])[];
 }
 
-/** coverage-gate ratchet floors and the coverage command. */
-export interface CoverageConfig {
-  readonly funcsFloor: number;
-  readonly linesFloor: number;
-  /** argv that emits Bun's text coverage table, e.g. `["bun","test","--coverage","src"]`. */
-  readonly command: readonly string[];
-}
-
 /** post-build-smoke parameters. */
 export interface SmokeConfig {
   /** Expected `--version` banner prefix, e.g. `goodvibes-agent `. */
@@ -93,23 +80,7 @@ export interface SmokeConfig {
   readonly binaryDefault: string;
 }
 
-/** release-cut parameters (prepare/bump/changelog/tag only, never re-runs gates). */
-export interface ReleaseCutConfig {
-  /** Branch a cut is allowed from, e.g. `main`. */
-  readonly branch: string;
-  /** Extra `package.json` paths (beyond root) whose version is stamped, e.g. platform-package manifests. */
-  readonly versionFiles: readonly string[];
-  /** Commands that sync generated version surfaces after the bump, e.g. `[["bun","run","scripts/prebuild.ts"]]`. */
-  readonly syncCommands: readonly (readonly string[])[];
-  /** Paths staged into the release commit. */
-  readonly commitPaths: readonly string[];
-  /** `bracket` → `## [x.y.z] - DATE`; `plain` → `## x.y.z - DATE`. */
-  readonly changelogHeading: 'bracket' | 'plain';
-  /** `first-separator` inserts the new section after the first `---`; `top` prepends above all sections. */
-  readonly changelogInsertMarker: 'first-separator' | 'top';
-}
-
-/** publish-package parameters. */
+/** Packed-tarball rules checked by package-install-check. */
 export interface PublishPackageConfig {
   readonly packageName: string;
   readonly defaultRegistry: string;
@@ -129,9 +100,7 @@ export interface ToolchainConfig {
   readonly packageName: string;
   readonly enginePin?: EnginePinConfig;
   readonly build?: BuildConfig;
-  readonly coverage?: CoverageConfig;
   readonly smoke?: SmokeConfig;
-  readonly releaseCut?: ReleaseCutConfig;
   readonly publish?: PublishPackageConfig;
 }
 
@@ -146,7 +115,6 @@ export function resolveEnginePinConfig(partial: Partial<EnginePinConfig> | undef
     enginePackage,
     pinSource: partial?.pinSource ?? 'dependencies',
     lockfile: partial?.lockfile ?? DEFAULT_LOCKFILE,
-    overlayMarker: partial?.overlayMarker ?? `node_modules/${enginePackage}/.local-engine-overlay.json`,
     sourceRoots: partial?.sourceRoots ?? ['src'],
     enforceExportsMap: partial?.enforceExportsMap ?? false,
   };
@@ -163,14 +131,13 @@ export function resolveEnginePinConfig(partial: Partial<EnginePinConfig> | undef
 // enginePin has a resolver that fills fields from a partial plus defaults,
 // so requiredness lives in that resolver, not here: every field
 // below is optional and the resolver decides what is missing. The other
-// sections (build, coverage, smoke, releaseCut, publish) have no resolver,
+// sections (build, smoke, publish) have no resolver,
 // their consumers read the parsed fields directly, so their required fields
 // stay required here.
 const EnginePinConfigSchema = z.object({
   enginePackage: z.string().optional(),
   pinSource: z.enum(['dependencies', 'devDependencies']).optional(),
   lockfile: z.string().optional(),
-  overlayMarker: z.string().optional(),
   sourceRoots: z.array(z.string()).optional(),
   enforceExportsMap: z.boolean().optional(),
 }).catchall(z.unknown());
@@ -195,24 +162,9 @@ const BuildConfigSchema = z.object({
   prebuild: z.array(z.array(z.string())),
 }).catchall(z.unknown());
 
-const CoverageConfigSchema = z.object({
-  funcsFloor: z.number(),
-  linesFloor: z.number(),
-  command: z.array(z.string()),
-}).catchall(z.unknown());
-
 const SmokeConfigSchema = z.object({
   bannerPrefix: z.string(),
   binaryDefault: z.string(),
-}).catchall(z.unknown());
-
-const ReleaseCutConfigSchema = z.object({
-  branch: z.string(),
-  versionFiles: z.array(z.string()),
-  syncCommands: z.array(z.array(z.string())),
-  commitPaths: z.array(z.string()),
-  changelogHeading: z.enum(['bracket', 'plain']),
-  changelogInsertMarker: z.enum(['first-separator', 'top']),
 }).catchall(z.unknown());
 
 const PublishPackageConfigSchema = z.object({
@@ -228,9 +180,7 @@ const ToolchainConfigSchema = z.object({
   packageName: z.string().min(1, 'must be a non-empty string'),
   enginePin: EnginePinConfigSchema.optional(),
   build: BuildConfigSchema.optional(),
-  coverage: CoverageConfigSchema.optional(),
   smoke: SmokeConfigSchema.optional(),
-  releaseCut: ReleaseCutConfigSchema.optional(),
   publish: PublishPackageConfigSchema.optional(),
 }).catchall(z.unknown());
 

@@ -1,48 +1,40 @@
 # @goodvibes-jev/engine/toolchain
 
-Shared GoodVibes CI/CD toolchain. One published home for the release, publish,
-and verification scripts that used to live as parallel copies across the
-`goodvibes-tui`, `goodvibes-agent`, `goodvibes-webui`, and `goodvibes`
-repos. Repo-specific values live in each repo's `toolchain.config.json`; the
-behavior lives here, so every repo maintains one implementation instead of
-several drifting ones.
+Shared GoodVibes build and packaging toolchain for the products in this
+monorepo. Each product keeps its values in its own `toolchain.config.json`; the
+behavior lives here, so every product uses one implementation. Releases are cut
+from the repository root (`bun run release:publish`, `bun run release:tag`).
 
 ## Tools
 
 Each tool ships as a library policy function (with injectable I/O for testing)
 and a thin CLI (`bin` entry):
 
-- **engine-pin-gate.** Pin ⇄ lockfile ⇄ installed tri-agreement plus a non-npm
-  import sweep and an optional exports-map check.
+- **engine-pin-gate.** The product depends on the engine as a workspace
+  dependency that is installed and locked, plus a non-npm import sweep and an
+  optional exports-map check.
 - **build-binaries.** `bun build --compile` across a target matrix, with an
   optional daemon leg and native-addon copy/cross-fetch, all config-driven.
-- **release-cut.** Prepare, bump, changelog, tag only. Never re-runs gates (CI
-  owns validation).
-- **coverage-gate.** Aggregates coverage and enforces a per-repo floor that only increases.
-- **verification-ledger.** Totals math and JSON and Markdown rendering of a
-  repo-collected verification inventory.
 - **post-build-smoke.** Boots a compiled binary and checks its version protocol and emitted module initialization.
 - **package-install-check.** Static `npm pack` tarball policy check, plus a check of each bin shim listed under `publish.bins` (present, executable, expected shebang).
-- **publish-package.** Idempotent `npm publish` plus a propagation poll.
-- **changelog-gate.** Asserts CHANGELOG carries a section for a version.
 - **sha256sums.** Generate or verify a `SHA256SUMS` manifest over release assets.
-- **train-status.** Read-only: one table per release-train cycle across the
-  family's local checkouts (versions, engine pin drift, unreleased/unpushed
-  commits, suggested action). Never mutates anything.
+  `--out <manifest> <asset...>` writes one; `--verify <manifest>` checks every
+  listed asset beside the manifest, and `--exact <payload...>` or `--exact-dir`
+  also fails on a payload the manifest does not list. Records use the coreutils
+  form `<64 lowercase hex>  <name>`.
 
-`runPostBuildSmoke` returns `Promise<SmokeResult>`. An exact version banner with
-empty stderr passes its deterministic protocol check offline. Any additional
-output requires an explicitly composed `diagnosticSourceOwner` and an installed
-judgment port. The owner screens both complete streams before the registered
-`toolchain.smoke.load-failure` battery reads their projection. Failure,
-uncertainty, stale ownership, or unavailable screening withholds qualification.
-The default CLI sends no diagnostic output to a provider.
+`runPostBuildSmoke` returns `Promise<SmokeResult>`. It reads the binary once,
+runs `--version` once, and passes only when the process exits 0 and prints
+exactly the configured banner with a semver version. Any other output fails the
+smoke and is printed, since a module or native-addon load failure shows up
+there. It then scans the binary for top-level eager namespace reads. No model is
+asked anything.
 
 ## Config
 
-See `docs/release-and-publishing.md` in the engine repo for the full
-`toolchain.config.json` contract and per-repo examples. Import the
-`ToolchainConfig` type from `@goodvibes-jev/engine/toolchain` for editor help.
+The `toolchain.config.json` contract is the `ToolchainConfig` type in
+`src/config.ts`; each product's own config is the working example. Import the
+type from `@goodvibes-jev/engine/toolchain` for editor help.
 
 ## Usage
 

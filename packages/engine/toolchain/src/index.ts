@@ -17,16 +17,8 @@ export * from './lib/retained-native-artifact-files.js';
 export * from './lib/bun-compile-compat.js';
 export * from './lib/bun-compile.js';
 export * from './lib/optional-externals.js';
-export * from './lib/release-cut.js';
-export * from './lib/coverage-gate.js';
-export * from './lib/verification-ledger.js';
 export * from './lib/post-build-smoke.js';
 export * from './lib/package-install-check.js';
-export * from './lib/publish-package.js';
-export * from './lib/changelog-gate.js';
 export * from './lib/sha256sums.js';
-export * from './lib/train-status.js';
-
-export { nativeAddonFailure } from './batteries/native-addon-failure.js';
 
 export { isPinnedWorkspaceVersion } from './lib/workspace-version.js';

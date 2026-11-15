@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import { findNodeOnlyImports } from '../scripts/browser-compat-check.ts';
+import { exportsResolver, findNodeOnlyImports } from '../scripts/browser-compat-check.ts';
 
 function reader(files: Record<string, string>) {
   return (path: string) => files[path];
@@ -41,4 +41,18 @@ test('a cycle terminates and a clean closure reports nothing', () => {
     [dist('b.js')]: "import './a.js';\n",
   };
   expect(findNodeOnlyImports(dist('a.js'), reader(files))).toEqual([]);
+});
+
+test('a package-name import of the workspace is followed through its exports map, and a file it cannot read is reported', () => {
+  const pkg = resolve('/virtual/judgment');
+  const resolver = exportsResolver(new Map([['@goodvibes-jev/judgment', { root: pkg, exports: { './decisions': { import: './dist/decisions.js' } } }]]));
+  const files = {
+    [dist('a.js')]: "import { d } from '@goodvibes-jev/judgment/decisions';\nimport { z } from 'zod';\n",
+    [resolve(pkg, 'dist/decisions.js')]: "import { x } from './port.js';\nimport { y } from './gone.js';\n",
+    [resolve(pkg, 'dist/port.js')]: "import { AsyncLocalStorage } from 'async_hooks';\n",
+  };
+  const offenders = findNodeOnlyImports(dist('a.js'), reader(files), resolver);
+  expect(offenders.some((chain) => chain.endsWith('@goodvibes-jev/judgment/decisions -> ./port.js -> async_hooks'))).toBe(true);
+  expect(offenders.some((chain) => chain.endsWith('./gone.js (cannot be read)'))).toBe(true);
+  expect(offenders).toHaveLength(2);
 });

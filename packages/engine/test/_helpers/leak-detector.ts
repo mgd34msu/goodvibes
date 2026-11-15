@@ -1,7 +1,7 @@
 /**
- * Timer-leak detector for the single-process `bun test` suite.
+ * Timer-leak detector for the single-process run of scripts/leak-scan.ts.
  *
- * Why this exists: every test file in this repo runs inside ONE bun process.
+ * Why this exists: leak-scan runs every test file inside ONE bun process.
  * A test that starts a poller (`setInterval`, or a `setTimeout` chain that
  * reschedules itself) and never stops it keeps firing for the rest of the run,
  * inside every later test file. That is how `provider-stream-retry.test.ts`

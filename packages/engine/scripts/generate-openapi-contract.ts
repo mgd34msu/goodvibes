@@ -8,11 +8,7 @@
  *
  * Source of truth:
  *   - contracts/artifacts/operator-contract.json  (methods, IO schemas,
- *     REST bindings, auth scheme, transports)
- *   - contracts/src/generated/foundation-client-types.ts +
- *     operator-method-ids.ts (the typed-client-IO ratchet inputs), used to mark
- *     the untyped methods HONESTLY: every method whose engine client IO resolves to
- *     `unknown` carries `x-typed-client-io: false`. They are never omitted.
+ *     REST bindings, replay keys, error codes, auth scheme, transports)
  *
  * Outputs:
  *   - contracts/artifacts/operator-openapi.json  (committed; package-exported,
@@ -29,17 +25,14 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseMapKeys, parseMethodIds, untypedMethodIds } from './foundation-io-coverage-rule.ts';
 import type { OperatorContractManifest, OperatorMethodContract } from '../contracts/src/types.ts';
-import { buildParameters, hasDeleteBody, isOpaqueSchema, pathParamNames, replayKey, SSE_METHODS, SSE_RESPONSE } from './openapi-shared.ts';
+import { buildParameters, errorBodySchema, hasRequestBody, isOpaqueSchema, knownErrorCodes, replayKey, requestBodySchema, SSE_METHODS, SSE_RESPONSE } from './openapi-shared.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
 const CHECK_ONLY = process.argv.includes('--check');
 
 const CONTRACT_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-contract.json');
-const FOUNDATION_TYPES_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/foundation-client-types.ts');
-const METHOD_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-method-ids.ts');
 const ARTIFACT_OUT = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-openapi.json');
 
 const INVOKE_PATH = '/api/control/gateway-methods/{methodId}/invoke';
@@ -56,34 +49,18 @@ interface OpenApiOperation {
   [extension: `x-${string}`]: unknown;
 }
 
-function loadUntypedSet(): Set<string> {
-  const foundationText = readFileSync(FOUNDATION_TYPES_PATH, 'utf8');
-  const idsText = readFileSync(METHOD_IDS_PATH, 'utf8');
-  const methodIds = parseMethodIds(idsText);
-  const inputKeys = parseMapKeys(foundationText, 'OperatorMethodInputMap');
-  const outputKeys = parseMapKeys(foundationText, 'OperatorMethodOutputMap');
-  return new Set(untypedMethodIds(methodIds, inputKeys, outputKeys));
-}
-
 function securityFor(method: OperatorMethodContract): Record<string, string[]>[] | undefined {
   // 'public' methods opt out of the document-level security requirement.
   if (method.access === 'public') return [];
   return undefined;
 }
 
-function buildOperation(method: OperatorMethodContract, untyped: Set<string>): OpenApiOperation {
-  const http = method.http!;
-  const isUntyped = untyped.has(method.id);
+function buildOperation(method: OperatorMethodContract): OpenApiOperation {
   const opaqueIn = isOpaqueSchema(method.inputSchema);
   const opaqueOut = isOpaqueSchema(method.outputSchema);
   const notes: string[] = [method.description];
-  const replay = replayKey(method.id);
+  const replay = replayKey(method);
   if (replay) notes.push(replay.note);
-  if (isUntyped) {
-    notes.push(
-      'NOTE: this method has no typed engine client IO. Request/response resolve to `unknown` in the typed client (see `x-typed-client-io`).',
-    );
-  }
   const op: OpenApiOperation = {
     operationId: method.id,
     summary: method.title,
@@ -104,32 +81,22 @@ function buildOperation(method: OperatorMethodContract, untyped: Set<string>): O
           },
       default: { $ref: '#/components/responses/Error' },
     },
-    'x-typed-client-io': !isUntyped,
     'x-access': method.access,
     'x-transport': method.transport,
     ...(method.scopes.length > 0 ? { 'x-scopes': method.scopes } : {}),
     ...(method.dangerous !== undefined ? { 'x-dangerous': method.dangerous } : {}),
     ...(method.idempotent !== undefined ? { 'x-idempotent': method.idempotent } : {}),
     ...(replay ? { 'x-replay-key': replay.extension } : {}),
+    ...(method.errorCodes ? { 'x-error-codes': method.errorCodes } : {}),
   };
   const security = securityFor(method);
   if (security) op.security = security;
   const parameters = buildParameters(method);
   if (parameters.length > 0) op.parameters = parameters;
-  if (http.method === 'POST' || http.method === 'PATCH' || (http.method === 'DELETE' && hasDeleteBody(method))) {
-    // The expected-turn route's URL is canonical, and its typed engine removes
-    // path keys from the wire body. Keep this new route's REST schema honest
-    // without migrating the legacy body contracts of unrelated endpoints.
-    const inputProperties = (method.inputSchema?.properties ?? {}) as Record<string, unknown>;
-    const requiredInputKeys = Array.isArray(method.inputSchema?.required) ? method.inputSchema.required as readonly string[] : [];
-    const bodySchema = method.id === 'sessions.turns.cancel' || http.method === 'DELETE'
-      ? { ...method.inputSchema,
-          properties: Object.fromEntries(Object.entries(inputProperties).filter(([key]) => !pathParamNames(http.path).includes(key))),
-          required: requiredInputKeys.filter((key) => !pathParamNames(http.path).includes(key)),
-        }
-      : method.inputSchema;
+  if (hasRequestBody(method)) {
+    const bodySchema = requestBodySchema(method);
     op.requestBody = {
-      required: http.method === 'DELETE' ? requiredInputKeys.some((key) => !pathParamNames(http.path).includes(key)) : !opaqueIn,
+      required: method.http!.method === 'DELETE' ? ((bodySchema?.required ?? []) as readonly string[]).length > 0 : !opaqueIn,
       content: {
         'application/json': {
           schema: opaqueIn
@@ -172,7 +139,7 @@ function buildInvokeOperation(invokeOnly: readonly OperatorMethodContract[]): Op
   };
 }
 
-function buildDocument(contract: OperatorContractManifest, untyped: Set<string>): Record<string, unknown> {
+function buildDocument(contract: OperatorContractManifest): Record<string, unknown> {
   const methods = contract.operator.methods;
   const withHttp = methods.filter((m) => m.http);
   const invokeOnly = methods.filter((m) => !m.http);
@@ -181,20 +148,17 @@ function buildDocument(contract: OperatorContractManifest, untyped: Set<string>)
   for (const method of withHttp) {
     const { path, method: verb } = method.http!;
     paths[path] ??= {};
-    paths[path]![verb.toLowerCase()] = buildOperation(method, untyped);
+    paths[path]![verb.toLowerCase()] = buildOperation(method);
   }
   paths[INVOKE_PATH] = { post: buildInvokeOperation(invokeOnly) };
 
   // Every method, REST-bound or invoke-only, appears in this index with its
-  // honest coverage marking; any untyped ids are visible, not omitted. The
-  // typed-IO ratchet is pinned at zero untyped methods today, and this marking
-  // is what keeps a future regression visible rather than silent.
+  // schema coverage.
   const methodIndex = methods.map((m) => ({
     id: m.id,
     category: m.category,
     access: m.access,
     rest: m.http ? `${m.http.method} ${m.http.path}` : null,
-    typedClientIo: !untyped.has(m.id),
     inputSchemaCoverage: isOpaqueSchema(m.inputSchema) ? 'schema-less' : 'typed',
     outputSchemaCoverage: isOpaqueSchema(m.outputSchema) ? 'schema-less' : 'typed',
   }));
@@ -209,8 +173,6 @@ function buildDocument(contract: OperatorContractManifest, untyped: Set<string>)
         'Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). ' +
         `${methods.length} cataloged methods: ${withHttp.length} with dedicated REST bindings, ` +
         `${invokeOnly.length} reachable only through the generic invoke endpoint. ` +
-        `${untyped.size} methods lack typed engine client IO and are marked with ` +
-        '`x-typed-client-io: false`. They are represented honestly, never omitted. ' +
         'Regenerate with `bun run openapi:generate`; drift fails `contracts:check`.',
     },
     servers: [{ url: 'http://127.0.0.1:{port}', variables: { port: { default: '4483' } }, description: 'Local daemon' }],
@@ -233,23 +195,14 @@ function buildDocument(contract: OperatorContractManifest, untyped: Set<string>)
       responses: {
         Error: {
           description: 'Error',
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } },
         },
       },
       schemas: {
-        ErrorEnvelope: {
-          type: 'object',
-          properties: {
-            error: { type: 'string' },
-            kind: { type: 'string' },
-            details: { type: 'object' },
-          },
-          required: ['error'],
-        },
+        ErrorBody: errorBodySchema(knownErrorCodes(methods)),
       },
     },
     'x-auth-contract': contract.auth,
-    'x-untyped-client-io-count': untyped.size,
     'x-operator-methods': methodIndex,
   };
 }
@@ -287,7 +240,7 @@ function countsParagraph(contract: OperatorContractManifest): string {
     `  ${invokeOnly} methods) and are listed on it under \`x-invoke-only-methods\`.`,
     `  \`x-operator-methods\` is a flat index of all ${methods.length} cataloged methods, REST-bound`,
     `  or invoke-only, each with its category, access level, resolved REST route (or`,
-    `  \`null\` for invoke-only), and schema/typed-IO coverage.`,
+    `  \`null\` for invoke-only), and schema coverage.`,
   ].join('\n');
 }
 
@@ -301,8 +254,7 @@ function docWithCounts(current: string, contract: OperatorContractManifest): str
 }
 
 const contract = JSON.parse(readFileSync(CONTRACT_PATH, 'utf8')) as OperatorContractManifest;
-const untyped = loadUntypedSet();
-const document = buildDocument(contract, untyped);
+const document = buildDocument(contract);
 const json = `${JSON.stringify(document, null, 2)}\n`;
 
 let drifted = false;
@@ -315,6 +267,6 @@ if (CHECK_ONLY && drifted) {
 }
 if (!CHECK_ONLY) {
   const paths = Object.keys(document.paths as Record<string, unknown>).length;
-  console.log(`[openapi] ${paths} paths, ${contract.operator.methods.length} methods, ${untyped.size} marked untyped-client-io`);
+  console.log(`[openapi] ${paths} paths, ${contract.operator.methods.length} methods`);
 }
 if (CHECK_ONLY && !drifted) console.log('[openapi] artifacts up-to-date');

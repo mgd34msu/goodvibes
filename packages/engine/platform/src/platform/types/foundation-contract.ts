@@ -1,5 +1,7 @@
 export type {
+  ContractErrorCode,
   ContractHttpDefinition,
+  ContractReplayKey,
   JsonSchema,
   OperatorContractManifest,
   OperatorEventContract,

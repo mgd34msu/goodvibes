@@ -2,9 +2,9 @@
 /**
  * engine-release-gates, publish-blocking engine-pin checks.
  *
- * The pin/lock/installed tri-agreement, overlay-marker hard-fail, and non-npm
- * import sweep now live in the shared @goodvibes-jev/engine/toolchain `engine-pin-gate`
- * (one implementation across tui/agent/webui). This file is a thin adapter that
+ * The workspace-dependency check and the non-npm import sweep live in the
+ * shared @goodvibes-jev/engine/toolchain `engine-pin-gate` (one implementation
+ * across tui/agent/webui). This file is a thin adapter that
  * drives that gate with the Agent's engine workspace dependency and the
  * authoritative monorepo lockfile, mapping results to the issue-string surface
  * that the release flow consumes.
@@ -14,7 +14,6 @@ import { join } from 'node:path';
 import { realFsReader, runEnginePinGate, type EnginePinConfig } from '@goodvibes-jev/engine/toolchain';
 
 export const ENGINE_PACKAGE = '@goodvibes-jev/engine';
-export const OVERLAY_MARKER_REL = 'node_modules/@goodvibes-jev/engine/.local-engine-overlay.json';
 
 /**
  * The Agent's engine-pin shape. Kept inline (rather than read from
@@ -25,16 +24,14 @@ export const AGENT_ENGINE_PIN: EnginePinConfig = {
   enginePackage: ENGINE_PACKAGE,
   pinSource: 'dependencies',
   lockfile: '../../bun.lock',
-  overlayMarker: OVERLAY_MARKER_REL,
   sourceRoots: ['src'],
   enforceExportsMap: true,
 };
 
-/** Gate ids that concern pin ⇄ lockfile ⇄ installed agreement (not the import sweep). */
+/** Gate ids that concern the workspace dependency, its install and the root lock (not the import sweep). */
 const PIN_AGREEMENT_GATE_IDS = new Set([
-  'local-engine-overlay-absent',
-  'engine-pin-exact-semver',
-  'installed-matches-pin',
+  'engine-pin-workspace',
+  'engine-installed',
   'lockfile-resolves-pin',
 ]);
 
@@ -49,7 +46,7 @@ export function readEnginePin(root: string = process.cwd()): string | undefined 
   return pin;
 }
 
-/** Overlay-marker + exact-pin + pin/lock/installed agreement (the non-import gates). */
+/** Workspace dependency, install and root lock (the non-import gates). */
 export function enginePinAgreementIssues(root: string = process.cwd()): string[] {
   return runEnginePinGate(realFsReader(root), AGENT_ENGINE_PIN)
     .filter((result) => !result.ok && PIN_AGREEMENT_GATE_IDS.has(result.id))
@@ -74,7 +71,7 @@ if (import.meta.main) {
     for (const issue of issues) console.error(`engine-release-gate: ${issue}`);
     process.exit(1);
   }
-  // For workspace pins, the shared gate checks installed manifest presence;
-  // it does not prove the link target's identity or version.
-  console.log('engine-release-gate: dependency and root-lock checks passed, installed engine manifest present, overlay absent, imports use public engine exports.');
+  // The shared gate checks installed manifest presence; it does not prove the
+  // link target's identity or version.
+  console.log('engine-release-gate: workspace dependency and root-lock checks passed, installed engine manifest present, imports use public engine exports.');
 }

@@ -4,7 +4,6 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   AGENT_ENGINE_PIN,
-  OVERLAY_MARKER_REL,
   ENGINE_PACKAGE,
   readEnginePin,
   enginePinAgreementIssues,
@@ -20,7 +19,6 @@ interface FixtureSpec {
   readonly installedVersion?: string | null;
   readonly lockPin?: string | null;
   readonly localLockPin?: string;
-  readonly marker?: boolean;
   readonly devPin?: string;
   readonly srcFiles?: Record<string, string>;
 }
@@ -40,8 +38,7 @@ function makeFixture(spec: FixtureSpec = {}): string {
     ...(spec.devPin === undefined ? {} : { devDependencies: { [engine]: spec.devPin } }),
   }));
 
-  // The shared workspace branch proves manifest presence only. Exact registry
-  // pins below separately exercise installed-version agreement.
+  // The shared gate proves manifest presence only.
   if (spec.installedVersion !== null) {
     const pkgDir = join(root, 'node_modules', engine);
     mkdirSync(pkgDir, { recursive: true });
@@ -50,7 +47,6 @@ function makeFixture(spec: FixtureSpec = {}): string {
       version: spec.installedVersion ?? '2.0.23',
       exports: { '.': './index.js', './platform': './platform/index.js', './platform/platform/state': './platform/state.js', './platform/platform/tools': './platform/tools.js', './toolchain': './toolchain/index.js' },
     }));
-    if (spec.marker) writeFileSync(join(pkgDir, '.local-engine-overlay.json'), '{}');
   }
 
   const lockPin = spec.lockPin === undefined ? pin : spec.lockPin;
@@ -77,10 +73,9 @@ afterEach(() => {
 });
 
 describe('engine-release-gates', () => {
-  test('the adapter names the installable package, root lock and engine-owned marker', () => {
+  test('the adapter names the installable package and root lock', () => {
     expect(ENGINE_PACKAGE).toBe('@goodvibes-jev/engine');
     expect(AGENT_ENGINE_PIN).toMatchObject({ pinSource: 'dependencies', lockfile: '../../bun.lock', enforceExportsMap: true });
-    expect(OVERLAY_MARKER_REL).toBe('node_modules/@goodvibes-jev/engine/.local-engine-overlay.json');
   });
 
   test('the actual Agent workspace passes dependency, root-lock and installed-presence checks', () => {
@@ -93,36 +88,19 @@ describe('engine-release-gates', () => {
     expect(engineReleaseGateIssues(makeFixture())).toEqual([]);
   });
 
-  test('clean exact registry fixture passes installed-version agreement', () => {
-    expect(engineReleaseGateIssues(makeFixture({ pin: '2.0.23' }))).toEqual([]);
+  test.each(['2.0.23', '^2.0.23', 'latest', 'file:../../packages/engine'])('a dependency other than the workspace (%s) fails', (pin) => {
+    expect(enginePinAgreementIssues(makeFixture({ pin })).some((issue) => issue.includes('must be a workspace dependency'))).toBe(true);
   });
 
-  test('the engine-owned overlay marker is a blocking issue', () => {
-    const issues = enginePinAgreementIssues(makeFixture({ marker: true }));
+  test('a missing installed engine fails', () => {
+    const issues = enginePinAgreementIssues(makeFixture({ installedVersion: null }));
     expect(issues).toHaveLength(1);
-    expect(issues[0]).toContain(`overlay marker present at ${OVERLAY_MARKER_REL}`);
-  });
-
-  test.each(['^2.0.23', '~2.0.23', 'latest', 'file:../../packages/engine'])('non-exact registry pin %s fails', (pin) => {
-    expect(enginePinAgreementIssues(makeFixture({ pin })).some((issue) => issue.includes('must be exact'))).toBe(true);
-  });
-
-  test.each(['workspace:*', '2.0.23'])('missing installed engine fails for %s', (pin) => {
-    const issues = enginePinAgreementIssues(makeFixture({ pin, installedVersion: null }));
-    expect(issues).toHaveLength(1);
-    expect(issues[0]).toMatch(/not installed|@missing != pin/);
-  });
-
-  test('wrong installed version fails an exact registry pin', () => {
-    const issues = enginePinAgreementIssues(makeFixture({ pin: '2.0.23', installedVersion: '2.0.22' }));
-    expect(issues).toHaveLength(1);
-    expect(issues[0]).toContain('installed @goodvibes-jev/engine@2.0.22 != pin 2.0.23');
+    expect(issues[0]).toContain('not installed');
   });
 
   test.each([
     { pin: 'workspace:*', lockPin: '2.0.23' },
     { pin: 'workspace:*', lockPin: null },
-    { pin: '2.0.23', lockPin: '2.0.22' },
   ])('root-lock mismatch blocks even when a local lock agrees: %j', (spec) => {
     const issues = enginePinAgreementIssues(makeFixture({ ...spec, localLockPin: spec.pin }));
     expect(issues).toHaveLength(1);

@@ -46,6 +46,7 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
     description: 'Import one exact versioned legacy manifest only after fresh recorded autonomous admission under paired authority. Durable exact-request replay bypasses new evaluation. Preserves source records and grants no execution or verification authority.',
     access: 'admin', scopes: [WORK_LEDGER_IMPORT_SCOPE, 'read:knowledge'], metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'POST', path: '/api/work-ledger/legacy-import' },
+    replay: { in: 'body', name: 'requestId', behavior: 'Sending the same requestId again replays the durable result without a new admission evaluation.' },
     inputSchema: { type: 'object', additionalProperties: false, required: ['type','requestId','expectedRevision','manifest'],
       properties: { type: { type: 'string', enum: ['import_legacy'] }, requestId: { type: 'string', minLength: 1, maxLength: 200 }, expectedRevision: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, manifest: manifestJsonSchema } },
     outputSchema: { anyOf: [json(union([

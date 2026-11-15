@@ -5,7 +5,6 @@
     "enginePackage": "@goodvibes-jev/engine",
     "pinSource": "dependencies",
     "lockfile": "../../bun.lock",
-    "overlayMarker": "node_modules/@goodvibes-jev/engine/.local-engine-overlay.json",
     "sourceRoots": [
       "src"
     ],
@@ -53,15 +52,5 @@
   "smoke": {
     "bannerPrefix": "goodvibes-agent ",
     "binaryDefault": "dist/goodvibes-agent-linux-x64"
-  },
-  "perJobGreen": {
-    "owner": "mgd34msu",
-    "repo": "goodvibes-agent",
-    "workflow": "ci.yml",
-    "event": "push",
-    "pollIntervalMs": 20000,
-    "deadlineMs": 1800000,
-    "retryAttempts": 8,
-    "retryDelayMs": 7000
   }
 }

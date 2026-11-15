@@ -135,33 +135,30 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Engine tests: nine disjoint partitions of the engine suite (selected by the
-  # runner itself with --partition=INDEX/9) plus the companion runtimes. Every
-  # leg restores the build job's compiled output. Partition 1 also owns the
-  # installer lifecycle and judgment;
-  # partition 9 holds the dedicated native workflow suite, whose declared
-  # four-minute test sets its own timeout.
+  # Engine tests: five disjoint partitions of the engine suite (selected by the
+  # runner itself with --partition=INDEX/5) plus the companion runtimes. Each
+  # partition runs its files one per process, cores - 1 at a time (the runner's
+  # default). Every leg restores the build job's compiled output. Partition 1
+  # also owns the installer lifecycle and judgment; partition 5 holds the
+  # dedicated native workflow suite, whose declared four-minute test sets its
+  # own timeout.
   # ---------------------------------------------------------------------------
   platform-matrix:
     name: Platform matrix (${{ matrix.name }})
     # Process-group timeout proofs require GNU coreutils, supplied by this image.
     runs-on: ubuntu-24.04
-    # Slowest partition: ~10.5 min on a 12-core workstation (single bun process).
+    # Was nine single-process partitions (slowest ~10.5 min); per-file processes on the runner's cores replace four of them.
     timeout-minutes: 35
     needs: [build]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: "bun 1/9", foundation: true, test-cmd: "bun packages/engine/scripts/test.ts --partition=1/9" }
-          - { name: "bun 2/9", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=2/9" }
-          - { name: "bun 3/9", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=3/9" }
-          - { name: "bun 4/9", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=4/9" }
-          - { name: "bun 5/9", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=5/9" }
-          - { name: "bun 6/9", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=6/9" }
-          - { name: "bun 7/9", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=7/9" }
-          - { name: "bun 8/9", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=8/9" }
-          - { name: "bun 9/9", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=9/9" }
+          - { name: "bun 1/5", foundation: true, test-cmd: "bun packages/engine/scripts/test.ts --partition=1/5" }
+          - { name: "bun 2/5", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=2/5" }
+          - { name: "bun 3/5", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=3/5" }
+          - { name: "bun 4/5", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=4/5" }
+          - { name: "bun 5/5", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=5/5" }
           - { name: rn-bundle, foundation: false, test-cmd: "bun run test:rn" }
           - { name: workers, foundation: false, test-cmd: "bun run test:workers" }
           - { name: workers-wrangler, foundation: false, test-cmd: "bun run test:workers:wrangler" }

@@ -143,6 +143,7 @@ function main(): void {
       '',
       'or, if it is genuinely internal, name it in INTENTIONALLY_INTERNAL in',
       'scripts/engine-package-lists.ts with the reason consumers do not need it.',
+      'A source-tree import resolves either way; only a packed tarball (bun run pack:check) proves the entry.',
     );
   }
 

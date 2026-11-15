@@ -138,7 +138,8 @@ async function runScenario(merchant: FixtureMerchant, scenario: Scenario): Promi
           };
           const giveUpAt = Date.now() + 10_000;
           const whenArmed = (): void => {
-            if (inbox.inspect().length > 0 || Date.now() > giveUpAt) answer();
+            if (inbox.inspect().length > 0) answer();
+            else if (Date.now() > giveUpAt) replyOutcome = 'no reply window opened within 10 s, so the owner had nothing to answer';
             else setTimeout(whenArmed, 10);
           };
           setTimeout(whenArmed, 0);

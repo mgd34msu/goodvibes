@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { assertCoversMethodIds, descriptorSchemas, parseMethodIds } from './foundation-io-catalog.ts';
+import { descriptorSchemas, parseMethodIds } from './foundation-io-catalog.ts';
 import { renderType } from './foundation-io-render.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,7 +45,6 @@ const FOUNDATION_TYPES_PATH = resolve(
 const METHOD_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-method-ids.ts');
 
 const methodIds = parseMethodIds(readFileSync(METHOD_IDS_PATH, 'utf8'));
-assertCoversMethodIds(methodIds);
 
 /** Every catalogued verb, each with the schema pair its own descriptor declares. */
 const ENTRIES = methodIds.map((methodId) => ({ methodId, ...descriptorSchemas(methodId) }));

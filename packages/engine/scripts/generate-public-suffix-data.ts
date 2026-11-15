@@ -41,8 +41,9 @@ export function renderPublicSuffixData(text: string, snapshotDate: string): {
   for (const suffix of CURATED_PRIVATE_SUFFIXES) multiLabel.add(suffix);
   if (parsed.multiLabel.size < MIN_MULTI_LABEL_SUFFIXES) {
     throw new Error(
-      `public-suffix: the upstream list has only ${String(parsed.multiLabel.size)} multi-label ICANN suffixes `
-      + `(expected more than ${String(MIN_MULTI_LABEL_SUFFIXES)}); refusing to overwrite the bundled data.`,
+      `public-suffix: the bundled data was left unchanged. The fetched list has only ${String(parsed.multiLabel.size)} `
+      + `multi-label ICANN suffixes (the real one has more than ${String(MIN_MULTI_LABEL_SUFFIXES)}), so it is not the full list. `
+      + `Check ${UPSTREAM_URL} and run the generator again.`,
     );
   }
   const { wildcardParents, exceptions } = parsed;

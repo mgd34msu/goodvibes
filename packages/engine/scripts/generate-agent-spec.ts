@@ -4,8 +4,8 @@
  *
  * Writes the small, agent-facing slice of the operator contract: sessions,
  * tasks, contracts, approvals and the event stream, with schemas shared through
- * `components` instead of inlined 475 times, the real error body and codes, and
- * a compact operation index. The full document stays the reference; this one is
+ * `components` instead of inlined 475 times, the real error body, the codes
+ * each method's route declares, and a compact operation index. The full document stays the reference; this one is
  * what an agent reads first.
  *
  * It runs when asked (`bun run agent-spec:generate`); `contracts:check` compares it in
@@ -22,9 +22,11 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EngineErrorCodes } from '../errors/src/error-codes.ts';
-import { DaemonErrorCategory } from '../errors/src/daemon-error-contract.ts';
-import type { OperatorContractManifest, OperatorMethodContract, OperatorEventContract, JsonSchema } from '../contracts/src/types.ts';
-import { buildParameters, hasDeleteBody, isOpaqueSchema, pathParamNames, replayKey, SSE_METHODS, SSE_RESPONSE } from './openapi-shared.ts';
+import type { ContractErrorCode, OperatorContractManifest, OperatorMethodContract, OperatorEventContract, JsonSchema } from '../contracts/src/types.ts';
+import {
+  buildParameters, errorBodySchema, hasRequestBody, isOpaqueSchema, knownErrorCodes, pathParamNames, replayKey, requestBodySchema,
+  REST_LAYER_CODES, SSE_METHODS, SSE_RESPONSE,
+} from './openapi-shared.ts';
 
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CHECK_ONLY = process.argv.includes('--check');
@@ -36,21 +38,6 @@ const FAMILIES = ['sessions', 'tasks', 'contracts', 'approvals'] as const;
 const EVENT_METHODS = new Set(['control.events.stream', 'control.events.catalog']);
 const INVOKE_PATH = '/api/control/gateway-methods/{methodId}/invoke';
 
-/**
- * Codes the session, control and gate routes put on the wire, with their status.
- * Everything else comes from the shared `EngineErrorCodes` list.
- */
-const ROUTE_CODES: ReadonlyArray<{ readonly code: string; readonly status: number; readonly meaning: string }> = [
-  { code: 'SESSION_NOT_FOUND', status: 404, meaning: 'No shared session has that id.' },
-  { code: 'SESSION_CLOSED', status: 409, meaning: 'The session is closed; reopen it (sessions.reopen) before sending to it.' },
-  { code: 'SESSION_ACTIVE', status: 409, meaning: 'The session still has a running turn or attached surface; the body names it.' },
-  { code: 'INPUT_NOT_DELIVERABLE', status: 409, meaning: 'The input is not in a state a surface may report on; the body returns the input and its state.' },
-  { code: 'CANCEL_NOT_ALLOWED', status: 409, meaning: 'Only a queued input can be cancelled; the body says whether it is running or ended.' },
-  { code: 'INVALID_KIND', status: 400, meaning: 'Unknown session or input kind; nothing was changed.' },
-  { code: 'INVALID_ARGUMENT', status: 400, meaning: 'A body field disagrees with the route target.' },
-  { code: 'METHOD_NOT_FOUND', status: 404, meaning: 'No such operator method id (invoke endpoint).' },
-];
-
 type Json = Record<string, unknown>;
 
 const contract = JSON.parse(readFileSync(CONTRACT_PATH, 'utf8')) as OperatorContractManifest;
@@ -58,6 +45,12 @@ const methods = contract.operator.methods;
 const selected = methods.filter((m) => (FAMILIES as readonly string[]).includes(m.category) || EVENT_METHODS.has(m.id));
 const rest = selected.filter((m) => m.http);
 const wsOnly = selected.filter((m) => !m.http);
+
+/** Each code the selected methods' routes declare, once, with the REST layer's codes first. */
+const declaredCodes: readonly ContractErrorCode[] = [
+  ...new Map([...REST_LAYER_CODES, ...selected.flatMap((m) => m.errorCodes ?? [])].map((entry) => [entry.code, entry])).values(),
+];
+const codesWithStatus = (status: number): string => declaredCodes.filter((entry) => entry.status === status).map((entry) => entry.code).join(', ');
 
 // ---------------------------------------------------------------------------
 // Shared schema components
@@ -168,7 +161,7 @@ function errorResponses(method: OperatorMethodContract): Record<string, unknown>
 
 function operationFor(method: OperatorMethodContract): Json {
   const http = method.http!;
-  const replay = replayKey(method.id);
+  const replay = replayKey(method);
   const params = buildParameters(method).map((param) => (isPlain(param['schema']) ? { ...param, schema: rewriteSchema(param['schema'] as JsonSchema) } : param));
   const op: Json = {
     operationId: method.id,
@@ -187,18 +180,13 @@ function operationFor(method: OperatorMethodContract): Json {
     },
     ...(method.scopes.length > 0 ? { 'x-scopes': method.scopes } : {}),
     ...(replay ? { 'x-replay-key': replay.extension } : {}),
+    ...(method.errorCodes ? { 'x-error-codes': method.errorCodes } : {}),
   };
-  if ((http.method === 'POST' || http.method === 'PATCH' || (http.method === 'DELETE' && hasDeleteBody(method))) && method.inputSchema) {
-    const pathParams = pathParamNames(http.path);
+  if (hasRequestBody(method) && method.inputSchema) {
     const input = method.inputSchema;
-    const properties = isPlain(input.properties) ? input.properties : {};
-    // A path key is carried by the URL, so it is not a body field (the full document keeps one exception for turns.cancel).
-    const body = method.id === 'sessions.turns.cancel' || http.method === 'DELETE'
-      ? { ...input, properties: Object.fromEntries(Object.entries(properties).filter(([key]) => !pathParams.includes(key))),
-          required: (Array.isArray(input.required) ? input.required as string[] : []).filter((key) => !pathParams.includes(key)) }
-      : input;
+    const body = requestBodySchema(method)!;
     op['requestBody'] = {
-      required: http.method === 'DELETE' ? (body.required as string[]).length > 0 : !isOpaqueSchema(input),
+      required: http.method === 'DELETE' ? ((body.required ?? []) as readonly string[]).length > 0 : !isOpaqueSchema(input),
       content: { 'application/json': { schema: isOpaqueSchema(input) ? { description: 'No declared input schema.' } : rewriteSchema(body as JsonSchema) } },
     };
   }
@@ -223,8 +211,6 @@ paths[INVOKE_PATH] = {
   },
 };
 
-const errorCodes = [...new Set([...Object.values(EngineErrorCodes), ...ROUTE_CODES.map((c) => c.code)])];
-
 const document = {
   openapi: '3.1.0',
   info: {
@@ -247,29 +233,14 @@ const document = {
     },
     responses: {
       Error: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } } },
-      BadRequest: { description: 'The request was malformed or failed validation; nothing was changed. `code` may be INVALID_KIND or INVALID_ARGUMENT.', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } } },
+      BadRequest: { description: `The request was malformed or failed validation; nothing was changed. Codes declared: ${codesWithStatus(400)}.`, content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } } },
       Unauthorized: { description: 'No valid bearer token or session cookie.', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } } },
       MissingScope: { description: 'The principal lacks a scope the operation requires; the body names the missing scopes.', content: { 'application/json': { schema: { $ref: '#/components/schemas/MissingScopeBody' } } } },
       NotFound: { description: 'The addressed record does not exist. For sessions `code` is SESSION_NOT_FOUND.', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } } },
-      Conflict: { description: 'The target is in a state that cannot take this action; the body names the state and what is allowed. Codes seen: SESSION_CLOSED, SESSION_ACTIVE, INPUT_NOT_DELIVERABLE, CANCEL_NOT_ALLOWED.', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } } },
+      Conflict: { description: `The target is in a state that cannot take this action; the body names the state and what is allowed. Codes declared: ${codesWithStatus(409)}.`, content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } } },
     },
     schemas: {
-      ErrorBody: {
-        type: 'object',
-        required: ['error'],
-        properties: {
-          error: { type: 'string', description: 'What went wrong, naming the current state and the allowed next step where there is one.' },
-          code: { type: 'string', description: 'A stable code. Known values are listed in `x-known-codes`; unknown codes must be treated as opaque.', 'x-known-codes': errorCodes },
-          category: { type: 'string', enum: Object.values(DaemonErrorCategory) },
-          source: { type: 'string' },
-          hint: { type: 'string' },
-          recoverable: { type: 'boolean' },
-          status: { type: 'integer' },
-          requestId: { type: 'string' },
-          retryAfterMs: { type: 'number', description: 'Present when retrying later can succeed.' },
-        },
-        additionalProperties: true,
-      },
+      ErrorBody: errorBodySchema(knownErrorCodes(selected)),
       MissingScopeBody: {
         type: 'object',
         required: ['error', 'requiredScopes', 'grantedScopes', 'missingScopes'],
@@ -301,27 +272,27 @@ function indexMarkdown(): string {
     '',
     `Generated from the operator contract (product ${contract.product.version}) by \`bun run agent-spec:generate\`. Spec: [agent-api.openapi.json](./agent-api.openapi.json). Everything not listed here is in the full document, \`contracts/artifacts/operator-openapi.json\`.`,
     '',
-    'Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{ error, code?, category?, hint?, requestId? }`; a 403 for a missing scope also lists `requiredScopes`, `grantedScopes` and `missingScopes`.',
+    'Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{ error, state?, next?, hint?, code?, category?, requestId?, retryAfterMs? }`; a 403 for a missing scope also lists `requiredScopes`, `grantedScopes` and `missingScopes`.',
     '',
   ];
   for (const family of FAMILIES) {
     lines.push(`## ${family}`, '', '| Method id | Route | Scopes | Replay key | Does |', '| --- | --- | --- | --- | --- |');
     for (const method of selected.filter((m) => m.category === family).sort((a, b) => a.id.localeCompare(b.id))) {
       const route = method.http ? `${method.http.method} ${method.http.path}` : 'invoke / WebSocket only';
-      const replay = replayKey(method.id);
-      lines.push(`| \`${method.id}\` | ${method.http ? `\`${route}\`` : route} | ${method.scopes.join(', ') || 'none'} | ${replay ? `body \`${replay.extension['name']}\`` : ''} | ${oneLine(method.description)} |`);
+      const replay = replayKey(method);
+      lines.push(`| \`${method.id}\` | ${method.http ? `\`${route}\`` : route} | ${method.scopes.join(', ') || 'none'} | ${replay ? `${replay.extension['in']} \`${replay.extension['name']}\`` : ''} | ${oneLine(method.description)} |`);
     }
     lines.push('');
   }
   lines.push('## events', '', `Stream: \`GET /api/control-plane/events?domains=<comma list>\` (\`text/event-stream\`), catalog at \`GET /api/control-plane/events/catalog\`. Methods: ${selected.filter((m) => EVENT_METHODS.has(m.id)).map((m) => `\`${m.id}\``).join(', ')}.`, '', '| Event id | Domains |', '| --- | --- |');
   for (const event of contract.operator.events) lines.push(`| \`${event.id}\` | ${(event.domains ?? []).join(', ') || 'control'} |`);
-  lines.push('', '## Replay', '', 'There is no `Idempotency-Key` header. These methods replay on a field of the request body:', '');
-  for (const method of selected.concat(methods.filter((m) => m.id.startsWith('workLedger.'))).filter((m, i, all) => replayKey(m.id) && all.indexOf(m) === i)) {
-    const replay = replayKey(method.id)!;
-    lines.push(`- \`${method.id}\`: \`${replay.extension['name']}\`. ${replay.extension['behavior']}`);
+  lines.push('', '## Replay', '', 'These methods recognise a retry of the same request by a request header or a body field, and return the first result instead of acting twice:', '');
+  for (const method of selected.concat(methods.filter((m) => m.id.startsWith('workLedger.'))).filter((m, i, all) => m.replay && all.indexOf(m) === i)) {
+    const replay = replayKey(method)!;
+    lines.push(`- \`${method.id}\`: ${replay.extension['in']} \`${replay.extension['name']}\`. ${replay.extension['behavior']}`);
   }
-  lines.push('', '## Error codes', '', '| Code | Status | Meaning |', '| --- | --- | --- |');
-  for (const route of ROUTE_CODES) lines.push(`| \`${route.code}\` | ${route.status} | ${route.meaning} |`);
+  lines.push('', '## Error codes', '', 'Declared by each method beside its route; every operation also lists its own under `x-error-codes`.', '', '| Code | Status | Meaning |', '| --- | --- | --- |');
+  for (const entry of declaredCodes) lines.push(`| \`${entry.code}\` | ${entry.status} | ${entry.meaning.replace(/\|/g, '/')} |`);
   lines.push(`| ${[...Object.values(EngineErrorCodes)].map((code) => `\`${code}\``).join(', ')} | varies | The shared engine codes (\`@goodvibes-jev/engine/errors\`); the status is the route's. |`, '');
   return lines.join('\n');
 }

@@ -23,7 +23,6 @@ describe('toolchain config', () => {
     expect(resolved.enginePackage).toBe(DEFAULT_ENGINE_PACKAGE);
     expect(resolved.pinSource).toBe('dependencies');
     expect(resolved.lockfile).toBe('bun.lock');
-    expect(resolved.overlayMarker).toContain('.local-engine-overlay.json');
   });
   test('a one-field enginePin section parses: requiredness lives in resolveEnginePinConfig, not the schema', () => {
     const raw = JSON.stringify({
@@ -47,23 +46,9 @@ describe('toolchain config', () => {
   test('rejects a malformed nested section with a clear message naming the bad field', () => {
     const raw = JSON.stringify({
       packageName: '@goodvibes-jev/tui',
-      coverage: { funcsFloor: 80, linesFloor: '90', command: ['bun', 'test', '--coverage', 'src'] },
+      smoke: { bannerPrefix: 'goodvibes ', binaryDefault: 7 },
     });
-    expect(() => parseToolchainConfig(raw)).toThrow(/coverage\.linesFloor/);
-  });
-  test('rejects a malformed enum field with a clear message naming the bad field', () => {
-    const raw = JSON.stringify({
-      packageName: '@goodvibes-jev/tui',
-      releaseCut: {
-        branch: 'main',
-        versionFiles: [],
-        syncCommands: [],
-        commitPaths: [],
-        changelogHeading: 'invalid',
-        changelogInsertMarker: 'top',
-      },
-    });
-    expect(() => parseToolchainConfig(raw)).toThrow(/releaseCut\.changelogHeading/);
+    expect(() => parseToolchainConfig(raw)).toThrow(/smoke\.binaryDefault/);
   });
   test('valid config parses to a deep-equal object, matching the old cast-through parser', () => {
     const full = {
@@ -72,14 +57,12 @@ describe('toolchain config', () => {
         enginePackage: '@goodvibes-jev/engine',
         pinSource: 'dependencies',
         lockfile: 'bun.lock',
-        overlayMarker: 'node_modules/@goodvibes-jev/engine/.local-engine-overlay.json',
         sourceRoots: ['src'],
         enforceExportsMap: false,
       },
-      coverage: {
-        funcsFloor: 80,
-        linesFloor: 90,
-        command: ['bun', 'test', '--coverage', 'src'],
+      smoke: {
+        bannerPrefix: 'goodvibes ',
+        binaryDefault: 'dist/goodvibes-linux-x64',
       },
       // Unknown extra key: the old cast-through parser preserved whatever the
       // raw JSON contained, so a valid config must still round-trip it. This

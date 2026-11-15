@@ -32,6 +32,22 @@ function defaultTimeoutMs(): number {
   return Number.isFinite(env) && env >= 1 ? Math.floor(env) : 60_000;
 }
 
+/**
+ * The longest one test file may run in its own process before its process
+ * group is killed and the file reported as failed. Per-test timeouts cover a
+ * test that hangs inside bun's runner; this covers a file that never exits
+ * (a leaked server or poller keeping its event loop alive).
+ */
+function fileDeadlineMs(): number {
+  const env = Number(process.env.GOODVIBES_TEST_FILE_TIMEOUT_MS);
+  return Number.isFinite(env) && env >= 1 ? Math.floor(env) : 600_000;
+}
+
+/** Files run side by side by default: one per core, leaving one for the runner and the host. */
+function defaultJobs(): number {
+  return Math.max(1, availableParallelism() - 1);
+}
+
 export interface BunTestRun {
   /** Everything after `bun test`: flags and test files or filters. */
   readonly args: readonly string[];
@@ -39,7 +55,11 @@ export interface BunTestRun {
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Variables the isolation allowlist would otherwise strip. */
   readonly fixtureEnv?: Readonly<Record<string, string | undefined>>;
-  /** With more than 1, each test file runs in its own `bun test` process, this many at a time. */
+  /**
+   * With more than 1, each test file runs in its own `bun test` process (its
+   * own home and temp root), this many at a time. Omitted, every file runs in
+   * one process; the command line defaults to one file per core.
+   */
   readonly jobs?: number;
 }
 
@@ -190,7 +210,7 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
   /** One `bun test` child; with `capture`, its output is returned instead of inherited. */
   // `own` is a child's private temp root and HOME: files run side by side must
   // not share a home directory.
-  const spawnBun = async (testArgs: readonly string[], capture: boolean, own?: string): Promise<{ code: number; output: string }> => {
+  const spawnBun = async (testArgs: readonly string[], capture: boolean, own?: string, deadlineMs?: number): Promise<{ code: number; output: string; timedOut: boolean }> => {
     const tmp = own ?? root;
     if (own) mkdirSync(own);
     const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, ...testArgs], {
@@ -207,30 +227,48 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
       },
     });
     children.add(child);
+    let timedOut = false;
+    const deadline = deadlineMs === undefined ? undefined : setTimeout(() => {
+      timedOut = true;
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ }
+    }, deadlineMs);
     try {
       const [stdout, stderr, code] = capture
         ? await Promise.all([new Response(child.stdout as ReadableStream).text(), new Response(child.stderr as ReadableStream).text(), child.exited])
         : ['', '', await child.exited];
       try { process.kill(-child.pid, 'SIGKILL'); } catch { /* nothing left in the group */ }
-      return { code: code ?? 1, output: stdout + stderr };
-    } finally { children.delete(child); }
+      return { code: code ?? 1, output: stdout + stderr, timedOut };
+    } finally {
+      if (deadline !== undefined) clearTimeout(deadline);
+      children.delete(child);
+    }
   };
   try {
     let exitCode: number;
-    if ((run.jobs ?? 1) <= 1) {
+    const files = (run.jobs ?? 1) <= 1 ? [] : expandFiles(cwd, filters, flags);
+    if (files.length <= 1) {
+      // One process, output streamed as it comes: the whole selection when jobs is 1, or the one selected file.
       exitCode = (await spawnBun([...flags, ...filters], false)).code;
     } else {
-      // One child per file, at most `jobs` at a time; output is printed as each finishes.
-      const files = expandFiles(cwd, filters, flags);
+      // One child per file, at most `jobs` at a time. Each file prints a line when it starts and one when it
+      // ends; a failing file's output follows its line, and a file that outlives its deadline is killed.
       const failed: string[] = [];
+      const deadlineMs = fileDeadlineMs();
       let next = 0;
       const worker = async (): Promise<void> => {
         while (!signalled && next < files.length) {
           const index = next++, file = files[index]!;
           const started = Date.now();
-          const { code, output } = await spawnBun([...flags, `./${file}`], true, join(root, `${basename(root)}-f${index}`));
-          if (code !== 0 || signalled) failed.push(file);
-          process.stdout.write(`\n==> ${file} (${((Date.now() - started) / 1000).toFixed(1)}s)${code !== 0 ? `  [FAIL: exit ${code}]` : ''}\n${output}`);
+          process.stdout.write(`==> start ${file}\n`);
+          const { code, output, timedOut } = await spawnBun([...flags, `./${file}`], true, join(root, `${basename(root)}-f${index}`), deadlineMs);
+          const seconds = ((Date.now() - started) / 1000).toFixed(1);
+          if (code !== 0 || timedOut || signalled) {
+            failed.push(file);
+            const why = timedOut ? `still running after ${String(deadlineMs / 1000)}s, killed` : `exit ${code}`;
+            process.stdout.write(`==> FAIL ${file} (${seconds}s, ${why})\n${output}\n`);
+          } else {
+            process.stdout.write(`==> ok ${file} (${seconds}s)\n`);
+          }
         }
       };
       await Promise.all(Array.from({ length: Math.min(run.jobs!, files.length) }, worker));
@@ -258,11 +296,12 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
 
 /**
  * CLI: `bun scripts/test.ts [--cwd DIR] [--partition=I/N] [--jobs=N|auto] [bun test flags] [files]`.
- * `--cwd` is relative to the engine package. `--jobs=auto` is min(4, cores - 1). `--manifest=` is accepted and ignored.
+ * `--cwd` is relative to the engine package. Files run one per process, cores - 1 at a time (`--jobs=auto`, the
+ * default); `--jobs=1` runs the whole selection in one process. `--manifest=` is accepted and ignored.
  */
 function parseCli(argv: readonly string[]): BunTestRun {
   const { flags, filters, cwd, partition, jobs } = splitArgs(argv);
-  const jobCount = jobs === undefined ? 1 : jobs === 'auto' ? Math.max(1, Math.min(4, availableParallelism() - 1)) : Number(jobs);
+  const jobCount = jobs === undefined || jobs === 'auto' ? defaultJobs() : Number(jobs);
   if (!Number.isInteger(jobCount) || jobCount < 1) throw new Error('--jobs expects a positive integer or "auto"');
   if (partition !== undefined) {
     if (cwd !== undefined || filters.length > 0) throw new Error('--partition selects engine test files itself; do not combine it with --cwd or test files');

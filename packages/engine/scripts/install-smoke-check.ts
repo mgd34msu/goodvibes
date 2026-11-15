@@ -307,7 +307,7 @@ async function installWithNpm(specs: readonly string[]): Promise<void> {
       registry: REGISTRY,
       packageName: PUBLIC_PACKAGE_NAME,
       stdio: 'pipe',
-    }), { prefix: 'install-smoke', label: 'npm install', site: 'release.install-smoke.npm-install' });
+    }), { prefix: 'install-smoke', label: 'npm install' });
     run('node', ['check.mjs'], projectDir);
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
@@ -335,7 +335,7 @@ async function installWithBun(specs: readonly string[]): Promise<void> {
       registry: REGISTRY,
       packageName: PUBLIC_PACKAGE_NAME,
       stdio: 'pipe',
-    }), { prefix: 'install-smoke', label: 'bun add', site: 'release.install-smoke.bun-add' });
+    }), { prefix: 'install-smoke', label: 'bun add' });
     run('bun', ['run', 'check.mjs'], projectDir);
   } finally {
     rmSync(projectDir, { recursive: true, force: true });

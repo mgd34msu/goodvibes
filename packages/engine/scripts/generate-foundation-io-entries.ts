@@ -27,7 +27,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { assertCoversMethodIds, descriptorSchemas, parseMethodIds } from './foundation-io-catalog.ts';
+import { descriptorSchemas, parseMethodIds } from './foundation-io-catalog.ts';
 import { renderType } from './foundation-io-render.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,7 +48,6 @@ function replaceMapBody(fileText: string, mapName: string, body: string): string
 export function generateFoundationIoEntries(options: { readonly check: boolean }): boolean {
   const idsText = readFileSync(METHOD_IDS_PATH, 'utf8');
   const methodIds = parseMethodIds(idsText);
-  assertCoversMethodIds(methodIds);
 
   const inputLines: string[] = [];
   const outputLines: string[] = [];

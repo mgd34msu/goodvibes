@@ -142,7 +142,8 @@ interface RegisteredGatewayEvent {
 
 const BUILTIN_GATEWAY_EVENTS: readonly GatewayEventDescriptor[] = builtinGatewayEventDescriptors;
 
-const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
+/** Every builtin gateway method descriptor, in registration order. */
+export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayWorkLedgerMethodDescriptors,
   ...builtinGatewayNativeWorkExecutionMethodDescriptors,
   ...builtinGatewayNativeWorkSubmissionMethodDescriptors,

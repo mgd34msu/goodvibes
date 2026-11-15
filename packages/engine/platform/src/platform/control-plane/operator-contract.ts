@@ -168,6 +168,8 @@ function toMethodContract(d: GatewayMethodDescriptor): OperatorMethodContract {
     ...(d.pluginId !== undefined ? { pluginId: d.pluginId } : {}),
     ...(d.dangerous !== undefined ? { dangerous: d.dangerous } : {}),
     ...(d.invokable !== undefined ? { invokable: d.invokable } : {}),
+    ...(d.replay ? { replay: d.replay } : {}),
+    ...(d.errorCodes ? { errorCodes: d.errorCodes } : {}),
     ...(d.metadata ? { metadata: d.metadata } : {}),
   };
 }

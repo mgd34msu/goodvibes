@@ -11,22 +11,16 @@
  * whose bins include this one; every tool also stays directly invocable by
  * its own `goodvibes-*` bin name.
  *
- * The tool argument accepts both the bare tool name (`train-status`) and the
- * bin-prefixed form (`goodvibes-train-status`) so existing invocation
+ * The tool argument accepts both the bare tool name (`sha256sums`) and the
+ * bin-prefixed form (`goodvibes-sha256sums`) so existing invocation
  * strings work unchanged.
  */
 const TOOLS: Record<string, string> = {
   'engine-pin-gate': './engine-pin-gate.js',
   'build-binaries': './build-binaries.js',
-  'release-cut': './release-cut.js',
-  'coverage-gate': './coverage-gate.js',
-  'verification-ledger': './verification-ledger.js',
   'post-build-smoke': './post-build-smoke.js',
   'package-install-check': './package-install-check.js',
-  'publish-package': './publish-package.js',
-  'changelog-gate': './changelog-gate.js',
   'sha256sums': './sha256sums.js',
-  'train-status': './train-status.js',
 };
 
 const [tool, ...rest] = process.argv.slice(2);

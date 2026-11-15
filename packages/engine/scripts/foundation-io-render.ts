@@ -6,9 +6,7 @@
 //
 // Extracted verbatim from check-foundation-io-types.ts so the drift CHECK and
 // the ENTRY GENERATOR (generate-foundation-io-entries.ts) render through one
-// implementation rather than two that can disagree. Keeping the counting rules
-// in a pure module mirrors foundation-io-coverage-rule.ts vs
-// check-foundation-io-coverage.ts.
+// implementation rather than two that can disagree.
 //
 // Scope: intentionally NOT a general JSON-Schema-to-TS compiler. It implements
 // the constructs actually present in the method-catalog schemas: string/number/

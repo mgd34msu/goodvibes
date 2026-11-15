@@ -47,17 +47,4 @@ describe('goodvibes-toolchain dispatcher', () => {
       expect(res.stderr).toContain('Usage: goodvibes-toolchain <tool>');
     }
   });
-
-  test('the goodvibes- prefixed form dispatches the same as the bare tool name', () => {
-    // train-status with no --manifest exits 2 with its own named error,
-    // proof the dispatcher reached the real tool with a clean argv.
-    for (const name of ['train-status', 'goodvibes-train-status']) {
-      const res = spawnSync('bun', [DISPATCHER_SRC, name], {
-        encoding: 'utf8',
-        timeout: 30_000,
-      });
-      expect(res.status).toBe(2);
-      expect(res.stderr + res.stdout).toContain('train-status: --manifest');
-    }
-  });
 });

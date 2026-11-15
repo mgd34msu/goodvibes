@@ -11,7 +11,9 @@ import { PEER_CONTRACT } from './generated/peer-contract.js';
 import { PEER_ENDPOINT_IDS } from './generated/peer-endpoint-ids.js';
 
 export type {
+  ContractErrorCode,
   ContractHttpDefinition,
+  ContractReplayKey,
   DistributedPeerKind,
   DistributedWorkStatus,
   DistributedWorkType,

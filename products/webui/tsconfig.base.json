@@ -7,9 +7,8 @@
     "  scripts/tsconfig.json -> scripts/ (bun/node CLI: no DOM)",
     "  e2e/tsconfig.json     -> e2e/ (playwright: DOM for page.evaluate callbacks, no react-jsx)",
     "`bun run typecheck` runs all three. Adding a fourth source tree without a",
-    "project to cover it is caught by scripts/typecheck-coverage.ts, which",
-    "diffs git-tracked .ts/.tsx files against the union of every project's",
-    "`tsc --listFilesOnly` output."
+    "project to cover it is caught by the root `bun run products:check`, which",
+    "reports any .ts/.tsx file outside every tsconfig project."
   ],
   "compilerOptions": {
     "target": "ES2022",

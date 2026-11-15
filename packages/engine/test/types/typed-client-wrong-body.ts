@@ -63,8 +63,8 @@ void operator.invoke('vendor.extension.unknown', { anything: 1 });
 // 154 method ids with a hand-authored entry in foundation-client-types.ts get a
 // real input type; the other 289 fall back to `Record<string, unknown>`. So a
 // correct `required` array is necessary for a consumer-visible constraint and
-// nowhere near sufficient, the verb also has to be in that file. Coverage is
-// tracked by scripts/check-foundation-io-coverage.ts against a ratchet.
+// nowhere near sufficient, the verb also has to be in that file;
+// scripts/check-foundation-io-types.ts fails when a cataloged verb is missing.
 
 // ── Conditional requirements: "one of these", stated as a union of branches ──
 // Each of these handlers refuses a body satisfying no branch. A flat `required`

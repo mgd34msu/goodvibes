@@ -1,18 +1,17 @@
 /**
- * engine-pin-gate, verifies a consumer repo pins the engine correctly.
+ * engine-pin-gate, verifies a product depends on the engine through the
+ * workspace and imports it only through its published entry points.
  *
- * Absorbs three parallel copies: tui/scripts/publish-check.ts (pin in
- * `dependencies`), agent/scripts/engine-release-gates.ts (pin in
- * `devDependencies`), and webui/scripts/release-gate.ts (adds the exports-map
- * import sweep). The tri-agreement (pin ⇄ lockfile ⇄ installed) catches the
- * "pin bumped but lockfile lagged, ships old engine silently" failure class.
+ * Every product in the monorepo links the engine as `workspace:*`, so the pin
+ * check states that link and that it is installed and locked; the import
+ * sweep is the part with content: no product reaches into engine source by a
+ * relative path, and (with `enforceExportsMap`) every subpath it imports is a
+ * key of the engine's exports map.
  */
 
 import type { FsReader } from './effects.js';
 import { type EnginePinConfig, resolveEnginePinConfig } from '../config.js';
-import { engineOverlayMarkerPaths } from './engine-overlay.js';
 
-const EXACT_SEMVER = /^\d+\.\d+\.\d+$/;
 /** A dependency on the engine through the monorepo workspace (`workspace:*`, `workspace:^`). */
 const WORKSPACE_PIN = /^workspace:/;
 
@@ -118,17 +117,6 @@ function allowedExportSpecifiers(fs: FsReader, enginePackage: string): Set<strin
   return allow;
 }
 
-/** `pkg@3.3.1` must not match a lockfile entry for `pkg@3.3.10` or `pkg@3.3.1-rc.1`. */
-function lockfileNamesVersion(text: string, spec: string): boolean {
-  let from = 0;
-  for (;;) {
-    const at = text.indexOf(spec, from);
-    if (at === -1) return false;
-    if (!/[\w.+-]/.test(text.charAt(at + spec.length))) return true;
-    from = at + 1;
-  }
-}
-
 /**
  * Run every engine-pin gate and return one result per gate. Pure over the injected
  * FsReader, no process exit, no console. The bin maps results to exit codes.
@@ -137,37 +125,26 @@ export function runEnginePinGate(fs: FsReader, partial: Partial<EnginePinConfig>
   const config = resolveEnginePinConfig(partial);
   const results: GateResult[] = [];
 
-  const overlayPresent = engineOverlayMarkerPaths(config.enginePackage, config.overlayMarker).find(path => fs.exists(path));
-  results.push({
-    id: 'local-engine-overlay-absent',
-    ok: !overlayPresent,
-    detail: overlayPresent
-      ? `dev-link overlay marker present at ${overlayPresent}, restore the published engine before cutting`
-      : 'no dev-link overlay marker',
-  });
-
   const pin = readEnginePin(fs, config);
-  const pinExact = pin !== null && EXACT_SEMVER.test(pin);
   const pinWorkspace = pin !== null && WORKSPACE_PIN.test(pin);
   results.push({
-    id: 'engine-pin-exact-semver',
-    ok: pinExact || pinWorkspace,
-    detail: pinExact || pinWorkspace
-      ? `${config.enginePackage} pinned to ${pin}`
-      : `${config.enginePackage} pin in ${config.pinSource} must be exact X.Y.Z or a workspace dependency (found: ${pin ?? 'missing'})`,
+    id: 'engine-pin-workspace',
+    ok: pinWorkspace,
+    detail: pinWorkspace
+      ? `${config.enginePackage} is a workspace dependency (${pin})`
+      : `${config.enginePackage} in ${config.pinSource} must be a workspace dependency such as workspace:* (found: ${pin ?? 'missing'})`,
   });
 
   if (pinWorkspace) {
-    // A workspace dependency has no version to match. The reader cannot follow
-    // links, so this gate states only that the package is installed and the
-    // lockfile records the workspace entry.
+    // The reader cannot follow links, so this states only that the package is
+    // installed and the lockfile records the workspace entry.
     const installedPath = `node_modules/${config.enginePackage}/package.json`;
     results.push({
-      id: 'installed-matches-pin',
+      id: 'engine-installed',
       ok: fs.exists(installedPath),
       detail: fs.exists(installedPath)
         ? `${config.enginePackage} is installed (a link to the workspace is not verified here)`
-        : `${config.enginePackage} is not installed (run install)`,
+        : `${config.enginePackage} is not installed (run bun install)`,
     });
     const lockResolves = fs.exists(config.lockfile) && fs.readText(config.lockfile).includes(`${config.enginePackage}@workspace:`);
     results.push({
@@ -175,31 +152,7 @@ export function runEnginePinGate(fs: FsReader, partial: Partial<EnginePinConfig>
       ok: lockResolves,
       detail: lockResolves
         ? `${config.lockfile} resolves ${config.enginePackage} from the workspace`
-        : `${config.lockfile} does not resolve ${config.enginePackage} from the workspace (run install)`,
-    });
-  }
-
-  if (pinExact && pin) {
-    const installedPath = `node_modules/${config.enginePackage}/package.json`;
-    const installedVersion = fs.exists(installedPath)
-      ? (readManifest(fs, installedPath) as { version?: string }).version ?? null
-      : null;
-    results.push({
-      id: 'installed-matches-pin',
-      ok: installedVersion === pin,
-      detail: installedVersion === pin
-        ? `installed ${config.enginePackage}@${installedVersion} matches pin`
-        : `installed ${config.enginePackage}@${installedVersion ?? 'missing'} != pin ${pin} (run install)`,
-    });
-
-    const lockPresent = fs.exists(config.lockfile);
-    const lockResolves = lockPresent && lockfileNamesVersion(fs.readText(config.lockfile), `${config.enginePackage}@${pin}`);
-    results.push({
-      id: 'lockfile-resolves-pin',
-      ok: lockResolves,
-      detail: lockResolves
-        ? `${config.lockfile} resolves ${config.enginePackage}@${pin}`
-        : `${config.lockfile} does not resolve ${config.enginePackage}@${pin}, lockfile lagged the pin bump`,
+        : `${config.lockfile} does not resolve ${config.enginePackage} from the workspace (run bun install)`,
     });
   }
 

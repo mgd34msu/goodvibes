@@ -7,7 +7,7 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 /** A copy of the runner next to a product-like directory `app/` holding the given test files. */
-function fixture(files: Record<string, string>): { root: string; run: (args: string[]) => { code: number | null; output: string } } {
+function fixture(files: Record<string, string>): { root: string; run: (args: string[], env?: Record<string, string>) => { code: number | null; output: string } } {
   const root = mkdtempSync(join(tmpdir(), 'runner-jobs-')); roots.push(root);
   mkdirSync(join(root, 'scripts')); mkdirSync(join(root, 'app'));
   for (const file of ['test.ts', 'dist-freshness.ts', 'test-discovery.ts', 'test-partitions.ts']) copyFileSync(resolve(import.meta.dir, '../scripts', file), join(root, 'scripts', file));
@@ -16,9 +16,9 @@ function fixture(files: Record<string, string>): { root: string; run: (args: str
     mkdirSync(join(root, 'app', name, '..'), { recursive: true });
     writeFileSync(join(root, 'app', name), `import { test, expect } from 'bun:test'; test(${JSON.stringify(name)}, () => { ${body} });`);
   }
-  const run = (args: string[]) => {
+  const run = (args: string[], env: Record<string, string> = {}) => {
     const child = Bun.spawnSync({ cmd: [process.execPath, join(root, 'scripts/test.ts'), '--cwd', 'app', ...args], cwd: root,
-      env: { PATH: process.env.PATH ?? '', HOME: root }, timeout: 30_000, stdout: 'pipe', stderr: 'pipe' });
+      env: { PATH: process.env.PATH ?? '', HOME: root, ...env }, timeout: 30_000, stdout: 'pipe', stderr: 'pipe' });
     return { code: child.exitCode, output: `${child.stdout.toString()}${child.stderr.toString()}` };
   };
   return { root, run };
@@ -45,7 +45,7 @@ test('space-separated flag values are not mistaken for test files, and an unmatc
   const { run } = fixture({ 'a.test.ts': 'expect(1).toBe(1);' });
   const spaced = run(['--timeout', '20000', '--jobs', '2', 'a.test']);
   expect(spaced.code, spaced.output).toBe(0);
-  expect(spaced.output).toContain('Test files: 1, failed: 0');
+  expect(spaced.output).toContain('1 pass');
   expect(run(['--jobs=2', 'nothing-matches']).code).not.toBe(0);
 });
 
@@ -57,4 +57,14 @@ test('a path relative to the current directory runs that file, and an unmatched 
   const missing = run(['src/none.test.ts']);
   expect(missing.code).not.toBe(0);
   expect(missing.output).toMatch(/Test path\(s\) not found under \S+\/app: src\/none\.test\.ts/);
+});
+
+test('a file that never exits is killed at its deadline and named as failed', () => {
+  const { root, run } = fixture({ 'a.test.ts': 'expect(1).toBe(1);' });
+  writeFileSync(join(root, 'app', 'hang.test.ts'), "import { test } from 'bun:test'; test('hang', () => new Promise(() => {}), 600_000);");
+  const result = run(['a.test', 'hang.test'], { GOODVIBES_TEST_FILE_TIMEOUT_MS: '1000' });
+  expect(result.code, result.output).toBe(1);
+  expect(result.output).toContain('==> start hang.test.ts');
+  expect(result.output).toContain('FAIL hang.test.ts');
+  expect(result.output).toContain('Test files: 2, failed: 1');
 });

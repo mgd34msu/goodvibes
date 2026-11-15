@@ -22,6 +22,26 @@ export interface ContractHttpDefinition {
   readonly path: string;
 }
 
+/**
+ * How a retry of a method is recognised as the same request: a request header
+ * or a request-body field whose repeated value replays the first result
+ * instead of acting twice.
+ */
+export interface ContractReplayKey {
+  readonly in: 'header' | 'body';
+  readonly name: string;
+  /** What a repeated value returns, and what a different request under the same value gets. */
+  readonly behavior: string;
+}
+
+/** A `code` a method's route puts on an error body, with the HTTP status it comes with. */
+export interface ContractErrorCode {
+  readonly code: string;
+  readonly status: number;
+  /** The state the code reports and the next step, in one sentence. */
+  readonly meaning: string;
+}
+
 export interface OperatorMethodContract {
   readonly id: string;
   readonly title: string;
@@ -40,6 +60,10 @@ export interface OperatorMethodContract {
   readonly invokable?: boolean | undefined;
   /** Whether this method is idempotent. When true, safe to retry on 5xx + network errors. */
   readonly idempotent?: boolean | undefined;
+  /** The header or body field that makes a retry of this method safe, when it has one. */
+  readonly replay?: ContractReplayKey | undefined;
+  /** Codes this method's route answers with beyond the shared engine codes. */
+  readonly errorCodes?: readonly ContractErrorCode[] | undefined;
   /**
    * Intentionally open bag for generator-supplied extension fields (e.g.
    * plugin manifests, analytics tags, UI hints). Consumers must not rely on any

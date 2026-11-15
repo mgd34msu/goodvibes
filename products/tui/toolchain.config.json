@@ -82,15 +82,5 @@
       "vendor/"
     ],
     "maxTarballBytes": 52428800
-  },
-  "perJobGreen": {
-    "owner": "mgd34msu",
-    "repo": "goodvibes-tui",
-    "workflow": "ci.yml",
-    "event": "push",
-    "pollIntervalMs": 20000,
-    "deadlineMs": 1800000,
-    "retryAttempts": 8,
-    "retryDelayMs": 7000
   }
 }

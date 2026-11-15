@@ -24,7 +24,7 @@ from the committed contract artifact and kept honest by a drift gate.
   75 methods) and are listed on it under `x-invoke-only-methods`.
   `x-operator-methods` is a flat index of all 572 cataloged methods, REST-bound
   or invoke-only, each with its category, access level, resolved REST route (or
-  `null` for invoke-only), and schema/typed-IO coverage.
+  `null` for invoke-only), and schema coverage.
   <!-- openapi-counts:end -->
   `x-operator-methods` in the document is authoritative.
 - Real JSON Schemas for request/response bodies, embedded directly from the
@@ -32,14 +32,14 @@ from the committed contract artifact and kept honest by a drift gate.
   A method whose contract schema is absent or a bare object with no declared
   properties is marked `x-schema-coverage: schema-less` instead of being given
   an invented schema.
-- **Honest typed-IO marking.** A method lacks typed platform client IO when its id
-  has no entry in the generated `OperatorMethodInputMap`/`OperatorMethodOutputMap`.
-  That untyped set is currently empty: every cataloged method carries a
-  rendered map entry, so every operation carries `x-typed-client-io: true` and
-  `x-untyped-client-io-count` reads `0`. The marking mechanism stays in the
-  generator (and in this document) because the ratchet is enforced, not fixed;
-  a future method that ships without a map entry would surface here as
-  `x-typed-client-io: false` and a nonzero count, not silently.
+- Typed client IO for every method: `contracts:check` fails when a cataloged
+  method has no rendered `OperatorMethodInputMap`/`OperatorMethodOutputMap`
+  entry, so no operation is untyped in the typed client.
+- One error body, `components.schemas.ErrorBody`, with the fields every daemon
+  route answers with (`error`, `state`, `next`, `hint`, `code`, `category`,
+  `requestId`, `retryAfterMs` and the rest of `StructuredDaemonErrorBody`). Its
+  `code` lists the known codes in `x-known-codes`; an operation whose route adds
+  its own codes lists them, with status and meaning, in `x-error-codes`.
 - For GET and DELETE methods, top-level input-schema properties that are not
   already path parameters are emitted as query parameters instead of a request
   body, since those HTTP verbs carry no body in this contract.
@@ -59,18 +59,19 @@ bun run openapi:check      # exit 1 on drift
 `contracts:check` (part of `validate`) runs the drift check, so a change to the
 operator contract that is not reflected in the committed OpenAPI document, or a
 hand-edit to the document, fails gates. The generator's inputs are themselves
-committed artifacts (`operator-contract.json` plus the typed-client-IO ratchet
-inputs), so generation is deterministic.
+committed artifact `operator-contract.json`, so generation is deterministic.
 
 ## Streams and replay
 
 - The two server-sent event routes (`control.events.stream`, `companion.chat.events.stream`)
   declare a `text/event-stream` 200 response, not a JSON body.
-- Operations that already replay safely name their replay key in an
-  `x-replay-key` extension (`in: body`, `name`, `behavior`) and in their
-  description: `sessions.register` (`sessionId`), `workLedger.submit`,
-  `workLedger.intake.capture` and `workLedger.importLegacy` (`requestId`). There
-  is no `Idempotency-Key` header; the key is a field of the request body.
+- Operations that replay safely name their replay key in an `x-replay-key`
+  extension (`in`, `name`, `behavior`) and in their description. The key is
+  declared on the method in the catalog, beside its route. `contracts.start`
+  reads the `Idempotency-Key` request header (`in: header`): a retry with the
+  same key and body returns the first contract. `sessions.register`
+  (`sessionId`), `workLedger.submit` and `workLedger.importLegacy` (`requestId`)
+  replay on a field of the request body (`in: body`).
 
 ## Small agent-facing spec
 

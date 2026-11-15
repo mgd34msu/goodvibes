@@ -1,29 +1,15 @@
-import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
 /**
  * Retry for the package-install steps of the release scripts (install smoke,
  * artifact lane). npm and bun fetches hit transient connection faults on CI
- * runners; a single blip must not fail a release, and a real failure (a bad
- * tarball, a missing entry, a parse error) must not be retried.
+ * runners; a single blip must not fail a release, and a failure npm names
+ * with a non-transient code (a missing package, a bad integrity hash) must
+ * not be retried.
  *
- * Whether a failure is a transient network fault is decided in two steps:
- *
- *  1. A structured errno code settles it. npm prints the error's `code` field
- *     on a fixed `npm error code <CODE>` line (`npm ERR! code` before npm 10),
- *     and a spawn failure carries it on the error object. That is a fixed
- *     format, so it stays code: a transient errno retries, any other code does
- *     not.
- *  2. With no code (bun prints prose, and npm omits the line for some
- *     failures), the wording is read by the engine failure battery through
- *     `readFailure`, and only a `transient_network` yes strong enough to act on
- *     retries. The judgment port is built from the environment the first time
- *     a reading is needed (as packages/judgment/scripts/calibrate.ts builds
- *     one), unless one is already installed; without one the install failure
- *     is reported with the reason no reading could be made. There is no
- *     pattern-list fallback.
+ * npm prints the error's `code` field on a fixed `npm error code <CODE>` line
+ * (`npm ERR! code` before npm 10), and a spawn failure carries it on the
+ * error object; that code decides. With no code the install is simply tried
+ * again, up to three attempts, because an install is idempotent.
  */
-import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
-import { installJudgmentPort, judgmentPort, JudgmentPortMissingError, readFailure } from '@goodvibes-jev/engine/errors';
-
 type CommandError = Error & {
   readonly code?: unknown;
   readonly stderr?: Buffer | string;
@@ -53,9 +39,6 @@ function isTransientCode(code: string): boolean {
   return TRANSIENT_CODES.has(upper) || REGISTRY_SERVER_ERROR.test(upper);
 }
 
-/** The longest output tail handed to a reading; install output says what failed at its end. */
-const MAX_EVIDENCE_CHARS = 2_000;
-
 function outputText(value: Buffer | string | undefined): string {
   return value === undefined ? '' : value.toString();
 }
@@ -74,47 +57,16 @@ export function installErrorCode(error: unknown): string | null {
   return line?.[1] ?? null;
 }
 
-/** The failure text a reading is given: the command's message and the tail of its output. */
-export function installFailureText(error: unknown): string {
-  if (!error || typeof error !== 'object') return String(error);
-  const commandError = error as CommandError;
-  const output = [outputText(commandError.stderr), outputText(commandError.stdout)]
-    .map((text) => text.trim())
-    .filter(Boolean)
-    .join('\n');
-  const tail = output.length > MAX_EVIDENCE_CHARS ? output.slice(-MAX_EVIDENCE_CHARS) : output;
-  return [commandError.message, tail].filter(Boolean).join('\n');
-}
-
-/** Uses the installed judgment port, building one from the environment when none is installed. */
-function ensureJudgmentPort(site: string): void {
-  try {
-    judgmentPort(site);
-  } catch (error) {
-    if (!(error instanceof JudgmentPortMissingError)) throw error;
-    installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() })));
-  }
-}
-
-/** A codeless install failure that no reading could classify, because no judgment port could be built. */
-export class InstallReadingUnavailableError extends AggregateError {}
-
-/** Whether a failed install is a transient network fault worth another attempt. */
-export async function isTransientInstallFailure(error: unknown, site: string): Promise<boolean> {
+/**
+ * Whether a failed install is worth another attempt. A coded failure is
+ * settled by the errno table: a transient code retries, any other does not.
+ * A codeless failure (bun prints prose; npm omits the line for some failures)
+ * retries: an install is idempotent, so another attempt within the bounded
+ * backoff costs at most seconds and its own output says what went wrong.
+ */
+export function isTransientInstallFailure(error: unknown): boolean {
   const code = installErrorCode(error);
-  if (code !== null) return isTransientCode(code);
-  try {
-    ensureJudgmentPort(site);
-  } catch (portError) {
-    const reason = portError instanceof Error ? portError.message : String(portError);
-    throw new InstallReadingUnavailableError(
-      [error, portError],
-      `${site}: the install failed without an error code, and its output could not be read (${reason})`,
-    );
-  }
-  const name = error instanceof Error ? error.name : undefined;
-  const failure = await readFailure({ message: installFailureText(error), errorName: name }, site);
-  return failure.transientNetwork;
+  return code === null || isTransientCode(code);
 }
 
 export interface InstallRetryOptions {
@@ -122,8 +74,6 @@ export interface InstallRetryOptions {
   readonly prefix: string;
   /** What the step is, e.g. `npm install`. */
   readonly label: string;
-  /** The decision site for the decision log. */
-  readonly site: string;
   /** Waits between attempts; defaults to a timer. Tests inject one that returns at once. */
   readonly sleep?: ((ms: number) => Promise<void>) | undefined;
 }
@@ -132,10 +82,10 @@ const BACKOFF_MS = [0, 2000, 5000];
 const MAX_ATTEMPTS = BACKOFF_MS.length;
 
 /**
- * Runs an install step, retrying transient network faults up to three
+ * Runs an install step, retrying a transient or codeless failure up to three
  * attempts with backoff. The step should capture its output (stdio 'pipe')
- * so a failure carries the text the decision reads; the output is echoed
- * either way so the run still shows it.
+ * so a failure carries the npm code line; the output is echoed either way so
+ * the run still shows it, and the last failure is thrown as the install's own.
  */
 export async function retryTransientInstall(op: () => string | void, options: InstallRetryOptions): Promise<void> {
   let lastErr: unknown;
@@ -158,20 +108,9 @@ export async function retryTransientInstall(op: () => string | void, options: In
         if (stderr) console.error(stderr);
       }
       if (attempt === MAX_ATTEMPTS) throw err;
-      let transient: boolean;
-      try {
-        transient = await isTransientInstallFailure(err, options.site);
-      } catch (reading) {
-        if (!(reading instanceof InstallReadingUnavailableError)) throw reading;
-        // No reading is possible (no judgment key). A fresh install attempt is idempotent, so give a codeless
-        // failure one more try rather than failing a release on a blip; a second failure is reported as it is.
-        if (attempt > 1) throw err;
-        console.log(`[${options.prefix}] ${options.label}: failed with no error code and no way to read its output; retrying once`);
-        continue;
-      }
-      if (!transient) throw err;
+      if (!isTransientInstallFailure(err)) throw err;
       const message = err instanceof Error ? err.message : String(err);
-      console.log(`[${options.prefix}] ${options.label}: transient network error, retrying (${message.slice(0, 200)})`);
+      console.log(`[${options.prefix}] ${options.label}: failed, retrying (${message.slice(0, 200)})`);
     }
   }
   throw lastErr;

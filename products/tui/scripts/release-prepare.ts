@@ -12,10 +12,8 @@
  *   bun run release:prepare --version 2.2.0     bump to an exact version
  *   bun run release:prepare --no-bump           regenerate at the current version
  *   bun run release:prepare --no-bump --no-changelog
- *                                               the toolchain release-cut sync
- *                                               command (release-cut bumps the
- *                                               manifests and writes the
- *                                               changelog section itself)
+ *                                               regenerate without a changelog
+ *                                               section
  *   --no-install   skip the relock (offline, or the lockfile is already current)
  *   --no-pins      accepted for old invocations; workflow pins are no longer rewritten
  *
@@ -63,8 +61,7 @@ export function setManifestVersionText(text: string, version: string): string {
 
 /**
  * CHANGELOG text with a section for `version` inserted directly under the first
- * `---` separator (this changelog's insert marker, the same one the toolchain
- * release-cut uses), or above the newest `## ` heading when there is no
+ * `---` separator (this changelog's insert marker), or above the newest `## ` heading when there is no
  * separator. Unchanged when a section for the version already exists.
  */
 export function scaffoldChangelogText(changelog: string, version: string, date: string): string {

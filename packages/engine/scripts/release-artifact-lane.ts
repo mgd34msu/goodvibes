@@ -192,7 +192,7 @@ async function main(): Promise<void> {
     // together, so nothing is fetched from the registry under our scope.
     await retryTransientInstall(
       () => run('npm', ['install', ...tarballs, 'zod@^4'], projectDir, { stdio: 'pipe' }),
-      { prefix: 'artifact-lane', label: 'npm install', site: 'release.artifact-lane.npm-install' },
+      { prefix: 'artifact-lane', label: 'npm install' },
     );
 
     console.log('[artifact-lane] running shipped conformance kit against the packed artifacts...');

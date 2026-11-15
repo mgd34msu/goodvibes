@@ -6,9 +6,7 @@
  *   - every cataloged operator method appears (REST-bound methods as path
  *     operations, invoke-only methods listed on the generic invoke endpoint,
  *     and ALL methods in the x-operator-methods index);
- *   - the untyped-client-IO methods are marked `x-typed-client-io: false` and
- *     their count equals the foundation-io ratchet's untyped set, honestly
- *     present, never omitted;
+ *   - replay keys declared on the methods are named, header and body alike;
  *   - auth schemes mirror the contract's auth block.
  *
  * Version-decoupled: assertions compare committed artifacts to each other
@@ -18,7 +16,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseMapKeys, parseMethodIds, untypedMethodIds } from '../scripts/foundation-io-coverage-rule.ts';
 
 const ROOT = join(import.meta.dir, '..');
 const openapiText = readFileSync(join(ROOT, 'contracts/artifacts/operator-openapi.json'), 'utf8');
@@ -26,7 +23,6 @@ const openapiText = readFileSync(join(ROOT, 'contracts/artifacts/operator-openap
 interface MethodIndexEntry {
   id: string;
   rest: string | null;
-  typedClientIo: boolean;
   inputSchemaCoverage: string;
   outputSchemaCoverage: string;
 }
@@ -34,9 +30,8 @@ interface MethodIndexEntry {
 const doc = JSON.parse(openapiText) as {
   openapi: string;
   info: { version: string };
-  paths: Record<string, Record<string, { operationId?: string; 'x-typed-client-io'?: boolean; 'x-invoke-only-methods'?: string[] }>>;
+  paths: Record<string, Record<string, { operationId?: string; 'x-invoke-only-methods'?: string[] }>>;
   components: { securitySchemes: Record<string, { type: string; name?: string }> };
-  'x-untyped-client-io-count': number;
   'x-operator-methods': MethodIndexEntry[];
 };
 
@@ -47,18 +42,6 @@ const contract = JSON.parse(
   auth: { sessionCookie: { name: string } };
   operator: { methods: { id: string; http?: { method: string; path: string } }[] };
 };
-
-function ratchetUntypedSet(): Set<string> {
-  const foundationText = readFileSync(join(ROOT, 'contracts/src/generated/foundation-client-types.ts'), 'utf8');
-  const idsText = readFileSync(join(ROOT, 'contracts/src/generated/operator-method-ids.ts'), 'utf8');
-  return new Set(
-    untypedMethodIds(
-      parseMethodIds(idsText),
-      parseMapKeys(foundationText, 'OperatorMethodInputMap'),
-      parseMapKeys(foundationText, 'OperatorMethodOutputMap'),
-    ),
-  );
-}
 
 describe('published OpenAPI operator contract', () => {
   test('is OpenAPI 3.1 and carries the contract product version', () => {
@@ -92,22 +75,6 @@ describe('published OpenAPI operator contract', () => {
     for (const m of invokeOnly) expect(listed.has(m.id)).toBe(true);
   });
 
-  test('the untyped-client-IO methods are honestly marked and match the ratchet set', () => {
-    const untyped = ratchetUntypedSet();
-    expect(doc['x-untyped-client-io-count']).toBe(untyped.size);
-    const markedUntyped = doc['x-operator-methods'].filter((m) => !m.typedClientIo);
-    expect(markedUntyped.length).toBe(untyped.size);
-    for (const entry of markedUntyped) expect(untyped.has(entry.id)).toBe(true);
-    // and they are NOT omitted from the operation set when REST-bound
-    for (const entry of markedUntyped) {
-      if (!entry.rest) continue;
-      const [verb, path] = entry.rest.split(' ') as [string, string];
-      const op = doc.paths[path]?.[verb.toLowerCase()];
-      expect(op?.operationId).toBe(entry.id);
-      expect(op?.['x-typed-client-io']).toBe(false);
-    }
-  });
-
   test('auth schemes mirror the contract auth block', () => {
     expect(doc.components.securitySchemes.bearerAuth?.type).toBe('http');
     expect(doc.components.securitySchemes.sessionCookie?.name).toBe(contract.auth.sessionCookie.name);
@@ -120,6 +87,7 @@ describe('published OpenAPI operator contract', () => {
     expect(register['x-replay-key']).toMatchObject({ in: 'body', name: 'sessionId' });
     const submit = doc.paths['/api/work-ledger/submissions']?.post as unknown as { 'x-replay-key'?: { name: string }; description: string };
     expect(submit['x-replay-key']?.name).toBe('requestId');
-    expect(submit.description).toContain('no Idempotency-Key header');
+    const start = doc.paths['/api/contracts']?.post as unknown as { 'x-replay-key'?: { in: string; name: string } };
+    expect(start['x-replay-key']).toMatchObject({ in: 'header', name: 'Idempotency-Key' });
   });
 });

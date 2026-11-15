@@ -15,8 +15,9 @@
  *   - Operator: buildOperatorContract(new GatewayMethodCatalog()), built-in methods/events
  *     auto-registered from the method-catalog-* modules, product.version overridden with
  *     the engine's current VERSION.
- *   - Peer: the authoritative PEER_CONTRACT constant exported from the contracts package
- *     (peer contract is hand-maintained; this script just re-emits the JSON artifact from it).
+ *   - Peer: PEER_CONTRACT_SOURCE in contracts/src/peer-contract-source.ts, the
+ *     hand-written definition; generated/peer-contract.ts and the JSON artifact are
+ *     rendered from it, so a hand edit to either output is drift.
  *
  * Usage:
  *   bun run scripts/refresh-contract-artifacts.ts
@@ -34,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.ts';
-import { PEER_CONTRACT } from '../contracts/src/generated/peer-contract.ts';
+import { PEER_CONTRACT_SOURCE } from '../contracts/src/peer-contract-source.ts';
 import { buildMockDaemonFixtureMap } from '../contracts/src/testing/mock-daemon.ts';
 import type { OperatorContractManifest } from '../contracts/src/types.ts';
 
@@ -162,17 +163,17 @@ function renderEndpointIdsTs(ids: readonly string[]): string {
 const catalog = new GatewayMethodCatalog();
 const operatorContract = buildOperatorContract(catalog);
 const operatorMethodIds = operatorContract.operator.methods.map((m) => m.id);
-const peerEndpointIds = PEER_CONTRACT.endpoints.map((e) => e.id);
+const peerEndpointIds = PEER_CONTRACT_SOURCE.endpoints.map((e) => e.id);
 
 const operatorJson = safeStringify(operatorContract) + '\n';
-const peerJson = safeStringify(PEER_CONTRACT) + '\n';
+const peerJson = safeStringify(PEER_CONTRACT_SOURCE) + '\n';
 
 let drifted = false;
 drifted = writeIfChanged(OPERATOR_JSON_PATH, operatorJson) || drifted;
 drifted = writeIfChanged(PEER_JSON_PATH, peerJson) || drifted;
 drifted = writeIfChanged(OPERATOR_TS_PATH, renderOperatorContractTs(operatorContract)) || drifted;
 drifted = writeIfChanged(OPERATOR_METHOD_IDS_PATH, renderMethodIdsTs(operatorMethodIds)) || drifted;
-drifted = writeIfChanged(PEER_TS_PATH, renderPeerContractTs(PEER_CONTRACT)) || drifted;
+drifted = writeIfChanged(PEER_TS_PATH, renderPeerContractTs(PEER_CONTRACT_SOURCE)) || drifted;
 drifted = writeIfChanged(PEER_ENDPOINT_IDS_PATH, renderEndpointIdsTs(peerEndpointIds)) || drifted;
 drifted = writeIfChanged(MOCK_DAEMON_FIXTURES_PATH, renderMockDaemonFixturesTs(operatorContract)) || drifted;
 drifted = writeIfChanged(

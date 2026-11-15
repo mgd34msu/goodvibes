@@ -103,9 +103,15 @@ if (values.windows !== undefined) driftOptions();
 
 const path = logPath();
 if (!existsSync(path)) fail(`no decision log at ${path}`);
-const { decisions, files, conflicts } = await loadEngineRegistries();
-// The first-loaded decision of a name would silently set every floor and the registered names.
-if (conflicts.length > 0) fail(`two registries register different decisions under the same name (${conflicts.join(', ')}); run judgment:lint`);
+const loaded = await loadEngineRegistries();
+const { files, conflicts } = loaded;
+// Two different decisions under one name have no single floor, so neither counts as registered:
+// their calls show as outside a registered battery (and fail --check) while the rest of the report stands.
+const decisions = loaded.decisions.filter((decision) => !conflicts.includes(decision.name));
+if (conflicts.length > 0) {
+  console.error(`[observe-report] ${String(conflicts.length)} name(s) are registered as two different decisions (${conflicts.join(', ')}); `
+    + 'their calls are reported as outside a registered battery. Run judgment:lint to find both registrations.');
+}
 const limit = values.limit === undefined ? undefined : Number(values.limit);
 if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) fail('--limit takes a positive integer');
 const sweepAt = thresholds();
@@ -127,7 +133,7 @@ const report = analyzeDecisionLog(log, {
 const suite = await new EvalRunner().runSuite(JUDGMENT_EVAL_SUITE, judgmentEvalScenarios(report.accuracy));
 
 if (values.json === true) {
-  console.log(JSON.stringify({ log: path, registries: files, report, evalSuite: suite }, null, 2));
+  console.log(JSON.stringify({ log: path, registries: files, conflicts, report, evalSuite: suite }, null, 2));
 } else {
   console.log(formatObserveReport(report, path));
   console.log('\n== Judgment accuracy eval suite (ground-truth accuracy scored against each registered floor)');

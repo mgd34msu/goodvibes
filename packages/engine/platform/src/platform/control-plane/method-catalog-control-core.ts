@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { ContractErrorCode } from '../types/foundation-contract.js';
 import { SESSION_GATE_PRESET_NAMES } from '../gate/presets.js';
 import {
   BOOLEAN_SCHEMA,
@@ -66,6 +67,22 @@ import {
   TELEMETRY_STREAM_READY_SCHEMA,
 } from './operator-contract-schemas.js';
 import { OPERATOR_CONTRACT_SCHEMA } from './operator-contract.js';
+
+// Codes the shared-session and task routes put on an error body (daemon-api
+// runtime-session routes); declared here so the operator contract carries them.
+const SESSION_NOT_FOUND: ContractErrorCode = { code: 'SESSION_NOT_FOUND', status: 404, meaning: 'No shared session has that id.' };
+const SESSION_CLOSED: ContractErrorCode = { code: 'SESSION_CLOSED', status: 409, meaning: 'The session is closed; reopen it (sessions.reopen) before sending to it.' };
+const WORKSPACE_BUSY: ContractErrorCode = { code: 'WORKSPACE_BUSY', status: 409, meaning: 'A workspace swap is in progress; retry after retryAfterMs.' };
+const SESSION_AGENT_BIND_FAILED: ContractErrorCode = { code: 'SESSION_AGENT_BIND_FAILED', status: 500, meaning: 'The input was accepted but the agent started for it could not be bound; the input was released to the queue.' };
+const SESSION_ACTIVE: ContractErrorCode = { code: 'SESSION_ACTIVE', status: 409, meaning: 'The session is still active; close it, then delete it.' };
+const HOSTED_SESSION_STILL_RUNNING: ContractErrorCode = { code: 'HOSTED_SESSION_STILL_RUNNING', status: 409, meaning: 'A daemon-hosted session is still running; end it with sessions.hosted.kill, which also closes the record. Nothing was changed.' };
+const INPUT_NOT_CLAIMABLE: ContractErrorCode = { code: 'INPUT_NOT_CLAIMABLE', status: 409, meaning: 'Another surface holds the input or it has ended; the body returns the input. Nothing was changed.' };
+const INPUT_NOT_DELIVERABLE: ContractErrorCode = { code: 'INPUT_NOT_DELIVERABLE', status: 409, meaning: 'The input is not in a state a surface may report on; the body returns the input and its state.' };
+const CANCEL_NOT_ALLOWED: ContractErrorCode = { code: 'CANCEL_NOT_ALLOWED', status: 409, meaning: 'Only a queued input can be cancelled; the body says whether it is running or ended.' };
+const INVALID_KIND: ContractErrorCode = { code: 'INVALID_KIND', status: 400, meaning: 'Unknown message kind (task, message or followup); nothing was changed.' };
+const INVALID_MESSAGE_ID: ContractErrorCode = { code: 'INVALID_MESSAGE_ID', status: 400, meaning: 'messageId is not 1 to 128 letters, digits, ".", "_", ":" or "-"; nothing was changed.' };
+/** What every route that submits work to a session can answer. */
+const SUBMISSION_ERROR_CODES: readonly ContractErrorCode[] = [SESSION_NOT_FOUND, SESSION_CLOSED, WORKSPACE_BUSY, SESSION_AGENT_BIND_FAILED];
 
 export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -381,6 +398,11 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/register' },
+    replay: {
+      in: 'body',
+      name: 'sessionId',
+      behavior: 'Registering the same sessionId again is a heartbeat, not a second session; it returns the existing record.',
+    },
     events: ['control.session_update'],
     inputSchema: SHARED_SESSION_REGISTER_INPUT_SCHEMA,
     outputSchema: SHARED_SESSION_REGISTER_OUTPUT_SCHEMA,
@@ -392,6 +414,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     category: 'sessions',
     scopes: ['read:sessions'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}' },
+    errorCodes: [SESSION_NOT_FOUND],
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: SHARED_SESSION_WITH_MESSAGES_SCHEMA,
   }),
@@ -403,6 +426,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/{sessionId}/close' },
+    errorCodes: [SESSION_NOT_FOUND, HOSTED_SESSION_STILL_RUNNING],
     events: ['control.session_update'],
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: actionResultOutputSchema('session', SHARED_SESSION_RECORD_SCHEMA),
@@ -415,6 +439,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/{sessionId}/reopen' },
+    errorCodes: [SESSION_NOT_FOUND],
     events: ['control.session_update'],
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: actionResultOutputSchema('session', SHARED_SESSION_RECORD_SCHEMA),
@@ -427,6 +452,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/{sessionId}/detach' },
+    errorCodes: [SESSION_NOT_FOUND],
     events: ['control.session_update'],
     inputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
@@ -442,6 +468,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'DELETE', path: '/api/sessions/{sessionId}' },
+    errorCodes: [SESSION_NOT_FOUND, SESSION_ACTIVE],
     events: ['control.session_update'],
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: objectSchema({
@@ -523,6 +550,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     category: 'sessions',
     scopes: ['read:sessions'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/messages' },
+    errorCodes: [SESSION_NOT_FOUND],
     inputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
       limit: NUMBER_SCHEMA,
@@ -539,6 +567,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/{sessionId}/messages' },
+    errorCodes: [INVALID_KIND, INVALID_MESSAGE_ID, ...SUBMISSION_ERROR_CODES],
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
       sessionId: STRING_SCHEMA,
@@ -557,6 +586,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     category: 'sessions',
     scopes: ['read:sessions'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/inputs' },
+    errorCodes: [SESSION_NOT_FOUND],
     inputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
       limit: NUMBER_SCHEMA,
@@ -573,6 +603,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/{sessionId}/steer' },
+    errorCodes: SUBMISSION_ERROR_CODES,
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
       sessionId: STRING_SCHEMA,
@@ -592,6 +623,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/{sessionId}/follow-up' },
+    errorCodes: SUBMISSION_ERROR_CODES,
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
       sessionId: STRING_SCHEMA,
@@ -610,6 +642,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/{sessionId}/inputs/{inputId}/cancel' },
+    errorCodes: [CANCEL_NOT_ALLOWED],
     events: ['control.session_update'],
     inputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
@@ -625,6 +658,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:sessions'],
     access: 'admin',
     http: { method: 'POST', path: '/api/sessions/{sessionId}/inputs/{inputId}/deliver' },
+    errorCodes: [INPUT_NOT_CLAIMABLE, INPUT_NOT_DELIVERABLE],
     events: ['control.session_update'],
     inputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
@@ -705,6 +739,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     scopes: ['write:tasks'],
     access: 'admin',
     http: { method: 'POST', path: '/task' },
+    errorCodes: SUBMISSION_ERROR_CODES,
     events: [runtimeEventId('tasks')],
     inputSchema: TASK_CREATE_INPUT_SCHEMA,
     outputSchema: TASK_CREATE_OUTPUT_SCHEMA,

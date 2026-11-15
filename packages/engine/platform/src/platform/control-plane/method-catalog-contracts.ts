@@ -10,6 +10,7 @@
  * `write:fleet`.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { ContractErrorCode } from '../types/foundation-contract.js';
 import { methodDescriptor } from './method-catalog-shared.js';
 import {
   CONTRACTS_CANCEL_INPUT_SCHEMA,
@@ -23,6 +24,10 @@ import {
   CONTRACTS_START_INPUT_SCHEMA,
   CONTRACTS_START_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-contracts.js';
+
+const CONTRACT_NOT_FOUND: ContractErrorCode = { code: 'CONTRACT_NOT_FOUND', status: 404, meaning: 'No runner on this daemon holds that contract id.' };
+const CONTRACT_NOT_RUNNING: ContractErrorCode = { code: 'CONTRACT_NOT_RUNNING', status: 409, meaning: 'This runner holds the contract only for inspection.' };
+const INVALID_ARGUMENT: ContractErrorCode = { code: 'INVALID_ARGUMENT', status: 400, meaning: 'An input is not one the method accepts; the error names it and nothing was changed.' };
 
 export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -42,6 +47,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
     category: 'contracts',
     scopes: ['read:fleet'],
     http: { method: 'GET', path: '/api/contracts/{contractId}' },
+    errorCodes: [CONTRACT_NOT_FOUND],
     inputSchema: CONTRACTS_GET_INPUT_SCHEMA,
     outputSchema: CONTRACTS_GET_OUTPUT_SCHEMA,
   }),
@@ -52,6 +58,17 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
     category: 'contracts',
     scopes: ['write:fleet'],
     http: { method: 'POST', path: '/api/contracts' },
+    replay: {
+      in: 'header',
+      name: 'Idempotency-Key',
+      behavior: 'A retry with the same key and the same body returns the first contract (with the Idempotent-Replayed: true response header) instead of starting a second one; the same key with a different body is refused with IDEMPOTENCY_KEY_REUSED. Keys are held in memory, so a retry after a daemon restart starts a new contract.',
+    },
+    errorCodes: [
+      INVALID_ARGUMENT,
+      { code: 'SESSION_NOT_OWNED', status: 403, meaning: 'The session belongs to another caller.' },
+      { code: 'SESSION_NOT_LIVE', status: 409, meaning: 'sessionId names a hosted session that is no longer live.' },
+      { code: 'IDEMPOTENCY_KEY_REUSED', status: 409, meaning: 'This Idempotency-Key was already used for a different request; use a new key.' },
+    ],
     inputSchema: CONTRACTS_START_INPUT_SCHEMA,
     outputSchema: CONTRACTS_START_OUTPUT_SCHEMA,
   }),
@@ -62,6 +79,11 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
     category: 'contracts',
     scopes: ['write:fleet'],
     http: { method: 'POST', path: '/api/contracts/{contractId}/cancel' },
+    errorCodes: [
+      CONTRACT_NOT_FOUND,
+      { code: 'CONTRACT_NATIVE', status: 409, meaning: 'Native work stops through its own execution, or by answering its open question with cancel.' },
+      CONTRACT_NOT_RUNNING,
+    ],
     inputSchema: CONTRACTS_CANCEL_INPUT_SCHEMA,
     outputSchema: CONTRACTS_CANCEL_OUTPUT_SCHEMA,
   }),
@@ -72,6 +94,13 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
     category: 'contracts',
     scopes: ['write:fleet'],
     http: { method: 'POST', path: '/api/contracts/{contractId}/reply' },
+    errorCodes: [
+      CONTRACT_NOT_FOUND,
+      CONTRACT_NOT_RUNNING,
+      { code: 'CONTRACT_ENDED', status: 409, meaning: 'The contract has ended.' },
+      { code: 'ESCALATION_NOT_OPEN', status: 409, meaning: 'The escalation is already answered, or another reply to it is being read.' },
+      INVALID_ARGUMENT,
+    ],
     inputSchema: CONTRACTS_REPLY_INPUT_SCHEMA,
     outputSchema: CONTRACTS_REPLY_OUTPUT_SCHEMA,
   }),

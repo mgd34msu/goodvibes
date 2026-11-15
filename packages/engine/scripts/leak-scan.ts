@@ -1,10 +1,11 @@
 /**
  * Runs the full test suite with the timer-leak detector preloaded.
  *
- * The suite runs every test file in ONE bun process, so a poller a test forgets
- * to stop keeps firing inside every later test file. This script is how that
- * class of bug is measured: it reports the handles still live when the run ends
- * and attributes each to the test file that created it.
+ * An ordinary run gives each test file its own process, which hides a poller a
+ * test forgets to stop. This script runs every file in ONE bun process on
+ * purpose, so such a poller keeps firing inside every later file: it reports the
+ * handles still live when the run ends and attributes each to the test file
+ * that created it.
  *
  *   bun scripts/leak-scan.ts                    # whole suite
  *   bun scripts/leak-scan.ts test/foo.test.ts   # one file

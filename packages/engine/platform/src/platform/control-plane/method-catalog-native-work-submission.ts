@@ -20,6 +20,7 @@ export const builtinGatewayNativeWorkSubmissionMethodDescriptors: readonly Gatew
     description: 'Persist one bounded explicit-source goal and ordered criteria on the selected authoritative host. Exact request replay returns the immutable submission receipt. Does not start execution or grant verification authority. Complete encoded input is limited to 262144 bytes without truncation.',
     access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE], metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'POST', path: '/api/work-ledger/submissions' },
+    replay: { in: 'body', name: 'requestId', behavior: 'Sending the same requestId with the same content again returns the original immutable receipt (replayed: true). After a lost response, use workLedger.submission.get with the same requestId.' },
     inputSchema: json(nativeWorkSubmissionRequestSchema), outputSchema: json(nativeWorkSubmissionResultSchema),
   }),
   methodDescriptor({

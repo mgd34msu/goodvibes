@@ -1,4 +1,5 @@
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
+import type { ContractErrorCode, ContractReplayKey } from '../types/foundation-contract.js';
 import type { NativeExecutionAuthority } from '../security/http-auth.js';
 export type { NativeExecutionAuthority, NativePairedSnapshot } from '../security/http-auth.js';
 
@@ -27,6 +28,10 @@ export interface GatewayMethodDescriptor {
   readonly outputSchema?: Record<string, unknown> | undefined;
   readonly pluginId?: string | undefined;
   readonly dangerous?: boolean | undefined;
+  /** The header or body field that makes a retry safe; the route that reads it is its owner. */
+  readonly replay?: ContractReplayKey | undefined;
+  /** Codes this method's route puts on an error body beyond the shared engine codes. */
+  readonly errorCodes?: readonly ContractErrorCode[] | undefined;
   /**
    * Defaults to `true`. When explicitly `false`, this method is NOT dispatchable
    * through the generic HTTP/WS method-invocation surface
@@ -174,6 +179,8 @@ export const METHOD_DESCRIPTOR_SCHEMA = objectSchema({
   pluginId: STRING_SCHEMA,
   dangerous: BOOLEAN_SCHEMA,
   invokable: BOOLEAN_SCHEMA,
+  replay: objectSchema({ in: STRING_SCHEMA, name: STRING_SCHEMA, behavior: STRING_SCHEMA }, ['in', 'name', 'behavior']),
+  errorCodes: arraySchema(objectSchema({ code: STRING_SCHEMA, status: NUMBER_SCHEMA, meaning: STRING_SCHEMA }, ['code', 'status', 'meaning'])),
   metadata: JSON_OBJECT_SCHEMA,
 }, ['id', 'title', 'description', 'category', 'source', 'access', 'transport', 'scopes']);
 

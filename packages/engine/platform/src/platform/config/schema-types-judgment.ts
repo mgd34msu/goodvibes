@@ -39,6 +39,8 @@ export interface JudgmentSettings {
   backend?: JudgmentBackendSettings;
   /** Timeout per judgment attempt in milliseconds. */
   timeoutMs: number;
+  /** Deadline for a decision a person or tool call waits on; missing on older installations. */
+  decisionDeadlineMs?: number;
   /** Ordered compatible endpoints. An explicit empty list disables inherited fallbacks. */
   fallbacks: readonly JudgmentFallbackSettings[];
 }
@@ -52,6 +54,7 @@ export type JudgmentConfigKey =
   | 'judgment.model'
   | 'judgment.backend'
   | 'judgment.timeoutMs'
+  | 'judgment.decisionDeadlineMs'
   | 'judgment.fallbacks';
 
 /** The value of every `judgment.*` key, folded into ConfigValue with one arm. */
@@ -64,5 +67,6 @@ export interface JudgmentConfigValueMap {
   'judgment.model': string;
   'judgment.backend': JudgmentBackendSettings;
   'judgment.timeoutMs': number;
+  'judgment.decisionDeadlineMs': number;
   'judgment.fallbacks': readonly JudgmentFallbackSettings[];
 }

@@ -11,7 +11,7 @@ import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 
 const request = { state: { fixture: 'native lifecycle' }, questions: { yes: noul('Is this a lifecycle fixture?') }, context: { site: 'test.native-lifecycle' } };
 const source = (endpoint: string, secrets: JudgmentSettingsSource['secrets'] = { get: async () => 'synthetic-key' }): JudgmentSettingsSource => ({
-  config: { get: (key) => ({ 'judgment.endpoint': endpoint, 'judgment.model': 'jev-1.13.0', 'judgment.timeoutMs': 1000, 'judgment.keySource': 'secret', 'judgment.fallbacks': [], 'judgment.backend': {}, 'judgment.policy': 'Default - On', 'judgment.keyName': 'TYPESAFE_API_KEY', 'judgment.volumeMonitor': { enabled: false, budgets: [] } })[key] },
+  config: { get: (key) => ({ 'judgment.endpoint': endpoint, 'judgment.model': 'jev-1.13.0', 'judgment.timeoutMs': 1000, 'judgment.decisionDeadlineMs': 1500, 'judgment.keySource': 'secret', 'judgment.fallbacks': [], 'judgment.backend': {}, 'judgment.policy': 'Default - On', 'judgment.keyName': 'TYPESAFE_API_KEY', 'judgment.volumeMonitor': { enabled: false, budgets: [] } })[key] },
   env: {}, secrets,
 });
 function deferred() {

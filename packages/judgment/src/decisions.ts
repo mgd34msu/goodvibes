@@ -27,3 +27,17 @@ export { opaqueUuid } from './port/opaque-uuid.ts';
 export { observeJudgmentModel, reuseObservedJudgmentResult, type JudgmentModelObservation } from './port/model-observation.ts';
 
 export { assertSynchronousJudgmentGuard } from './port/attempt-guard.ts';
+
+export {
+  createJudgeCache,
+  forgetProcessJudgments,
+  judge,
+  type BandedReadings,
+  type JudgeCache,
+  type JudgeCacheOption,
+  type JudgeCacheScope,
+  type JudgeFallbackReason,
+  type JudgeOptions,
+  type JudgeOutcome,
+} from './port/judge.ts';
+export { DEFAULT_DECISION_DEADLINE_MS, MAX_DECISION_DEADLINE_MS, validDecisionDeadline } from './port/deadline.ts';

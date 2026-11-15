@@ -145,6 +145,8 @@ export interface DecisionVolumeEntry {
 export interface DecisionLog {
   /** Appends an entry and returns its id. Throws when the write fails. */
   record(entry: NewDecisionEntry): DecisionId;
+  /** Optional on older/custom logs. Appends an answered entry and its notes in one write; throws and keeps nothing when it fails. */
+  recordWithNotes?(entry: NewDecisionEntry, notes: readonly DecisionNote[]): DecisionId;
   /** Appends a note to an answered entry without replacing earlier notes. Throws when there is no answered entry with that id or the write fails. */
   attach(id: string, note: DecisionNote): void;
   get(id: string): DecisionEntry | undefined;

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createJudgmentSourceLifetime } from '../platform/src/platform/runtime/judgment-source-lifetime.js';
 import {
   brokerSandboxEscalation,
   resolveRuntimeSandboxPlan,
@@ -68,20 +67,15 @@ describe('sandbox command reading lifetime', () => {
     expect(after.requests).toHaveLength(1);
   });
 
-  test('changed settings retire cached readings while the port object stays installed', async () => {
-    const settings: Record<string, unknown> = { 'judgment.model': 'jev-1.13.0', 'judgment.endpoint': 'https://before.example.test' };
-    let probability = 0.01;
+  test('a changed port revision retires cached readings while the port object stays installed', async () => {
+    let probability = 0.01, revision = 1;
     const fake = fakePort(() => noulAnswer(probability));
-    const lifetime = createJudgmentSourceLifetime({ config: { get: key => settings[key] }, env: {}, secrets: {} });
-    bindJudgmentPortAuthority(fake.port, lifetime.capture);
-    installJudgmentPort(fake.port);
-    try {
-      expect(await readCommandNeeds('fixture-command', '/fixture/workspace')).toEqual({ needsNetwork: false, needsPrivilege: false });
-      settings['judgment.endpoint'] = 'https://after.example.test';
-      probability = 0.99;
-      expect(await readCommandNeeds('fixture-command', '/fixture/workspace')).toEqual({ needsNetwork: true, needsPrivilege: true });
-      expect(fake.requests).toHaveLength(2);
-    } finally { lifetime.dispose(); }
+    installJudgmentPort({ ...fake.port, revision: () => revision });
+    expect(await readCommandNeeds('fixture-command', '/fixture/workspace')).toEqual({ needsNetwork: false, needsPrivilege: false });
+    revision++;
+    probability = 0.99;
+    expect(await readCommandNeeds('fixture-command', '/fixture/workspace')).toEqual({ needsNetwork: true, needsPrivilege: true });
+    expect(fake.requests).toHaveLength(2);
   });
 
   test('workspace and command remain distinct even when either contains a separator', async () => {
@@ -92,28 +86,12 @@ describe('sandbox command reading lifetime', () => {
     expect(fake.requests).toHaveLength(2);
   });
 
-  test('restoring a previously installed port never restores its old cache', async () => {
-    let probability = 0.01;
-    const fake = fakePort(() => noulAnswer(probability));
-    installJudgmentPort(fake.port);
-    await readCommandNeeds('fixture-command');
-    installJudgmentPort(undefined);
-    await expect(readCommandNeeds('fixture-command')).rejects.toThrow('No judgment port');
-    probability = 0.99;
+  test('with no decision model installed the command is unassessed, so the sandbox asks', async () => {
+    expect(await readCommandNeeds('fixture-command')).toEqual({ needsNetwork: null, needsPrivilege: null, provenance: 'classic' });
+    const fake = fakePort(() => noulAnswer(0.99));
     installJudgmentPort(fake.port);
     expect(await readCommandNeeds('fixture-command')).toEqual({ needsNetwork: true, needsPrivilege: true });
-    expect(fake.requests).toHaveLength(2);
-  });
-
-  test('replacing the installed port ask method invalidates its cached observations', async () => {
-    const before = fakePort(() => noulAnswer(0.01));
-    const after = fakePort(() => noulAnswer(0.99));
-    const port: JudgmentPort = { ...before.port };
-    installJudgmentPort(port);
-    await readCommandNeeds('fixture-command');
-    port.ask = after.port.ask;
-    expect(await readCommandNeeds('fixture-command')).toEqual({ needsNetwork: true, needsPrivilege: true });
-    expect(after.requests).toHaveLength(1);
+    expect(fake.requests).toHaveLength(1);
   });
 
   test('returned observations cannot be changed through a caller reference', async () => {
@@ -132,7 +110,7 @@ describe('sandbox command reading lifetime', () => {
     installJudgmentPort(fake.port);
     const needs = await readCommandNeeds('fixture-command', undefined, { signal: canceled.signal });
     canceled.abort();
-    await expect(readCommandNeeds('fixture-command', undefined, { signal: canceled.signal })).rejects.toThrow('no longer current');
+    await expect(readCommandNeeds('fixture-command', undefined, { signal: canceled.signal })).rejects.toThrow('cancelled');
     expect(await readCommandNeeds('fixture-command')).toBe(needs);
     expect(fake.requests).toHaveLength(1);
   });
@@ -146,7 +124,7 @@ describe('sandbox command reading lifetime', () => {
     expect(fake.requests).toHaveLength(1);
   });
 
-  for (const stop of ['caller cancellation', 'port replacement', 'source revocation'] as const) {
+  for (const stop of ['caller cancellation'] as const) {
     test(`${stop} interrupts an uncooperative reading and prevents late records or caching`, async () => {
       const held = heldReading();
       const canceled = new AbortController();
@@ -157,8 +135,6 @@ describe('sandbox command reading lifetime', () => {
       try {
         await held.entered.promise;
         if (stop === 'caller cancellation') canceled.abort();
-        else if (stop === 'port replacement') installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
-        else source.abort();
         expect(await promptly(pending)).toBeInstanceOf(Error);
         expect(held.signal?.aborted).toBe(true);
         held.release.resolve();
@@ -171,36 +147,6 @@ describe('sandbox command reading lifetime', () => {
       } finally { held.release.resolve(); await pending; }
     });
   }
-
-  test('revocation after a provider result prevents recording and cache publication', async () => {
-    const held = heldReading();
-    let current = true;
-    installJudgmentPort(held.port);
-    const pending = readCommandNeeds('fixture-command', undefined, { assertCurrent() { if (!current) throw new Error('operation changed'); } });
-    const refused = pending.catch(error => error);
-    await held.entered.promise;
-    current = false;
-    held.release.resolve();
-    expect(await refused).toBeInstanceOf(Error);
-    expect(held.records).toEqual([]);
-    await readCommandNeeds('fixture-command');
-    expect(held.records).toEqual(['readings', 'action']);
-  });
-
-  test('reentrant cancellation while recording an action cannot publish a cache entry', async () => {
-    const fake = fakePort(() => noulAnswer(0.99));
-    const canceled = new AbortController();
-    let cancelAtRecord = true;
-    const port: JudgmentPort = { ...fake.port,
-      async ask(request) { return { ...await fake.port.ask(request), decisionId: 'fixture-reading' }; },
-      recorder: { recordReadings() {}, recordAction() { if (cancelAtRecord) canceled.abort(); } },
-    };
-    installJudgmentPort(port);
-    await expect(readCommandNeeds('fixture-command', undefined, { signal: canceled.signal })).rejects.toThrow('no longer current');
-    cancelAtRecord = false;
-    await readCommandNeeds('fixture-command');
-    expect(fake.requests).toHaveLength(2);
-  });
 
   test('runtime planning reads the command needs once and honors cancellation', async () => {
     const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);

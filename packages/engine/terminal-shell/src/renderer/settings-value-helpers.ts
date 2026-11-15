@@ -10,6 +10,7 @@ const CHOICE_LABELS: Readonly<Record<string, string>> = {
   'judgment.model': 'Decision model', 'judgment.endpoint': 'Decision endpoint',
   'judgment.keySource': 'Credential source', 'judgment.keyName': 'Credential reference',
   'judgment.fallbacks': 'Decision fallback chain', 'judgment.timeoutMs': 'Decision timeout (ms)',
+  'judgment.decisionDeadlineMs': 'Decision deadline (ms)',
   'provider.decisionRouter': 'Decision Router categories', 'permissions.mode': 'Execution permissions',
 };
 export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(policy: {

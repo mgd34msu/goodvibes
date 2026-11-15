@@ -2,14 +2,19 @@ import type { Fetch } from '@typesafe-ai/sdk';
 import { JudgmentError } from './errors.ts';
 import { retryPolicy, type JudgmentRetryPolicy } from './retry.ts';
 import { validEndpointURL } from './endpoint-validation.ts';
+import { MAX_DECISION_DEADLINE_MS, validDecisionDeadline } from './deadline.ts';
 import { captureJudgmentBackendSettings, type JudgmentBackendSettings } from './backend-settings.ts';
 export { isPinnedJudgmentModel, validEndpointURL } from './endpoint-validation.ts';
+export {
+  DEADLINE_COOLDOWN_MS, DEADLINE_MISSES_BEFORE_COOLDOWN, DEFAULT_DECISION_DEADLINE_MS, MAX_DECISION_DEADLINE_MS, validDecisionDeadline,
+} from './deadline.ts';
 
 /** The hosted System One endpoint. */
 export const HOSTED_BASE_URL = 'https://api.typesafe.ai';
 
 /** Follow TypeSafe's most recent stable Jev release. Responses retain the resolved version. */
 export const DEFAULT_MODEL = 'jev-latest';
+
 
 /**
  * Where judgments are answered. `hosted` is TypeSafe's Jev endpoint; `local`
@@ -38,6 +43,12 @@ export interface JudgmentConfig {
   readonly model: string;
   /** Finite per-target timeout in milliseconds; legacy 0 selects the 30-second default. */
   readonly timeoutMs: number;
+  /**
+   * The deadline `judge` gives a decision a person or tool call waits on when
+   * the caller names none; defaults to {@link DEFAULT_DECISION_DEADLINE_MS}.
+   * A request bounds its own total time with `deadlineMs`.
+   */
+  readonly decisionDeadlineMs?: number;
   /** Cooldown timing for unavailable targets; it never delays independent fallbacks. */
   readonly retry: Partial<JudgmentRetryPolicy>;
   /** Additional System One targets. No discovery or implicit alternate providers. */
@@ -81,6 +92,7 @@ export function judgmentConfigFromEnv(
     timeoutMs: overrides.timeoutMs ?? 30_000,
     retry: overrides.retry ?? {},
     ...(overrides.signal === undefined ? {} : { signal: overrides.signal }),
+    ...(overrides.decisionDeadlineMs === undefined ? {} : { decisionDeadlineMs: overrides.decisionDeadlineMs }),
     ...(overrides.fallbacks === undefined ? {} : { fallbacks: overrides.fallbacks }),
     ...(overrides.fetch === undefined ? {} : { fetch: overrides.fetch }),
   };
@@ -114,7 +126,10 @@ export function validateJudgmentConfig(config: JudgmentConfig): void {
   }
   if (!Number.isInteger(config.timeoutMs) || config.timeoutMs < 0 || config.timeoutMs > 2_147_483_647
     || 'totalTimeoutMs' in config) {
-    throw new JudgmentError('invalid-request', 'judgment attempt timeout must be 0 or valid timer milliseconds; total-time limits are not supported');
+    throw new JudgmentError('invalid-request', 'judgment attempt timeout must be 0 or valid timer milliseconds; total-time limits belong on a request as deadlineMs');
+  }
+  if (config.decisionDeadlineMs !== undefined && !validDecisionDeadline(config.decisionDeadlineMs)) {
+    throw new JudgmentError('invalid-request', `the decision deadline must be whole milliseconds from 1 to ${MAX_DECISION_DEADLINE_MS}`);
   }
   retryPolicy(config.retry);
 }

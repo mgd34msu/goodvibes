@@ -11,86 +11,58 @@
  * is at stake is the gate's stakes reading, and what host access it needs
  * inside the sandbox is `engine.gate.sandbox-needs`, read here.
  */
-import {
-  captureJudgmentPort,
-  JudgmentAuthorityRetiredError,
-  type JudgmentReadingOptions,
-} from '@goodvibes-jev/engine/errors';
+import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { sandboxNeeds } from '../../../gate/batteries/sandbox-needs.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { decisionOrClassic } from '../../decision-policy.js';
+import { forgetProcessJudgments, judge } from '../../judge.js';
 
 export interface CommandNeeds {
-  /** No host-access assessment was taken; the sandbox policy must ask the owner. */
+  /** No host-access assessment was taken (decision models off, no answer within the deadline, or none available); the sandbox policy must ask the owner. */
   readonly provenance?: 'classic';
-  /** It reaches the network (uncertain readings count as yes); null means unassessed in Classic. */
+  /** It reaches the network (uncertain readings count as yes); null means unassessed. */
   readonly needsNetwork: boolean | null;
-  /** It needs host administrator privileges (uncertain readings count as yes); null means unassessed in Classic. */
+  /** It needs host administrator privileges (uncertain readings count as yes); null means unassessed. */
   readonly needsPrivilege: boolean | null;
 }
 
-interface CachedCommandNeeds {
-  readonly needs: CommandNeeds;
-  readonly assertCurrent: () => void;
-}
-
-let SEEN = new WeakMap<object, Map<string, CachedCommandNeeds>>();
-const SEEN_LIMIT = 256;
+const UNASSESSED: CommandNeeds = Object.freeze({ needsNetwork: null, needsPrivilege: null, provenance: 'classic' as const });
 
 /** The decision site the sandbox's command readings are logged under. */
 export const COMMAND_NEEDS_SITE = 'engine.gate.sandbox-needs';
 
-/** Reuses a command's observation only while its actual Jev authority stays current. */
+/**
+ * One reading per command and workspace for the life of the process. With no
+ * answer within the decision deadline, or with decision models off, the
+ * command is unassessed and the sandbox policy asks.
+ */
 export async function readCommandNeeds(
   command: string,
   workspace?: string,
   options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {},
 ): Promise<CommandNeeds> {
-  return decisionOrClassic(() => readDecisionCommandNeeds(command, workspace, options), () => {
-    options.signal?.throwIfAborted();
-    const restriction: unknown = options.assertCurrent?.();
-    if (restriction !== undefined) { drainOwned(restriction); throw new JudgmentAuthorityRetiredError(); }
-    options.signal?.throwIfAborted();
-    return Object.freeze({ needsNetwork: null, needsPrivilege: null, provenance: 'classic' as const });
+  const { value } = await judge({
+    site: COMMAND_NEEDS_SITE,
+    battery: sandboxNeeds,
+    state: { command, ...(workspace ? { workspace } : {}) },
+    cache: { key: JSON.stringify([workspace ?? '', command]), scope: 'process' },
+    // An uncertain reading counts as needing the access: a wrong yes costs one ask.
+    settle: (readings): CommandNeeds => Object.freeze({
+      needsNetwork: readings.needsNetwork.verdict !== 'no',
+      needsPrivilege: readings.needsPrivilege.verdict !== 'no',
+    }),
+    fallback: () => UNASSESSED,
+    describe: needs => `network:${needs.needsNetwork} privilege:${needs.needsPrivilege}`,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
-}
-async function readDecisionCommandNeeds(command: string, workspace: string | undefined,
-  options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'>): Promise<CommandNeeds> {
-  // Caller cancellation retires its reading, never a shared authority's cache.
-  const authority = captureJudgmentPort(COMMAND_NEEDS_SITE);
-  const reading = captureJudgmentPort(COMMAND_NEEDS_SITE, options);
-  authority.assertCurrent();
-  reading.assertCurrent();
-  if (authority.identity !== reading.identity) throw new JudgmentAuthorityRetiredError();
-  let cache = SEEN.get(authority.identity);
-  if (!cache) { cache = new Map(); SEEN.set(authority.identity, cache); }
-  const key = JSON.stringify([workspace ?? '', command]);
-  const seen = cache.get(key);
-  if (seen !== undefined) {
-    let current = false;
-    try { seen.assertCurrent(); current = true; }
-    catch (error) { if (!(error instanceof JudgmentAuthorityRetiredError)) throw error; cache.delete(key); }
-    reading.assertCurrent();
-    if (current) return seen.needs;
-  }
-  const run = await sandboxNeeds.run(reading.port, { command, ...(workspace ? { workspace } : {}) }, { site: COMMAND_NEEDS_SITE, signal: reading.signal });
-  reading.assertCurrent();
-  const needs: CommandNeeds = Object.freeze({
-    needsNetwork: run.readings.needsNetwork.verdict !== 'no',
-    needsPrivilege: run.readings.needsPrivilege.verdict !== 'no',
-  });
-  run.recordAction(`network:${needs.needsNetwork} privilege:${needs.needsPrivilege}`);
-  reading.assertCurrent();
-  authority.assertCurrent();
-  cache.set(key, { needs, assertCurrent: authority.assertCurrent });
-  if (cache.size > SEEN_LIMIT) {
-    const oldest = cache.keys().next();
-    if (!oldest.done) cache.delete(oldest.value);
-  }
-  return needs;
+  // The caller's own operation may have ended while the reading ran.
+  let restriction: unknown;
+  try { restriction = options.assertCurrent?.(); }
+  catch (error) { drainOwned(error); throw new JudgmentAuthorityRetiredError(); }
+  if (restriction !== undefined) { drainOwned(restriction); throw new JudgmentAuthorityRetiredError(); }
+  return value;
 }
 
 /** Forgets every remembered reading (tests, and a settings change that alters the model). */
 export function forgetCommandNeeds(): void {
-  SEEN = new WeakMap();
+  forgetProcessJudgments();
 }

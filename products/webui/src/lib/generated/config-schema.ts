@@ -3919,7 +3919,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "judgment.fallbacks",
     "type": "object",
     "default": [],
-    "description": "Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted once with a finite deadline; exhaustion halts the operation",
+    "description": "Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted with a finite timeout; when the chain is exhausted, a decision that has a fallback takes it and any other decision stops",
     "validationHint": "array of { endpoint, model, keySource: \"env\" | \"secret\", keyName }; no credentials in URLs or inline keys"
   },
   {
@@ -3928,6 +3928,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "default": 30000,
     "description": "Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner",
     "validationHint": "integer in [0, 2147483647]"
+  },
+  {
+    "key": "judgment.decisionDeadlineMs",
+    "type": "number",
+    "default": 1500,
+    "description": "How long a decision that a person or a tool call waits on may take, in milliseconds, before it takes its fallback (for example asking you, or the safe default). A decision target that misses this deadline three times in a row is skipped for a minute, so the next decisions take their fallback at once",
+    "validationHint": "integer in [1, 120000]"
   },
   {
     "key": "fetch.sanitizeMode",

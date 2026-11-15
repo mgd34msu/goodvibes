@@ -62,6 +62,26 @@ const battery = defineBattery({
 const run = await battery.run(port, 'Question: ...\nReply: ...', { site: 'example.reply' });
 ```
 
+A decision that a person or a tool call waits on goes through `judge`: one
+request with a deadline, an optional cache and a fallback, so it never halts the
+work. `settle` turns the banded readings into a value, or `undefined` when it
+cannot act on them; `fallback` gives the value when the model is off, does not
+answer within the deadline (the port's `decisionDeadlineMs`, else 1500 ms), is
+unavailable, or is unsure. A cache hit, policy off and a skipped target cost no
+request. The answer, its readings and the action are written to the decision log
+in one write.
+
+```ts
+import { judge } from '@goodvibes-jev/judgment/decisions';
+
+const { value, source, why } = await judge({
+  port, site: 'example.reply', battery, state: 'Question: ...\nReply: ...',
+  cache: { key: replyId, scope: 'process' },
+  settle: readings => readings.answers.verdict === 'uncertain' ? undefined : readings.answers.verdict === 'yes',
+  fallback: () => false,
+});
+```
+
 Each check is read for what it actually decides: a check whose answer is its own definition (arithmetic, dates, counting, id equality, a grammar a program produced, a value the owner configured) stays code, and a check that answers a question of meaning is asked of the model, whatever its category, security checks included. Every battery keeps its questions and thresholds in one place, and `bun run calibrate --registry <module>` runs its fixtures live against the configured model (by default `jev-latest`) and fails when a battery falls below its floor.
 
 The decision log keeps every call with what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note). Calibration records each fixture's expectations as truth on that fixture's call; an owner correction or an observed outcome is attached the same way. The engine's observe subsystem reads accuracy against confidence, threshold sweeps, drift and historical questions stuck in `confirm` or `escalate` from the log alone. Those log values do not prescribe human approval in the autonomous contract.
@@ -120,25 +140,30 @@ The actual returned ID and each target's requested ID remain distinct in logs.
 No adapter fabricates probabilities or confidence.
 
 Every reading requires a request or port `AbortSignal`; either owner can cancel
-when both are supplied. Each target gets one finite attempt (default 30 seconds;
-legacy zero also selects that default). A Jev token-limit refusal can retry the
-same complete input once in long-context mode. Host authority is rechecked before
-every transmission. Redirects are refused.
+when both are supplied. Each attempt has a finite timeout (default 30 seconds;
+legacy zero also selects that default). A request can bound its whole call,
+every target and retry included, with `deadlineMs`; an owning signal aborted by
+`AbortSignal.timeout` is read the same way. A missed deadline fails the call as
+`unavailable`; a target that misses three in a row is skipped for 60 seconds.
+A Jev token-limit refusal can retry the same complete input once in long-context
+mode. Host authority is rechecked before every transmission. Redirects are refused.
 
 The primary receives the request's model; each fallback receives its own model.
 Connection errors, target authentication/billing/model errors, unsupported input
 capabilities, malformed responses and timeouts can advance to the next configured
 target. A valid semantic answer, including rejection, uncertainty or deferral,
 ends the chain. Cancellation and host authorization refusals never advance it.
-All configured chains, including single-target chains, run once. Exhaustion halts
-the operation and directs the user to check API keys, endpoints, model names and
-local services. Products must not invent answers or restart an endless loop.
+The last target ready to take a call gets one further attempt after a transient
+failure (a timeout, a lost connection, HTTP 408, 429 or 5xx) when the wait,
+`Retry-After` included, fits within `backoffMaxMs` and the remaining deadline;
+`onRetry` reports that wait. Otherwise each chain runs once. An exhausted chain
+fails as `unavailable`; a decision asked through `judge` then takes its fallback.
 A single target's terminal protocol/context error retains its precise kind so
 callers can partition complete evidence when supported.
 
 `Retry-After` cools the failed target for at most five minutes without delaying
 independent backups. Health snapshots expose the remaining cooldown.
-Progress reports a zero delay before the next target. Credential-free lineage
+Progress reports a zero delay before the next target and the real wait before a retry. Credential-free lineage
 records each attempt's model, endpoint index/kind, outcome and safe request ID;
 the logical result retains the original requested model and actual returned model.
 

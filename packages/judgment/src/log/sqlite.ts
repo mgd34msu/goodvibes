@@ -134,16 +134,27 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
     return id;
   }
 
+  recordWithNotes(entry: NewDecisionEntry, notes: readonly DecisionNote[]): DecisionId {
+    const id = opaqueUuid(Bun.randomUUIDv7()) as DecisionId;
+    this.#db.transaction(() => {
+      this.#insert.run(toParams(id, entry));
+      for (const note of notes) this.#note(id, note);
+    }).immediate();
+    return id;
+  }
+
   attach(id: string, note: DecisionNote): void {
+    this.#db.transaction(() => this.#note(id, note)).immediate();
+  }
+
+  #note(id: string, note: DecisionNote): void {
     const column = note.kind;
     const payload = codecFor(column).write(note);
-    this.#db.transaction(() => {
-      // Retain latest-value columns for existing SQL consumers, but never use
-      // them as history. Both writes commit together or neither takes effect.
-      const { changes } = this.#attach[column].run({ id, [column]: payload });
-      if (changes !== 1) throw new RangeError(`decision ${id} cannot take a ${column} note`);
-      this.#append.run({ id, kind: column, payload });
-    }).immediate();
+    // Retain latest-value columns for existing SQL consumers, but never use
+    // them as history. Both writes commit together or neither takes effect.
+    const { changes } = this.#attach[column].run({ id, [column]: payload });
+    if (changes !== 1) throw new RangeError(`decision ${id} cannot take a ${column} note`);
+    this.#append.run({ id, kind: column, payload });
   }
 
   get(id: string): DecisionEntry | undefined {

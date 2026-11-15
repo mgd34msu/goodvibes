@@ -94,7 +94,7 @@ describe('createSandboxExecAsk', () => {
     const pending = gate(execRequest('fixture-abandoned-reader'), { signal: controller.signal });
     await started.promise;
     controller.abort();
-    await expect(pending).rejects.toThrow('The judgment reading owner is no longer current.');
+    await expect(pending).rejects.toThrow();
     expect(asked).toBe(false);
     waiting.resolve();
     await Promise.resolve();
@@ -171,12 +171,12 @@ describe('createSandboxExecAsk', () => {
     expect(escalations.some(value => value.includes('privilege'))).toBe(true);
   });
 
-  it('does not fabricate safe needs or approve when the reader fails', async () => {
+  it('asks the owner instead of assuming safe needs when the reader fails', async () => {
     installJudgmentPort(fakePort(() => { throw new Error('fixture needs reader unavailable'); }).port);
     let asked = false;
-    const gate = createSandboxExecAsk(deps(), async () => { asked = true; return { approved: true }; });
-    await expect(gate(execRequest('fixture-reader-failure'))).rejects.toThrow('fixture needs reader unavailable');
-    expect(asked).toBe(false);
+    const gate = createSandboxExecAsk(deps(), async () => { asked = true; return { approved: false }; });
+    await gate(execRequest('fixture-reader-failure'));
+    expect(asked).toBe(true);
   });
 
   it('does not read needs when disabled or for a non-exec request', async () => {

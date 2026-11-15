@@ -168,7 +168,8 @@ describe('configured transport owns Preferred exhaustion', () => {
         expect(kind).toBe('unavailable');
         expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
         await expect(port.ask({ ...request, signal: controller.signal })).rejects.toMatchObject({ code: 'decision-models-disabled' });
-        expect(primary.calls()).toBe(1); expect(secondary.calls()).toBe(1);
+        // The last target gets one further attempt after a transient failure.
+        expect(primary.calls()).toBe(1); expect(secondary.calls()).toBe(2);
       });
     } finally { controller.abort(); primary.stop(); secondary.stop(); }
   });

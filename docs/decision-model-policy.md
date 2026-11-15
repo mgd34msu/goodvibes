@@ -15,6 +15,14 @@ the key value. Local deployments can explicitly select no authentication.
 Each target can use its own model, protocol, endpoint, and credential reference.
 WebUI provides editable fallback rows and an Advanced JSON view.
 
+**Decision deadline (ms)** (`judgment.decisionDeadlineMs`, default 1500) bounds
+a decision that you or a tool call wait on. When no answer arrives in time, that
+decision takes its stated fallback, such as asking you; a target that misses the
+deadline three times in a row is skipped for a minute. A decision with a fallback
+also takes it when decision models are off or unavailable, without a request.
+The sandbox's reading of what host access a command needs works this way: with no
+answer the command counts as unassessed and the sandbox asks you.
+
 Execution permissions are in **Permissions → Execution permissions**, including
 **YOLO**. Choose the decision policy and execution permissions independently.
 The daemon configuration command also exposes these settings.

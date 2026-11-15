@@ -11,7 +11,7 @@ import {
   toJson, type JudgmentAttempt, type JudgmentLineage, type JudgmentPort, type JudgmentRequest,
   type JudgmentResult, type Questions,
 } from '../port/types.ts';
-import { hashState, isoTime, type DecisionLog, type NewDecisionEntry } from './types.ts';
+import { hashState, isoTime, type DecisionLog, type DecisionNote, type NewDecisionEntry } from './types.ts';
 
 interface RecordedInput {
   readonly state: JudgmentRequest<Questions>['state'];
@@ -238,6 +238,8 @@ function projectResult<Q extends Questions>(questions: Q, expectedModel: string,
 export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () => Date = () => new Date()): JudgmentPort {
   return {
     get model() { return inner.model; },
+    get decisionDeadlineMs() { return inner.decisionDeadlineMs; },
+    ...(inner.revision ? { revision: () => inner.revision!() } : {}),
     ...(inner.health ? { health: () => inner.health!() } : {}),
     recorder: {
       recordReadings: (id, readings) => recorded(() => log.attach(id, { kind: 'readings', readings })),
@@ -249,7 +251,8 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       let logAssertion: (() => void) | undefined;
       let resultCapture: JudgmentRequest<Q>['captureResult'];
       let inputBinding: JudgmentRequest<Q>['inputBinding'];
-      try { logAssertion = request.assertLogCurrent; resultCapture = request.captureResult; inputBinding = request.inputBinding; }
+      let conclude: JudgmentRequest<Q>['conclude'];
+      try { logAssertion = request.assertLogCurrent; resultCapture = request.captureResult; inputBinding = request.inputBinding; conclude = request.conclude; }
       catch (error) { drainOwned(error); throw new JudgmentError('rejected', FAILURE_MESSAGES.rejected); }
       // Observe malformed owned work immediately, even if a later retention
       // guard refuses before enum validation. Never assimilate borrowed thenables.
@@ -276,6 +279,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       let originalResult: JudgmentResult<Q> | undefined;
       let result: JudgmentResult<Q>;
       let resultToReturn: JudgmentResult<Q>;
+      let notes: DecisionNote[] = [];
       try {
         if (inputBinding !== undefined && inputBinding !== 'state') throw new JudgmentError('invalid-request', FAILURE_MESSAGES['invalid-request']);
         requestedModel = identifier(request.model ?? inner.model, true);
@@ -308,6 +312,13 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
         try { recordImmutableJudgmentResult({ ...resultToReturn }); }
         catch { throw invalidResponse(); }
         checkCancellation(signal);
+        if (conclude) {
+          const concluded = conclude(result);
+          notes = [
+            ...(concluded.readings === undefined ? [] : [{ kind: 'readings' as const, readings: concluded.readings }]),
+            ...(concluded.action === undefined ? [] : [{ kind: 'action' as const, action: concluded.action }]),
+          ];
+        }
       } catch (error) {
         const failure = asFailure(error, cancellationKind(signal));
         const entry: NewDecisionEntry = {
@@ -340,7 +351,14 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
         lineage: result.lineage ?? { logicalRequestId: opaqueUuid(), attempts: [] },
       }));
       assertLogCurrent(logAssertion);
-      const decisionId = recorded(() => log.record(entry));
+      // The answer and what code concluded from it go in one write when the log can.
+      const decisionId = recorded(() => {
+        if (notes.length === 0) return log.record(entry);
+        if (log.recordWithNotes) return log.recordWithNotes(entry, notes);
+        const id = log.record(entry);
+        for (const note of notes) log.attach(id, note);
+        return id;
+      });
       const returned = recordImmutableJudgmentResult(retainNativeModelObservation(originalResult, { ...resultToReturn, decisionId }));
       if (entry.stateHash !== undefined) applyRecordedInput(setRecordedInput, recordedInputResults, [returned, { state: input.state, questions: input.questions, context: call.context, stateHash: entry.stateHash, decisionId }]);
       return returned;

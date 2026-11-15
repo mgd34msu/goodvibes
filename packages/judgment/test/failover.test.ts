@@ -23,7 +23,8 @@ describe('finite configured decision model failover', () => {
       return attempts === 1 ? Response.json({ model: DEFAULT_MODEL, answers: { yes: { type: 'noul', noul: 7 } }, usage: { input_tokens: 1, output_tokens: 1 } }) : bad(503);
     }));
     expect((await failure(port.ask(request))).kind).toBe('invalid-response');
-    expect(attempts).toBe(2);
+    // The last target gets one further attempt after its transient failure.
+    expect(attempts).toBe(3);
   });
   test.each([408, 429, 500, 529])('advances after HTTP %i with one logical result and request lineage', async (status) => {
     const urls: string[] = [];
@@ -44,7 +45,7 @@ describe('finite configured decision model failover', () => {
     expect(JSON.stringify(log.query())).not.toContain(primary.baseURL);
   });
 
-  test('a primary-only outage halts after one attempt and records no effects', async () => {
+  test('a primary-only outage gets one further attempt, then halts and records no effects', async () => {
     let calls = 0, progress = 0, effects = 0;
     const port = createSystemOnePort(config(async () => { calls++; throw new Error('network'); }, { fallbacks: [] }));
     using log = new SqliteDecisionLog(':memory:');
@@ -52,10 +53,10 @@ describe('finite configured decision model failover', () => {
     const error = await failure(work);
     expect(error.kind).toBe('unavailable');
     expect(error.message).toContain('No decision models are currently available');
-    expect(calls).toBe(1); expect(progress).toBe(0); expect(effects).toBe(0);
+    expect(calls).toBe(2); expect(progress).toBe(1); expect(effects).toBe(0);
     expect(log.query()).toHaveLength(1);
     expect(log.query()[0]?.status).toBe('failed');
-    expect(error.lineage?.attempts).toHaveLength(1);
+    expect(error.lineage?.attempts).toHaveLength(2);
   });
 
   test.each([408, 429, 500, 529])('HTTP %i exhausts the configured chain once with one failed log', async (status) => {
@@ -119,25 +120,23 @@ describe('finite configured decision model failover', () => {
     }));
     using log = new SqliteDecisionLog(':memory:');
     const recorded = withDecisionLog(port, log);
-    const error = await failure(recorded.ask({ ...request, signal: controller.signal, onRetry: (event) => {
-      if (event.attempt.endpointIndex === 1) controller.abort();
-    } }));
+    const error = await failure(recorded.ask({ ...request, signal: controller.signal }));
     expect(error.kind).toBe('unavailable');
     expect(error.status).toBeUndefined();
     expect(error.requestId).toBeUndefined();
     expect(error.cause).toBeUndefined();
-    expect(error.lineage?.attempts.map((attempt) => [attempt.endpointIndex, attempt.outcome, attempt.requestId])).toEqual([[0, 'unavailable', undefined], [1, 'unavailable', undefined]]);
+    expect(error.lineage?.attempts.map((attempt) => [attempt.endpointIndex, attempt.outcome, attempt.requestId])).toEqual([[0, 'unavailable', undefined], [1, 'unavailable', undefined], [1, 'unavailable', undefined]]);
     expect(log.query()).toHaveLength(1);
     available = true;
     const result = await recorded.ask(request);
     expect(result.answers.yes.noul).toBe(0.9);
     expect(result.lineage?.attempts.map((attempt) => [attempt.attempt, attempt.endpointIndex, attempt.outcome])).toEqual([[1, 0, 'answered']]);
     expect(result.lineage?.logicalRequestId).not.toBe(error.lineage?.logicalRequestId);
-    expect(urls).toEqual([`${primary.baseURL}/v1/systemone`, `${secondary.baseURL}/v1/systemone`, `${primary.baseURL}/v1/systemone`]);
+    expect(urls).toEqual([`${primary.baseURL}/v1/systemone`, `${secondary.baseURL}/v1/systemone`, `${secondary.baseURL}/v1/systemone`, `${primary.baseURL}/v1/systemone`]);
     expect(log.query()).toHaveLength(2);
     expect(log.query().filter((entry) => entry.status === 'failed')).toHaveLength(1);
     expect(log.query().filter((entry) => entry.status === 'answered')).toHaveLength(1);
-    expect(port.health?.().map((endpoint) => [endpoint.attempts, endpoint.consecutiveFailures, endpoint.lastOutcome])).toEqual([[2, 0, 'answered'], [1, 1, 'unavailable']]);
+    expect(port.health?.().map((endpoint) => [endpoint.attempts, endpoint.consecutiveFailures, endpoint.lastOutcome])).toEqual([[2, 0, 'answered'], [2, 2, 'unavailable']]);
     for (const secret of [primary.apiKey, secondary.apiKey, primary.baseURL, secondary.baseURL]) {
       expect(JSON.stringify(error)).not.toContain(secret);
       expect(JSON.stringify(log.query())).not.toContain(secret);
@@ -155,13 +154,12 @@ describe('finite configured decision model failover', () => {
     using log = new SqliteDecisionLog(':memory:');
     const error = await failure(withDecisionLog(port, log).ask({ ...request, signal: controller.signal, onRetry: (event) => {
       retries.push(event.attempt.endpointIndex);
-      if (event.attempt.endpointIndex === 1) controller.abort();
     } }));
     expect(error.kind).toBe('unavailable');
-    expect(error.lineage?.attempts.map((attempt) => [attempt.endpointIndex, attempt.outcome])).toEqual([[0, 'unavailable'], [1, 'unavailable']]);
-    expect(signals).toHaveLength(2);
+    expect(error.lineage?.attempts.map((attempt) => [attempt.endpointIndex, attempt.outcome])).toEqual([[0, 'unavailable'], [1, 'unavailable'], [1, 'unavailable']]);
+    expect(signals).toHaveLength(3);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
-    expect(retries).toEqual([0]);
+    expect(retries).toEqual([0, 1]);
     expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
     expect(log.query()).toHaveLength(1);
     expect(log.query()[0]?.lineage).toEqual(error.lineage);

@@ -11,6 +11,8 @@ import {
   captureJudgmentBackendSettings,
   HOSTED_BASE_URL,
   DEFAULT_MODEL,
+  DEFAULT_DECISION_DEADLINE_MS,
+  validDecisionDeadline,
   withDecisionLog,
   type JudgmentConfig,
   type JudgmentPort,
@@ -32,7 +34,7 @@ export const JUDGMENT_KEY_NAME = 'TYPESAFE_API_KEY';
 /** What the judgment settings are read from. */
 export interface JudgmentSettingsSource {
   readonly config: {
-    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks' | 'judgment.volumeMonitor'): unknown;
+    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.decisionDeadlineMs' | 'judgment.fallbacks' | 'judgment.volumeMonitor'): unknown;
     subscribe?(key: 'judgment.volumeMonitor', listener: () => void): () => void;
     getConfigurationIncarnation?(): number;
     onDidChangeIncarnation?(listener: () => void): () => void;
@@ -53,6 +55,12 @@ const text = (value: unknown): string => (typeof value === 'string' ? value.trim
 /** The model a request names when it names none: judgment.model, then TYPESAFE_DEFAULT_MODEL, then jev-latest. */
 function settingsModel(source: JudgmentSettingsSource): string {
   return text(source.config.get('judgment.model')) || text(source.env['TYPESAFE_DEFAULT_MODEL']) || DEFAULT_MODEL;
+}
+
+/** The deadline judge() gives a decision a person or tool call waits on: judgment.decisionDeadlineMs, else the default. */
+function settingsDecisionDeadline(source: JudgmentSettingsSource): number {
+  const value = source.config.get('judgment.decisionDeadlineMs');
+  return validDecisionDeadline(value) ? value : DEFAULT_DECISION_DEADLINE_MS;
 }
 
 async function storedKey(secrets: JudgmentSettingsSource['secrets'], name: string, timeoutMs: number, signal?: AbortSignal): Promise<string | undefined> {
@@ -160,10 +168,24 @@ async function activeSettings(source: JudgmentSettingsSource, signal?: AbortSign
  */
 export function createSettingsJudgmentPort(source: JudgmentSettingsSource): JudgmentPort {
   let current: { config: JudgmentConfig; port: JudgmentPort } | undefined;
+  // One integer for what decides the answers: it moves when the configuration
+  // or the credential store changed since it was last read (two integer reads).
+  let observed: readonly [number | undefined, number | undefined] = [undefined, undefined];
+  let revision = 0;
   return {
     get model(): string {
       return settingsModel(source);
     },
+    revision(): number {
+      const configuration = source.config.getConfigurationIncarnation?.();
+      const credentials = source.secrets.getCredentialMutationState?.().generation;
+      if (configuration !== observed[0] || credentials !== observed[1]) { observed = [configuration, credentials]; revision++; }
+      return revision;
+    },
+    get decisionDeadlineMs(): number {
+      return settingsDecisionDeadline(source);
+    },
+    health: () => current?.port.health?.() ?? [],
     async ask(request) {
       assertDecisionModelsEnabled('configured decision transport');
       const signal = request.signal;
@@ -277,6 +299,9 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   const owned = (base: JudgmentPort): JudgmentPort => {
     const recorded = withDecisionLog({
       get model() { return base.model; },
+      get decisionDeadlineMs() { return base.decisionDeadlineMs; },
+      ...(base.health ? { health: () => base.health!() } : {}),
+      ...(base.revision ? { revision: () => base.revision!() } : {}),
       async ask(request) {
         try { return await base.ask(request); }
         finally { await yieldCompletion(); }
@@ -284,6 +309,9 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
     }, decisionLog);
     return {
       get model() { return recorded.model; },
+      get decisionDeadlineMs() { return recorded.decisionDeadlineMs; },
+      ...(recorded.health ? { health: () => recorded.health!() } : {}),
+      ...(recorded.revision ? { revision: () => recorded.revision!() } : {}),
       recorder: recorded.recorder!,
       ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
         // Retained port references must not reopen a retired runtime or write to
@@ -309,6 +337,9 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   // log, so a malformed answer or a failure echo is never retained.
   const browserPort = owned({
     get model() { return transport.model; },
+    get decisionDeadlineMs() { return transport.decisionDeadlineMs; },
+    health: () => transport.health?.() ?? [],
+    revision: () => transport.revision?.() ?? 0,
     ask(request) {
       let options: WebuiAnswerBoundaryOptions;
       try { options = browserBoundaryOptions(input); }

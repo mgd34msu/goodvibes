@@ -4,15 +4,21 @@ import { checkAnswers, projectAnswers } from './answers.ts';
 import { toJudgmentError } from './client.ts';
 import { acceptsBackendModel, askBackend, judgmentAdapter, validateBackendInput } from './backends.ts';
 import { validateJudgmentConfig, type JudgmentConfig } from './config.ts';
+import { DEADLINE_COOLDOWN_MS, DEADLINE_MISSES_BEFORE_COOLDOWN } from './deadline.ts';
 import { JudgmentContextLimitError, JudgmentError } from './errors.ts';
 import { requiresLongContext, validateContextBudget, validateQuestions } from './limits.ts';
 import { withRequestId } from './request-id.ts';
-import { interruptible, retryDelay, retryPolicy } from './retry.ts';
+import { delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
 import { recordNativeModelObservation } from './model-observation.ts';
 import { opaqueUuid } from './opaque-uuid.ts';
 import { captureJudgmentInput } from './input-snapshot.ts';
-import { DECISION_MODELS_UNAVAILABLE_NOTICE, rateLimitedNotice } from './availability-notice.ts';
+import { DECISION_MODELS_UNAVAILABLE_NOTICE, missedDeadlineNotice, rateLimitedNotice, slowTargetsNotice } from './availability-notice.ts';
 import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
+
+/** The reason AbortSignal.timeout gives; the owner's deadline passed. */
+function isTimeoutReason(reason: unknown): boolean {
+  return reason instanceof DOMException && reason.name === 'TimeoutError';
+}
 
 function needsContextUpgrade(error: unknown): boolean {
   if (!(error instanceof APIError) || error.status !== 400) return false;
@@ -32,6 +38,9 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
   const policy = retryPolicy(config.retry);
   const timeoutMs = config.timeoutMs || 30_000;
   const cooldowns = targets.map(() => 0);
+  // Why each target is cooling: a provider's Retry-After, or missed deadlines.
+  const cooledForDeadline = targets.map(() => false);
+  const deadlineMisses = targets.map(() => 0);
   const defaultModel = config.model;
   const ownerSignal = config.signal;
   const health: JudgmentEndpointHealth[] = targets.map(({ endpoint, model }, endpointIndex) => ({ endpointIndex, endpointKind: endpoint.kind, model, attempts: 0, consecutiveFailures: 0 }));
@@ -48,6 +57,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
 
   return {
     model: defaultModel,
+    ...(config.decisionDeadlineMs === undefined ? {} : { decisionDeadlineMs: config.decisionDeadlineMs }),
     health: () => health.map((item, index) => {
       const remaining = Math.max(0, (cooldowns[index] ?? 0) - Date.now());
       return { ...item, ...(remaining > 0 ? { cooldownRemainingMs: remaining } : {}) };
@@ -63,11 +73,17 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         attempts.push(attempt);
         if (attempts.length > 128) attempts.shift();
       };
-      const { signal, beforeAttempt, beforeAsyncAttempt, onRetry } = request;
+      const { signal, beforeAttempt, beforeAsyncAttempt, onRetry, deadlineMs } = request;
       const owners = [...new Set([signal, ownerSignal].filter((owner): owner is AbortSignal => owner !== undefined))];
       const requestedModel = request.model ?? defaultModel;
       const controller = new AbortController();
-      const cancelled = () => controller.abort(new JudgmentError('aborted', 'the judgment call was cancelled'));
+      const missedDeadline = new JudgmentError('unavailable', missedDeadlineNotice(deadlineMs));
+      // An owner aborted by AbortSignal.timeout is a deadline, not a cancellation.
+      const cancelled = () => controller.abort(owners.some(owner => owner.aborted && isTimeoutReason(owner.reason))
+        ? missedDeadline : new JudgmentError('aborted', 'the judgment call was cancelled'));
+      const pastDeadline = () => controller.signal.aborted && controller.signal.reason === missedDeadline;
+      let deadlineAt: number | undefined;
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
       for (const owner of owners) {
         if (owner.aborted) cancelled();
         owner.addEventListener('abort', cancelled, { once: true });
@@ -81,7 +97,14 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         if (typeof requestedModel !== 'string' || !/^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(requestedModel)) {
           throw new JudgmentError('invalid-request', 'judgment model overrides must be nonempty model identifiers');
         }
-        if ('totalTimeoutMs' in request) throw new JudgmentError('invalid-request', 'judgment total-time limits are not supported; cancel through the owning signal');
+        if ('totalTimeoutMs' in request) throw new JudgmentError('invalid-request', 'judgment total-time limits are set with deadlineMs');
+        if (deadlineMs !== undefined && (!Number.isInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 2_147_483_647)) {
+          throw new JudgmentError('invalid-request', 'a judgment deadline must be whole positive milliseconds');
+        }
+        if (deadlineMs !== undefined) {
+          deadlineAt = performance.now() + deadlineMs;
+          deadlineTimer = setTimeout(() => controller.abort(missedDeadline), deadlineMs);
+        }
         checkCancellation();
         let input: Pick<JudgmentRequest<Q>, 'state' | 'questions'>;
         try { input = captureJudgmentInput(request); }
@@ -105,7 +128,9 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           let headers = judgmentAdapter(target.endpoint) === 'system-one' && requiresLongContext(state, questions)
             ? { 'TypeSafe-Danger-Zone-Long-Context': 'true' } : undefined;
           let contextUpgrade = false;
+          let retried = false;
           for (;;) {
+            let retryWaitMs: number | undefined;
             checkCancellation();
             try {
               if (beforeAsyncAttempt) {
@@ -135,7 +160,8 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
             const attemptController = new AbortController();
             const abortAttempt = () => attemptController.abort(controller.signal.reason);
             controller.signal.addEventListener('abort', abortAttempt, { once: true });
-            const attemptTimer = timeoutMs > 0 ? setTimeout(() => attemptController.abort(new APITimeoutError(timeoutMs)), timeoutMs) : undefined;
+            let attemptTimedOut = false;
+            const attemptTimer = timeoutMs > 0 ? setTimeout(() => { attemptTimedOut = true; attemptController.abort(new APITimeoutError(timeoutMs)); }, timeoutMs) : undefined;
             let failure: unknown;
             try {
               const body = { state, questions, model: targetModel };
@@ -163,6 +189,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                 latencyMs: performance.now() - attemptStarted, outcome: 'answered', ...(requestId ? { requestId } : {}),
               };
               remember(attempt);
+              deadlineMisses[endpointIndex] = 0;
               health[endpointIndex] = { ...health[endpointIndex]!, attempts: health[endpointIndex]!.attempts + 1, consecutiveFailures: 0, lastOutcome: 'answered' };
               return recordNativeModelObservation({
                 answers: projectAnswers(questions, result.answers), requestedModel, model: result.model,
@@ -182,6 +209,16 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                 ...(last.status === undefined ? {} : { status: last.status }), ...(requestId ? { requestId } : {}),
               });
               health[endpointIndex] = { ...health[endpointIndex]!, attempts: health[endpointIndex]!.attempts + 1, consecutiveFailures: health[endpointIndex]!.consecutiveFailures + 1, lastOutcome: last.kind };
+              // A target that keeps missing deadlines is skipped for a while, so
+              // the next decisions take their fallback, or the next target, at once.
+              if (pastDeadline() || attemptTimedOut) {
+                deadlineMisses[endpointIndex] = deadlineMisses[endpointIndex]! + 1;
+                if (deadlineMisses[endpointIndex]! >= DEADLINE_MISSES_BEFORE_COOLDOWN) {
+                  deadlineMisses[endpointIndex] = 0;
+                  cooldowns[endpointIndex] = Date.now() + DEADLINE_COOLDOWN_MS;
+                  cooledForDeadline[endpointIndex] = true;
+                }
+              }
               // Exact server tokenization can exceed the character estimate.
               // Retry the complete input on the same endpoint in long-context
               // mode, retaining this refusal and rechecking owner authority.
@@ -194,14 +231,36 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               // refusal or abstention is final; HTTP/config/response failures
               // belong to this target and may advance to another configured model.
               if (last.kind === 'internal' || last.kind === 'aborted' || failure instanceof JudgmentError && last.kind === 'rejected') throw last;
-              if (failure instanceof APIError && (failure.headers.has('retry-after') || failure.headers.has('retry-after-ms'))) {
+              // One further attempt on the same target for a transient failure,
+              // when no other target is ready to take the call and the wait fits
+              // inside both the backoff ceiling and the remaining deadline.
+              const laterTargetReady = eligible.slice(eligibleIndex + 1).some(next => cooldowns[next.endpointIndex]! <= Date.now());
+              if (!retried && !laterTargetReady && !controller.signal.aborted && retryable(failure)) {
+                const wait = retryDelay(failure, 0, policy);
+                if (wait <= policy.backoffMaxMs && (deadlineAt === undefined || wait < deadlineAt - performance.now())) retryWaitMs = wait;
+              }
+              if (retryWaitMs === undefined && failure instanceof APIError && (failure.headers.has('retry-after') || failure.headers.has('retry-after-ms'))) {
                 cooldowns[endpointIndex] = Date.now() + retryDelay(failure, 0, policy);
+                cooledForDeadline[endpointIndex] = false;
               }
             } finally {
               clearTimeout(attemptTimer);
               controller.signal.removeEventListener('abort', abortAttempt);
             }
             checkCancellation();
+            if (retryWaitMs !== undefined) {
+              retried = true;
+              if (onRetry) {
+                try {
+                  const progress = Object.freeze({ logicalRequestId,
+                    attempt: Object.freeze({ ...attempts[attempts.length - 1]! }),
+                    elapsedMs: performance.now() - started, nextDelayMs: retryWaitMs });
+                  await interruptible(Promise.resolve().then(() => { checkCancellation(); return onRetry(progress); }), controller.signal);
+                } catch { checkCancellation(); }
+              }
+              await delay(retryWaitMs, controller.signal);
+              continue;
+            }
             if (eligibleIndex + 1 < eligible.length && onRetry) {
               // A Retry-After applies to the failed target, never to an independent backup.
               try {
@@ -248,7 +307,14 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         // advice is the wait, not a credentials check.
         const now = Date.now();
         const waits = cooldowns.map(until => until - now);
-        const retryAfterMs = waits.every(wait => wait > 0) ? Math.ceil(Math.min(...waits)) : undefined;
+        const allCooling = waits.every(wait => wait > 0);
+        if (allCooling && cooledForDeadline.some(Boolean)) {
+          throw new JudgmentError('unavailable', slowTargetsNotice(Math.ceil(Math.min(...waits))), {
+            ...(last?.status === undefined ? {} : { status: last.status }),
+            ...(last?.requestId === undefined ? {} : { requestId: last.requestId }),
+          });
+        }
+        const retryAfterMs = allCooling ? Math.ceil(Math.min(...waits)) : undefined;
         if (retryAfterMs !== undefined) {
           throw new JudgmentError('unavailable', rateLimitedNotice(retryAfterMs), {
             retryAfterMs,
@@ -273,6 +339,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           lineage: lineage(),
         });
       } finally {
+        clearTimeout(deadlineTimer);
         for (const owner of owners) owner.removeEventListener('abort', cancelled);
       }
     },

@@ -61,6 +61,20 @@ export interface JudgmentRequest<Q extends Questions> {
   readonly model?: string;
   /** Cancels the call and any pending retries. Required by the real transport unless its config supplies an owning signal. */
   readonly signal?: AbortSignal;
+  /**
+   * Total time for the whole call: every target, retry and failover. When it
+   * passes, the call fails as `unavailable` and the target in flight counts a
+   * missed deadline. An owning signal aborted with a `TimeoutError` reason
+   * (`AbortSignal.timeout`) is read the same way. Omitted: only the per-target timeout applies.
+   */
+  readonly deadlineMs?: number;
+  /**
+   * Called once with the answered result, before a recording port writes the
+   * entry, so the readings and the action code took are stored in the same
+   * write as the answer. A port without a decision log ignores it.
+   */
+  // Method syntax keeps a request for specific questions assignable to one for any questions.
+  conclude?(result: JudgmentResult<Q>): JudgmentConclusion;
   /** Synchronous current-authority check before every wire attempt, including retries. */
   readonly beforeAttempt?: () => void;
   /** Optional asynchronous admission before every wire attempt; the synchronous guard runs afterward. */
@@ -85,6 +99,12 @@ export interface JudgmentRequest<Q extends Questions> {
   readonly onRetry?: (progress: JudgmentRetryProgress) => void;
   /** Attribution for the decision log; never sent to the model. */
   readonly context?: DecisionContext;
+}
+
+/** What code concluded from an answer, stored with it in the decision log. */
+export interface JudgmentConclusion {
+  readonly readings?: JsonValue;
+  readonly action?: string;
 }
 
 /** Credential-free evidence of one configured target attempt in a logical reading. */
@@ -166,6 +186,10 @@ export interface JudgmentPort {
   readonly recorder?: DecisionRecorder;
   /** A credential-free snapshot of the currently configured targets. */
   readonly health?: () => readonly JudgmentEndpointHealth[];
+  /** The owner's deadline for decisions a person or a tool call waits on; `judge` uses it when the caller names none. */
+  readonly decisionDeadlineMs?: number | undefined;
+  /** Moves up when what decides this port's answers changes (targets, models, credentials); `judge` keys cached answers by it. */
+  readonly revision?: (() => number) | undefined;
 }
 
 /** Question builders with the same shapes the wire expects. */

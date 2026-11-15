@@ -6,8 +6,17 @@
  * Integration points:
  * - 'tasks' domain: TASK_FAILED, TASK_CANCELLED
  * - 'turn' domain: TURN_ERROR, TURN_CANCEL
- * - 'tools' domain: tool failures (permission denial, execution failure)
- * - Health cascade events (CASCADE_APPLIED) on the session domain
+ * - 'tools' domain: tool calls (bracketing the tool phase), failures and
+ *   permission denials (TOOL_PERMISSIONED with approved false)
+ * - Health cascade events (CASCADE_APPLIED) on the session domain, attributed
+ *   only to a turn that called the failed MCP server
+ *
+ * A turn's phases are named for what happens in them: PREFLIGHT (local checks
+ * before the model call), MODEL_REQUEST (waiting for the model to start),
+ * STREAM (the model replying), AFTER_STREAM (local work after the reply),
+ * TOOLS (from the first tool call received until none is in flight) and
+ * AFTER_TOOLS. A task has CREATED and RUNNING. Which phase was unusually long
+ * is decided in code (slow-phases.ts); no model is asked.
  *
  * Reports are pushed to the ForensicsRegistry and a FORENSICS_REPORT_CREATED
  * event is emitted so the panel can refresh.
@@ -19,6 +28,7 @@ import type { AnyRuntimeEvent } from '../../../events/domain-map.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 import type {
+  FailureClass,
   FailureReport,
   PhaseTimingEntry,
   PhaseLedgerEntry,
@@ -29,8 +39,8 @@ import type {
   BudgetBreachEvidence,
 } from './types.js';
 import { classifyFailure, summariseFailure } from './classifier.js';
-import { readSlowPhases } from './slow-phases.js';
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
+import { slowPhases } from './slow-phases.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
 import type { ForensicsRegistry } from './registry.js';
 import { emitForensicsReportCreated } from '../emitters/forensics.js';
 import { redactAtRestLine } from '../at-rest-persistence.js';
@@ -72,6 +82,10 @@ interface TurnTracker {
   lastPhaseStart?: number | undefined;
   currentPhase?: string | undefined;
   currentPhaseEnterEventType?: string | undefined;
+  /** Tool calls received and not yet finished; the TOOLS phase lasts while any is. */
+  readonly toolCallsInFlight: Set<string>;
+  /** MCP servers this turn called (from `mcp:<server>:<tool>` names). */
+  readonly mcpServers: Set<string>;
   _causalSeq: number;
   _phaseSeq: number;
 }
@@ -98,6 +112,13 @@ interface TaskTracker {
   currentPhaseEnterEventType?: string | undefined;
   _causalSeq: number;
   _phaseSeq: number;
+}
+
+/** The MCP server of a qualified MCP tool name (`mcp:<server>:<tool>`), if it is one. */
+function mcpServerOf(tool: string | undefined): string | undefined {
+  if (!tool?.startsWith('mcp:')) return undefined;
+  const server = tool.slice(4).split(':')[0];
+  return server ? server : undefined;
 }
 
 // ── ForensicsCollector ─────────────────────────────────────────────────────
@@ -229,9 +250,11 @@ export class ForensicsCollector {
           hasPermissionDenial: false,
           hasCascadeEvents: false,
           hasCompactionError: false,
-          currentPhase: 'SUBMITTED',
+          currentPhase: 'PREFLIGHT',
           lastPhaseStart: env.ts,
           currentPhaseEnterEventType: payload.type,
+          toolCallsInFlight: new Set(),
+          mcpServers: new Set(),
           _causalSeq: 0,
           _phaseSeq: 0,
         });
@@ -240,7 +263,7 @@ export class ForensicsCollector {
       case 'PREFLIGHT_OK': {
         const t = this._turns.get(turnId);
         if (!t) break;
-        this._transitionPhase(t, 'turn', 'PREFLIGHT', env.ts, payload.type);
+        this._transitionPhase(t, 'turn', 'MODEL_REQUEST', env.ts, payload.type);
         break;
       }
       case 'PREFLIGHT_FAIL': {
@@ -261,19 +284,7 @@ export class ForensicsCollector {
       case 'STREAM_END': {
         const t = this._turns.get(turnId);
         if (!t) break;
-        this._transitionPhase(t, 'turn', 'STREAM_COMPLETE', env.ts, payload.type);
-        break;
-      }
-      case 'TOOL_BATCH_READY': {
-        const t = this._turns.get(turnId);
-        if (!t) break;
-        this._transitionPhase(t, 'turn', 'TOOL_BATCH', env.ts, payload.type);
-        break;
-      }
-      case 'TOOLS_DONE': {
-        const t = this._turns.get(turnId);
-        if (!t) break;
-        this._transitionPhase(t, 'turn', 'POST_TOOL_BATCH', env.ts, payload.type);
+        this._transitionPhase(t, 'turn', 'AFTER_STREAM', env.ts, payload.type);
         break;
       }
       case 'TURN_COMPLETED': {
@@ -421,8 +432,18 @@ export class ForensicsCollector {
       this._callToTurn.set(payload.callId, payload.turnId);
     }
 
+    const tracker = payload.turnId ? this._turns.get(payload.turnId) : undefined;
     switch (payload.type) {
+      case 'TOOL_RECEIVED': {
+        if (!tracker || !payload.callId) break;
+        if (tracker.toolCallsInFlight.size === 0) this._transitionPhase(tracker, 'turn', 'TOOLS', env.ts, payload.type);
+        tracker.toolCallsInFlight.add(payload.callId);
+        const server = mcpServerOf(payload.tool);
+        if (server) tracker.mcpServers.add(server);
+        break;
+      }
       case 'TOOL_FAILED': {
+        if (tracker && payload.callId) this._endToolCall(tracker, payload.callId, env.ts, payload.type);
         if (!payload.turnId) break;
         const t = this._turns.get(payload.turnId);
         if (!t) break;
@@ -468,7 +489,7 @@ export class ForensicsCollector {
         );
         break;
       }
-      case 'TOOL_PERMISSION_CHECKED': {
+      case 'TOOL_PERMISSIONED': {
         // If approved is explicitly false, record permission denial
         if (payload.approved === false && payload.turnId) {
           const t = this._turns.get(payload.turnId);
@@ -486,10 +507,17 @@ export class ForensicsCollector {
       }
       case 'TOOL_SUCCEEDED':
       case 'TOOL_CANCELLED': {
+        if (tracker && payload.callId) this._endToolCall(tracker, payload.callId, env.ts, payload.type);
         if (payload.callId) this._callToTurn.delete(payload.callId);
         break;
       }
     }
+  }
+
+  /** A tool call finished; when it was the last one in flight, the tool phase ends. */
+  private _endToolCall(t: TurnTracker, callId: string, ts: number, eventType: string): void {
+    if (!t.toolCallsInFlight.delete(callId)) return;
+    if (t.toolCallsInFlight.size === 0) this._transitionPhase(t, 'turn', 'AFTER_TOOLS', ts, eventType);
   }
 
   private _handlePermissionEnvelope(
@@ -560,20 +588,23 @@ export class ForensicsCollector {
   // ── Cascade handling ───────────────────────────────────────────────────────
 
   /**
-   * A cascade applies to the session it names; one raised without a session
-   * (the health system's 'runtime' scope) concerns every turn and task in flight.
+   * A cascade is attributed only to work that depends on the failed entity: a
+   * turn that called a tool of the MCP server the cascade reports as failed.
+   * Other failures (a compaction, a tool, a permission) are recorded from their
+   * own events, so unrelated work in the same session is never blamed on a cascade.
    */
   private _handleCascadeEnvelope(
     env: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>
   ): void {
-    const payload = env.payload as { type: string; ruleId?: string; source?: string; target?: string };
-    if (payload.type !== 'CASCADE_APPLIED') return;
-    const wholeRuntime = !env.sessionId || env.sessionId === 'runtime';
-    const description = `Health cascade ${payload.ruleId ?? 'unknown rule'} applied: ${payload.source ?? 'unknown'} -> ${payload.target ?? 'unknown'}`;
-    for (const t of [...this._turns.values(), ...this._tasks.values()]) {
-      if (!wholeRuntime && t.sessionId !== env.sessionId) continue;
+    const payload = env.payload as { type: string; ruleId?: string; source?: string; target?: string; sourceContext?: Record<string, string> };
+    if (payload.type !== 'CASCADE_APPLIED' || payload.source !== 'mcp') return;
+    const server = payload.sourceContext?.['serverId'];
+    if (!server) return;
+    const description = `Health cascade ${payload.ruleId ?? 'unknown rule'}: MCP server ${server} failed while this turn was using it`;
+    for (const t of this._turns.values()) {
+      if (!t.mcpServers.has(server)) continue;
       t.hasCascadeEvents = true;
-      t.cascadeEvents.push(this._addCausal(t, env.ts, description, payload.type, false));
+      t.cascadeEvents.push(this._addCausal(t, env.ts, description, payload.type, false, { server }));
     }
   }
 
@@ -615,7 +646,7 @@ export class ForensicsCollector {
     work: OwnedJudgmentWork,
   ): Promise<void> {
     work.assertCurrent();
-    const classification = await classifyFailure({
+    const classification = await this._classify({
       stopReason,
       errorMessage,
       wasCancelled,
@@ -623,7 +654,7 @@ export class ForensicsCollector {
       hasToolFailure: tracker.hasToolFailure,
       hasPermissionDenial: tracker.hasPermissionDenial,
       hasCompactionError: tracker.hasCompactionError,
-    }, work.options('runtime.forensics.classifier'));
+    }, tracker, { turnId: tracker.turnId }, work);
     work.assertCurrent();
 
     const summary = summariseFailure(classification, errorMessage, stopReason);
@@ -646,7 +677,7 @@ export class ForensicsCollector {
       errorMessage,
       turnId: tracker.turnId,
       phaseTimings: tracker.phaseTimings,
-      ...await this._assessSlowPhases('turn', tracker.phaseTimings, work),
+      ...this._assessSlowPhases('turn', tracker.phaseTimings, wasCancelled),
       phaseLedger: tracker.phaseLedger,
       causalChain: tracker.causalChain,
       cascadeEvents: tracker.cascadeEvents,
@@ -674,14 +705,14 @@ export class ForensicsCollector {
     work: OwnedJudgmentWork,
   ): Promise<void> {
     work.assertCurrent();
-    const classification = await classifyFailure({
+    const classification = await this._classify({
       errorMessage,
       wasCancelled,
       hasCascadeEvents: tracker.hasCascadeEvents,
       hasToolFailure: tracker.hasToolFailure,
       hasPermissionDenial: tracker.hasPermissionDenial,
       hasCompactionError: tracker.hasCompactionError,
-    }, work.options('runtime.forensics.classifier'));
+    }, tracker, { taskId: tracker.taskId }, work);
     work.assertCurrent();
 
     const summary = summariseFailure(classification, errorMessage);
@@ -704,7 +735,7 @@ export class ForensicsCollector {
       taskId: tracker.taskId,
       agentId: tracker.agentId,
       phaseTimings: tracker.phaseTimings,
-      ...await this._assessSlowPhases('task', tracker.phaseTimings, work),
+      ...this._assessSlowPhases('task', tracker.phaseTimings, wasCancelled),
       phaseLedger: tracker.phaseLedger,
       causalChain: tracker.causalChain,
       cascadeEvents: tracker.cascadeEvents,
@@ -716,17 +747,34 @@ export class ForensicsCollector {
     this._publishReport(report, { taskId: tracker.taskId }, work);
   }
 
-  private async _assessSlowPhases(domain: 'turn' | 'task', timings: readonly PhaseTimingEntry[], work: OwnedJudgmentWork) {
-    const site = `runtime.forensics.${domain}-slow-phases`;
-    const assessment = await decisionOrClassic<{ slowPhases: string[]; slowPhaseAssessment: 'semantic' | 'not-needed' | 'not-evaluated' }>(async () => ({
-      slowPhases: await readSlowPhases(domain, timings, site, work.options(site)),
-      slowPhaseAssessment: timings.some(timing => timing.durationMs !== undefined) ? 'semantic' : 'not-needed',
-    }), () => {
-      work.assertCurrent();
-      return { slowPhases: [] as string[], slowPhaseAssessment: 'not-evaluated' as const };
-    }, () => { work.assertCurrent(); return true; });
-    work.assertCurrent();
-    return { ...assessment, ...(isClassicOperation() ? { operationProvenance: 'classic' as const } : {}) };
+  /** Which phases ran unusually long, decided from the phase table; a cancellation is not assessed. */
+  private _assessSlowPhases(domain: 'turn' | 'task', timings: readonly PhaseTimingEntry[], wasCancelled: boolean) {
+    const assessed = !wasCancelled && timings.some((timing) => timing.durationMs !== undefined);
+    return {
+      slowPhases: assessed ? slowPhases(domain, timings) : [],
+      slowPhaseAssessment: assessed ? 'table' as const : 'not-needed' as const,
+      ...(isClassicOperation() ? { operationProvenance: 'classic' as const } : {}),
+    };
+  }
+
+  /**
+   * The failure class. When the error-message reading cannot be had (the
+   * decision model is down, which is often why the turn failed), the report is
+   * still published, classified `unknown`, with everything else collected in code.
+   */
+  private async _classify(
+    input: Parameters<typeof classifyFailure>[0],
+    tracker: { sessionId: string; traceId: string },
+    context: { turnId?: string; taskId?: string },
+    work: OwnedJudgmentWork,
+  ): Promise<FailureClass> {
+    try {
+      return await classifyFailure(input, work.options('runtime.forensics.classifier'));
+    } catch (error) {
+      if (!work.current) throw error;
+      this._logUnclassified(error, tracker, context);
+      return 'unknown';
+    }
   }
 
   private _trackReport(
@@ -808,13 +856,9 @@ export class ForensicsCollector {
     return entry;
   }
 
-  /**
-   * A failure whose error message could not be read (no judgment port, or the
-   * reading failed) gets no report: a report carries a classification, and
-   * none was read. The failure is logged with what went wrong instead.
-   */
+  /** A failure whose error message could not be read is reported as `unknown`; what went wrong with the reading is logged. */
   private _logUnclassified(error: unknown, t: { sessionId: string; traceId: string }, context: { turnId?: string; taskId?: string }): void {
-    logger.error('Forensics collector could not classify a failure', { sessionId: t.sessionId, traceId: t.traceId, ...context, error: summarizeError(error) });
+    logger.warn('Forensics collector could not read a failure message; reporting it as unknown', { sessionId: t.sessionId, traceId: t.traceId, ...context, error: summarizeError(error) });
   }
 
   private _publishReport(

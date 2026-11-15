@@ -235,13 +235,25 @@ export class TriggerManager {
 // ScheduleManager
 // ---------------------------------------------------------------------------
 
+/**
+ * A scheduled command of the workflow tool. It lives in the process that
+ * created it (it is gone when that process exits); `/schedule` routines are the
+ * durable kind.
+ */
 export interface ScheduleEntry {
   name: string;
   interval: string;
   command: string;
+  /** When the current or most recent run started. */
   lastRun?: number | undefined;
   nextRun?: number | undefined;
   enabled: boolean;
+  /** True while a run of this schedule's command is executing. */
+  running?: boolean | undefined;
+  /** The exit code of the most recent finished run; null when it was killed by a signal. */
+  lastExitCode?: number | null | undefined;
+  /** When the most recent run finished. */
+  lastExitAt?: number | undefined;
 }
 
 /**
@@ -297,6 +309,8 @@ export class ScheduleManager {
   private schedules = new Map<string, ScheduleEntry>();
   /** Timer IDs keyed by schedule name */
   private timers = new Map<string, ReturnType<typeof setInterval>>();
+  /** The running process of each schedule (one run at a time), so remove can stop it. */
+  private runningProcs = new Map<string, { kill(): void }>();
 
   /**
    * `commands` starts scheduled commands with the exec path's credential-env
@@ -337,8 +351,16 @@ export class ScheduleManager {
     return entry;
   }
 
+  /** Removes the schedule and stops its command if a run is executing. */
   remove(name: string): boolean {
     this._clearTimer(name);
+    const proc = this.runningProcs.get(name);
+    this.runningProcs.delete(name);
+    if (proc) {
+      try { proc.kill(); } catch (error) {
+        logger.debug('[workflow] stopping a removed schedule\'s command failed', { workflow: name, error: summarizeError(error) });
+      }
+    }
     return this.schedules.delete(name);
   }
 
@@ -377,6 +399,7 @@ export class ScheduleManager {
       this._clearTimer(name);
     }
     this.schedules.clear();
+    this.runningProcs.clear();
     this.commands.stop('schedule');
   }
 
@@ -406,11 +429,30 @@ export class ScheduleManager {
    * does not run.
    */
   private async _spawnScheduled(name: string, command: string, parts: string[]): Promise<void> {
-    const outcome = await this.commands.start({ kind: 'schedule', key: name, argv: parts, env: { GV_SCHEDULE_NAME: name }, maxInFlight: 1 });
+    // Spawned here so the entry can follow its run: running while it executes,
+    // and the exit code once it ends.
+    const spawn = ((...args: Parameters<typeof Bun.spawn>) => {
+      const proc = Bun.spawn(...args);
+      this.runningProcs.set(name, proc);
+      void proc.exited.then((code) => {
+        if (this.runningProcs.get(name) === proc) this.runningProcs.delete(name);
+        const entry = this.schedules.get(name);
+        if (!entry) return;
+        entry.running = false;
+        entry.lastExitCode = proc.signalCode ? null : code;
+        entry.lastExitAt = Date.now();
+      }, () => { if (this.runningProcs.get(name) === proc) this.runningProcs.delete(name); });
+      return proc;
+    }) as typeof Bun.spawn;
+    const outcome = await this.commands.start({ kind: 'schedule', key: name, argv: parts, env: { GV_SCHEDULE_NAME: name }, maxInFlight: 1, spawn });
     if (outcome.started) {
       // Recorded only once the command actually started, so `list` never shows a run that did not happen.
       const entry = this.schedules.get(name);
-      if (entry) entry.lastRun = Date.now();
+      if (entry) {
+        entry.lastRun = Date.now();
+        // The run may already have ended (a very short command); only a live process is running.
+        entry.running = this.runningProcs.has(name);
+      }
     } else if (outcome.reason === 'busy') {
       logger.debug('[workflow] scheduled command still running; tick skipped', { workflow: name });
     } else if (outcome.reason !== 'stopped') {

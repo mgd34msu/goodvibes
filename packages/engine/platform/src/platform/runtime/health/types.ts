@@ -96,10 +96,12 @@ export interface CascadeRule {
   target: HealthDomain | 'ALL';
   /** The effect to apply to the target */
   effect: CascadeEffect;
-  /** Human-readable description of why this cascade exists */
+  /** Human-readable description of what the cascade reports */
   description: string;
   /** If true, a recovery attempt must be made before cascading */
   recoveryFirst: boolean;
+  /** Remediation playbook ids for this failure mode, primary first. */
+  playbooks: readonly string[];
 }
 
 /** Result of evaluating a single cascade rule */

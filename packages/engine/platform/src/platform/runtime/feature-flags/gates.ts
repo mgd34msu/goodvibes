@@ -23,11 +23,13 @@ export function isFeatureGateEnabled(
   // the composition site instead of shipping the capability dead.
   assertFeatureGateIdRegistered(flagId, 'isFeatureGateEnabled');
   // A capability that cannot operate is OFF, whatever its settings key says
-  // and even with no manager wired (the branch below defaults to permissive).
-  // Without this, a user flips the switch, the config accepts it, and nothing
-  // happens, which is the exact failure this field exists to prevent.
+  // and even with no manager wired. Without this, a user flips the switch, the
+  // config accepts it, and nothing happens, which is the exact failure this
+  // field exists to prevent.
   if (featureInoperability(flagId) !== null) return false;
-  if (!featureFlags) return true;
+  // With no manager wired the answer is the feature's declared default, so a
+  // default-off feature stays off in a composition that passes no manager.
+  if (!featureFlags) return FEATURE_FLAG_MAP.get(flagId)?.defaultState === 'enabled';
   return featureFlags.isEnabled(flagId);
 }
 

@@ -73,8 +73,6 @@ import { settingsRisk } from './settings/batteries/settings-risk.js';
 registry.register(settingsRisk);
 
 // Runtime: forensics.
-import { forensicsSlowPhase } from './forensics/batteries/slow-phase.js';
-registry.register(forensicsSlowPhase);
 
 // Runtime: observed fleet agents.
 

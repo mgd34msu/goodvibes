@@ -4,14 +4,12 @@ import { gateReadingsPort } from './_helpers/gate-readings.ts';
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApiTokenAuditor, captureTokenAuditReadSource } from '../platform/src/platform/security/token-audit.js';
 import { SecurityReadSourceRetiredError, captureSecurityReadFiles, retainSecurityReadData } from '../platform/src/platform/security/read-source.js';
 import { PolicyRuntimeState, capturePolicyRuntimeReadSource } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
 import { PolicyRegistry } from '../platform/src/platform/runtime/permissions/policy-registry.js';
 import { createUnsignedBundle } from '../platform/src/platform/runtime/permissions/policy-loader.js';
 import { PermissionSimulator } from '../platform/src/platform/runtime/permissions/simulation.js';
 import { DivergenceDashboard, captureDivergenceReadSource } from '../platform/src/platform/runtime/permissions/divergence-dashboard.js';
-import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
 import { PluginManager, capturePluginSecurityReadSource } from '../platform/src/platform/plugins/manager.js';
 import { SubscriptionManager, captureSubscriptionReadSource } from '../platform/src/platform/config/subscriptions.js';
 import { SecretsManager, captureSecretsReadSource } from '../platform/src/platform/config/secrets.js';
@@ -24,13 +22,6 @@ function root() {
   const path = mkdtempSync(join(tmpdir(), 'native-source-receipt-'));
   cleanups.push(() => rmSync(path, { recursive: true, force: true })); return path;
 }
-function tokenAuditor(now: number) {
-  const auditor = new ApiTokenAuditor({ managed: false });
-  auditor.registerPolicy({ id: 'fixture', name: 'Synthetic local policy', allowedScopes: ['observe'], rotationCadenceMs: 1000, rotationWarningThresholdMs: 200 });
-  const token = { id: 'fixture-token', label: 'Synthetic token metadata', issuedAt: now, grantedScopes: ['observe'], policyId: 'fixture' };
-  auditor.registerToken(token); return { auditor, token };
-}
-
 describe('native read receipts retain original publishers and clocks', () => {
   test('complete original hidden fields and named array metadata remain guarded', () => {
     const rows = [{ id: 'fixture' }];
@@ -43,43 +34,6 @@ describe('native read receipts retain original publishers and clocks', () => {
   test('a getter in native snapshot data is refused without invocation', () => {
     let reads = 0; const source = Object.defineProperty({}, 'hidden', { get() { reads++; return 'value'; }, enumerable: false });
     expect(() => retainSecurityReadData(source)).toThrow(SecurityReadSourceRetiredError); expect(reads).toBe(0);
-  });
-
-  test('native token deregistration and identical re-registration retains the retirement witness', () => {
-    const now = Date.now(), { auditor, token } = tokenAuditor(now), current = captureTokenAuditReadSource(auditor, now);
-    expect(auditor.deregisterToken(token.id)).toBe(true); auditor.registerToken(token);
-    expect(auditor.tokenCount).toBe(1); expect(current).toThrow(SecurityReadSourceRetiredError);
-  });
-
-  test('token age and original audit timestamp stay intact until the exact warning threshold', () => {
-    let now = 1000; const clock = spyOn(Date, 'now').mockImplementation(() => now); cleanups.push(() => clock.mockRestore());
-    const { auditor } = tokenAuditor(now), original = auditor.auditAll(now), current = captureTokenAuditReadSource(auditor, now);
-    now = 1799; expect(current).not.toThrow();
-    expect(original.capturedAt).toBe(1000); expect(original.results[0]?.rotation.ageMs).toBe(0);
-    now = 1800; expect(current).toThrow(SecurityReadSourceRetiredError);
-    expect(auditor.auditAll(now).rotationWarnings).toEqual(['fixture-token']);
-  });
-
-  test('overdue uses the actual strict deadline and backward clock movement retires a read', () => {
-    let now = 2000; const clock = spyOn(Date, 'now').mockImplementation(() => now); cleanups.push(() => clock.mockRestore());
-    const { auditor } = tokenAuditor(1000), atDeadline = captureTokenAuditReadSource(auditor, now);
-    expect(auditor.auditAll(now).rotationOverdue).toEqual([]); now = 2001;
-    expect(atDeadline).toThrow(SecurityReadSourceRetiredError); expect(auditor.auditAll(now).rotationOverdue).toEqual(['fixture-token']);
-    const afterDeadline = captureTokenAuditReadSource(auditor, now); now = 2000;
-    expect(afterDeadline).toThrow(SecurityReadSourceRetiredError);
-  });
-
-  test('actual native flag change and restore cannot preserve a token read receipt', () => {
-    const flags = createFeatureFlagManager(), auditor = new ApiTokenAuditor({ managed: true, featureFlags: flags });
-    const current = captureTokenAuditReadSource(auditor), original = flags.getState('token-scope-rotation-audit');
-    flags.loadFromConfig({ flags: { 'token-scope-rotation-audit': 'killed' } }); flags.disable('token-scope-rotation-audit');
-    if (original === 'enabled') flags.enable('token-scope-rotation-audit');
-    expect(current).toThrow(SecurityReadSourceRetiredError);
-  });
-
-  test('a caller-authored flag reader cannot supply a native receipt', () => {
-    const auditor = new ApiTokenAuditor({ managed: true, featureFlags: { isEnabled: () => true } });
-    expect(() => captureTokenAuditReadSource(auditor)).toThrow(SecurityReadSourceRetiredError);
   });
 
   test('policy guards retain the actual timestamped snapshot without regenerating it, then retire on native publication', () => {

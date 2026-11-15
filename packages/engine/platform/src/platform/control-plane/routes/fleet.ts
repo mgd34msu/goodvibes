@@ -33,6 +33,7 @@ import type {
   ProcessState,
 } from '../../runtime/fleet/types.js';
 import type { FleetArchiveView } from '../../runtime/fleet/archive.js';
+import { contractRawForWire } from '../../runtime/fleet/contract-wire.js';
 import type { AttemptJudgment, AttemptPickResult, HeldMergeGroup } from '../../orchestration/types.js';
 import { AttemptError } from '../../orchestration/attempts.js';
 import { paginateItems } from '@goodvibes-jev/engine/daemon-api';
@@ -135,13 +136,17 @@ export type FleetQueryOnlyRegistry = Pick<ProcessRegistry, 'query'>;
  * The terminal reads two things back from the wire and nothing else: the
  * contract views behind contract, group and unit rows (they hold plan,
  * criteria and unit state, no process output), and an agent's `contractRole`.
- * Those are the only parts of `raw` that travel.
+ * Those are the only parts of `raw` that travel, and the contract view travels
+ * once, on the contract node (runtime/fleet/contract-wire.ts).
  */
 const CONTRACT_RAW_KINDS: ReadonlySet<ProcessKind> = new Set<ProcessKind>(['contract', 'contract-group', 'contract-unit']);
 
 function toWireNode(node: ProcessNode): ProcessNode {
   const { raw, ...wire } = node;
-  if (CONTRACT_RAW_KINDS.has(node.kind) && raw !== undefined) return { ...wire, raw };
+  if (CONTRACT_RAW_KINDS.has(node.kind) && raw !== undefined) {
+    const wireRaw = contractRawForWire(node);
+    return wireRaw === undefined ? wire : { ...wire, raw: wireRaw };
+  }
   if (node.kind === 'agent' && typeof raw === 'object' && raw !== null) {
     const contractRole = (raw as { contractRole?: unknown }).contractRole;
     if (contractRole !== undefined) return { ...wire, raw: { contractRole } };

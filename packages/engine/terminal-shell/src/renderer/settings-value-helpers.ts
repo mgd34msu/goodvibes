@@ -70,9 +70,9 @@ export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(pol
   }
   return { formatValue, valueColor, getSettingLabel, describeUiRouting };
 }
-export function flagStateColor(state: string, killed: boolean): string {
+export function flagStateColor(state: string): string {
   const tokens = activeTokens();
-  return killed ? tokens.error : state === 'enabled' ? tokens.accent : tokens.textMuted;
+  return state === 'enabled' ? tokens.accent : tokens.textMuted;
 }
 export function mcpTrustColor(mode: string): string {
   const tokens = activeTokens();

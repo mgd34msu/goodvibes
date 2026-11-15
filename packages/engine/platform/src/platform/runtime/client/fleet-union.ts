@@ -53,6 +53,7 @@
  */
 import { logger, summarizeError } from '../../utils/index.js';
 import type { ProcessNode } from '../fleet/index.js';
+import { joinWireContractViews } from '../fleet/contract-wire.js';
 import type { DaemonVerbCaller } from './daemon-verbs.js';
 
 /** How often the daemon's rows are re-read. A local half is push-driven. */
@@ -91,7 +92,8 @@ export function readDaemonFleetRows(payload: unknown, now: () => number = Date.n
   const capturedAt = typeof record['capturedAt'] === 'number' ? record['capturedAt'] : now();
   const totalCount = typeof record['totalCount'] === 'number' ? record['totalCount'] : undefined;
   return {
-    nodes,
+    // The contract view travels once, on the contract node; group and unit rows get it back here.
+    nodes: joinWireContractViews(nodes),
     capturedAt,
     ...(record['truncated'] === true ? { truncated: true } : {}),
     ...(totalCount === undefined ? {} : { totalCount }),

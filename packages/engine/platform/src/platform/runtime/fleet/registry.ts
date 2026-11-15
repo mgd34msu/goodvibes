@@ -70,8 +70,17 @@ import { summarizeError } from '../../utils/error-display.js';
 
 /** Default stalled threshold: running agent with no bus activity for this long → 'stalled'. */
 export const DEFAULT_STALLED_THRESHOLD_MS = 20_000;
-/** Default coalesced tick interval for subscriber notification. */
+/** Default coalesced tick interval for subscriber notification while something changed. */
 export const DEFAULT_TICK_INTERVAL_MS = 750;
+/**
+ * With a runtime bus, how often the fleet is rebuilt when no bus event marked
+ * it changed: the one refresh for sources that announce nothing (background
+ * processes, watchers, observed foreign agents).
+ */
+export const DEFAULT_SLOW_REFRESH_MS = 5_000;
+
+/** Bus domains whose events change what the fleet shows; any event on them marks it for a rebuild. */
+const FLEET_SOURCE_DOMAINS = ['agents', 'contracts', 'tasks', 'gate', 'watchers', 'automation', 'session'] as const;
 /**
  * TTL for a steer message, deliberately much larger than
  * AgentMessageBus's own DEFAULT_TTL_MS (5 min, message-bus-core.ts). A
@@ -177,6 +186,8 @@ export interface ProcessRegistryDeps {
   /** Stall-tell threshold: a live node quiet this long gains the marker (default 5 min). */
   readonly stallTellMs?: number | undefined;
   readonly tickIntervalMs?: number | undefined;
+  /** With a runtime bus: the rebuild period when no event marked a change (default 5 s). */
+  readonly slowRefreshMs?: number | undefined;
   readonly timers?: RegistryTimers | undefined;
 }
 
@@ -252,7 +263,15 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   const stalledThresholdMs = deps.stalledThresholdMs ?? DEFAULT_STALLED_THRESHOLD_MS;
   const stallTellMs = deps.stallTellMs ?? DEFAULT_STALL_TELL_MS;
   const tickIntervalMs = deps.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS;
+  const slowRefreshMs = Math.max(deps.slowRefreshMs ?? DEFAULT_SLOW_REFRESH_MS, tickIntervalMs);
   const timers = deps.timers ?? defaultTimers;
+  // Demand-driven refresh: with a runtime bus, the events that change the fleet
+  // mark it dirty and the next tick rebuilds; otherwise a tick rebuilds only
+  // after slowRefreshMs. Without a bus nothing announces a change, so every
+  // tick rebuilds.
+  const demandDriven = deps.runtimeBus !== undefined;
+  let dirty = true;
+  let lastBuiltAt = Number.NEGATIVE_INFINITY;
 
   // ── Activity side-table (the only liveness mechanism, registry-owned) ─────
   const activity = new Map<string, AgentActivityEntry>();
@@ -271,6 +290,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   if (deps.runtimeBus) {
     busUnsubscribers.push(
       deps.runtimeBus.onDomain('agents', (envelope) => {
+        markDirty();
         const event = envelope.payload;
         const prior = activity.get(event.agentId);
         switch (event.type) {
@@ -330,6 +350,13 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
         },
       ),
     );
+  }
+
+  if (deps.runtimeBus) {
+    for (const domain of FLEET_SOURCE_DOMAINS) {
+      if (domain === 'agents') continue; // marked by the activity handler above
+      busUnsubscribers.push(deps.runtimeBus.onDomain(domain, () => markDirty()));
+    }
   }
 
   // ── Query assembly (aggregate-on-read, all O(n) in-memory scans) ──────────
@@ -526,11 +553,27 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
 
   const listeners = new Set<(snapshot: FleetSnapshot) => void>();
   let tickHandle: unknown = null;
+  let tickPeriod = 0;
+  let quietTicks = 0;
   let lastSignature: string | null = null;
   let refreshUnavailable = false;
 
+  /** A change was announced: rebuild on the next coalesced tick, ticking fast until things settle. */
+  function markDirty(): void {
+    dirty = true;
+    if (tickHandle !== null && tickPeriod !== tickIntervalMs) restartTicking(tickIntervalMs);
+  }
+
   function tick(): void {
     if (listeners.size === 0) return;
+    if (demandDriven && !dirty && now() - lastBuiltAt < slowRefreshMs) {
+      // Nothing announced a change: after two quiet fast ticks, drop to the slow period.
+      if (tickPeriod === tickIntervalMs && ++quietTicks >= 2) restartTicking(slowRefreshMs);
+      return;
+    }
+    dirty = false;
+    quietTicks = 0;
+    lastBuiltAt = now();
     let snapshot: FleetSnapshot;
     try { snapshot = query(); }
     catch {
@@ -558,18 +601,27 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     }
   }
 
-  function startTicking(): void {
-    if (tickHandle !== null) return;
-    tickHandle = timers.setInterval(tick, tickIntervalMs);
+  function restartTicking(period: number): void {
+    if (tickHandle !== null) timers.clearInterval(tickHandle);
+    tickPeriod = period;
+    quietTicks = 0;
+    tickHandle = timers.setInterval(tick, period);
     // Never pin the event loop: an idle runtime must be able to exit even if
     // a consumer forgot to dispose (mirrors ScheduleManager.destroy hygiene).
     unrefHandle(tickHandle);
+  }
+
+  function startTicking(): void {
+    if (tickHandle !== null) return;
+    dirty = true;
+    restartTicking(tickIntervalMs);
   }
 
   function stopTicking(): void {
     if (tickHandle === null) return;
     timers.clearInterval(tickHandle);
     tickHandle = null;
+    tickPeriod = 0;
     lastSignature = null; refreshUnavailable = false;
   }
 
@@ -617,7 +669,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     promise.catch((error) => {
       const message = summarizeError(error);
       logger.warn(`[fleet] automation job ${op} failed`, { jobId, error: message });
-      if (!disposed) controlFailures.set(nodeId, { op, message, at: now() });
+      if (!disposed) { controlFailures.set(nodeId, { op, message, at: now() }); markDirty(); }
     });
   }
 
@@ -871,5 +923,14 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     controlFailures.clear();
   }
 
-  return { query, getNode, subscribe, interrupt, kill, resume, steer, dispose };
+  // A control act changes what the fleet shows; the next tick rebuilds.
+  const afterControl = <A extends unknown[], R>(act: (...args: A) => R) => (...args: A): R => {
+    try { return act(...args); } finally { markDirty(); }
+  };
+
+  return {
+    query, getNode, subscribe,
+    interrupt: afterControl(interrupt), kill: afterControl(kill), resume: afterControl(resume), steer: afterControl(steer),
+    dispose,
+  };
 }

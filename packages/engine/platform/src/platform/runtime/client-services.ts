@@ -112,6 +112,7 @@ import { createWorkflowServices, type WorkflowServices } from '../tools/workflow
 import { SandboxSessionRegistry } from './sandbox/session-registry.js';
 import { createShellPathService, type ShellPathService } from './shell-paths.js';
 import { claimSurfaceHome } from './home-single-writer.js';
+import { createRuntimeStoreInspector, type StateInspectorProvider } from './inspection/state-inspector/index.js';
 import { requireSurfaceRoot } from './surface-root.js';
 import { createAsyncDisposalScope } from './disposal.js';
 import { createDomainDispatch, type DomainDispatch, type RuntimeStore } from './store/index.js';
@@ -201,6 +202,8 @@ export interface ClientRuntimeServices {
   readonly runtimeBus: RuntimeEventBus;
   readonly runtimeStore: RuntimeStore;
   readonly runtimeDispatch: DomainDispatch;
+  /** This surface's runtime store, every domain registered: snapshots, transitions and the timeline, read on demand. */
+  readonly stateInspector: StateInspectorProvider;
 
   // Credentials this surface reads as a client of its own config tree.
   readonly secretsManager: SecretsManager;
@@ -691,6 +694,7 @@ function composeClientRuntimeServices(
     runtimeBus: options.runtimeBus,
     runtimeStore: options.runtimeStore,
     runtimeDispatch,
+    stateInspector: createRuntimeStoreInspector(options.runtimeStore),
     secretsManager,
     serviceRegistry,
     subscriptionManager,

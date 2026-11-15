@@ -1,6 +1,6 @@
 /**
  * What the forensics collector stores must be safe and must be findable: error
- * text has credential-shaped spans masked, a health cascade during a turn is
+ * text has credential-shaped spans masked, a failed MCP server a turn called is
  * recorded and classified, reports sharing a trace each keep their own id, and
  * the call map does not outlive the turn it belongs to.
  */
@@ -45,11 +45,15 @@ describe('ForensicsCollector', () => {
     collector.dispose();
   });
 
-  test('a health cascade during a turn is recorded and classifies the failure', async () => {
+  test('a failed MCP server the turn called is recorded and classifies the failure', async () => {
     const { bus, registry, collector } = setup();
     const { wiring } = createWiredHealthSystem(bus);
     emit(bus, 'turn', { type: 'TURN_SUBMITTED', turnId: 't1', prompt: 'hi' });
-    wiring.evaluateDomain('turn', 'failed', { sessionId: 's' });
+    emit(bus, 'tools', { type: 'TOOL_RECEIVED', turnId: 't1', callId: 'c1', tool: 'mcp:docs:search', args: {} });
+    wiring.evaluateDomain('mcp', 'failed', { serverId: 'docs' });
+    wiring.evaluateDomain('mcp', 'failed', { serverId: 'docs' });
+    wiring.evaluateDomain('mcp', 'failed', { serverId: 'docs' });
+    wiring.evaluateDomain('mcp', 'failed', { serverId: 'docs' });
     await settle();
     emit(bus, 'turn', { type: 'TURN_ERROR', turnId: 't1', error: 'boom' });
     await settle();
@@ -59,16 +63,27 @@ describe('ForensicsCollector', () => {
     collector.dispose();
   });
 
-  test('a cascade in another session is not attributed to this turn', async () => {
+  test('a failure elsewhere is not attributed to a turn that did not depend on it', async () => {
     const { bus, registry, collector } = setup();
     const { wiring } = createWiredHealthSystem(bus);
     emit(bus, 'turn', { type: 'TURN_SUBMITTED', turnId: 't1', prompt: 'hi' });
-    wiring.evaluateDomain('turn', 'failed', { sessionId: 'another-session' });
+    wiring.evaluateDomain('agents', 'failed', { sessionId: 's', agentId: 'a1' });
+    for (let i = 0; i < 4; i++) wiring.evaluateDomain('mcp', 'failed', { serverId: 'unused' });
     await settle();
     emit(bus, 'turn', { type: 'TURN_ERROR', turnId: 't1', error: 'boom' });
     await settle();
     expect(registry.latest()?.cascadeEvents).toEqual([]);
     expect(registry.latest()?.classification).not.toBe('cascade_failure');
+    collector.dispose();
+  });
+
+  test('a call the gate denied is classified as a permission denial', async () => {
+    const { bus, registry, collector } = setup();
+    emit(bus, 'turn', { type: 'TURN_SUBMITTED', turnId: 't1', prompt: 'hi' });
+    emit(bus, 'tools', { type: 'TOOL_PERMISSIONED', turnId: 't1', callId: 'c1', tool: 'exec', approved: false });
+    emit(bus, 'turn', { type: 'TURN_ERROR', turnId: 't1', error: 'boom' });
+    await settle();
+    expect(registry.latest()?.classification).toBe('permission_denied');
     collector.dispose();
   });
 
@@ -89,13 +104,13 @@ describe('ForensicsCollector', () => {
     const { bus, collector } = setup();
     const calls = (): number => (Reflect.get(collector, '_callToTurn') as Map<string, string>).size;
     emit(bus, 'turn', { type: 'TURN_SUBMITTED', turnId: 't1', prompt: 'hi' });
-    emit(bus, 'tools', { type: 'TOOL_PERMISSION_CHECKED', turnId: 't1', callId: 'c1', tool: 'x', approved: true });
+    emit(bus, 'tools', { type: 'TOOL_PERMISSIONED', turnId: 't1', callId: 'c1', tool: 'x', approved: true });
     await tick();
     expect(calls()).toBe(1);
     emit(bus, 'turn', { type: 'TURN_CANCEL', turnId: 't1', reason: 'stop' });
     await tick();
     expect(calls()).toBe(0);
-    emit(bus, 'tools', { type: 'TOOL_PERMISSION_CHECKED', turnId: 't1', callId: 'late', tool: 'x', approved: true });
+    emit(bus, 'tools', { type: 'TOOL_PERMISSIONED', turnId: 't1', callId: 'late', tool: 'x', approved: true });
     await tick();
     expect(calls()).toBe(0);
     collector.dispose();

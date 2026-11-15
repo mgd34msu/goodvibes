@@ -60,7 +60,7 @@ export function wireIdlePowerAndLiveTurn(deps: IdlePowerServicesDeps): IdlePower
     isIdle: deps.isIdle,
     onReceipt: (receipt) => {
       const text = formatConsolidationReceipt(receipt);
-      if (text) consolidationReceiptStore.record(receipt.runId, text);
+      if (text) consolidationReceiptStore.notify(`memory-consolidation:${receipt.runId}`, text);
     },
   });
   memoryConsolidationScheduler.start();

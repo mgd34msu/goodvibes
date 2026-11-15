@@ -146,9 +146,9 @@ function buildFeatureOptionLines(entry: SettingEntry): string[] {
 function buildFlagContext(entry: SettingEntry | null): string[] {
   const flagEntry = entry?.flag ?? null;
   if (!entry || !flagEntry) return ['Features', 'No feature is selected.'];
-  const { feature, flag, state, persistedState, pendingRestart } = flagEntry;
+  const { feature, state, persistedState, pendingRestart } = flagEntry;
   const configOn = isFeatureValueEnabled(feature, entry.currentValue);
-  const displayState = state === 'killed' ? 'killed' : configOn ? 'enabled' : 'disabled';
+  const displayState = configOn ? 'enabled' : 'disabled';
   const lines: string[] = [
     feature.name,
     `Feature: ${feature.id} (${feature.domain} domain)`,
@@ -187,9 +187,6 @@ function buildFlagContext(entry: SettingEntry | null): string[] {
     }
   }
 
-  if (state === 'killed' && flag.killReason) {
-    lines.push('', `Kill reason: ${flag.killReason}`);
-  }
   return lines;
 }
 

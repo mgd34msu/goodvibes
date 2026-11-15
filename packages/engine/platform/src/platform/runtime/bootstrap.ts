@@ -115,17 +115,13 @@ export type {
 // so an entry point can claim its home BEFORE it composes anything.
 export {
   claimSurfaceHome,
-  currentProcessIdentity,
-  decideHomeClaim,
   homeClaimRefusalMessage,
-  readProcessIdentity,
   surfaceHomeClaimPath,
+  surfaceHomeLockPath,
   SurfaceHomeInUseError,
 } from './home-single-writer.js';
 export type {
   ClaimSurfaceHomeOptions,
-  HomeClaimDecision,
-  HomeClaimInput,
   HomeOwnerClaim,
   SurfaceHomeClaim,
 } from './home-single-writer.js';

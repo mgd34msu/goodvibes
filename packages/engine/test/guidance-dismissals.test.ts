@@ -15,7 +15,7 @@ const newPath = (): string => {
   roots.push(root);
   return join(root, 'guidance.json');
 };
-const readIds = (path: string): string[] => Object.keys(JSON.parse(readFileSync(path, 'utf-8')).dismissed as Record<string, number>).sort();
+const readIds = (path: string): string[] => Object.keys(JSON.parse(readFileSync(path, 'utf-8')).dismissed as Record<string, unknown>).sort();
 
 afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); });
 
@@ -26,7 +26,7 @@ describe('guidance dismissals', () => {
     const script = `
       const { dismissGuidance } = await import(process.argv[1]);
       for (let i = 0; i < 15; i++) {
-        if (!dismissGuidance(process.argv[3] + i, { guidancePath: process.argv[2] })) process.exit(1);
+        if (!dismissGuidance({ id: process.argv[3] + i, occurrence: 'now' }, { guidancePath: process.argv[2] })) process.exit(1);
       }
     `;
     const children = ['a', 'b', 'c'].map((tag) => Bun.spawn([process.execPath, '-e', script, module, guidancePath, tag], { stdout: 'pipe', stderr: 'pipe' }));
@@ -39,14 +39,14 @@ describe('guidance dismissals', () => {
   test('a store that cannot be read is left alone, and the caller is told', () => {
     const guidancePath = newPath();
     mkdirSync(guidancePath);
-    expect(dismissGuidance('one', { guidancePath })).toBe(false);
+    expect(dismissGuidance({ id: 'one', occurrence: 'now' }, { guidancePath })).toBe(false);
     expect(resetGuidance(undefined, { guidancePath })).toBe(false);
   });
 
   test('reset removes one id or all of them', () => {
     const guidancePath = newPath();
-    expect(dismissGuidance('one', { guidancePath })).toBe(true);
-    expect(dismissGuidance('two', { guidancePath })).toBe(true);
+    expect(dismissGuidance({ id: 'one', occurrence: 'now' }, { guidancePath })).toBe(true);
+    expect(dismissGuidance({ id: 'two', occurrence: 'now' }, { guidancePath })).toBe(true);
     expect(resetGuidance('one', { guidancePath })).toBe(true);
     expect(readIds(guidancePath)).toEqual(['two']);
     expect(resetGuidance(undefined, { guidancePath })).toBe(true);

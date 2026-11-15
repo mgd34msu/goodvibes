@@ -118,7 +118,7 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry>({
     const editing = selected && modal.editingMode;
     const danger = modal.currentCategory === 'danger' && !modal.searchFocused;
     if (entry.flag) {
-      const { feature, state, pendingRestart } = entry.flag;
+      const { feature, pendingRestart } = entry.flag;
       const configOn = isFeatureValueEnabled(feature, entry.currentValue);
       const raw = currentSettingValue(modal, entry, selected);
       // A startup-gated feature changed this session shows its saved value with
@@ -129,8 +129,8 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry>({
         desc: [category, entry.metadataUnavailable ? 'unavailable' : ''].filter(Boolean).join(' · ') || undefined,
         right: fitValue(value, width, editing, feature.name),
         rightFg: valueColor(entry),
-        mark: state === 'killed' ? '✕' : configOn ? '●' : '○',
-        markFg: state === 'killed' ? t.error : configOn ? t.success : t.textFaint,
+        mark: configOn ? '●' : '○',
+        markFg: configOn ? t.success : t.textFaint,
         selected: selected && focused,
         current: selected && !focused,
         labelFg: danger ? t.error : undefined,

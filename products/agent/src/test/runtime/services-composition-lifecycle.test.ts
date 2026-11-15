@@ -3,9 +3,9 @@
  * what a follow-up on a shared session is spawned with.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import type { ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { bootstrap as runtimeComposition } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { AgentConfigManager } from '../../config/host-settings.ts';
@@ -20,6 +20,7 @@ import { StoreSnapshotScheduler } from '@goodvibes-jev/engine/platform/platform/
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { holdHomeInChildProcess } from '../helpers/home-holder.ts';
 
 const built: RuntimeServices[] = [];
 const holders: ChildProcess[] = [];
@@ -55,17 +56,9 @@ afterEach(async () => {
   for (const child of holders.splice(0)) child.kill('SIGKILL');
 });
 
-/** A process that is alive and is some other program, so a claim naming it reads as a live holder. */
+/** A separate live process that holds this home's claim. */
 async function liveForeignHolder(home: string): Promise<void> {
-  const child = spawn('sleep', ['120'], { stdio: 'ignore' });
-  holders.push(child);
-  const pid = child.pid;
-  if (typeof pid !== 'number') throw new Error('could not start a holder process');
-  // /proc holds the parent's argv until exec finishes; only the real program counts.
-  for (let attempt = 0; attempt < 1000 && runtimeComposition.readProcessIdentity(pid) !== 'sleep 120'; attempt++) await Bun.sleep(10);
-  const path = runtimeComposition.surfaceHomeClaimPath(home, GOODVIBES_AGENT_SURFACE_ROOT);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ pid, identity: 'sleep 120', claimedAt: Date.now() }), { mode: 0o600 });
+  holders.push(await holdHomeInChildProcess(home, GOODVIBES_AGENT_SURFACE_ROOT));
 }
 
 describe('a graph whose composition throws part way', () => {

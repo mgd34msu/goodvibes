@@ -63,7 +63,7 @@ describe('exec guard: AST parsing', () => {
     const result = await guardExecCommand('kill -TERM 12345', mgr);
     expect(result.astModeActive).toBe(true);
     expect(result.allowed).toBe(true);
-    mgr.disable('shell-ast-normalization');
+    mgr.applyConfigState('shell-ast-normalization', 'disabled');
     expect((await guardExecCommand('kill -TERM 12345', mgr)).astModeActive).toBe(false);
   });
 

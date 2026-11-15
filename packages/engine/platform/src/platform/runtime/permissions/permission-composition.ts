@@ -141,7 +141,7 @@ export interface ApprovalDerivedHandlerOptions {
   readonly configManager: ConfigManager;
   readonly featureFlags: FeatureFlagManager;
   /** Announce-once store backing the containment receipt. */
-  readonly announcementStore: Pick<FeatureAnnouncementStore, 'record'>;
+  readonly announcementStore: Pick<FeatureAnnouncementStore, 'recordOnce'>;
 }
 
 /** The handlers that must ride the same ask seam as a tool permission. */

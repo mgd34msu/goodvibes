@@ -14,6 +14,7 @@ import {
   createFleetSnapshotHandler,
   type FleetConflictsDeps,
 } from '../platform/src/platform/control-plane/routes/fleet.ts';
+import { joinWireContractViews } from '../platform/src/platform/runtime/fleet/contract-wire.ts';
 import {
   GatewayVerbError,
   readGatewayVerbRefusal,
@@ -88,21 +89,25 @@ describe('fleet verbs keep the source record off the wire', () => {
     expect((list as { items: ProcessNode[] }).items.map((n) => n.id)).toEqual(['a', 'b']);
   });
 
-  test('the contract views and an agent\'s role stay, so a terminal attached to the daemon can still act on a conflicted unit', async () => {
-    const unitRaw = { contract: { id: 'c1' }, unit: { id: 'u1', groupId: 'g1' } };
+  test('the contract view travels once and an agent\'s role stays, so a terminal attached to the daemon can still act on a conflicted unit', async () => {
+    const contract = { id: 'c1' };
+    const unit = { id: 'u1', groupId: 'g1' };
     const nodes = [
-      { id: 'c1:u1', kind: 'contract-unit', state: 'idle', label: 'u', startedAt: 3, raw: unitRaw },
-      { id: 'c1', kind: 'contract', state: 'idle', label: 'c', startedAt: 2, raw: { id: 'c1' } },
+      { id: 'unit:c1:u1', kind: 'contract-unit', state: 'idle', label: 'u', startedAt: 3, raw: { contract, unit } },
+      { id: 'contract:c1', kind: 'contract', state: 'idle', label: 'c', startedAt: 2, raw: contract },
       { id: 'agent-1', kind: 'agent', state: 'idle', label: 'owner', startedAt: 1, raw: { contractRole: 'owner', prompt: SECRET_MARKER } },
       { id: 'proc-1', kind: 'background-process', state: 'idle', label: 'p', startedAt: 0, raw: { stdout: [SECRET_MARKER] } },
     ] as unknown as ProcessNode[];
     const snapshot = await call(createFleetSnapshotHandler({ query: () => ({ capturedAt: 1, nodes }) })) as { nodes: ProcessNode[] };
     const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
-    expect(byId.get('c1:u1')?.raw).toEqual(unitRaw);
-    expect(byId.get('c1')?.raw).toEqual({ id: 'c1' });
+    expect(byId.get('unit:c1:u1')?.raw).toEqual({ contractId: 'c1', unit });
+    expect(byId.get('contract:c1')?.raw).toEqual(contract);
     expect(byId.get('agent-1')?.raw).toEqual({ contractRole: 'owner' });
     expect(byId.get('proc-1')?.raw).toBeUndefined();
     expect(JSON.stringify(snapshot)).not.toContain(SECRET_MARKER);
+    // The client joins the view back from the contract node in the same snapshot.
+    const joined = new Map(joinWireContractViews(snapshot.nodes).map((n) => [n.id, n]));
+    expect(joined.get('unit:c1:u1')?.raw).toEqual({ contractId: 'c1', unit, contract });
   });
 });
 

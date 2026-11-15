@@ -1,36 +1,14 @@
 /**
  * feature-flag-lifecycle.test.ts
  *
- * Kill precedence against settings writes, the restart marker for a gate its
- * consumer reads once, the bounded transition log, and the teardown of the
- * settings bridge a composition attached.
+ * The restart marker for a gate its consumer reads once, the bounded
+ * transition log, and the teardown of the settings bridge a composition attached.
  */
 import { describe, expect, test } from 'bun:test';
 import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
 import { FEATURE_SETTINGS } from '../platform/src/platform/runtime/feature-flags/feature-settings.js';
 import { disposeRuntimeFeatureFlags, resolveRuntimeFeatureFlags } from '../platform/src/platform/runtime/feature-flag-composition.js';
 import type { ConfigManager } from '../platform/src/platform/config/manager.js';
-
-describe('kill precedence', () => {
-  test('the manager has no kill entry point; a gate is only ever killed by a config value', () => {
-    const manager = createFeatureFlagManager() as unknown as Record<string, unknown>;
-    expect(manager['kill']).toBeUndefined();
-    expect(manager['isKilled']).toBeUndefined();
-    expect(manager['getKillReason']).toBeUndefined();
-  });
-
-  test('a settings write in either direction leaves a killed gate killed; only disable() ends the kill', () => {
-    const manager = createFeatureFlagManager();
-    manager.applyConfigState('agent-passive-code-injection', 'killed');
-    manager.applyConfigState('agent-passive-code-injection', 'disabled');
-    expect(manager.getState('agent-passive-code-injection')).toBe('killed');
-    manager.applyConfigState('agent-passive-code-injection', 'enabled');
-    expect(manager.getState('agent-passive-code-injection')).toBe('killed');
-    expect(manager.isEnabled('agent-passive-code-injection')).toBe(false);
-    manager.disable('agent-passive-code-injection');
-    expect(manager.getState('agent-passive-code-injection')).toBe('disabled');
-  });
-});
 
 describe('overflow spill backend gate', () => {
   test('is startup-gated: surfaces show restart required and a live change is recorded as pending', () => {
@@ -47,8 +25,8 @@ describe('transition log', () => {
   test('keeps only the latest entries and hands out a copy', () => {
     const manager = createFeatureFlagManager();
     for (let i = 0; i < 700; i++) {
-      manager.enable('agent-passive-code-injection');
-      manager.disable('agent-passive-code-injection');
+      manager.applyConfigState('agent-passive-code-injection', 'enabled');
+      manager.applyConfigState('agent-passive-code-injection', 'disabled');
     }
     const log = manager.getTransitions();
     expect(log.length).toBe(1000);

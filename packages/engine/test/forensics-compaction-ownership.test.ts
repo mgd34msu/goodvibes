@@ -44,7 +44,7 @@ const turnCtx = { sessionId: 'owned-session', source: 'fixture', traceId: 'owned
 function failTurn(bus: RuntimeEventBus, id: string, cancelled = false): void {
   emitTurnSubmitted(bus, turnCtx, { turnId: id, prompt: 'synthetic prompt' });
   if (cancelled) emitTurnCancel(bus, turnCtx, { turnId: id, reason: 'cancelled', stopReason: 'cancelled' });
-  else emitTurnError(bus, turnCtx, { turnId: id, error: 'synthetic timed out', stopReason: 'provider_error' });
+  else emitTurnError(bus, turnCtx, { turnId: id, error: 'synthetic timed out', stopReason: 'unexpected_error' });
 }
 
 function manager(bus: RuntimeEventBus): CompactionManager {
@@ -109,19 +109,6 @@ describe('forensics report ownership', () => {
       expect(log.query()).toHaveLength(stored); expect(reports.count()).toBe(1);
       expect(events).toEqual(['FORENSICS_REPORT_CREATED']); expect(errors).not.toHaveBeenCalled();
       off(); successor.dispose();
-    } finally { held.release.resolve(); collector.dispose(); errors.mockRestore(); }
-  });
-
-  test('retiring during slow-phase reading produces no late attachment, action, report, or diagnostic', async () => {
-    using log = new SqliteDecisionLog(':memory:');
-    const held = heldPort(failureReadingsPort([]).port, 'engine.runtime.forensics-slow-phase');
-    installJudgmentPort(withDecisionLog(held.port, log));
-    const bus = new RuntimeEventBus(); const reports = new ForensicsRegistry();
-    const collector = new ForensicsCollector(bus, reports); const errors = spyOn(logger, 'error');
-    try {
-      failTurn(bus, 'cancelled', true); await held.entered.promise;
-      collector.dispose(); await flush(); held.release.resolve(); await flush();
-      expect(log.query()).toEqual([]); expect(reports.count()).toBe(0); expect(errors).not.toHaveBeenCalled();
     } finally { held.release.resolve(); collector.dispose(); errors.mockRestore(); }
   });
 

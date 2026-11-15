@@ -15,6 +15,7 @@
 import { mergeCostSource, mergePricingAsOf } from '../../../orchestration/types.js';
 import type { ContractGroupView, ContractUnitView, ContractView } from '../../../contract/types.js';
 import type { CriterionStatus } from '../../../../events/contract.js';
+import { TERMINAL_PROCESS_STATES } from '../terminal-states.js';
 import type {
   ProcessAttention,
   ProcessCheckSummary,
@@ -38,7 +39,7 @@ export function contractUnitNodeId(contractId: string, unitId: string): string {
   return `unit:${contractId}:${unitId}`;
 }
 
-const TERMINAL_STATES: ReadonlySet<ProcessState> = new Set(['done', 'failed', 'killed', 'interrupted']);
+const TERMINAL_STATES = TERMINAL_PROCESS_STATES;
 
 /** True when an agent node is still working (not finished, failed, killed or interrupted). */
 export function isLiveNode(node: ProcessNode | undefined): node is ProcessNode {

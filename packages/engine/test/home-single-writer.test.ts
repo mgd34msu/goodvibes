@@ -4,83 +4,35 @@
  * The defect: a turn forked a SECOND agent onto the home a live agent was
  * already running out of, and two writers over one `.goodvibes/agent/` tree
  * produced a process-killing temp-file race and a session left marked "active"
- * by a writer that no longer existed. Nothing refused, because a home had no
- * notion of an owner.
+ * by a writer that no longer existed.
  *
- * The guard has to refuse the real case and, just as load-bearing, must NOT
- * refuse on a stale record, because a boot guard that stops a product from
- * starting for a reason that is not true is worse than the defect. Both
- * directions are pinned here, and every seam (pid, identity, clock) is injected
- * so nothing spawns a process.
+ * The claim is a kernel lock held for the life of the process, so the cases
+ * that matter need real processes: a second one is refused naming the first,
+ * and a killed holder frees the home with nothing left to clean up.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import {
   claimSurfaceHome,
-  decideHomeClaim,
   surfaceHomeClaimPath,
-  SurfaceHomeInUseError,
   type HomeOwnerClaim,
 } from '../platform/src/platform/runtime/home-single-writer.ts';
-import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
 import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
 
-const AGENT = '/usr/local/bin/goodvibes-agent --daemon';
-
-const claim = (over: Partial<HomeOwnerClaim> = {}): HomeOwnerClaim => ({
-  pid: 4242,
-  claimedAt: 1_700_000_000_000,
-  identity: AGENT,
-  ...over,
-});
-
-// ── The decision ────────────────────────────────────────────────────────────
-
-describe('decideHomeClaim', () => {
-  test('an unclaimed home is claimed', () => {
-    expect(decideHomeClaim({ existing: null, pid: 1, identity: AGENT, holderIdentityNow: null }))
-      .toEqual({ outcome: 'claim' });
-  });
-
-  test('a live process with the same identity refuses, naming the holding pid', () => {
-    const decision = decideHomeClaim(
-      { existing: claim(), pid: 99, identity: AGENT, holderIdentityNow: AGENT },
-      { surfaceRoot: 'agent', homePath: '/home/x/.goodvibes/agent/owner.json' },
-    );
-    expect(decision.outcome).toBe('refuse');
-    if (decision.outcome !== 'refuse') throw new Error('unreachable');
-    expect(decision.holderPid).toBe(4242);
-    expect(decision.message).toContain('4242');
-    expect(decision.message).toContain('/home/x/.goodvibes/agent/owner.json');
-    expect(decision.message).toContain('already owned by a live process');
-  });
-
-  test('our OWN claim is already-held, not a refusal: re-entrancy is not contention', () => {
-    expect(decideHomeClaim({ existing: claim({ pid: 77 }), pid: 77, identity: AGENT, holderIdentityNow: AGENT }))
-      .toEqual({ outcome: 'already-held' });
-  });
-
-  test('a dead holder is not a holder: the claim is taken', () => {
-    expect(decideHomeClaim({ existing: claim(), pid: 99, identity: AGENT, holderIdentityNow: null }))
-      .toEqual({ outcome: 'claim' });
-  });
-
-  test('a RECYCLED pid, alive, but now some other program, does not refuse a boot', () => {
-    expect(decideHomeClaim({
-      existing: claim(),
-      pid: 99,
-      identity: AGENT,
-      holderIdentityNow: '/usr/bin/firefox',
-    })).toEqual({ outcome: 'claim' });
-  });
-});
-
-// ── The filesystem shell ────────────────────────────────────────────────────
+const MODULE = new URL('../platform/src/platform/runtime/home-single-writer.ts', import.meta.url).href;
+const HOLD_SCRIPT = `
+  const { claimSurfaceHome } = await import(process.argv[1]);
+  try {
+    claimSurfaceHome({ homeDirectory: process.argv[2], surfaceRoot: 'agent' });
+    console.log('acquired');
+    setInterval(() => {}, 1000);
+  } catch (error) { console.log(error && error.name === 'SurfaceHomeInUseError' ? 'refused ' + error.holderPid : 'error: ' + error); }
+`;
 
 describe('claimSurfaceHome', () => {
   const roots: string[] = [];
@@ -89,10 +41,14 @@ describe('claimSurfaceHome', () => {
     roots.push(root);
     return root;
   };
+  const spawnHolder = (home: string) => Bun.spawn(['bun', '-e', HOLD_SCRIPT, MODULE, home], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const firstLine = async (child: ReturnType<typeof spawnHolder>): Promise<string> => {
+    const reader = child.stdout.getReader();
+    try { return new TextDecoder().decode((await reader.read()).value).trim(); } finally { reader.releaseLock(); }
+  };
 
   test('simultaneous processes cannot both acquire an empty home', async () => {
     const home = newHome();
-    const module = new URL('../platform/src/platform/runtime/home-single-writer.ts', import.meta.url).href;
     const children = Array.from({ length: 6 }, () => Bun.spawn(['bun', '-e', `
       const { claimSurfaceHome } = await import(process.argv[1]);
       console.log('ready');
@@ -102,7 +58,7 @@ describe('claimSurfaceHome', () => {
         console.log('acquired');
         setInterval(() => {}, 1000);
       } catch (error) { console.log(error && error.name === 'SurfaceHomeInUseError' ? 'refused' : 'error: ' + error); }
-    `, module, home], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
+    `, MODULE, home], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
     const readers = children.map(child => child.stdout.getReader());
     try {
       await Promise.all(readers.map(async reader => expect(new TextDecoder().decode((await reader.read()).value)).toContain('ready')));
@@ -110,7 +66,6 @@ describe('claimSurfaceHome', () => {
       const results = await Promise.all(readers.map(async reader => new TextDecoder().decode((await reader.read()).value).trim()));
       expect(results.filter(value => value === 'acquired')).toHaveLength(1);
       expect(results.filter(value => value === 'refused')).toHaveLength(5);
-      // The one winner's claim, and nobody else's, is what is on disk.
       const winner = children[results.indexOf('acquired')]!;
       expect((JSON.parse(readFileSync(surfaceHomeClaimPath(home, 'agent'), 'utf8')) as HomeOwnerClaim).pid).toBe(winner.pid);
     } finally {
@@ -120,127 +75,51 @@ describe('claimSurfaceHome', () => {
     }
   });
 
-  test('a claim attempted while another process holds the claim lock is refused with a next step', () => {
+  test('a second process is refused naming the first; once the first is killed the home is free', async () => {
     const home = newHome();
-    const path = surfaceHomeClaimPath(home, 'agent');
-    mkdirSync(dirname(path), { recursive: true });
-    const unlock = tryAcquireCrossProcessLock(`${path}.lock`);
-    if (!unlock) throw new Error('the fixture lock could not be taken');
+    const first = spawnHolder(home);
+    let second: ReturnType<typeof spawnHolder> | undefined;
+    let third: ReturnType<typeof spawnHolder> | undefined;
     try {
-      let thrown: unknown;
-      try { claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'agent', pid: 501, identity: AGENT }); } catch (error) { thrown = error; }
-      expect(thrown).toBeInstanceOf(SurfaceHomeInUseError);
-      expect((thrown as SurfaceHomeInUseError).message).toContain(path);
-      expect((thrown as SurfaceHomeInUseError).message).toContain('start again');
-      expect(existsSync(path)).toBe(false);
-    } finally { unlock(); }
-  });
-
-  test('a second process launched by name is refused while the first still lives', async () => {
-    const home = newHome();
-    const module = new URL('../platform/src/platform/runtime/home-single-writer.ts', import.meta.url).href;
-    const script = `
-      const { claimSurfaceHome } = await import(process.argv[1]);
-      try {
-        claimSurfaceHome({ homeDirectory: process.argv[2], surfaceRoot: 'agent' });
-        console.log('acquired');
-        setInterval(() => {}, 1000);
-      } catch (error) { console.log(error.name); }
-    `;
-    const spawn = () => Bun.spawn(['bun', '-e', script, module, home], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
-    const first = spawn();
-    const firstReader = first.stdout.getReader();
-    let second: ReturnType<typeof spawn> | undefined;
-    try {
-      expect(new TextDecoder().decode((await firstReader.read()).value).trim()).toBe('acquired');
-      second = spawn();
-      expect((await new Response(second.stdout).text()).trim()).toBe('SurfaceHomeInUseError');
+      expect(await firstLine(first)).toBe('acquired');
+      second = spawnHolder(home);
+      expect((await new Response(second.stdout).text()).trim()).toBe(`refused ${first.pid}`);
+      first.kill('SIGKILL');
+      await first.exited;
+      third = spawnHolder(home);
+      expect(await firstLine(third)).toBe('acquired');
     } finally {
-      first.kill();
-      second?.kill();
-      await Promise.all([first.exited, second?.exited]);
-      firstReader.releaseLock();
+      for (const child of [first, second, third]) child?.kill();
+      await Promise.all([first.exited, second?.exited, third?.exited]);
     }
   });
 
-  test('a replaced claim survives release of its older handle', () => {
+  test('claiming an empty home writes an owner record, and release removes it', () => {
     const home = newHome();
-    const first = claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'agent', pid: 500, identity: AGENT });
-    writeFileSync(first.path, JSON.stringify({ pid: 500, identity: AGENT, claimedAt: 123, token: 'replacement' }));
-    first.release();
-    expect(JSON.parse(readFileSync(first.path, 'utf8')).token).toBe('replacement');
-  });
-
-  test('claiming an empty home writes an owner record', () => {
-    const home = newHome();
-    const held = claimSurfaceHome({
-      homeDirectory: home, surfaceRoot: 'agent', pid: 500, identity: AGENT, now: () => 123,
-    });
+    const held = claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'agent', now: () => 123 });
     const onDisk = JSON.parse(readFileSync(held.path, 'utf-8')) as HomeOwnerClaim;
-    expect(onDisk).toMatchObject({ pid: 500, claimedAt: 123, identity: AGENT });
-    expect(onDisk.token).toBeString();
+    expect(onDisk).toMatchObject({ pid: process.pid, claimedAt: 123 });
     held.release();
     expect(existsSync(held.path)).toBe(false);
   });
 
-  test('a second LIVE process on the same home throws, naming the pid', () => {
+  test('several holders in ONE process: the claim stands until the last release', () => {
     const home = newHome();
-    claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'agent', pid: 500, identity: AGENT });
-    let thrown: unknown;
-    try {
-      claimSurfaceHome({
-        homeDirectory: home,
-        surfaceRoot: 'agent',
-        pid: 501,
-        identity: AGENT,
-        identityOf: (pid) => (pid === 500 ? AGENT : null),
-      });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(SurfaceHomeInUseError);
-    expect((thrown as SurfaceHomeInUseError).holderPid).toBe(500);
-    expect((thrown as Error).message).toContain('500');
-  });
-
-  test('a DEAD holder does not block a boot', () => {
-    const home = newHome();
-    claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'agent', pid: 500, identity: AGENT });
-    const second = claimSurfaceHome({
-      homeDirectory: home, surfaceRoot: 'agent', pid: 501, identity: AGENT, identityOf: () => null,
-    });
-    const onDisk = JSON.parse(readFileSync(second.path, 'utf-8')) as HomeOwnerClaim;
-    expect(onDisk.pid).toBe(501);
-  });
-
-  test('a different surface is a different home: the agent does not block the terminal', () => {
-    const home = newHome();
-    claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'agent', pid: 500, identity: AGENT });
-    const tui = claimSurfaceHome({
-      homeDirectory: home, surfaceRoot: 'tui', pid: 501, identity: AGENT, identityOf: () => AGENT,
-    });
-    expect(tui.path).toBe(surfaceHomeClaimPath(home, 'tui'));
-  });
-
-  test('several holders in ONE process: the record survives until the last release', () => {
-    const home = newHome();
-    const first = claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'daemon', pid: 900, identity: AGENT });
-    const second = claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'daemon', pid: 900, identity: AGENT });
+    const first = claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'daemon' });
+    const second = claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'daemon' });
     first.release();
     expect(existsSync(first.path)).toBe(true);
     second.release();
     expect(existsSync(first.path)).toBe(false);
   });
 
-  test('an unreadable owner record is not a holder', () => {
+  test('a different surface is a different home', () => {
     const home = newHome();
-    const path = surfaceHomeClaimPath(home, 'agent');
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, 'not json at all', 'utf-8');
-    const held = claimSurfaceHome({
-      homeDirectory: home, surfaceRoot: 'agent', pid: 501, identity: AGENT, identityOf: () => AGENT,
-    });
-    expect((JSON.parse(readFileSync(held.path, 'utf-8')) as HomeOwnerClaim).pid).toBe(501);
+    const agent = claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'agent' });
+    const tui = claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'tui' });
+    expect(tui.path).toBe(surfaceHomeClaimPath(home, 'tui'));
+    agent.release();
+    tui.release();
   });
 
   test('cleanup', () => {

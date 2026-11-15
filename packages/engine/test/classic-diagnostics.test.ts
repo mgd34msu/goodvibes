@@ -15,7 +15,6 @@ import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.j
 import { emitTurnSubmitted, emitTurnError } from '../platform/src/platform/runtime/emitters/turn.js';
 import { readSystemMessagePriority } from '../platform/src/platform/runtime/batteries/system-message-priority.js';
 import { replyInstructsTyping } from '../platform/src/platform/runtime/batteries/setup-reply-command.js';
-import { readSlowPhases } from '../platform/src/platform/runtime/forensics/slow-phases.js';
 import { readUserErrorClass, describeUserError } from '../platform/src/platform/routing/user-error.js';
 import { lintPolicyConfig } from '../platform/src/platform/runtime/permissions/lint.js';
 
@@ -59,8 +58,6 @@ test('Classic failure handling and system notices use native evidence without bo
     expect(describeUserError(error, reading).message).toContain('credentials or sign-in session');
     expect(await readUserErrorClass(new Error('Context limit according to arbitrary wording'))).toMatchObject({ kind: 'generic' });
     await expect(replyInstructsTyping('Some setup prose', 'test.classic.setup')).rejects.toMatchObject({ code: 'decision-models-disabled' });
-    await expect(readSlowPhases('turn', [{ phase: 'STREAM', startedAt: 0, durationMs: 1234, success: false }], 'test.classic.slow'))
-      .rejects.toMatchObject({ code: 'decision-models-disabled' });
   });
   expect({ metadata, requests }).toEqual({ metadata: 0, requests: 0 });
 });
@@ -77,10 +74,11 @@ test.each(['Classic - Off', 'Preferred'] as const)('%s failure reports retain na
       emitTurnError(bus, context, { turnId: 'failed-turn', error: 'An unstructured provider failure', stopReason: 'provider_error' });
       await ready.promise;
       expect(reports.latest()).toMatchObject({ turnId: 'failed-turn', classification: 'llm_error',
-        errorMessage: 'An unstructured provider failure', operationProvenance: 'classic', slowPhaseAssessment: 'not-evaluated' });
+        errorMessage: 'An unstructured provider failure', slowPhaseAssessment: 'table' });
       expect(reports.latest()?.causalChain.length).toBeGreaterThan(0);
     });
-    expect(fake.requests.length).toBe(policy === 'Classic - Off' ? 0 : 1);
+    // The stop reason already says the provider failed: the message is not read.
+    expect(fake.requests.length).toBe(0);
   } finally { unsubscribe(); collector.dispose(); }
 });
 

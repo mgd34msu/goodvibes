@@ -1,6 +1,6 @@
 /**
- * The runtime events that mean a subsystem failed or came back drive the
- * health aggregator and its cascades.
+ * Each domain's health follows its own entities: one entity failing or
+ * recovering does not change what the others report.
  */
 import { expect, test } from 'bun:test';
 import { createWiredHealthSystem } from '../platform/src/platform/runtime/health/index.ts';
@@ -20,22 +20,17 @@ function system() {
   return { bus, unbind, ...health };
 }
 
-test('repeated MCP disconnects block MCP tool dispatch once recovery is spent, and a reconnect lifts the block', async () => {
+test('one MCP server down of two is degraded and named; its reconnect returns the domain to healthy', async () => {
   const { bus, aggregator } = system();
-  const disconnect = () => emitMcpDisconnected(bus, ctx, { serverId: 'a', willRetry: true });
-  for (let i = 0; i < 3; i++) disconnect();
-  await flush();
-  expect(aggregator.getDomainHealth('mcp').status).toBe('failed');
-  expect(aggregator.canExecute('toolExecution', 'mcp-tools').allowed).toBe(true);
-  disconnect();
-  await flush();
-  expect(aggregator.canExecute('toolExecution', 'mcp-tools').allowed).toBe(false);
-
   emitMcpConnected(bus, ctx, { serverId: 'a', toolCount: 1, resourceCount: 0 });
+  emitMcpConnected(bus, ctx, { serverId: 'b', toolCount: 1, resourceCount: 0 });
+  emitMcpDisconnected(bus, ctx, { serverId: 'b', willRetry: true });
+  await flush();
+  expect(aggregator.getDomainHealth('mcp').status).toBe('degraded');
+  expect(aggregator.getDomainHealth('mcp').failureReason).toContain('b');
+  emitMcpConnected(bus, ctx, { serverId: 'b', toolCount: 1, resourceCount: 0 });
   await flush();
   expect(aggregator.getDomainHealth('mcp').status).toBe('healthy');
-  expect(aggregator.getDomainHealth('mcp').recoveryAttempts).toBe(0);
-  expect(aggregator.canExecute('toolExecution', 'mcp-tools').allowed).toBe(true);
 });
 
 test('unbinding stops following the bus', async () => {
@@ -46,46 +41,23 @@ test('unbinding stops following the bus', async () => {
   expect(aggregator.getDomainHealth('mcp').status).toBe('unknown');
 });
 
-test('a failed turn cancels tool execution and a completed turn returns it to healthy', async () => {
-  const { bus, aggregator } = system();
-  emitTurnError(bus, ctx, { turnId: 'u1', error: 'boom', stopReason: 'unexpected_error' });
-  await flush();
-  expect(aggregator.getDomainHealth('toolExecution').status).toBe('degraded');
-  emitTurnCompleted(bus, ctx, { turnId: 'u2', response: 'ok', stopReason: 'completed' });
-  await flush();
-  expect(aggregator.getDomainHealth('turn').status).toBe('healthy');
-  expect(aggregator.getDomainHealth('toolExecution').status).toBe('healthy');
-});
-
-test('a failed agent marks tasks failed and a completed agent returns them to healthy', async () => {
+test('a failed agent stays reported when another agent completes, and never marks tasks failed', async () => {
   const { bus, aggregator } = system();
   emitAgentFailed(bus, ctx, { agentId: 'a', error: 'boom', durationMs: 1 });
+  emitAgentCompleted(bus, ctx, { agentId: 'b', durationMs: 1 });
   await flush();
-  expect(aggregator.getDomainHealth('tasks').status).toBe('failed');
-  emitAgentCompleted(bus, ctx, { agentId: 'a', durationMs: 1 });
-  await flush();
-  expect(aggregator.getDomainHealth('tasks').status).toBe('healthy');
+  expect(aggregator.getDomainHealth('agents').status).toBe('failed');
+  expect(aggregator.getDomainHealth('tasks').status).toBe('unknown');
 });
 
-test('a recovered source does not clear a target that another failed source still holds', async () => {
-  const { bus, aggregator, wiring } = system();
+test('a turn failing in one session does not make another session look failed or healthy', async () => {
+  const { bus, aggregator } = system();
   emitTurnError(bus, ctx, { turnId: 'u1', error: 'boom', stopReason: 'unexpected_error' });
-  wiring.evaluateDomain('plugins', 'failed');
+  emitTurnCompleted(bus, { ...ctx, sessionId: 's2' }, { turnId: 'u2', response: 'ok', stopReason: 'completed' });
   await flush();
-  emitTurnCompleted(bus, ctx, { turnId: 'u2', response: 'ok', stopReason: 'completed' });
+  expect(aggregator.getDomainHealth('turn').status).toBe('degraded');
+  emitTurnCompleted(bus, ctx, { turnId: 'u3', response: 'ok', stopReason: 'completed' });
   await flush();
-  expect(aggregator.getDomainHealth('toolExecution').status).toBe('degraded');
-});
-
-test('a target whose cascade reason was overwritten by another source is released once every source recovers', async () => {
-  const { bus, wiring, aggregator } = system();
-  emitTurnError(bus, ctx, { turnId: 'u1', error: 'boom', stopReason: 'unexpected_error' });
-  await flush();
-  wiring.evaluateDomain('plugins', 'failed');
-  expect(aggregator.getDomainHealth('toolExecution').failureReason).toStartWith('Tool deregistration requested');
-  wiring.evaluateDomain('plugins', 'healthy');
-  expect(aggregator.getDomainHealth('toolExecution').status).toBe('degraded');
-  emitTurnCompleted(bus, ctx, { turnId: 'u2', response: 'ok', stopReason: 'completed' });
-  await flush();
-  expect(aggregator.getDomainHealth('toolExecution').status).toBe('healthy');
+  expect(aggregator.getDomainHealth('turn').status).toBe('healthy');
+  expect(aggregator.getDomainHealth('toolExecution').status).toBe('unknown');
 });

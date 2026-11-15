@@ -31,7 +31,7 @@ export type FailureClass =
  * Used to reconstruct execution timelines in the forensics panel.
  */
 export interface PhaseTimingEntry {
-  /** Phase name (e.g. 'PREFLIGHT', 'STREAM', 'TOOL_BATCH', 'POST_HOOKS'). */
+  /** Phase name (turn: 'PREFLIGHT', 'MODEL_REQUEST', 'STREAM', 'AFTER_STREAM', 'TOOLS', 'AFTER_TOOLS'; task: 'CREATED', 'RUNNING'). */
   readonly phase: string;
   /** Epoch ms when the phase started. */
   readonly startedAt: number;
@@ -113,8 +113,8 @@ export interface ForensicsJumpLink {
  */
 export interface FailureReport {
   readonly operationProvenance?: 'classic';
-  /** Empty slowPhases does not claim that no phase was slow when not evaluated. */
-  readonly slowPhaseAssessment?: 'semantic' | 'not-needed' | 'not-evaluated';
+  /** `table`: slowPhases was decided from the phase table; `not-needed`: nothing to assess (a cancellation, or no timed phase). */
+  readonly slowPhaseAssessment?: 'table' | 'not-needed';
   /** Unique report identifier (short hex, derived from trace ID). */
   readonly id: string;
   /** Full trace ID of the originating event envelope. */
@@ -139,7 +139,7 @@ export interface FailureReport {
   readonly agentId?: string | undefined;
   /** Ordered phase timings from the originating turn or task execution. */
   readonly phaseTimings: readonly PhaseTimingEntry[];
-  /** Phases read as unusually long for their kind (`engine.runtime.forensics-slow-phase`), in phase order. */
+  /** Phases over the phase table's limit for their kind (forensics/slow-phases.ts), in phase order. */
   readonly slowPhases: readonly string[];
   /** Ordered phase transition ledger for explicit runtime reconstruction. */
   readonly phaseLedger: readonly PhaseLedgerEntry[];

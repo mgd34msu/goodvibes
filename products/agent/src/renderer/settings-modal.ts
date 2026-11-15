@@ -47,9 +47,9 @@ function flagRow(entry: FlagEntry, selected: boolean, focused: boolean): KitRow 
     label: entry.feature.name,
     desc: `${entry.feature.domain} · ${entry.feature.restartRequired ? 'applies next run' : 'applies now'}`,
     right: entry.state,
-    rightFg: flagStateColor(entry.state, entry.state === 'killed'),
-    mark: entry.state === 'killed' ? '✕' : on ? '●' : '○',
-    markFg: entry.state === 'killed' ? t.error : on ? t.success : t.textFaint,
+    rightFg: flagStateColor(entry.state),
+    mark: on ? '●' : '○',
+    markFg: on ? t.success : t.textFaint,
     selected: selected && focused,
     current: selected && !focused,
   };

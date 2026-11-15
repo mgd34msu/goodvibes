@@ -1,9 +1,8 @@
 /**
  * Health Error Propagation, Effect Handlers
  *
- * Implements concrete actions for each CascadeEffect type produced by the
- * CascadeEngine. Each handler is a pure dispatch function, side effects
- * are performed through the provided aggregator and eventBus context.
+ * Publishes the cascades the CascadeEngine produces. A cascade is a report:
+ * see handleCascadeEffect.
  *
  * Callers (e.g. HealthStoreWiring) are responsible for iterating over
  * CascadeResult arrays and invoking this function for each result.
@@ -43,148 +42,47 @@ function emitHealthEvent(
 
 /** Context injected into each effect handler. */
 export interface EffectHandlerContext {
-  /** The health aggregator, used to mark domain state changes. */
+  /** The health aggregator. Effects never write another domain's status; it is passed for hosts that read it. */
   readonly aggregator: RuntimeHealthAggregator;
   /** The event bus, used to emit CASCADE_APPLIED and domain events. */
   readonly eventBus: RuntimeEventBus;
 }
 
 /**
- * Dispatches the appropriate runtime action for a given CascadeEffect.
+ * Publishes one cascade. A cascade reports what a failing domain affects; it
+ * cancels, blocks and deregisters nothing, and it leaves every other domain's
+ * status to that domain's own entities (a failed agent does not make `tasks`
+ * failed). So every CASCADE_APPLIED carries `enforced: false`. An EMIT_EVENT
+ * effect also publishes its named event.
  *
- * Handles all six CascadeEffect variants:
- * - `CANCEL_INFLIGHT`, signals cancellation of in-flight operations in the given scope
- * - `BLOCK_DISPATCH`, blocks new dispatch in the given scope (optionally queues)
- * - `MARK_CHILDREN`, marks child tasks/agents as failed or blocked
- * - `DEREGISTER_TOOLS`, signals deregistration, scoped by pluginId from sourceContext
- * - `EMIT_EVENT`, emits a domain event of the given eventType on the bus
- * - `BLOCK_NEW`, blocks new operations of the given scope
- *
- * After applying the effect, emits a `CASCADE_APPLIED` event on the event bus
- * so that other subsystems can observe cascade propagation.
- *
- * @param effect - The CascadeEffect to apply.
+ * @param effect - The CascadeEffect of the rule that fired.
  * @param result - The CascadeResult that produced this effect (carries ruleId, source, etc.).
- * @param context - The aggregator and eventBus needed to perform side effects.
+ * @param context - The aggregator and eventBus.
  */
 export function handleCascadeEffect(
   effect: CascadeEffect,
   result: CascadeResult,
   context: EffectHandlerContext,
 ): void {
-  const { aggregator, eventBus } = context;
-  // Cancellation and tool deregistration are requests for the host that owns
-  // the signal or registry; every other effect is complete once state is written.
-  let enforced = true;
-
-  switch (effect.type) {
-    case 'CANCEL_INFLIGHT': {
-      enforced = false;
-      // Publish the request for the host that owns the operation's cancellation signal.
-      if (result.target !== 'ALL') {
-        aggregator.updateDomainHealth(result.target, 'degraded', {
-          failureReason: `In-flight cancellation requested (scope: ${effect.scope})`,
-        });
-      }
-      break;
-    }
-
-    case 'BLOCK_DISPATCH': {
-      // Mark the target domain as degraded with the blocked scope noted.
-      // If queueable, subscribers may hold and retry; otherwise, they must reject.
-      if (result.target !== 'ALL') {
-        aggregator.updateDomainHealth(result.target, 'degraded', {
-          failureReason: effect.queueable
-            ? `Dispatch blocked (scope: ${effect.scope}), queuing enabled`
-            : `Dispatch blocked (scope: ${effect.scope}), queuing disabled`,
-          degradedCapabilities: [effect.scope],
-        });
-      }
-      break;
-    }
-
-    case 'MARK_CHILDREN': {
-      // Mark child domains as failed or blocked.
-      // For 'ALL' target, propagate to tasks and agents as the primary child domains.
-      const childDomains =
-        result.target === 'ALL'
-          ? (['tasks', 'agents'] as const)
-          : ([result.target] as const);
-
-      for (const childDomain of childDomains) {
-        // 'blocked' children can take no new work but are not failed.
-        aggregator.updateDomainHealth(childDomain, effect.status === 'failed' ? 'failed' : 'degraded', {
-          ...(effect.status === 'blocked' ? { degradedCapabilities: ['dispatch'] } : {}),
-          failureReason: `Marked ${effect.status} by cascade from '${result.source}'${effect.notifyParent ? ' (parent notified)' : ''}`,
-        });
-      }
-      break;
-    }
-
-    case 'DEREGISTER_TOOLS': {
-      enforced = false;
-      // Publish the request for the host that owns the tool registry.
-      const pluginId = effect.pluginId ?? result.sourceContext?.['pluginId'];
-      const scope = pluginId ? `plugin:${pluginId}` : 'all-plugins';
-
-      if (result.target !== 'ALL') {
-        aggregator.updateDomainHealth(result.target, 'degraded', {
-          failureReason: `Tool deregistration requested (${scope})`,
-          degradedCapabilities: [`tool-dispatch:${scope}`],
-        });
-      }
-      break;
-    }
-
-    case 'EMIT_EVENT': {
-      // Emit the specified event type on the bus as a synthetic health event.
-      // Since CASCADE_APPLIED is not in AnyRuntimeEvent, we use a cast to
-      // emit on the 'session' domain (the most general available routing domain).
-      const syntheticEnvelope = createEventEnvelope(
-        effect.eventType,
-        {
-          type: effect.eventType,
-          ruleId: result.ruleId,
-          source: result.source,
-          target: result.target,
-          timestamp: result.timestamp,
-          sourceContext: result.sourceContext,
-        },
-        {
-          sessionId: result.sourceContext?.['sessionId'] ?? 'runtime',
-          source: 'health/effect-handlers',
-        },
-      );
-      emitHealthEvent(eventBus, syntheticEnvelope);
-      break;
-    }
-
-    case 'BLOCK_NEW': {
-      // Block new operations in the given scope by marking target domain degraded.
-      if (result.target !== 'ALL') {
-        aggregator.updateDomainHealth(result.target, 'degraded', {
-          failureReason: `New operations blocked (scope: ${effect.scope})`,
-          degradedCapabilities: [effect.scope],
-        });
-      }
-      break;
-    }
-
-    default: {
-      const _exhaustive: never = effect;
-      throw new Error(`Unhandled cascade effect type: ${(effect as { type: string }).type}`);
-    }
+  const { eventBus } = context;
+  const sessionId = result.sourceContext?.['sessionId'] ?? 'runtime';
+  if (effect.type === 'EMIT_EVENT') {
+    emitHealthEvent(eventBus, createEventEnvelope(
+      effect.eventType,
+      {
+        type: effect.eventType,
+        ruleId: result.ruleId,
+        source: result.source,
+        target: result.target,
+        timestamp: result.timestamp,
+        sourceContext: result.sourceContext,
+      },
+      { sessionId, source: 'health/effect-handlers' },
+    ));
   }
-
-  // Emit CASCADE_APPLIED event for observability
-  const appliedEvent = createCascadeAppliedEvent(result, enforced);
-  const appliedEnvelope = createEventEnvelope(
+  emitHealthEvent(eventBus, createEventEnvelope(
     'CASCADE_APPLIED',
-    appliedEvent,
-    {
-      sessionId: result.sourceContext?.['sessionId'] ?? 'runtime',
-      source: 'health/effect-handlers',
-    },
-  );
-  emitHealthEvent(eventBus, appliedEnvelope);
+    createCascadeAppliedEvent(result, false),
+    { sessionId, source: 'health/effect-handlers' },
+  ));
 }

@@ -3,27 +3,18 @@
  *
  * Responsibilities:
  *   - Initialises all flags from the registry with their default states.
- *   - Applies config-layer overrides (`loadFromConfig`).
- *   - Enforces kill-switch semantics: a killed flag cannot be re-enabled without
- *     first being un-killed via `disable()`.
- *   - Refuses runtime toggles for flags marked `runtimeToggleable: false`.
+ *   - Applies config-layer values (`loadFromConfig` at boot, `applyConfigState`
+ *     for a live change). Settings own a flag's state; there is no other way
+ *     to set it.
+ *   - Records a live change to a flag marked `runtimeToggleable: false` as
+ *     pending a restart instead of applying it.
  *   - Maintains an in-process audit log of all transitions.
  *   - Notifies subscribers synchronously on every state change.
  */
 import { FEATURE_FLAG_MAP } from './flags.js';
 import type { FlagConfig, FlagState, FlagTransition, FeatureFlag } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadMap } from '../../security/read-source.js';
-
-const flagReadSources = new WeakMap<object, () => () => void>();
-const getFlagReadSources = flagReadSources.get.bind(flagReadSources);
-const setFlagReadSources = flagReadSources.set.bind(flagReadSources);
-
-export function captureFeatureFlagReadSource(manager: object): () => void {
-  const capture = getFlagReadSources(manager);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
-}
+import { revisionSource, type RevisionSource } from '../../utils/revision.js';
 
 /** Most recent transitions kept in the in-process audit log. */
 const MAX_RECORDED_TRANSITIONS = 1000;
@@ -42,7 +33,9 @@ export type FlagSubscriber = (
 class FeatureFlagManagerImpl {
   private _publicationRevision = 0;
 
+  /** Bumped on every flag transition; a reader that must re-check compares this integer. */
   public getPublicationRevision(): number { return this._publicationRevision; }
+  public readonly revisionSource: RevisionSource = revisionSource('feature flags', () => this._publicationRevision);
   /** Current state for each registered flag */
   private readonly _states: Map<string, FlagState> = new Map();
 
@@ -67,19 +60,12 @@ class FeatureFlagManagerImpl {
     for (const [id, flag] of FEATURE_FLAG_MAP) {
       this._states.set(id, flag.defaultState);
     }
-    setFlagReadSources(this, () => {
-      const bindings = captureSecurityReadBindings(this, ['_publicationRevision', '_states', 'isEnabled', 'getPublicationRevision']);
-      const revision = this._publicationRevision;
-      const statesCurrent = retainSecurityReadMap(this._states);
-      return () => { bindings(); statesCurrent(); assertSecurityReadSource(this._publicationRevision === revision); };
-    });
   }
 
   // ── Read API ────────────────────────────────────────────────────────────
 
   /**
    * Returns `true` only if the flag is in the `'enabled'` state.
-   * A killed flag always returns `false`.
    *
    * @param flagId - The flag's kebab-case identifier.
    */
@@ -170,77 +156,12 @@ class FeatureFlagManagerImpl {
     return [...this._transitions];
   }
 
-  // ── Write API ───────────────────────────────────────────────────────────
-
-  /**
-   * Enables a flag.
-   *
-   * Throws if:
-   *   - The flag id is not registered.
-   *   - The flag is currently `'killed'` (must call `disable()` first to un-kill).
-   *   - The flag is not `runtimeToggleable` and the process has already started.
-   *
-   * @param flagId - The flag's kebab-case identifier.
-   */
-  enable(flagId: string): void {
-    const flag = this._requireFlag(flagId);
-    const previous = this._states.get(flagId) as FlagState;
-
-    if (previous === 'enabled') return; // idempotent
-
-    if (previous === 'killed') {
-      throw new Error(
-        `[FeatureFlagManager] Cannot enable killed flag "${flagId}". Call disable() first to un-kill, then enable().`,
-      );
-    }
-
-    if (!flag.runtimeToggleable) {
-      // Startup-only flags may only be enabled via loadFromConfig before the
-      // runtime event loop begins; runtime calls are rejected.
-      throw new Error(
-        `[FeatureFlagManager] Flag "${flagId}" is not runtime-toggleable. Use loadFromConfig() at startup.`,
-      );
-    }
-
-    this._transition(flagId, previous, 'enabled');
-  }
-
-  /**
-   * Disables a flag (or un-kills it, resetting to `'disabled'`).
-   *
-   * This is the only way to move a flag out of the `'killed'` state; settings
-   * writes never clear a kill.
-   *
-   * Throws if the flag is not `runtimeToggleable` and is not currently killed
-   * (un-killing a killed flag is always permitted regardless of toggleability).
-   *
-   * @param flagId - The flag's kebab-case identifier.
-   */
-  disable(flagId: string): void {
-    const flag = this._requireFlag(flagId);
-    const previous = this._states.get(flagId) as FlagState;
-
-    if (previous === 'disabled') return; // idempotent
-
-    if (!flag.runtimeToggleable && previous !== 'killed') {
-      throw new Error(
-        `[FeatureFlagManager] Flag "${flagId}" is not runtime-toggleable. Use loadFromConfig() at startup.`,
-      );
-    }
-
-    this._transition(flagId, previous, 'disabled');
-  }
-
   // ── Config integration ──────────────────────────────────────────────────
 
   /**
    * Applies flag state overrides from the user config layer.
    *
    * - Unknown flag ids are rejected so stale configs cannot hide misspelled gates.
-   * - Skips non-toggleable flags if the current state is already non-default
-   *   (allows startup-only flags to be seeded via config without error).
-   * - A config-level `'killed'` state is applied as-is; nothing else in the
-   *   platform can put a flag into that state.
    *
    * This is the boot-time path, called once, before the runtime event loop
    * begins, so it applies EVERY flag's desired state directly regardless of
@@ -266,9 +187,7 @@ class FeatureFlagManagerImpl {
    * (i.e. `configManager.set('featureFlags.<id>', ...)` firing after boot,
    * see `bindFeatureFlagConfigBridge`), honoring `runtimeToggleable`:
    *
-   * - Runtime-toggleable flags apply immediately through the same
-   *   transition path `enable()`/`disable()` use, so subscribers
-   *   fire exactly as they would for a direct manager toggle.
+   * - Runtime-toggleable flags apply immediately, and subscribers fire.
    * - Startup-gated flags are never faked live: the effective state is left
    *   untouched and the persisted value is recorded as pending a restart
    *   (see `getAll()` / `hasPendingRestart()` / `getPendingRestartState()`)
@@ -298,21 +217,11 @@ class FeatureFlagManagerImpl {
    * Shared transition logic for a single flag's desired config-layer state,
    * used by both `loadFromConfig()` (every flag, at boot) and
    * `applyConfigState()` (one flag, already gated on `runtimeToggleable` by
-   * its caller). Idempotent, and honors kill precedence: config can never
-   * silently re-enable a killed flag.
+   * its caller). Idempotent.
    */
   private _applyPersistedState(id: string, desiredState: FlagState): void {
     const current = this._states.get(id) as FlagState;
     if (current === desiredState) return; // already correct, skip
-
-    if (desiredState === 'killed') {
-      this._transition(id, current, 'killed', 'Loaded from config');
-      return;
-    }
-
-    // A kill ends only through disable(): a settings write, in either
-    // direction, must not undo an emergency switch-off made in this process.
-    if (current === 'killed') return;
     this._transition(id, current, desiredState);
   }
 
@@ -356,7 +265,6 @@ class FeatureFlagManagerImpl {
     flagId: string,
     previous: FlagState,
     next: FlagState,
-    reason?: string,
   ): void {
     this._publicationRevision++;
     this._states.set(flagId, next);
@@ -366,7 +274,6 @@ class FeatureFlagManagerImpl {
       previous,
       next,
       timestamp: Date.now(),
-      ...(reason !== undefined ? { reason } : {}),
     };
     this._transitions.push(entry);
     if (this._transitions.length > MAX_RECORDED_TRANSITIONS) this._transitions.shift();

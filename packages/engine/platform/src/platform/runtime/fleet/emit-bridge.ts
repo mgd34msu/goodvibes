@@ -14,11 +14,18 @@
  * - The FIRST snapshot only SEEDS the prior-state table; it emits nothing, so a
  *   bridge that attaches to an already-populated fleet does not fabricate a burst
  *   of STARTED events for nodes that did not just start.
+ * - A node first seen already terminal (it started and ended between two
+ *   snapshots) emits STARTED and then FINISHED, with `previousState` equal to
+ *   its state because no earlier state was observed; a client waiting for it
+ *   to finish is not left waiting.
  * - A node that simply disappears from the snapshot (archived / gc'd) emits no
- *   FINISHED, finish is claimed only on an observed transition INTO a terminal
- *   state, never inferred from absence.
- * - Every emitted field is copied straight from the authoritative snapshot; the
- *   bridge owns no state beyond the small prior-state diff table.
+ *   FINISHED, finish is claimed only on an observed terminal state, never
+ *   inferred from absence. A node that was blocked on the user and disappears
+ *   emits UNBLOCKED: the question it was asking no longer exists, so anything
+ *   escalating it (a push nudge) stops.
+ * - Every emitted field is copied straight from the authoritative snapshot (or,
+ *   for a node that left, from its last snapshot); the bridge owns no state
+ *   beyond the small prior-state diff table.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -35,22 +42,13 @@ import type { FleetSnapshot, ProcessAttentionReason, ProcessNode, ProcessState }
 import type { ProcessRegistry } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { isTerminalProcessState as isTerminal } from './terminal-states.js';
 
-const TERMINAL_STATES: ReadonlySet<ProcessState> = new Set<ProcessState>([
-  'done',
-  'failed',
-  'killed',
-  'interrupted',
-]);
-
-function isTerminal(state: ProcessState): boolean {
-  return TERMINAL_STATES.has(state);
-}
-
-/** The minimal per-node prior state the diff needs. */
+/** The minimal per-node prior state the diff needs, plus what an UNBLOCKED for a node that left must carry. */
 interface PriorNodeState {
   readonly state: ProcessState;
   readonly attentionReason: ProcessAttentionReason | undefined;
+  readonly node: Pick<ProcessNode, 'id' | 'kind' | 'label' | 'sessionRef'>;
 }
 
 export interface FleetEmitBridgeDeps {
@@ -81,7 +79,7 @@ export function attachFleetEmitBridge(deps: FleetEmitBridgeDeps): () => void {
   // non-session sentinel (mirrors the bus's own 'runtime-bus' synthetic). The
   // PAYLOAD carries a sessionId only when the node actually has one, so a
   // subscriber never mistakes the sentinel for a real session.
-  const ctxFor = (node: ProcessNode): EmitterContext => ({
+  const ctxFor = (node: Pick<ProcessNode, 'sessionRef'>): EmitterContext => ({
     traceId: nextTraceId(),
     source: 'fleet-registry',
     sessionId: node.sessionRef?.sessionId ?? 'fleet-registry',
@@ -114,6 +112,16 @@ export function attachFleetEmitBridge(deps: FleetEmitBridgeDeps): () => void {
               ...(node.needsAttention?.detail ? { detail: node.needsAttention.detail } : {}),
               ...(node.sessionRef?.sessionId ? { sessionId: node.sessionRef.sessionId } : {}),
               ...(node.sessionRef?.agentId ? { agentId: node.sessionRef.agentId } : {}),
+            });
+          }
+          if (isTerminal(node.state)) {
+            emitFleetNodeFinished(deps.bus, ctxFor(node), {
+              nodeId: node.id,
+              kind: node.kind,
+              state: node.state,
+              previousState: node.state,
+              label: node.label,
+              ...(node.sessionRef?.sessionId ? { sessionId: node.sessionRef.sessionId } : {}),
             });
           }
         } else if (seeded && prev) {
@@ -164,13 +172,22 @@ export function attachFleetEmitBridge(deps: FleetEmitBridgeDeps): () => void {
           }
         }
 
-        prior.set(node.id, { state: node.state, attentionReason });
+        prior.set(node.id, { state: node.state, attentionReason, node: { id: node.id, kind: node.kind, label: node.label, sessionRef: node.sessionRef } });
       }
 
       // Drop prior entries for nodes that left the snapshot (archived / gc'd).
-      // No FINISHED is claimed from absence, see the module honesty invariants.
-      for (const id of [...prior.keys()]) {
-        if (!seenIds.has(id)) prior.delete(id);
+      // No FINISHED is claimed from absence; a block that left is lifted.
+      for (const [id, prev] of [...prior]) {
+        if (seenIds.has(id)) continue;
+        prior.delete(id);
+        if (prev.attentionReason === undefined) continue;
+        emitFleetNodeUnblocked(deps.bus, ctxFor(prev.node), {
+          nodeId: id,
+          kind: prev.node.kind,
+          state: prev.state,
+          label: prev.node.label,
+          ...(prev.node.sessionRef?.sessionId ? { sessionId: prev.node.sessionRef.sessionId } : {}),
+        });
       }
       seeded = true;
     } catch (error) {

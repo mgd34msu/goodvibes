@@ -15,9 +15,9 @@ import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-
  * `homeSingleWriter: 'claim'` where the terminal deliberately does not.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import type { ChildProcess } from 'node:child_process';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { bootstrap as runtimeComposition } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
@@ -26,44 +26,16 @@ import { handleGoodVibesCliCommand, parseGoodVibesCli } from '../../cli/index.ts
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { holdHomeInChildProcess } from '../helpers/home-holder.ts';
 
 const holders: ChildProcess[] = [];
 const built: RuntimeServices[] = [];
 
-async function waitForHolderIdentity(
-  pid: number,
-  expectedIdentity: string,
-  readIdentity: (pid: number) => string | null = runtimeComposition.readProcessIdentity,
-  now: () => number = Date.now,
-): Promise<string> {
-  const deadline = now() + 10_000;
-  let identity = readIdentity(pid);
-  while (identity !== expectedIdentity && now() < deadline) {
-    await Bun.sleep(10);
-    identity = readIdentity(pid);
-  }
-  if (identity !== expectedIdentity) throw new Error(`the holder pid ${pid} did not report expected identity ${expectedIdentity} before the deadline`);
-  return identity;
-}
-
-/**
- * A process that is genuinely alive and genuinely some OTHER program, so the
- * liveness check has a real pid to read and a real argv to compare against. A
- * fabricated pid would be testing the fake: the identity half of the rule
- * exists precisely because it reads `/proc/<pid>/cmdline` for real.
- */
-async function liveForeignProcess(): Promise<{ pid: number; identity: string }> {
-  const command = 'sleep';
-  const args = ['120'];
-  const child = spawn(command, args, { stdio: 'ignore' });
+/** A separate live process holding this home's claim, as a first agent would. */
+async function liveHolder(home: string): Promise<{ pid: number }> {
+  const child = await holdHomeInChildProcess(home, GOODVIBES_AGENT_SURFACE_ROOT);
   holders.push(child);
-  const pid = child.pid;
-  if (typeof pid !== 'number') throw new Error('could not start a holder process');
-  // Before exec finishes, /proc can be empty OR still contain the inherited
-  // parent argv. Only the exact program/arguments we spawned establish readiness.
-  // Recording that transient parent identity would correctly look stale at boot.
-  const identity = await waitForHolderIdentity(pid, [command, ...args].join(' '));
-  return { pid, identity };
+  return { pid: child.pid };
 }
 
 /** Boot the agent's real service composition rooted at this home. */
@@ -88,13 +60,6 @@ async function bootAgentAt(home: string): Promise<RuntimeServices> {
   return services;
 }
 
-/** Put an owner record on a home, as a live first agent would have left it. */
-function writeClaim(home: string, claim: { pid: number; identity: string }): void {
-  const path = runtimeComposition.surfaceHomeClaimPath(home, GOODVIBES_AGENT_SURFACE_ROOT);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ ...claim, claimedAt: Date.now() }), { mode: 0o600 });
-}
-
 afterEach(async () => {
   const graphs = built.splice(0).map(services => Promise.resolve().then(() => services.close()));
   const children = holders.splice(0).map(child => new Promise<void>((resolve, reject) => {
@@ -107,36 +72,10 @@ afterEach(async () => {
   if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Home ownership fixtures did not close');
 });
 
-describe('live holder identity readiness', () => {
-  test('ignores inherited parent argv and empty transitions until the expected program appears', async () => {
-    const identities = ['bun parent-agent-tests.ts', null, 'bun parent-agent-tests.ts', 'sleep 120'];
-    const probedPids: number[] = [];
-    const identity = await waitForHolderIdentity(4242, 'sleep 120', (pid) => {
-      probedPids.push(pid);
-      return identities.shift() ?? null;
-    });
-    expect(identity).toBe('sleep 120');
-    expect(identities).toEqual([]);
-    expect(probedPids).toEqual([4242, 4242, 4242, 4242]);
-  });
-
-  test('rejects a nonmatching nonempty identity at the existing deadline', async () => {
-    let reads = 0;
-    let clockReads = 0;
-    await expect(waitForHolderIdentity(4242, 'sleep 120', () => {
-      reads += 1;
-      return 'bun parent-agent-tests.ts';
-    }, () => clockReads++ * 10_000)).rejects.toThrow('did not report expected identity sleep 120');
-    expect(reads).toBe(1);
-  });
-});
-
-// Another process's identity is only readable from /proc, so a live holder is only provable on Linux.
-describe.skipIf(process.platform !== 'linux')('a second agent booted onto a live agent\'s home', () => {
+describe('a second agent booted onto a live agent\'s home', () => {
   test('is refused at boot, and the refusal names the pid that holds it', async () => {
     const home = makeProjectTempDir('agent-home-claim');
-    const holder = await liveForeignProcess();
-    writeClaim(home, holder);
+    const holder = await liveHolder(home);
 
     let refusal: unknown;
     try {
@@ -165,7 +104,7 @@ describe.skipIf(process.platform !== 'linux')('a second agent booted onto a live
   });
 });
 
-describe.skipIf(process.platform !== 'linux')('one-shot commands against a home a live agent holds', () => {
+describe('one-shot commands against a home a live agent holds', () => {
   async function runCli(home: string, args: readonly string[]): Promise<{ readonly exitCode: number; readonly output: string }> {
     const workingDirectory = join(home, 'work');
     mkdirSync(workingDirectory, { recursive: true });
@@ -187,8 +126,7 @@ describe.skipIf(process.platform !== 'linux')('one-shot commands against a home 
 
   test('a listing answers, and a command that writes the shared stores is refused naming the holder', async () => {
     const home = makeProjectTempDir('agent-home-readonly');
-    const holder = await liveForeignProcess();
-    writeClaim(home, holder);
+    const holder = await liveHolder(home);
 
     const listing = await runCli(home, ['sessions', 'list']);
     expect(listing.exitCode).toBe(0);

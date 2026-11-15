@@ -381,7 +381,7 @@ describe('orchestrator-runner: per-turn passive knowledge injection', () => {
     ]);
 
     const featureFlagManager = createFeatureFlagManager();
-    featureFlagManager.disable('agent-passive-knowledge-injection');
+    featureFlagManager.applyConfigState('agent-passive-knowledge-injection', 'disabled');
 
     const capturedSystemPrompts: string[] = [];
     let chatCallCount = 0;
@@ -597,7 +597,7 @@ test('captured same-line generations refresh without reranking memory and old at
   try {
     const memory = makeCountingMemoryRegistry([]);
     const record = makeRecord({ id: 'captured-generation-runner' });
-    const flags = createFeatureFlagManager(); flags.enable('agent-passive-code-injection');
+    const flags = createFeatureFlagManager(); flags.applyConfigState('agent-passive-code-injection', 'enabled');
     let generation = 0; let active = false; let disposed = false;
     const prompts: string[] = []; const reads: number[] = []; const attempts: (() => void | Promise<void>)[] = [];
     const provider: LLMProvider = { name: 'fake', models: ['fake-model'], async chat(request) {
@@ -653,7 +653,7 @@ test('captured code-disabled turns retain independent memory when no code budget
     let reads = 0; let budget = 800; let preparation = 0;
     const memoryRegistry = { ...makeCountingMemoryRegistry([]).registry, getAll: () => ++reads === 1 ? [] : [makeMemoryRecord({ id: 'retained-memory', summary: 'deployment docs use deployment templates', confidence: 90, reviewState: 'reviewed' })] };
     const record = makeRecord({ id: 'captured-memory-only' });
-    const flags = createFeatureFlagManager(); flags.disable('agent-passive-code-injection');
+    const flags = createFeatureFlagManager(); flags.applyConfigState('agent-passive-code-injection', 'disabled');
     const prompts: string[] = [];
     const provider: LLMProvider = { name: 'fake', models: ['fake-model'], async chat(request) {
       prompts.push(request.systemPrompt ?? '');
@@ -673,12 +673,12 @@ test('disabling the global passive flag after a captured turn cannot reuse relea
   const root = mkdtempSync(join(tmpdir(), 'captured-global-gate-'));
   try {
     const record = makeRecord({ id: 'captured-global-gate' });
-    const flags = createFeatureFlagManager(); flags.enable('agent-passive-code-injection');
+    const flags = createFeatureFlagManager(); flags.applyConfigState('agent-passive-code-injection', 'enabled');
     let active = false; let prepares = 0;
     const prompts: string[] = [];
     const provider: LLMProvider = { name: 'fake', models: ['fake-model'], async chat(request) {
       prompts.push(request.systemPrompt ?? '');
-      flags.disable('agent-passive-knowledge-injection');
+      flags.applyConfigState('agent-passive-knowledge-injection', 'disabled');
       return { content: '', toolCalls: prompts.length < 2 ? [{ id: 'c', name: 'nonexistent_tool', arguments: {} }] : [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: prompts.length < 2 ? 'tool_call' : 'completed' };
     } };
     const base = makeContext({ workingDirectory: root, runtimeBus: new RuntimeEventBus(), messageBus: new AgentMessageBus(), provider, memoryRegistry: makeCountingMemoryRegistry([]).registry, featureFlagManager: flags });
@@ -706,7 +706,7 @@ test.each([false, true])('new-input zero-budget turn clears memory through later
       id: 'prior-deployment-memory', summary: 'deployment docs use deployment templates', confidence: 90, reviewState: 'reviewed',
     })] };
     const flags = createFeatureFlagManager();
-    flags.disable('agent-passive-code-injection');
+    flags.applyConfigState('agent-passive-code-injection', 'disabled');
     const prompts: string[] = [];
     const provider: LLMProvider = { name: 'fake', models: ['fake-model'], async chat(request) {
       prompts.push(request.systemPrompt ?? '');
@@ -747,7 +747,7 @@ test.each(['success', 'retry', 'continuation', 'policy-retry', 'file-continuatio
     // expect() thrown there would fail the run for a reason the status hides.
     let promptHadCode = false; let hadBeforeAttempt = false; let returnedToolCall = false;
     let secondAttemptError: unknown;
-    const flags = createFeatureFlagManager(); flags.enable('agent-passive-code-injection');
+    const flags = createFeatureFlagManager(); flags.applyConfigState('agent-passive-code-injection', 'enabled');
     const provider: LLMProvider = { name: 'fake', models: ['fake-model'], async chat(request) {
       dispatched++;
       promptHadCode = (request.systemPrompt ?? '').includes('backoff.ts');

@@ -51,10 +51,15 @@ export { StateInspectorProvider } from './inspector.js';
 // ── Domain adapter re-export ──────────────────────────────────────────────────
 export type { InspectableDomain } from '../../diagnostics/panels/state-inspector.js';
 
+// ── Runtime store adapter ─────────────────────────────────────────────────────
+export { runtimeStoreDomains } from './runtime-store-domains.js';
+export type { InspectableRuntimeStore } from './runtime-store-domains.js';
+
 // ── Factory ───────────────────────────────────────────────────────────────────
 import { StateInspectorProvider } from './inspector.js';
 import type { InspectableDomain } from '../../diagnostics/panels/state-inspector.js';
 import type { StateInspectorConfig } from './types.js';
+import { runtimeStoreDomains, type InspectableRuntimeStore } from './runtime-store-domains.js';
 
 /**
  * Factory parameters for createStateInspector.
@@ -75,4 +80,15 @@ export function createStateInspector(
 ): StateInspectorProvider {
   const { domains = [], ...config } = options;
   return new StateInspectorProvider(domains, config);
+}
+
+/**
+ * The state inspector over a runtime store: every store domain registered.
+ * Constructing it reads nothing; a snapshot serializes and masks on request.
+ */
+export function createRuntimeStoreInspector(
+  store: InspectableRuntimeStore,
+  config: StateInspectorConfig = {},
+): StateInspectorProvider {
+  return new StateInspectorProvider(runtimeStoreDomains(store), config);
 }

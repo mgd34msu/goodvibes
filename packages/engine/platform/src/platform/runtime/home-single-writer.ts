@@ -19,78 +19,39 @@
  * This is the PROCESS-level guard: at boot, a surface claims its home, and a
  * second live process claiming the same home is REFUSED with a message naming
  * the pid that holds it. It is not a mutex around a write and it does not wait
- *, waiting is the wrong answer to "another copy of me is already running", and
- * a boot that hangs is worse than a boot that says why it stopped.
+ * for the holder to finish: waiting is the wrong answer to "another copy of me
+ * is already running", and a boot that hangs is worse than a boot that says
+ * why it stopped. It retries for a moment only, so a copy that is just exiting
+ * (a restart) is not mistaken for one that is running.
  *
  * The STORE-level half, serializing two writers of one JSON file so neither
- * tears the other's write, is a different layer with a different answer
- * (`acquireCrossProcessLock`, and the atomic-store work alongside it). Both are
- * wanted; neither substitutes for the other. A single-writer boot guard cannot
- * help a daemon and a CLI legitimately sharing a file, and a write lock cannot
- * stop a second agent from existing.
+ * tears the other's write, is a different layer with a different answer (the
+ * per-store process lock). Both are wanted; neither substitutes for the other.
  *
  * ── How ownership is decided ───────────────────────────────────────────────
  *
- * The claim is a small JSON record at `<home>/.goodvibes/<surface>/owner.json`
- * carrying the pid, when it was claimed, and an identity string. A claim is
- * LIVE when its pid is still alive AND that pid still looks like the same
- * program (its argv, read from `/proc/<pid>/cmdline` on Linux, still matches
- * the recorded identity). The second half is what keeps a recycled pid from
- * producing a refusal that names a process which has nothing to do with us,
- * a false refusal at boot is a product that will not start, so the check errs
- * toward letting the boot proceed.
- *
- * Everything the decision needs is passed in, so the whole rule is exercisable
- * without spawning a process or writing a file: {@link decideHomeClaim} is
- * pure, and {@link claimSurfaceHome} is the thin filesystem shell around it.
+ * The claim is the kernel-released process lock on
+ * `<home>/.goodvibes/<surface>/owner.writer.sqlite`, held for the life of the
+ * process. The operating system releases it when the holder exits, however it
+ * exits, on every platform: there is no liveness inference, no command-line
+ * identity and no pid-reuse rule. `owner.json` beside it records the holder's
+ * pid and claim time so a refusal can name them; it is information, not the
+ * claim.
  */
 
 import { readFileSync, rmSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
-import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { holdProcessLock, type HeldProcessLock } from '../utils/process-lock.js';
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** The record written to the claim file. */
+/** The record written beside the lock so a refusal can name the holder. */
 export interface HomeOwnerClaim {
   readonly pid: number;
-  readonly token?: string | undefined;
-  /** Epoch millis the claim was written. */
+  /** Epoch millis the claim was taken. */
   readonly claimedAt: number;
-  /**
-   * A short, stable description of the program holding the home, the argv of
-   * the process that claimed it. Compared against the CURRENT argv of that pid
-   * so a recycled pid does not masquerade as a live holder.
-   */
-  readonly identity: string;
 }
-
-/** What {@link decideHomeClaim} was asked. */
-export interface HomeClaimInput {
-  /** The claim currently on disk, or null when the home is unclaimed. */
-  readonly existing: HomeOwnerClaim | null;
-  /** This process's pid. */
-  readonly pid: number;
-  /** This process's identity string. */
-  readonly identity: string;
-  /**
-   * The identity of the pid recorded in `existing`, as it looks RIGHT NOW, or
-   * null when that pid is not alive (or cannot be read). Null ⇒ nothing holds
-   * the home.
-   */
-  readonly holderIdentityNow: string | null;
-}
-
-/** The verdict. */
-export type HomeClaimDecision =
-  /** The home is ours to take; write the claim. */
-  | { readonly outcome: 'claim' }
-  /** We already hold it (same pid). Nothing to write; nothing to refuse. */
-  | { readonly outcome: 'already-held' }
-  /** Another live process holds it. `message` is the plain refusal. */
-  | { readonly outcome: 'refuse'; readonly holderPid: number; readonly message: string };
 
 /**
  * How a refusal reads. Names the pid, the home, and what to do, a message
@@ -102,98 +63,31 @@ export function homeClaimRefusalMessage(input: {
   readonly homePath: string;
   readonly claimedAt: number;
 }): string {
+  const owner = input.holderPid > 0
+    ? `  owner pid: ${input.holderPid}${input.claimedAt > 0 ? ` (claimed ${new Date(input.claimedAt).toISOString()})` : ''}`
+    : '  owner pid: not yet recorded (the other process is starting)';
+  const stop = input.holderPid > 0 ? `stop it (pid ${input.holderPid})` : 'stop it';
   return [
     `Refusing to start: this ${input.surfaceRoot} home is already owned by a live process.`,
     `  home: ${input.homePath}`,
-    `  owner pid: ${input.holderPid} (claimed ${new Date(input.claimedAt).toISOString()})`,
+    owner,
     'Two processes writing one home is what corrupts sessions and leaves ghost "active"',
     'entries behind, so this one is stopping instead.',
-    `Use the process that is already running, or stop it (pid ${input.holderPid}) and start again.`,
+    `Use the process that is already running, or ${stop} and start again.`,
   ].join('\n');
 }
 
-/**
- * Decide whether this process may claim the home. Pure.
- *
- * The bias is deliberate and one-directional: every uncertainty resolves to
- * `claim`. An unreadable claim, a dead pid, a pid whose identity no longer
- * matches, all of those mean nothing is holding the home, because refusing a
- * boot on a stale record is a product that will not start for a reason that is
- * not true.
- */
-export function decideHomeClaim(input: HomeClaimInput, options?: {
-  readonly surfaceRoot?: string | undefined;
-  readonly homePath?: string | undefined;
-}): HomeClaimDecision {
-  const existing = input.existing;
-  if (!existing) return { outcome: 'claim' };
-  if (existing.pid === input.pid) return { outcome: 'already-held' };
-  if (input.holderIdentityNow === null) return { outcome: 'claim' };
-  // A pid that is alive but is now some OTHER program is a recycled pid, not a
-  // second copy of us.
-  if (input.holderIdentityNow !== existing.identity) return { outcome: 'claim' };
-  return {
-    outcome: 'refuse',
-    holderPid: existing.pid,
-    message: homeClaimRefusalMessage({
-      holderPid: existing.pid,
-      surfaceRoot: options?.surfaceRoot ?? 'goodvibes',
-      homePath: options?.homePath ?? '(unknown)',
-      claimedAt: existing.claimedAt,
-    }),
-  };
-}
-
-/** Where a surface's claim file lives. */
+/** Where a surface's owner record lives. */
 export function surfaceHomeClaimPath(homeDirectory: string, surfaceRoot: string): string {
   return join(homeDirectory, '.goodvibes', surfaceRoot, 'owner.json');
 }
 
-/**
- * This process's identity string, recorded the same way another process reads
- * it back. On Linux that is `/proc/<pid>/cmdline`, whose argv[0] is the name the
- * process was launched with and so differs from `process.argv[0]` (an absolute
- * path); recording argv would never match what a second process reads. Where
- * `/proc` is absent the joined argv is the fallback, and the reader returns
- * null there anyway.
- */
-export function currentProcessIdentity(argv: readonly string[] = process.argv): string {
-  if (argv === process.argv) {
-    const observed = readProcessIdentity(process.pid);
-    if (observed !== null) return observed;
-  }
-  return argv.join(' ').slice(0, 512);
+/** The lock file whose kernel lock is the claim. */
+export function surfaceHomeLockPath(homeDirectory: string, surfaceRoot: string): string {
+  return join(homeDirectory, '.goodvibes', surfaceRoot, 'owner.writer.sqlite');
 }
 
-/**
- * The identity of a live pid, or null when it is not alive / not readable.
- *
- * Linux reads `/proc/<pid>/cmdline` (NUL-separated argv). Everywhere else there
- * is no portable way to read another process's argv without spawning, and this
- * runs at boot, so the answer is null, which resolves to `claim`. On those
- * hosts the guard degrades to "pid liveness is not proof", which is honest: it
- * refuses nothing rather than refusing on a guess.
- */
-export function readProcessIdentity(pid: number): string | null {
-  if (!Number.isFinite(pid) || pid <= 0) return null;
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    // EPERM means it exists but is not ours to signal, still alive.
-    if ((error as NodeJS.ErrnoException).code !== 'EPERM') return null;
-  }
-  if (process.platform !== 'linux') return null;
-  try {
-    const raw = readFileSync(`/proc/${pid}/cmdline`, 'utf-8');
-    const argv = raw.split('\0').filter((part) => part !== '');
-    if (argv.length === 0) return null;
-    return argv.join(' ').slice(0, 512);
-  } catch {
-    return null;
-  }
-}
-
-/** Read the claim on disk, or null when there is none / it is unreadable. */
+/** Read the owner record, or null when there is none / it is unreadable. */
 function readClaim(path: string): HomeOwnerClaim | null {
   let raw: string;
   try {
@@ -205,18 +99,13 @@ function readClaim(path: string): HomeOwnerClaim | null {
     const parsed = JSON.parse(raw) as Partial<HomeOwnerClaim>;
     const pid = Number(parsed.pid);
     if (!Number.isFinite(pid) || pid <= 0) return null;
-    return {
-      pid,
-      claimedAt: Number.isFinite(Number(parsed.claimedAt)) ? Number(parsed.claimedAt) : 0,
-      identity: typeof parsed.identity === 'string' ? parsed.identity : '',
-      token: typeof parsed.token === 'string' ? parsed.token : undefined,
-    };
+    return { pid, claimedAt: Number.isFinite(Number(parsed.claimedAt)) ? Number(parsed.claimedAt) : 0 };
   } catch {
     return null;
   }
 }
 
-/** Raised when another live process already owns this home. */
+/** Raised when another live process already owns this home. `holderPid` is 0 when the holder has not recorded itself yet. */
 export class SurfaceHomeInUseError extends Error {
   readonly holderPid: number;
   constructor(message: string, holderPid: number) {
@@ -228,31 +117,42 @@ export class SurfaceHomeInUseError extends Error {
 
 /** What a successful claim hands back. */
 export interface SurfaceHomeClaim {
-  /** The file this process now owns. */
+  /** The owner record this process wrote. */
   readonly path: string;
-  /** Drop the claim. Idempotent, and only ever removes a claim this process wrote. */
+  /** Drop the claim. Idempotent; the home is free once the last holder in this process releases. */
   release(): void;
 }
 
 /**
- * How many live holders this process has per claim path.
- *
- * One process may legitimately compose several graphs over one home, the
- * daemon builds a workspace floor per hosted workspace, all under its own home
- * and its own pid. Those are `already-held`, and the first of them to be
- * disposed must not delete a claim the others are still standing on. Counted,
- * so the file goes away when the LAST holder in this process releases.
+ * The claims this process holds, by lock path, with how many holders stand on
+ * each. One process may legitimately compose several graphs over one home (the
+ * daemon builds a workspace floor per hosted workspace, all under its own
+ * home); the first of them to be disposed must not give up a claim the others
+ * still stand on.
  */
-const heldClaims = new Map<string, { pid: number; token: string; count: number }>();
+const heldClaims = new Map<string, { lock: HeldProcessLock; count: number }>();
+
+/** How long a claim retries a held lock before refusing: a copy that is exiting releases within this. */
+const CLAIM_RETRY_MS = 500;
+const CLAIM_RETRY_STEP_MS = 25;
 
 export interface ClaimSurfaceHomeOptions {
   readonly homeDirectory: string;
   readonly surfaceRoot: string;
-  /** Seams for tests; the real ones are the defaults. */
-  readonly pid?: number | undefined;
-  readonly identity?: string | undefined;
-  readonly identityOf?: ((pid: number) => string | null) | undefined;
+  /** Clock for the recorded claim time; the real one is the default. */
   readonly now?: (() => number) | undefined;
+}
+
+function takeLock(lockPath: string): HeldProcessLock | null {
+  const deadline = Date.now() + CLAIM_RETRY_MS;
+  let pause: Int32Array | null = null;
+  for (;;) {
+    const lock = holdProcessLock(lockPath);
+    if (lock || Date.now() >= deadline) return lock;
+    // Boot only, and only while another process holds the home.
+    pause ??= new Int32Array(new SharedArrayBuffer(4));
+    Atomics.wait(pause, 0, 0, CLAIM_RETRY_STEP_MS);
+  }
 }
 
 /**
@@ -263,30 +163,28 @@ export interface ClaimSurfaceHomeOptions {
  */
 export function claimSurfaceHome(options: ClaimSurfaceHomeOptions): SurfaceHomeClaim {
   const path = surfaceHomeClaimPath(options.homeDirectory, options.surfaceRoot);
-  const unlock = tryAcquireCrossProcessLock(`${path}.lock`);
-  if (!unlock) {
-    const existing = readClaim(path);
-    throw new SurfaceHomeInUseError(`Another process is claiming or releasing this home: ${path}. Wait a moment and start again; if it keeps happening, check that no other copy is starting up.`, existing?.pid ?? 0);
-  }
-  try { return claimLockedHome(options, path); }
-  finally { unlock(); }
-}
-
-function claimLockedHome(options: ClaimSurfaceHomeOptions, path: string): SurfaceHomeClaim {
-  const pid = options.pid ?? process.pid;
-  const identity = options.identity ?? currentProcessIdentity();
-  const existing = readClaim(path);
-  const decision = decideHomeClaim({
-    existing, pid, identity,
-    holderIdentityNow: existing && existing.pid !== pid ? (options.identityOf ?? readProcessIdentity)(existing.pid) : null,
-  }, { surfaceRoot: options.surfaceRoot, homePath: path });
-  if (decision.outcome === 'refuse') throw new SurfaceHomeInUseError(decision.message, decision.holderPid);
-
-  let held = heldClaims.get(path);
-  if (!held || held.pid !== pid || held.token !== existing?.token) {
-    held = { pid, token: randomUUID(), count: 0 };
-    writeJsonFileAtomic(path, { pid, identity, token: held.token, claimedAt: (options.now ?? Date.now)() });
-    heldClaims.set(path, held);
+  const lockPath = surfaceHomeLockPath(options.homeDirectory, options.surfaceRoot);
+  let held = heldClaims.get(lockPath);
+  if (!held) {
+    const lock = takeLock(lockPath);
+    if (!lock) {
+      const holder = readClaim(path);
+      const holderPid = holder?.pid ?? 0;
+      throw new SurfaceHomeInUseError(homeClaimRefusalMessage({
+        holderPid,
+        surfaceRoot: options.surfaceRoot,
+        homePath: path,
+        claimedAt: holder?.claimedAt ?? 0,
+      }), holderPid);
+    }
+    try {
+      writeJsonFileAtomic(path, { pid: process.pid, claimedAt: (options.now ?? Date.now)() });
+    } catch (error) {
+      lock.release();
+      throw error;
+    }
+    held = { lock, count: 0 };
+    heldClaims.set(lockPath, held);
   }
   held.count += 1;
   const owned = held;
@@ -296,19 +194,16 @@ function claimLockedHome(options: ClaimSurfaceHomeOptions, path: string): Surfac
     release() {
       if (released) return;
       released = true;
-      if (heldClaims.get(path) !== owned) return;
+      if (heldClaims.get(lockPath) !== owned) return;
       if (--owned.count > 0) return;
-      heldClaims.delete(path);
-      // Acquisition and release use the same mutex; an old handle cannot
-      // remove a later claim, even if the process ID was reused.
-      let unlock: (() => void) | null = null;
+      heldClaims.delete(lockPath);
+      // The record is removed while the lock is still held, so it can only be ours.
       try {
-        unlock = tryAcquireCrossProcessLock(`${path}.lock`);
-        if (!unlock) throw new Error('home claim is being updated');
-        if (readClaim(path)?.token === owned.token) rmSync(path, { force: true });
+        rmSync(path, { force: true });
       } catch (error) {
-        logger.debug('home-single-writer: releasing the home claim failed', { path, error: summarizeError(error) });
-      } finally { unlock?.(); }
+        logger.debug('home-single-writer: removing the owner record failed', { path, error: summarizeError(error) });
+      }
+      owned.lock.release();
     },
   };
 }

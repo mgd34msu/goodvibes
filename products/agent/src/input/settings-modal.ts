@@ -472,7 +472,7 @@ export class SettingsModal extends TerminalSettingsModalState<
 
     if (this.currentCategory === 'flags') {
       const flagEntry = this.getSelectedFlag();
-      if (!flagEntry || flagEntry.state === 'killed' || !this.configManager) return;
+      if (!flagEntry || !this.configManager) return;
       const targetState: FlagState = direction === 'right' ? 'enabled' : 'disabled';
       if (flagEntry.state !== targetState) this._setSelectedFlagState(flagEntry, targetState);
       return;
@@ -501,15 +501,12 @@ export class SettingsModal extends TerminalSettingsModalState<
    * settings bridge propagates the change into the gate manager; features
    * that require a restart record an honest pending-restart state instead.
    *
-   * Killed features cannot be toggled. Always-available features (constant
-   * enablement) refuse with guidance naming their real settings keys.
+   * Always-available features (constant enablement) refuse with guidance
+   * naming their real settings keys.
    */
   toggleSelectedFlag(): void {
     const flagEntry = this.getSelectedFlag();
     if (!flagEntry || !this.configManager) return;
-
-    // Killed features are blocked
-    if (flagEntry.state === 'killed') return;
 
     const newState: FlagState = flagEntry.state === 'enabled' ? 'disabled' : 'enabled';
 
@@ -518,7 +515,6 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   private _setSelectedFlagState(flagEntry: FlagEntry, newState: FlagState): void {
     if (!this.configManager || !this._canEditSettings()) return;
-    if (newState === 'killed') return;
     const feature = flagEntry.feature;
 
     try {

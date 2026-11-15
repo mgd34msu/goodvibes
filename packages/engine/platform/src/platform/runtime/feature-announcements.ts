@@ -16,7 +16,7 @@
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { resolveWebBinding } from '../daemon/host-resolver.js';
 import { join } from 'node:path';
-import { withSyncFileLock } from '../config/sync-file-lock.js';
+import { trySyncFileLock } from '../config/sync-file-lock.js';
 import { logger } from '../utils/logger.js';
 import type { ConfigManager } from '../config/manager.js';
 
@@ -38,6 +38,20 @@ interface AnnouncementFileState {
   pending: PendingFeatureAnnouncement[];
 }
 
+/** The outcome of {@link FeatureAnnouncementStore.recordOnce}. */
+export type AnnouncementRecordOutcome = 'recorded' | 'announced-before' | 'busy';
+
+/** How many undelivered lines the pending queue keeps; older ones are dropped first. */
+export const PENDING_ANNOUNCEMENTS_KEPT = 50;
+
+/**
+ * Ids written by memory consolidation runs before their receipts became plain
+ * notices: one per run, never read back. Dropped from `announced` on the next write.
+ */
+function isRetiredRunReceiptId(id: string): boolean {
+  return id.startsWith('memory-consolidation:') || id.startsWith('mcon-');
+}
+
 /**
  * Persisted announce-once bookkeeping under the control-plane config
  * directory, so an announcement made by any process of this install is made
@@ -45,6 +59,14 @@ interface AnnouncementFileState {
  * text waits here until a rendering surface drains it (the daemon folds the
  * queue into the explicitly-consuming /status receipts read), so
  * announce-once lines reach surfaces instead of dead-ending in the log.
+ * A recurring notice (a consolidation run's receipt) joins the queue through
+ * {@link notify} without an announce-once id, so `announced` holds only the
+ * fixed set of once-per-install ids and does not grow with use.
+ *
+ * Every read-modify-write holds the shared file lock (the daemon and the
+ * terminal products write this file). When another process holds it past the
+ * short wait, the write is skipped, not made unlocked: an announcement or
+ * notice that misses its turn is made on the next attempt.
  *
  * File format: `{ announced: { id -> timestamp }, pending: [{id,text,at}] }`.
  * The legacy format (a plain id->timestamp map) reads as announced-with-
@@ -86,8 +108,13 @@ export class FeatureAnnouncementStore {
   }
 
   private persist(state: AnnouncementFileState, context: string): void {
+    const announced: Record<string, number> = {};
+    for (const [id, at] of Object.entries(state.announced)) if (!isRetiredRunReceiptId(id)) announced[id] = at;
+    const pending = state.pending.length > PENDING_ANNOUNCEMENTS_KEPT
+      ? state.pending.slice(state.pending.length - PENDING_ANNOUNCEMENTS_KEPT)
+      : state.pending;
     try {
-      writeJsonFileAtomic(this.path, state);
+      writeJsonFileAtomic(this.path, { announced, pending });
     } catch (err) {
       // An unwritable store must never block the feature; the announcement
       // may repeat on the next start, which is noisy but honest.
@@ -98,53 +125,82 @@ export class FeatureAnnouncementStore {
     }
   }
 
+  /** Run a read-modify-write under the shared file lock, or report that another process holds it. */
+  private locked<T>(operation: () => T): { readonly ran: true; readonly value: T } | { readonly ran: false } {
+    const attempt = trySyncFileLock(this.path, operation);
+    if (!attempt.ran) {
+      logger.debug('[announcements] store busy in another process; skipped this write', { path: this.path });
+    }
+    return attempt;
+  }
+
   has(id: string): boolean {
     return id in this.read().announced;
   }
 
   /**
-   * Record an announcement; returns true only on the FIRST record (the caller
-   * announces), false when it was already made (the caller stays silent).
+   * Record an announcement once per install. `recorded`: this call made it (the
+   * caller announces); `announced-before`: it was already made (stay silent);
+   * `busy`: another process held the store, nothing was written (try again later).
    * With `text`, the first record also enqueues the line for surface delivery
    * (see drainPending), so the announcement reaches a rendering surface, not
    * only the log.
    */
-  record(id: string, text?: string): boolean {
-    // The daemon and the terminal products share this file; the lock makes the
-    // read-check-write one step across processes so only one of them announces.
-    return withSyncFileLock(this.path, () => {
+  recordOnce(id: string, text?: string): AnnouncementRecordOutcome {
+    const attempt = this.locked((): AnnouncementRecordOutcome => {
       const state = this.read();
-      if (id in state.announced) return false;
+      if (id in state.announced) return 'announced-before';
       const at = Date.now();
       state.announced[id] = at;
       if (typeof text === 'string' && text.length > 0) {
         state.pending.push({ id, text, at });
       }
       this.persist(state, id);
-      return true;
+      return 'recorded';
     });
+    return attempt.ran ? attempt.value : 'busy';
+  }
+
+  /** {@link recordOnce} as a boolean: true only when this call made the announcement. */
+  record(id: string, text?: string): boolean {
+    return this.recordOnce(id, text) === 'recorded';
+  }
+
+  /**
+   * Queue a recurring notice for surface delivery without an announce-once id
+   * (a run receipt). The queue keeps the newest {@link PENDING_ANNOUNCEMENTS_KEPT}.
+   * Returns false when another process held the store and nothing was queued.
+   */
+  notify(id: string, text: string): boolean {
+    if (text.length === 0) return false;
+    return this.locked(() => {
+      const state = this.read();
+      state.pending.push({ id, text, at: Date.now() });
+      this.persist(state, id);
+    }).ran;
   }
 
   /**
    * The fired-but-undelivered announcements, cleared on read: exactly-once
    * delivery to the first draining reader (the daemon's explicitly-consuming
-   * /status receipts read), mirroring the daemon receipt contract.
+   * /status receipts read), mirroring the daemon receipt contract. Empty when
+   * another process holds the store; the lines stay queued for the next drain.
    */
   drainPending(): PendingFeatureAnnouncement[] {
-    // Under the same lock as record, so an announcement recorded meanwhile is
-    // not overwritten by this write of a stale copy of the file.
-    return withSyncFileLock(this.path, () => {
+    const attempt = this.locked(() => {
       const state = this.read();
       if (state.pending.length === 0) return [];
       const pending = state.pending;
       this.persist({ announced: state.announced, pending: [] }, 'drain');
       return pending;
     });
+    return attempt.ran ? attempt.value : [];
   }
 
   /** The fired-but-undelivered announcements, left in place until {@link acknowledge} names them. */
   peekPending(): PendingFeatureAnnouncement[] {
-    return withSyncFileLock(this.path, () => this.read().pending);
+    // A read needs no lock: every write replaces the file with one rename.
+    return this.read().pending;
   }
 
   /**
@@ -154,7 +210,7 @@ export class FeatureAnnouncementStore {
    */
   forgetMatching(selects: (id: string) => boolean): void {
     if (!Object.keys(this.read().announced).some(selects)) return;
-    withSyncFileLock(this.path, () => {
+    this.locked(() => {
       const state = this.read();
       const announced: Record<string, number> = {};
       for (const [id, at] of Object.entries(state.announced)) if (!selects(id)) announced[id] = at;
@@ -166,7 +222,7 @@ export class FeatureAnnouncementStore {
 
   /** Removes the named announcements from the pending queue; ids not pending are ignored. */
   acknowledge(ids: ReadonlySet<string>): void {
-    withSyncFileLock(this.path, () => {
+    this.locked(() => {
       const state = this.read();
       const remaining = state.pending.filter((entry) => !ids.has(entry.id));
       if (remaining.length === state.pending.length) return;
@@ -272,15 +328,23 @@ export function buildAutomationEmptyState(input: {
 /**
  * The exec sandbox's first-contained-run announcer: call it on every
  * sandboxed command execution; the FIRST call per install announces once via
- * `onAnnounce` and every later call is silent.
+ * `onAnnounce` and every later call is silent. Once the store has answered
+ * (recorded, or announced before) this process never asks it again, so a
+ * contained command costs one boolean test; a busy store is asked again on the
+ * next run.
  */
 export function createSandboxContainmentAnnouncer(
-  store: Pick<FeatureAnnouncementStore, 'record'>,
+  store: Pick<FeatureAnnouncementStore, 'recordOnce'>,
   onAnnounce: (announcement: FeatureAnnouncement) => void,
 ): () => void {
+  let settled = false;
   return () => {
+    if (settled) return;
     // Recording WITH text also enqueues the line for surface delivery.
-    if (store.record(SANDBOX_CONTAINED_ANNOUNCEMENT_ID, SANDBOX_CONTAINED_ANNOUNCEMENT_TEXT)) {
+    const outcome = store.recordOnce(SANDBOX_CONTAINED_ANNOUNCEMENT_ID, SANDBOX_CONTAINED_ANNOUNCEMENT_TEXT);
+    if (outcome === 'busy') return;
+    settled = true;
+    if (outcome === 'recorded') {
       onAnnounce({
         id: SANDBOX_CONTAINED_ANNOUNCEMENT_ID,
         text: SANDBOX_CONTAINED_ANNOUNCEMENT_TEXT,

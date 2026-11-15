@@ -319,6 +319,8 @@ export interface RuntimeServices {
    */
   readonly triggerManager?: TriggerManager | undefined;
   readonly approvalBroker: ApprovalBroker;
+  /** The daemon's owner inbox (questions, claims, purchase windows, queued actions over this broker); set by the daemon composition. */
+  readonly ownerInbox?: import('../control-plane/owner-inbox.js').OwnerInbox | undefined;
   readonly userPermissionRuleStore: UserPermissionRuleStore; // durable user-origin permission rules (remembered approvals); permissions.rules.* surface
   readonly sessionBroker: SharedSessionBroker;
   readonly deliveryManager: AutomationDeliveryManager;
@@ -728,9 +730,9 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
   // Memory consolidation runs HERE, this runtime is the memory store's single
   // writer. Idle trigger (no busy broker sessions) + slow schedule fallback;
   // reversible outcomes only, receipts retained, learning.consolidation.* tunes it.
-  // Announce-once receipts (constructed HERE, before its first consumer): the
-  // consolidation scheduler's run receipts and later the sandbox containment
-  // line share the one store.
+  // Announce-once store (constructed HERE, before its first consumer): the
+  // consolidation scheduler's run receipts join its delivery queue as notices,
+  // and the sandbox containment line is announced through it once per install.
   const announcementStore = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
   const memoryConsolidationScheduler = new MemoryConsolidationScheduler({
     memoryRegistry,
@@ -743,7 +745,7 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     onReceipt: (receipt) => {
       const changed = receipt.merged.length + receipt.archived.length + receipt.decayed.length + receipt.proposed.length;
       if (changed === 0) return;
-      announcementStore.record(
+      announcementStore.notify(
         `memory-consolidation:${receipt.runId}`,
         `Memory consolidation ran (${receipt.trigger}): ${receipt.merged.length} merged, ${receipt.decayed.length} decayed, ${receipt.archived.length} archived, ${receipt.proposed.length} proposal${receipt.proposed.length === 1 ? '' : 's'} awaiting review.`,
       );

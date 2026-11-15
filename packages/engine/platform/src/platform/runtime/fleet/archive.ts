@@ -15,9 +15,10 @@
  * interrupted) can be archived, a finished member of a still-running swarm
  * stays visible with its parent.
  */
-import type { FleetSnapshot, ProcessNode, ProcessRegistry, ProcessState } from './types.js';
+import type { FleetSnapshot, ProcessNode, ProcessRegistry } from './types.js';
+import { TERMINAL_PROCESS_STATES } from './terminal-states.js';
 
-const ARCHIVE_TERMINAL_STATES: ReadonlySet<ProcessState> = new Set(['done', 'failed', 'killed', 'interrupted']);
+const ARCHIVE_TERMINAL_STATES = TERMINAL_PROCESS_STATES;
 
 export interface FleetArchiveResult {
   readonly archived: boolean;

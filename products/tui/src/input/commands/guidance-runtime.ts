@@ -2,8 +2,46 @@ import { createWelcomeCommand } from '@goodvibes-jev/engine/terminal-shell/entry
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines, getGuidanceMode } from '@/runtime/index.ts';
 import { dismissGuidance, evaluateContextualGuidance, formatGuidanceItems, resetGuidance } from '@/runtime/index.ts';
+import type { GuidancePersistenceOptions } from '@/runtime/index.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireReadModels, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
+
+/** The guidance items active now, with the maintenance reading they were built from. */
+function currentGuidance(ctx: CommandContext, guidanceOptions: GuidancePersistenceOptions) {
+  const llmMessages = ctx.session.conversationManager.getMessagesForLLM();
+  const readModels = requireReadModels(ctx);
+  const session = readModels.session.getSnapshot();
+  const intelligence = readModels.intelligence.getSnapshot();
+  const mcp = readModels.mcp.getSnapshot();
+  const health = readModels.health.getSnapshot();
+  const marketplace = readModels.marketplace.getSnapshot();
+  const maintenance = evaluateSessionMaintenance({
+    configManager: ctx.platform.configManager,
+    currentTokens: estimateConversationTokens(llmMessages),
+    contextWindow: ctx.provider.providerRegistry.getKnownContextWindowForModel(ctx.provider.providerRegistry.getCurrentModel()) ?? 0,
+    messageCount: llmMessages.length,
+    sessionMemoryCount: requireSessionMemoryStore(ctx).list().length,
+    session: session.session,
+  });
+  const authRequiredMcpServers = mcp.servers.filter((server) => server.status === 'auth_required').map((server) => server.name);
+  const items = evaluateContextualGuidance(
+    ctx.platform.configManager,
+    {
+      pendingApproval: session.pendingApproval,
+      denialCount: session.denialCount,
+      authRequiredMcpCount: authRequiredMcpServers.length,
+      authRequiredMcpServers,
+      degradedProviderCount: health.providerProblems.length,
+      degradedProviders: health.providerProblems,
+      intelligenceUnavailable: intelligence.diagnosticsStatus === 'unavailable' && intelligence.symbolSearchStatus === 'unavailable',
+      recommendations: marketplace.recommendations,
+      sessionId: session.session.id,
+    },
+    maintenance,
+    guidanceOptions,
+  );
+  return { items, maintenance };
+}
 
 export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void {
   registry.register(welcomeCommand);
@@ -25,11 +63,17 @@ export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void
           ctx.print('Usage: /guidance dismiss <id>');
           return;
         }
-        if (!dismissGuidance(id, guidanceOptions)) {
+        // A dismissal hides the occurrence showing now; the same condition coming back later shows again.
+        const item = currentGuidance(ctx, guidanceOptions).items.find((candidate) => candidate.id === id);
+        if (!item) {
+          ctx.print(`Guidance item ${id} is not showing now, so there is nothing to dismiss. /guidance lists the items that are.`);
+          return;
+        }
+        if (!dismissGuidance(item, guidanceOptions)) {
           ctx.print(`Could not save the dismissal of guidance item ${id}: the guidance store is busy or unreadable, so nothing was changed. Try again.`);
           return;
         }
-        ctx.print(`Dismissed guidance item ${id}.`);
+        ctx.print(`Dismissed guidance item ${id}. It shows again if the condition comes back.`);
         return;
       }
       if (sub === 'reset') {
@@ -45,40 +89,12 @@ export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      const llmMessages = ctx.session.conversationManager.getMessagesForLLM();
-      const readModels = requireReadModels(ctx);
-      const session = readModels.session.getSnapshot();
-      const intelligence = readModels.intelligence.getSnapshot();
-      const mcp = readModels.mcp.getSnapshot();
-      const health = readModels.health.getSnapshot();
-      const marketplace = readModels.marketplace.getSnapshot();
-      const maintenance = evaluateSessionMaintenance({
-        configManager: ctx.platform.configManager,
-        currentTokens: estimateConversationTokens(llmMessages),
-        contextWindow: ctx.provider.providerRegistry.getKnownContextWindowForModel(ctx.provider.providerRegistry.getCurrentModel()) ?? 0,
-        messageCount: llmMessages.length,
-        sessionMemoryCount: requireSessionMemoryStore(ctx).list().length,
-        session: session.session,
-      });
-      const contextual = evaluateContextualGuidance(
-        ctx.platform.configManager,
-        {
-          pendingApproval: session.pendingApproval,
-          denialCount: session.denialCount,
-          authRequiredMcpCount: mcp.servers.filter((server) => server.status === 'auth_required').length,
-          degradedProviderCount: health.providerProblems.length,
-          intelligenceUnavailable: intelligence.diagnosticsStatus === 'unavailable' && intelligence.symbolSearchStatus === 'unavailable',
-          recommendations: marketplace.recommendations,
-        },
-        maintenance,
-        guidanceOptions,
-      );
-
+      const { items, maintenance } = currentGuidance(ctx, guidanceOptions);
       ctx.print(
         [
           `Guidance Review (${getGuidanceMode(ctx.platform.configManager)})`,
           '',
-          ...formatGuidanceItems(contextual),
+          ...formatGuidanceItems(items),
           '',
           ...formatSessionMaintenanceLines(maintenance, maintenance.guidanceMode === 'guided' ? 'guided' : 'minimal'),
         ].join('\n'),

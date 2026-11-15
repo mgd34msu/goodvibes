@@ -283,7 +283,7 @@ test.each(['toggle', 'adjust'])('Features %s cannot repair unavailable policy or
   modal.open(config, createFeatureFlagManager(), new SubscriptionManager(join(root, 'subscriptions.json')), { getAll: () => ({}) });
   const selectFeature = () => {
     modal.selectTarget('flags');
-    modal.selectedIndex = modal.flagEntries.findIndex(entry => entry.feature.enablement.kind === 'boolean' && entry.state !== 'killed');
+    modal.selectedIndex = modal.flagEntries.findIndex(entry => entry.feature.enablement.kind === 'boolean');
     expect(modal.selectedIndex).toBeGreaterThanOrEqual(0);
     return modal.getSelectedFlag()!;
   };

@@ -171,9 +171,8 @@ describe('the feature is wired up, and the mechanism that said otherwise is reti
   test('the gate follows the setting, on and off', () => {
     expect(isFeatureGateEnabled({ isEnabled: () => true }, 'wake-word-detection')).toBe(true);
     expect(isFeatureGateEnabled({ isEnabled: () => false }, 'wake-word-detection')).toBe(false);
-    // With no manager wired the gate is permissive, as it is for every other
-    // feature that has no inoperability declared.
-    expect(isFeatureGateEnabled(null, 'wake-word-detection')).toBe(true);
+    // With no manager wired the gate answers the feature's declared default.
+    expect(isFeatureGateEnabled(null, 'wake-word-detection')).toBe(false);
     expect(isFeatureGateEnabled(null, 'hitl-ux-modes')).toBe(true);
   });
 

@@ -205,6 +205,29 @@ describe('fleet emit-bridge', () => {
     expect(events.map((e) => e.type)).toEqual(['FLEET_NODE_STARTED']);
   });
 
+  test('a node that started and ended between snapshots emits STARTED then FINISHED, so a completion is not lost', async () => {
+    const bus = new RuntimeEventBus();
+    const reg = fakeRegistry();
+    const { events } = collectFleetEvents(bus);
+    attachFleetEmitBridge({ registry: reg, bus, traceId: () => 't' });
+    reg.push([]); // seed
+    reg.push([node('quick', 'done')]);
+    await flush();
+    expect(events.map((e) => e.type)).toEqual(['FLEET_NODE_STARTED', 'FLEET_NODE_FINISHED']);
+  });
+
+  test('a blocked node that leaves the snapshot emits UNBLOCKED, so its escalation stops', async () => {
+    const bus = new RuntimeEventBus();
+    const reg = fakeRegistry();
+    const { events } = collectFleetEvents(bus);
+    attachFleetEmitBridge({ registry: reg, bus, traceId: () => 't' });
+    reg.push([node('a', 'awaiting-approval', { sessionRef: { sessionId: 's1', agentId: 'a' }, ...attention('approval') })]); // seed
+    reg.push([]);
+    await flush();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'FLEET_NODE_UNBLOCKED', nodeId: 'a', sessionId: 's1' });
+  });
+
   test('an emit failure is contained: the snapshot callback does not throw and later snapshots still emit', async () => {
     const bus = new RuntimeEventBus();
     const reg = fakeRegistry();

@@ -50,7 +50,7 @@ interface ClassifierInput {
   readonly errorMessage?: string | undefined;
   /** Whether this entity was explicitly cancelled by the operator. */
   readonly wasCancelled?: boolean | undefined;
-  /** Whether any cascade events were present in the causal context. */
+  /** Whether a cascade reported an entity this work depended on as failed. */
   readonly hasCascadeEvents?: boolean | undefined;
   /** Whether any tool calls failed in this turn/task. */
   readonly hasToolFailure?: boolean | undefined;
@@ -97,9 +97,20 @@ export async function classifyFailure(input: ClassifierInput, options?: OwnedJud
     return 'tool_failure';
   }
 
-  // Cascade-induced failure
+  // A failed entity this turn depended on (an MCP server it called)
   if (input.hasCascadeEvents) {
     return 'cascade_failure';
+  }
+
+  // A stop reason that already says the LLM call failed: no reading of the text
+  if (
+    input.stopReason === 'provider_exhausted' ||
+    input.stopReason === 'provider_error' ||
+    input.stopReason === 'error' ||
+    input.stopReason === 'stop_sequence' ||
+    input.stopReason === 'content_filter'
+  ) {
+    return 'llm_error';
   }
 
   // What the error message says: a turn deadline or a failed LLM call
@@ -120,17 +131,6 @@ export async function classifyFailure(input: ClassifierInput, options?: OwnedJud
     current();
     const read = CLASS_FOR_CATEGORY[category];
     if (read !== undefined) return read;
-  }
-
-  // LLM stop reason hinting at an error
-  if (
-    input.stopReason === 'provider_exhausted' ||
-    input.stopReason === 'provider_error' ||
-    input.stopReason === 'error' ||
-    input.stopReason === 'stop_sequence' ||
-    input.stopReason === 'content_filter'
-  ) {
-    return 'llm_error';
   }
 
   return 'unknown';
@@ -157,7 +157,7 @@ export function summariseFailure(
     case 'permission_denied':
       return 'Tool call denied by permission policy';
     case 'cascade_failure':
-      return 'Failure propagated via health cascade';
+      return 'An MCP server this turn was using failed';
     case 'turn_timeout':
       return 'Turn exceeded configured timeout';
     case 'cancelled':

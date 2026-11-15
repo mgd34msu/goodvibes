@@ -363,12 +363,12 @@ The `ForensicsClassifier` maps event context to a `FailureClass` using priority-
 | `compaction_error` | Compaction failure recorded |
 | `permission_denied` | Permission denial or `hook_denied` stop reason |
 | `tool_failure` | Tool execution failure or `tool_loop_circuit_breaker` |
-| `cascade_failure` | A health cascade (`CASCADE_APPLIED`) was observed for the session while the turn or task was in flight |
+| `cascade_failure` | An MCP server the turn called a tool of was reported failed (`CASCADE_APPLIED` from the `mcp` domain) while the turn was in flight |
+| `llm_error` | The stop reason is `provider_exhausted`, `provider_error`, `error`, `stop_sequence` or `content_filter`, or the error message is read as a rate limit, billing, authentication, authorization, service, network or protocol failure |
 | `turn_timeout` | The error message is read as a timeout |
-| `llm_error` | The error message is read as a rate limit, billing, authentication, authorization, service, network or protocol failure, or the stop reason is `provider_exhausted`, `provider_error`, `error`, `stop_sequence` or `content_filter` |
-| `unknown` | No pattern matched |
+| `unknown` | No pattern matched, or the error message could not be read |
 
-The error message is not matched against words. The failure reading (a Jev decision) assigns it a category, and only that category maps to a class. In Classic operation, or when the reading is unsure, the category is `unknown`, so a failure that has only a message (for example "request timed out") is classified `unknown` unless one of the stop reasons above applies. Error text is stored with credential-shaped spans masked.
+The rungs are taken in this order, and the stop reason is checked before the error message is read. The error message is not matched against words. The failure reading (a Jev decision) assigns it a category, and only that category maps to a class. In Classic operation, when the reading is unsure, or when it cannot be had at all (the decision model is unreachable), the category is `unknown`; the report is still published with everything else it collected. A permission denial is the gate's `TOOL_PERMISSIONED` event with `approved: false`. Error text is stored with credential-shaped spans masked.
 
 ### FailureReport structure
 
@@ -385,9 +385,9 @@ interface FailureReport {
   taskId?: string;
   turnId?: string;
   agentId?: string;
-  phaseTimings: PhaseTimingEntry[];  // PREFLIGHT, STREAM, TOOL_BATCH, POST_HOOKS, ...
-  slowPhases: string[];              // phases read as unusually long for their kind
-  slowPhaseAssessment?: 'semantic' | 'not-needed' | 'not-evaluated'; // an empty slowPhases is a finding only when 'semantic'
+  phaseTimings: PhaseTimingEntry[];  // turn: PREFLIGHT, MODEL_REQUEST, STREAM, AFTER_STREAM, TOOLS, AFTER_TOOLS; task: CREATED, RUNNING
+  slowPhases: string[];              // phases over the phase table's limit for their kind
+  slowPhaseAssessment?: 'table' | 'not-needed'; // 'not-needed' for a cancellation or when no phase was timed
   operationProvenance?: 'classic';   // present on reports produced in Classic operation
   phaseLedger: PhaseLedgerEntry[];   // explicit phase transition log
   causalChain: CausalChainEntry[];   // root cause first
@@ -398,7 +398,7 @@ interface FailureReport {
 }
 ```
 
-An incident bundle carries `slowPhases` in its evidence. When several failures share one trace, the report ids stay distinct (`3fa91c2e`, `3fa91c2e-2`, ...) so each id resolves to its own report.
+Each phase is named for what happens in it: `PREFLIGHT` (local checks before the model call), `MODEL_REQUEST` (until the reply starts), `STREAM` (the reply), `AFTER_STREAM`, `TOOLS` (from the first tool call received until none is in flight) and `AFTER_TOOLS`. Whether a phase was slow is decided in code from one table (`SLOW_PHASE_LIMITS_MS` in `runtime/forensics/slow-phases.ts`: seconds for local phases, minutes for the model and tools); building a report makes no model request beyond the error-message reading. An incident bundle carries `slowPhases` in its evidence. When several failures share one trace, the report ids stay distinct (`3fa91c2e`, `3fa91c2e-2`, ...) so each id resolves to its own report.
 
 ### ForensicsRegistry
 
@@ -488,6 +488,8 @@ What failed and what can be done about it are served by the live owners, through
 | Retry or cancel a task | `tasks.retry`, `tasks.cancel` (the ops control plane) |
 | Agents and their work | `fleet.snapshot`, `fleet.list` |
 
+Each health domain's status comes from its own entities, as their owners announce them: each MCP server, each transport, each session's last turn and last compaction, each agent. A domain is `failed` when every entity it tracks is failing, `degraded` when some are, and its failure reason names them; one entity failing does not make unrelated work look failed. A cascade rule (`runtime/health/cascade-rules.ts`) reports what a failing domain affects as a `CASCADE_APPLIED` event with `enforced: false` and the remediation playbooks for that failure mode; it does not cancel, block or change another domain's status.
+
 ### Panels built by live owners
 
 | Panel | Class | Built by |
@@ -498,6 +500,8 @@ What failed and what can be done about it are served by the live owners, through
 | State inspector | `StateInspectorPanel` | its `InspectableDomain` type is the state inspector's |
 
 A panel follows one pattern: construct it with its data sources, read `getSnapshot()`, subscribe for changes, and call `dispose()` to release.
+
+The terminal products' runtime floor builds one state inspector over the runtime store (`stateInspector` on the client runtime services, `createRuntimeStoreInspector`): every store domain is registered, and a snapshot, the transition history and the timeline are read on demand. Constructing it reads nothing. A snapshot renders a `Date` as ISO text, an `Error` as `{ name, message }`, a `bigint` as decimal text and binary data as `"<N bytes>"`, masks credential-shaped spans, and stops at a fixed depth and value count with `"[Truncated]"`.
 
 ### Provider health
 

@@ -117,16 +117,6 @@ describe('FeatureFlagManager.applyConfigState: direct unit coverage', () => {
     expect(manager.getPendingRestartState(STARTUP_GATED_FLAG_ID)).toBeNull();
   });
 
-  test('killed semantics still follow the manager\'s existing kill-precedence rules via applyConfigState', () => {
-    const manager = createFeatureFlagManager();
-    manager.applyConfigState(TOGGLEABLE_FLAG_ID, 'killed');
-    expect(manager.getState(TOGGLEABLE_FLAG_ID)).toBe('killed');
-
-    // A derived enable can never silently resurrect a killed gate.
-    manager.applyConfigState(TOGGLEABLE_FLAG_ID, 'enabled');
-    expect(manager.getState(TOGGLEABLE_FLAG_ID)).toBe('killed');
-  });
-
   test('loadFromConfig (boot path) seeds startup-gated gates directly', () => {
     const manager = createFeatureFlagManager();
     manager.loadFromConfig({ flags: { [STARTUP_GATED_FLAG_ID]: 'enabled', [TOGGLEABLE_FLAG_ID]: 'enabled' } });

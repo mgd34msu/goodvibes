@@ -15,9 +15,11 @@
  * call.
  *
  * When the lock cannot be taken (another process holds it past the wait, or the
- * directory cannot hold the lock file) the operation still runs, unlocked, with
- * a warning: the caller's change is the user's intent, and dropping it would be
- * worse than the lost-update window this lock narrows.
+ * directory cannot hold the lock file) `withSyncFileLock` still runs the
+ * operation, unlocked, with a warning: the caller's change is the user's intent,
+ * and dropping it would be worse than the lost-update window this lock narrows.
+ * A write that can simply happen next time (a notice, a receipt) uses
+ * `trySyncFileLock` instead, which skips the operation.
  */
 import { resolve } from 'node:path';
 import { withProcessLockSync } from '../utils/process-lock.js';
@@ -35,20 +37,34 @@ export function syncFileLockPath(target: string): string {
   return `${resolve(target)}.writer.sqlite`;
 }
 
-/** Run `operation` with the lock for `target` held, releasing it however the operation ends. */
-export function withSyncFileLock<T>(target: string, operation: () => T): T {
+/** The outcome of {@link trySyncFileLock}: the operation's value, or that the lock could not be taken. */
+export type SyncFileLockAttempt<T> = { readonly ran: true; readonly value: T } | { readonly ran: false; readonly error: unknown };
+
+/**
+ * Run `operation` with the lock for `target` held, or skip it when the lock
+ * cannot be taken within the wait. Errors thrown by the operation propagate.
+ */
+export function trySyncFileLock<T>(target: string, operation: () => T): SyncFileLockAttempt<T> {
   const lock = syncFileLockPath(target);
-  if (heldHere.has(lock)) return operation();
+  if (heldHere.has(lock)) return { ran: true, value: operation() };
   let entered = false;
   try {
-    return withProcessLockSync(lock, () => {
+    const value = withProcessLockSync(lock, () => {
       entered = true;
       heldHere.add(lock);
       try { return operation(); } finally { heldHere.delete(lock); }
     }, { waitMs: WAIT_MS });
+    return { ran: true, value };
   } catch (error) {
     if (entered) throw error;
-    logger.warn('Shared file lock could not be taken; saving without it', { lock, error: summarizeError(error) });
-    return operation();
+    return { ran: false, error };
   }
+}
+
+/** Run `operation` with the lock for `target` held, releasing it however the operation ends. */
+export function withSyncFileLock<T>(target: string, operation: () => T): T {
+  const attempt = trySyncFileLock(target, operation);
+  if (attempt.ran) return attempt.value;
+  logger.warn('Shared file lock could not be taken; saving without it', { lock: syncFileLockPath(target), error: summarizeError(attempt.error) });
+  return operation();
 }

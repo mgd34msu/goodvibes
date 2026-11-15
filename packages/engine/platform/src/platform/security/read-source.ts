@@ -111,22 +111,6 @@ export function captureSecurityReadData(read: () => unknown): () => void {
   };
 }
 
-export function retainSecurityReadMap<K, V>(map: Map<K, V>): () => void {
-  assertSecurityReadSource(!nodeTypes.isProxy(map) && Object.getPrototypeOf(map) === Map.prototype && Reflect.ownKeys(map).length === 0);
-  const binding = captureSecurityReadBindings(map, ['entries']);
-  const entries = [...map.entries()];
-  const dataCurrent = retainSecurityReadData(entries);
-  return () => {
-    binding(); dataCurrent();
-    assertSecurityReadSource(Object.getPrototypeOf(map) === Map.prototype && Reflect.ownKeys(map).length === 0);
-    const current = [...map.entries()];
-    assertSecurityReadSource(current.length === entries.length && current.every((entry, index) => {
-      const original = entries[index];
-      return original !== undefined && Object.is(entry[0], original[0]) && Object.is(entry[1], original[1]);
-    }));
-  };
-}
-
 /** Observe manifests plus native inode clocks; missing paths retain their nearest existing parent. */
 /** An absent file is the same source while it stays absent under the same
  * directory. A directory's times and size change whenever any sibling is

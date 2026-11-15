@@ -122,18 +122,19 @@ describe('the collector', () => {
       installJudgmentPort(previous);
     });
 
-    test('a failure whose message or phases cannot be read gets no report', async () => {
+    test('a failure whose message cannot be read is still reported, as unknown', async () => {
       const bus = new RuntimeEventBus();
       const registry = new ForensicsRegistry();
       const collector = new ForensicsCollector(bus, registry);
       await emitTurn(bus, { type: 'TURN_SUBMITTED', turnId: 't2', prompt: 'hi' });
       await emitTurn(bus, { type: 'TURN_ERROR', turnId: 't2', error: 'Request timed out after 60000ms' });
-      expect(registry.count()).toBe(0);
-      // A cancellation needs no message reading, but its timed phases are read
-      // for slowness, and with no port that reading cannot be taken either.
+      expect(registry.latest()?.classification).toBe('unknown');
+      expect(registry.latest()?.causalChain.length).toBeGreaterThan(0);
+      // A cancellation needs no reading at all.
       await emitTurn(bus, { type: 'TURN_SUBMITTED', turnId: 't3', prompt: 'hi' });
       await emitTurn(bus, { type: 'TURN_CANCEL', turnId: 't3', reason: 'user pressed escape' });
-      expect(registry.count()).toBe(0);
+      expect(registry.latest()?.classification).toBe('cancelled');
+      expect(registry.latest()?.slowPhaseAssessment).toBe('not-needed');
       collector.dispose();
     });
   });

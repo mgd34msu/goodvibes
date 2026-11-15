@@ -1,4 +1,3 @@
-import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadData, retainSecurityReadMap } from '../../security/read-source.js';
 /**
  * ForensicsRegistry, in-memory store for FailureReport objects.
  *
@@ -15,6 +14,7 @@ import type {
 } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
+import { revisionSource, type RevisionSource } from '../../utils/revision.js';
 
 export interface ReplaySnapshotInput {
   readonly status: string;
@@ -44,14 +44,10 @@ export interface ReplaySnapshotInput {
 /** Default maximum number of failure reports retained in memory. */
 export const DEFAULT_REGISTRY_LIMIT = 100;
 
-const forensicsReadSources = new WeakMap<ForensicsRegistry, () => () => void>();
-const getForensicsReadSources = forensicsReadSources.get.bind(forensicsReadSources);
-const setForensicsReadSources = forensicsReadSources.set.bind(forensicsReadSources);
-export function captureForensicsReadSource(registry: ForensicsRegistry): () => void {
-  const capture = getForensicsReadSources(registry); assertSecurityReadSource(capture !== undefined); return capture();
-}
 export class ForensicsRegistry {
   private _readRevision = 0;
+  /** Bumped on every report stored; a reader that must re-check compares this integer. */
+  public readonly revisionSource: RevisionSource = revisionSource('failure reports', () => this._readRevision);
   private readonly _reports: FailureReport[] = [];
   private readonly _byId = new Map<string, FailureReport>();
   private readonly _limit: number;
@@ -59,11 +55,6 @@ export class ForensicsRegistry {
 
   public constructor(limit: number = DEFAULT_REGISTRY_LIMIT) {
     this._limit = limit;
-    setForensicsReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['_readRevision', '_reports', '_byId', '_limit', 'getAll', 'latest']);
-      const revision = this._readRevision, rawCurrent = retainSecurityReadData(this._reports), mapCurrent = retainSecurityReadMap(this._byId);
-      return () => { binding(); rawCurrent(); mapCurrent(); assertSecurityReadSource(this._readRevision === revision); };
-    });
   }
 
   /**

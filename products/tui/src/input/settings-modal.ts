@@ -574,7 +574,6 @@ export class SettingsModal extends TerminalSettingsModalState<
     this._refreshPolicyAvailability();
     const entry = this.getSelected();
     if (!entry?.flag || entry.metadataUnavailable) return;
-    if (entry.flag.state === 'killed') return;
     const feature = entry.flag.feature;
     const currentlyOn = isFeatureValueEnabled(feature, entry.currentValue);
     const write = featureEnablementWrite(feature.id, !currentlyOn);

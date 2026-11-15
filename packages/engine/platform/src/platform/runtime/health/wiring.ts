@@ -21,20 +21,9 @@ import { handleCascadeEffect } from './effect-handlers.js';
 import { logger } from '../../utils/logger.js';
 
 /**
- * Wires the health aggregator, cascade engine, and event bus together.
- *
- * Orchestrates the full error-propagation pipeline:
- * domain health change → cascade evaluation → effect application → event emission.
+ * Wires the health aggregator, cascade engine, and event bus together:
+ * domain health change -> cascade evaluation -> cascade reported on the bus.
  */
-/** The reasons the cascade effect handlers write on a target domain. */
-const CASCADE_REASON_PREFIXES = [
-  'In-flight cancellation requested',
-  'Marked ',
-  'Tool deregistration requested',
-  'Dispatch blocked (scope',
-  'New operations blocked',
-] as const;
-
 export class HealthStoreWiring {
   private unsubscribe: (() => void) | null = null;
 
@@ -96,7 +85,7 @@ export class HealthStoreWiring {
    * Pipeline:
    * 1. Update the domain health in the aggregator.
    * 2. Evaluate cascade rules for the new domain + status.
-   * 3. Apply all actionable cascade effects via effect handlers.
+   * 3. Report all actionable cascades via the effect handler.
    *    Pending-recovery effects are NOT applied, they await recovery exhaustion.
    *    Each evaluation that leaves a rule pending counts as one recovery
    *    attempt, so a domain that keeps failing reaches exhaustion and its
@@ -106,18 +95,19 @@ export class HealthStoreWiring {
    * @param status - The new health status for the domain.
    * @param sourceContext - Optional context identifying the triggering entity
    *   (e.g. `{ pluginId: 'my-plugin' }`). Propagated into CascadeResult.
+   * @param failureReason - What is failing, written on the domain (cleared when healthy).
    * @returns the cascades applied and those still pending recovery.
    */
   evaluateDomain(
     domain: HealthDomain,
     status: HealthStatus,
     sourceContext?: Record<string, string>,
+    failureReason?: string,
   ): EvaluateResult {
     // 1. Update domain health in the aggregator
-    this.aggregator.updateDomainHealth(domain, status);
-
-    // A source that recovered lifts the dispatch blocks its failure placed on other domains.
-    if (status === 'healthy') this.releaseBlockedTargets(domain);
+    this.aggregator.updateDomainHealth(domain, status, status === 'healthy'
+      ? { failureReason: undefined, degradedCapabilities: [] }
+      : failureReason !== undefined ? { failureReason } : undefined);
 
     // 2. Evaluate cascade rules for this domain transition
     const evaluation = this.cascadeEngine.evaluate(domain, status, sourceContext);
@@ -132,27 +122,5 @@ export class HealthStoreWiring {
     }
     if (pendingRecovery.length > 0) this.aggregator.recordRecoveryAttempt(domain);
     return evaluation;
-  }
-
-  /**
-   * Return a target domain to healthy when the effect a recovered source
-   * placed on it (a dispatch block, a cancellation or deregistration request,
-   * children marked failed) was its only reason to be unhealthy and no other
-   * source still holds it. A domain that is unhealthy for its own reasons is
-   * left alone: only the reasons the effect handlers write are recognised.
-   */
-  private releaseBlockedTargets(source: HealthDomain): void {
-    for (const rule of this.cascadeEngine.getRulesForDomain(source, 'failed')) {
-      if (rule.target === 'ALL') continue;
-      const target = this.aggregator.getDomainHealth(rule.target);
-      if (target.status === 'healthy' || target.status === 'unknown') continue;
-      // Another effect may have overwritten the reason since this rule's own
-      // effect ran, so any reason an effect handler writes counts, not only this rule's.
-      const reason = target.failureReason ?? '';
-      const placedByEffect = CASCADE_REASON_PREFIXES.some((prefix) => reason.startsWith(prefix));
-      if (!placedByEffect) continue;
-      if (this.cascadeEngine.getActiveRulesTargeting(rule.target).length > 0) continue;
-      this.aggregator.updateDomainHealth(rule.target, 'healthy', { degradedCapabilities: [] });
-    }
   }
 }

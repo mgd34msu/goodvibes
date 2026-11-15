@@ -1,19 +1,18 @@
 /**
- * Feature flag and kill switch type definitions for the goodvibes-platform runtime.
+ * Feature flag type definitions for the goodvibes-platform runtime.
  *
- * These types model the lifecycle of a feature gate from initial declaration
- * through runtime toggling and emergency kill.
+ * These types model a feature gate from its declaration through the settings
+ * that turn it on and off. Forcing a feature off and saying why is a locked
+ * managed setting's job, not a separate flag state.
  */
 
 /**
- * The three possible states for a feature flag.
+ * The two states of a feature flag.
  *
  * - `enabled` , the feature is active
- * - `disabled`, the feature is inactive (default for all gates)
- * - `killed`  , the feature has been emergency-killed and cannot be re-enabled
- *                until it is explicitly un-killed
+ * - `disabled`, the feature is inactive
  */
-export type FlagState = 'enabled' | 'disabled' | 'killed';
+export type FlagState = 'enabled' | 'disabled';
 
 /**
  * Why a REGISTERED capability cannot operate, regardless of how it is
@@ -71,9 +70,6 @@ export interface FeatureFlag {
   /** Initial state applied on first load when no config override exists */
   defaultState: FlagState;
 
-  /** When killed, this message explains why the flag was killed */
-  killReason?: string | undefined;
-
   /** The implementation tier that introduced this flag (1-based) */
   tier: number;
 
@@ -119,7 +115,4 @@ export interface FlagTransition {
 
   /** Unix timestamp (ms) when the transition occurred */
   timestamp: number;
-
-  /** Optional reason supplied with a kill operation */
-  reason?: string | undefined;
 }

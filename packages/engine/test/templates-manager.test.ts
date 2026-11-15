@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { rmSync, existsSync } from 'fs';
+import { rmSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/platform/platform/templates';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
@@ -87,12 +88,36 @@ describe('TemplateManager', () => {
     test('delete removes an existing template', () => {
       manager.save('to-delete', 'bye');
       const deleted = manager.delete('to-delete');
-      expect(deleted).toBe(true);
+      expect(deleted.ok).toBe(true);
       expect(manager.load('to-delete')).toBeNull();
     });
 
-    test('delete returns false for a non-existent template', () => {
-      expect(manager.delete('ghost')).toBe(false);
+    test('delete refuses a non-existent template', () => {
+      const result = manager.delete('ghost');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.refusal.code).toBe('TEMPLATE_NOT_FOUND');
+    });
+
+    test('a global template survives a project delete and is removed only from the global scope', () => {
+      const home = join(tmpDir, 'home');
+      const project = join(tmpDir, 'project');
+      mkdirSync(join(home, '.goodvibes', 'templates'), { recursive: true });
+      writeFileSync(join(home, '.goodvibes', 'templates', 'plan.md'), 'shared plan', 'utf-8');
+      const scoped = new TemplateManager({ projectRoot: project, homeDirectory: home });
+
+      const refused = scoped.delete('plan');
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) expect(refused.refusal.code).toBe('TEMPLATE_ONLY_GLOBAL');
+      expect(scoped.load('plan')).toBe('shared plan');
+
+      scoped.save('plan', 'project plan');
+      expect(scoped.list().map((entry) => [entry.scope, entry.shadowsGlobal])).toEqual([['project', true]]);
+      const projectDelete = scoped.delete('plan');
+      expect(projectDelete).toMatchObject({ ok: true, scope: 'project', stillLoadsFrom: 'global' });
+      expect(scoped.load('plan')).toBe('shared plan');
+
+      expect(scoped.delete('plan', 'global')).toMatchObject({ ok: true, scope: 'global', stillLoadsFrom: null });
+      expect(scoped.load('plan')).toBeNull();
     });
 
     test('deleted template no longer appears in list', () => {

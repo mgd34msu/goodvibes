@@ -1,12 +1,22 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { basename, join } from 'path';
+import { basename, join, resolve } from 'path';
+import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
+
+export type TemplateScope = 'project' | 'global';
 
 export interface TemplateEntry {
   name: string;
   path: string;
   preview: string;
-  scope: 'project' | 'global';
+  scope: TemplateScope;
+  /** True for a project template whose name also exists globally: the global copy is hidden here and loads again once this one is deleted. */
+  shadowsGlobal: boolean;
 }
+
+/** What `delete` did. `stillLoadsFrom: 'global'` means a global template of the same name now answers to it. */
+export type TemplateDeleteResult =
+  | { readonly ok: true; readonly name: string; readonly scope: TemplateScope; readonly path: string; readonly stillLoadsFrom: 'global' | null }
+  | { readonly ok: false; readonly name: string; readonly scope: TemplateScope; readonly refusal: Refusal };
 
 export interface TemplateManagerRoots {
   projectRoot: string;
@@ -36,6 +46,11 @@ export class TemplateManager {
     this.projectDir = roots.projectDirectory ?? join(roots.projectRoot, '.goodvibes', 'templates');
   }
 
+  /** When the project is the home directory both scopes are one folder; every template there is a project template. */
+  private get sharedDirectory(): boolean {
+    return resolve(this.projectDir) === resolve(this.globalDir);
+  }
+
   /** Saves the template and returns the name it is stored under: names are folded to lower case and `[a-z0-9_-]`, so "My Plan" and "my-plan" are one template. */
   save(name: string, content: string): string {
     const safeName = sanitizeName(name);
@@ -58,10 +73,13 @@ export class TemplateManager {
   }
 
   list(): TemplateEntry[] {
-    const seen = new Set<string>();
+    const projectNames = new Set<string>();
     const entries: TemplateEntry[] = [];
+    const scopes: ReadonlyArray<readonly [string, TemplateScope]> = this.sharedDirectory
+      ? [[this.projectDir, 'project']]
+      : [[this.projectDir, 'project'], [this.globalDir, 'global']];
 
-    for (const [dir, scope] of [[this.projectDir, 'project'], [this.globalDir, 'global']] as const) {
+    for (const [dir, scope] of scopes) {
       if (!existsSync(dir)) continue;
       let files: string[];
       try {
@@ -72,8 +90,12 @@ export class TemplateManager {
       for (const file of files) {
         if (!file.endsWith('.md')) continue;
         const name = basename(file, '.md');
-        if (seen.has(name)) continue;
-        seen.add(name);
+        if (scope === 'global' && projectNames.has(name)) {
+          const shadowing = entries.find((entry) => entry.name === name);
+          if (shadowing) shadowing.shadowsGlobal = true;
+          continue;
+        }
+        if (scope === 'project') projectNames.add(name);
         const filePath = join(dir, file);
         let preview = '';
         try {
@@ -82,26 +104,56 @@ export class TemplateManager {
         } catch {
           preview = '';
         }
-        entries.push({ name, path: filePath, preview, scope });
+        entries.push({ name, path: filePath, preview, scope, shadowsGlobal: false });
       }
     }
 
     return entries.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  delete(name: string): boolean {
+  /**
+   * Deletes the template of that name in one scope, project by default. A global
+   * template is shared by every project, so it is removed only when `scope` is
+   * `'global'`; asking for the project copy of a global-only name is refused.
+   */
+  delete(name: string, scope: TemplateScope = 'project'): TemplateDeleteResult {
     const safeName = sanitizeName(name);
     const projectPath = join(this.projectDir, `${safeName}.md`);
-    if (existsSync(projectPath)) {
-      rmSync(projectPath);
-      return true;
-    }
     const globalPath = join(this.globalDir, `${safeName}.md`);
-    if (existsSync(globalPath)) {
-      rmSync(globalPath);
-      return true;
+    const shared = this.sharedDirectory;
+    const targetPath = scope === 'global' ? globalPath : projectPath;
+
+    if (existsSync(targetPath)) {
+      rmSync(targetPath);
+      const stillLoadsFrom = scope === 'project' && !shared && existsSync(globalPath) ? 'global' : null;
+      return { ok: true, name: safeName, scope, path: targetPath, stillLoadsFrom };
     }
-    return false;
+
+    if (scope === 'project' && !shared && existsSync(globalPath)) {
+      return {
+        ok: false,
+        name: safeName,
+        scope,
+        refusal: refusal({
+          code: 'TEMPLATE_ONLY_GLOBAL',
+          state: `template "${safeName}" is global, not a project template`,
+          reason: `"${safeName}" is shared by every project (${globalPath}), so it was not deleted from this project`,
+          next: [`Delete it with the global scope to remove it for every project, or remove ${globalPath}`],
+        }),
+      };
+    }
+
+    return {
+      ok: false,
+      name: safeName,
+      scope,
+      refusal: refusal({
+        code: 'TEMPLATE_NOT_FOUND',
+        state: `no ${scope} template named "${safeName}"`,
+        reason: `There is no ${targetPath}`,
+        next: ['List templates with /template list'],
+      }),
+    };
   }
 
   expand(

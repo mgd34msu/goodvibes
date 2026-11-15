@@ -12,6 +12,7 @@ import {
   createOAuthState,
   createPkceVerifier,
   exchangeOAuthAuthorizationCode,
+  OAuthTokenExchangeError,
   parseOAuthScopes,
   refreshOAuthAccessToken,
 } from '../runtime/auth/oauth-core.js';
@@ -102,7 +103,59 @@ export interface ProviderSubscription {
    * refresh; a completed login replaces the whole record.
    */
   readonly revokedAt?: number | undefined;
+  /**
+   * Set while one process is spending this record's refresh token. Another
+   * process that needs a fresh token waits for the answer to land instead of
+   * sending the same refresh token, which the provider has rotated by then.
+   * Cleared by the refresh's own write; a holder that died lets it lapse.
+   */
+  readonly refreshingUntil?: number | undefined;
 }
+
+/**
+ * The provider refused this sign-in's grant (or there is nothing left to renew
+ * it with): the session is over and only a new sign-in replaces it.
+ */
+export class SubscriptionSessionEndedError extends Error {
+  readonly code = 'SUBSCRIPTION_SESSION_ENDED';
+  constructor(readonly provider: string, options?: { readonly cause?: unknown }) {
+    super(`The ${provider} sign-in has ended: the provider refused to renew it. Sign in again with /subscription login ${provider} start.`, options);
+    this.name = 'SubscriptionSessionEndedError';
+  }
+}
+
+/**
+ * How long a refresh holds its claim on a record: the token exchange's own
+ * bound (30 s in oauth-core) plus a margin, so a claim outlives the request it
+ * covers and lapses soon after a holder that died.
+ */
+const REFRESH_LEASE_MS = 35_000;
+const LEASE_POLL_FIRST_MS = 25;
+const LEASE_POLL_MAX_MS = 500;
+
+function sameGrant(a: Pick<ProviderSubscription, 'accessToken' | 'refreshToken'>, b: Pick<ProviderSubscription, 'accessToken' | 'refreshToken'>): boolean {
+  return a.accessToken === b.accessToken && a.refreshToken === b.refreshToken;
+}
+
+function withoutRefreshState(record: ProviderSubscription): ProviderSubscription {
+  const { refreshingUntil: _lease, revokedAt: _revoked, ...rest } = record;
+  return rest;
+}
+
+function signedOutDuringRefresh(provider: string): Error {
+  return new Error(`No stored OAuth subscription for ${provider}: it was signed out while its token was being refreshed.`);
+}
+
+type RefreshClaim =
+  | { readonly kind: 'settled'; readonly record: ProviderSubscription }
+  | { readonly kind: 'claimed'; readonly record: ProviderSubscription }
+  | { readonly kind: 'leased'; readonly record: ProviderSubscription; readonly until: number };
+type RefreshWrite =
+  | { readonly kind: 'saved' | 'newer'; readonly record: ProviderSubscription }
+  | { readonly kind: 'gone' };
+type FailedRefreshSettlement =
+  | { readonly kind: 'released' | 'gone' }
+  | { readonly kind: 'newer'; readonly record: ProviderSubscription };
 
 interface SubscriptionStore {
   readonly version: 1;
@@ -214,7 +267,7 @@ export class SubscriptionManager {
   }
   private readonly path: string;
   private importGeneration = 0;
-  /** One token refresh per provider at a time: a rotating refresh token is spent by the first use. */
+  /** One token refresh per provider at a time in this process; across processes the record's claim does the same. */
   private readonly refreshes = new Map<string, Promise<ProviderSubscription>>();
   private readonly preparedImports = new WeakMap<PreparedSubscriptionImport, SubscriptionImportRecord>();
 
@@ -422,8 +475,10 @@ export class SubscriptionManager {
     return (
       readJsonFileOrQuarantine<SubscriptionStore>(this.path, {
         label: 'config/subscriptions',
+        // The sign-in tokens are kept in this file, so the note must say they are gone from use and still on disk.
         recovery:
-          'Provider subscriptions are re-recorded the next time a provider subscription login completes; no stored credential is lost, because subscription secrets live in the secrets store, not here.',
+          'Every provider subscription sign-in was kept in this file, so each provider is signed out until you sign in again '
+          + '(/subscription login <provider> start). The copy moved aside still holds those sign-in tokens; delete it once you no longer need it.',
         validate: (parsed) => {
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
             throw new Error('subscription store is not a JSON object');
@@ -474,15 +529,32 @@ export class SubscriptionManager {
     return subscription.accessToken;
   }
 
+  /**
+   * The access token to send for `provider`, renewed first when it is at or
+   * near its expiry, or when `rejectedAccessToken` names the token the
+   * provider just refused (revoked mid-lifetime). A record already holding a
+   * different token than the refused one was renewed by another caller, and
+   * its token is returned without spending anything. Null when no sign-in is
+   * stored. Throws {@link SubscriptionSessionEndedError} when the provider
+   * refused the grant; any other failure leaves the session's state unknown.
+   */
   public async resolveAccessToken(
     provider: string,
     config: OAuthProviderConfig,
+    options: { readonly rejectedAccessToken?: string | undefined } = {},
   ): Promise<string | null> {
     const subscription = this.get(provider);
     if (!subscription) return null;
-    if (!isSubscriptionExpired(subscription.expiresAt)) return subscription.accessToken;
+    if (subscription.revokedAt !== undefined) throw new SubscriptionSessionEndedError(provider);
+    const rejected = options.rejectedAccessToken;
+    const current = rejected !== undefined ? subscription.accessToken !== rejected : !isSubscriptionExpired(subscription.expiresAt);
+    if (current) return subscription.accessToken;
+    if (!subscription.refreshToken) {
+      if (rejected !== undefined) throw new SubscriptionSessionEndedError(provider);
+      return subscription.accessToken;
+    }
     try {
-      return (await this.refreshOAuthToken(provider, config)).accessToken;
+      return (await this.refreshOAuthToken(provider, config, { heldAccessToken: subscription.accessToken })).accessToken;
     } catch (error) {
       // Signed out while the refresh was in flight: there is no token to use.
       if (this.get(provider) === null) return null;
@@ -553,17 +625,24 @@ export class SubscriptionManager {
   }
 
   /**
-   * Refresh a provider's access token. Concurrent callers share one request,
-   * so a rotating refresh token is used once; the result is merged into the
-   * store as it is after the request, never over a logout or a newer login.
+   * Refresh a provider's access token, for every provider and every process
+   * the same way. Callers in this process share one request; across processes
+   * the record itself carries the claim ({@link ProviderSubscription.refreshingUntil}),
+   * taken under the store lock, so a rotating refresh token is sent once and
+   * the other processes wait for its answer. `heldAccessToken` is the token
+   * the caller has: a record that already holds a different one was renewed
+   * meanwhile and is returned as it is. Without it the refresh is forced.
+   * The answer is merged into the store as it is after the request, never
+   * over a logout or a newer sign-in.
    */
   public refreshOAuthToken(
     provider: string,
     config: OAuthProviderConfig,
+    options: { readonly heldAccessToken?: string | undefined } = {},
   ): Promise<ProviderSubscription> {
     const inFlight = this.refreshes.get(provider);
     if (inFlight) return inFlight;
-    const refresh = this.refreshOAuthTokenOnce(provider, config).finally(() => {
+    const refresh = this.refreshOAuthTokenOnce(provider, config, options.heldAccessToken).finally(() => {
       if (this.refreshes.get(provider) === refresh) this.refreshes.delete(provider);
     });
     this.refreshes.set(provider, refresh);
@@ -573,32 +652,115 @@ export class SubscriptionManager {
   private async refreshOAuthTokenOnce(
     provider: string,
     config: OAuthProviderConfig,
+    heldAccessToken: string | undefined,
   ): Promise<ProviderSubscription> {
-    const existing = this.read().subscriptions[provider];
-    if (!existing) {
-      throw new Error(`No stored OAuth subscription for ${provider}.`);
+    let held = heldAccessToken;
+    const deadline = Date.now() + 2 * REFRESH_LEASE_MS;
+    let pause = LEASE_POLL_FIRST_MS;
+    for (;;) {
+      const claim = this.claimRefresh(provider, held);
+      if (claim.kind === 'settled') return claim.record;
+      if (claim.kind === 'claimed') return this.completeClaimedRefresh(provider, config, claim.record);
+      // Another process is spending this refresh token. Its answer replaces the
+      // access token (or clears the claim), which the next claim sees.
+      held ??= claim.record.accessToken;
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        throw new Error(`Another GoodVibes process started renewing the ${provider} sign-in and has not finished. Try again in a moment.`);
+      }
+      await new Promise<void>((done) => setTimeout(done, Math.min(pause, left, Math.max(1, claim.until - Date.now()))));
+      pause = Math.min(pause * 2, LEASE_POLL_MAX_MS);
     }
-    if (!existing.refreshToken) {
-      return existing;
-    }
+  }
 
-    const tokenResponse = await refreshOAuthAccessToken(config, existing.refreshToken);
-    // The comparison and the write are one locked step, so a login another
-    // process completes after this read cannot land between them.
-    const outcome = this.mutate((store): { readonly saved: boolean; readonly record: ProviderSubscription } => {
+  /** One locked read of the record: return it as it is, take the claim on it, or report another process's live claim. */
+  private claimRefresh(provider: string, held: string | undefined): RefreshClaim {
+    const now = Date.now();
+    return this.mutate((store): RefreshClaim => {
       const current = store.subscriptions[provider];
-      if (!current) {
-        throw new Error(`No stored OAuth subscription for ${provider}: it was signed out while its token was being refreshed.`);
+      if (!current) throw new Error(`No stored OAuth subscription for ${provider}.`);
+      if (current.revokedAt !== undefined) throw new SubscriptionSessionEndedError(provider);
+      if (!current.refreshToken || (held !== undefined && current.accessToken !== held)) return { kind: 'settled', record: current };
+      if (current.refreshingUntil !== undefined && current.refreshingUntil > now) {
+        return { kind: 'leased', record: current, until: current.refreshingUntil };
       }
-      if (current.accessToken !== existing.accessToken || current.refreshToken !== existing.refreshToken) {
-        // A login or another refresh replaced the record meanwhile; it is newer than this answer.
-        return { saved: false, record: current };
+      store.subscriptions[provider] = { ...current, refreshingUntil: now + REFRESH_LEASE_MS };
+      return { kind: 'claimed', record: current };
+    }, (claim) => claim.kind === 'claimed');
+  }
+
+  /** Spend the claimed refresh token outside the lock, then write the answer (or the refusal) in one locked compare-and-write. */
+  private async completeClaimedRefresh(
+    provider: string,
+    config: OAuthProviderConfig,
+    claimed: ProviderSubscription,
+  ): Promise<ProviderSubscription> {
+    let tokenResponse: Awaited<ReturnType<typeof refreshOAuthAccessToken>>;
+    try {
+      tokenResponse = await refreshOAuthAccessToken(config, claimed.refreshToken!);
+    } catch (error) {
+      // Only an answered 4xx is the authorization server refusing the grant;
+      // a transport failure, a 5xx or a malformed answer leaves it unknown.
+      const refused = error instanceof OAuthTokenExchangeError && error.status >= 400 && error.status < 500;
+      const newer = this.settleFailedRefresh(provider, claimed, refused);
+      if (newer) {
+        // The refusal answered a refresh token another process or a new sign-in
+        // already replaced; the stored record is the one to use.
+        if (newer.revokedAt !== undefined) throw new SubscriptionSessionEndedError(provider, { cause: error });
+        return newer;
       }
-      const refreshed = this.refreshedRecord(current, existing, tokenResponse);
-      store.subscriptions[provider] = refreshed;
-      return { saved: true, record: refreshed };
-    }, (result) => result.saved);
+      if (refused) throw new SubscriptionSessionEndedError(provider, { cause: error });
+      throw error;
+    }
+    let outcome: RefreshWrite;
+    try {
+      outcome = this.mutate((store): RefreshWrite => {
+        const current = store.subscriptions[provider];
+        if (!current) return { kind: 'gone' };
+        // A sign-in made while the request ran is newer than this answer.
+        if (!sameGrant(current, claimed)) return { kind: 'newer', record: current };
+        const refreshed = this.refreshedRecord(current, claimed, tokenResponse);
+        store.subscriptions[provider] = refreshed;
+        return { kind: 'saved', record: refreshed };
+      }, (result) => result.kind === 'saved');
+    } catch (error) {
+      // The provider has already rotated the old refresh token away, so
+      // dropping this answer over a disk error would end a healthy session.
+      // This process uses it; the store heals on the next successful save.
+      logger.warn('SubscriptionManager: a renewed sign-in could not be saved; using it for this process', {
+        provider,
+        error: summarizeError(error),
+      });
+      return this.refreshedRecord(claimed, claimed, tokenResponse);
+    }
+    if (outcome.kind === 'gone') throw signedOutDuringRefresh(provider);
     return outcome.record;
+  }
+
+  /**
+   * After a failed exchange: release the claim, stamping the session revoked
+   * when the provider refused it. Returns the stored record instead when it no
+   * longer holds the grant this attempt spent (renewed or replaced meanwhile).
+   */
+  private settleFailedRefresh(provider: string, claimed: ProviderSubscription, refused: boolean): ProviderSubscription | null {
+    let settled: FailedRefreshSettlement;
+    try {
+      settled = this.mutate((store): FailedRefreshSettlement => {
+        const current = store.subscriptions[provider];
+        if (!current) return { kind: 'gone' };
+        if (!sameGrant(current, claimed)) return { kind: 'newer', record: current };
+        const now = Date.now();
+        const { refreshingUntil: _lease, ...rest } = current;
+        store.subscriptions[provider] = refused ? { ...rest, revokedAt: now, updatedAt: now } : rest;
+        return { kind: 'released' };
+      }, (result) => result.kind === 'released');
+    } catch (error) {
+      // The claim lapses on its own; the caller still learns what the provider answered.
+      logger.warn('SubscriptionManager: the outcome of a failed renewal could not be saved', { provider, error: summarizeError(error) });
+      return null;
+    }
+    if (settled.kind === 'gone') throw signedOutDuringRefresh(provider);
+    return settled.kind === 'newer' ? settled.record : null;
   }
 
   private refreshedRecord(
@@ -608,7 +770,7 @@ export class SubscriptionManager {
   ): ProviderSubscription {
     const now = Date.now();
     const refreshed: ProviderSubscription = {
-      ...current,
+      ...withoutRefreshState(current),
       accessToken: tokenResponse.accessToken,
       refreshToken: typeof tokenResponse.refreshToken === 'string' && tokenResponse.refreshToken.length > 0
         ? tokenResponse.refreshToken

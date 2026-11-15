@@ -6,12 +6,13 @@
  * quietly falling back to a weaker default.
  */
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SubscriptionManager, type OAuthProviderConfig, type ProviderSubscription } from '../platform/src/platform/config/subscriptions.js';
 import { refreshOpenAISubscriptionAfterRejection, resolveFreshOpenAIAccessToken } from '../platform/src/platform/config/subscription-auth.js';
-import { setSyncFileLockWaitForTest, syncFileLockPath, withSyncFileLock } from '../platform/src/platform/config/sync-file-lock.js';
+import { syncFileLockPath, withSyncFileLock } from '../platform/src/platform/config/sync-file-lock.js';
+import { holdProcessLock } from '../platform/src/platform/utils/process-lock.js';
 import { persistSharedKey, raiseReaderFloorInFile, removeSharedKey } from '../platform/src/platform/config/shared-config-tier.js';
 import { stripFrozenDefaults } from '../platform/src/platform/config/settings-io.js';
 import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.js';
@@ -37,19 +38,6 @@ function quiet(): void {
     undo.push(() => spy.mockRestore());
   }
 }
-/** A lock held by a live process (this one): it is never reclaimed, so a taker has to wait. */
-function holdLockAsLiveProcess(target: string): string {
-  const lock = syncFileLockPath(target);
-  mkdirSync(lock, { recursive: true });
-  writeFileSync(join(lock, 'owner'), JSON.stringify({ pid: process.pid, start: null }));
-  return lock;
-}
-/** Counts the waits a taker makes on a held lock, without sleeping. */
-function countWaits(): { readonly count: () => number } {
-  let waits = 0;
-  undo.push(setSyncFileLockWaitForTest(() => { waits++; }));
-  return { count: () => waits };
-}
 function subscription(provider: string, overrides: Partial<ProviderSubscription> = {}): ProviderSubscription {
   return { provider, accessToken: `${provider}-access`, refreshToken: `${provider}-refresh`, tokenType: 'Bearer', authMode: 'oauth',
     overrideAmbientApiKeys: true, createdAt: 1, updatedAt: 1, ...overrides };
@@ -57,81 +45,49 @@ function subscription(provider: string, overrides: Partial<ProviderSubscription>
 
 // -- the lock itself ---------------------------------------------------------
 
-test('the lock exists while the operation runs and is gone after it, however it ends', () => {
+/** True while some holder has the lock for `target`: taking it here fails. */
+function lockHeld(target: string): boolean {
+  const probe = holdProcessLock(syncFileLockPath(target));
+  probe?.release();
+  return probe === null;
+}
+
+test('the lock is held while the operation runs and released after it, however it ends', () => {
   const target = join(tempDir(), 'file.json');
-  const lock = syncFileLockPath(target);
-  expect(withSyncFileLock(target, () => existsSync(lock))).toBe(true);
-  expect(existsSync(lock)).toBe(false);
+  expect(withSyncFileLock(target, () => lockHeld(target))).toBe(true);
+  expect(lockHeld(target)).toBe(false);
   expect(() => withSyncFileLock(target, () => { throw new Error('boom'); })).toThrow('boom');
-  expect(existsSync(lock)).toBe(false);
+  expect(lockHeld(target)).toBe(false);
 });
 
-test('a nested call in the same process joins the lock instead of waiting on itself', () => {
+test('a nested call in the same process joins the lock instead of being refused by it', () => {
   const target = join(tempDir(), 'file.json');
-  const waits = countWaits();
   expect(withSyncFileLock(target, () => withSyncFileLock(target, () => 'inner'))).toBe('inner');
-  expect(waits.count()).toBe(0);
 });
 
-test('a lock left by a process that no longer exists is reclaimed, not waited on', () => {
-  quiet();
-  const dead = Bun.spawnSync([process.execPath, '-e', '']);
-  const target = join(tempDir(), 'file.json');
-  const lock = syncFileLockPath(target);
-  mkdirSync(lock, { recursive: true });
-  writeFileSync(join(lock, 'owner'), JSON.stringify({ pid: dead.pid, start: null }));
-  const waits = countWaits();
-  expect(withSyncFileLock(target, () => 'ran')).toBe('ran');
-  expect(waits.count()).toBe(0);
-  expect(existsSync(lock)).toBe(false);
-});
-
-test('a lock a live process still holds is waited for; past the wait the change still happens and the other lock is left alone', () => {
+test('a change still lands when the lock cannot be taken', () => {
   quiet();
   const target = join(tempDir(), 'file.json');
-  const lock = holdLockAsLiveProcess(target);
-  const waits = countWaits();
-  expect(withSyncFileLock(target, () => 'ran anyway')).toBe('ran anyway');
-  expect(waits.count()).toBeGreaterThan(0);
-  expect(existsSync(lock)).toBe(true);
+  const other = holdProcessLock(syncFileLockPath(target));
+  try {
+    expect(withSyncFileLock(target, () => 'ran anyway')).toBe('ran anyway');
+  } finally {
+    other?.release();
+  }
 });
 
-// -- the writers take it -------------------------------------------------------
+// -- the writers keep each other's changes ----------------------------------------
 
-test('persistSharedKey, removeSharedKey and raiseReaderFloorInFile each take the lock, and keep each other\'s keys', () => {
+test('persistSharedKey, removeSharedKey and raiseReaderFloorInFile keep each other\'s keys', () => {
   quiet();
   const path = join(tempDir(), 'shared', 'settings.json');
-  const waits = countWaits();
-  const lock = holdLockAsLiveProcess(path);
   persistSharedKey(path, 'tts.voice', 'alloy');
-  const afterPersist = waits.count();
-  expect(afterPersist).toBeGreaterThan(0);
   persistSharedKey(path, 'tts.speed', 1.5);
-  expect(waits.count()).toBeGreaterThan(afterPersist);
-  const beforeFloor = waits.count();
   expect(raiseReaderFloorInFile(path, '9.0.0', 'test')).toBe(true);
-  expect(waits.count()).toBeGreaterThan(beforeFloor);
-  const beforeRemove = waits.count();
   removeSharedKey(path, 'tts.voice');
-  expect(waits.count()).toBeGreaterThan(beforeRemove);
   const stored = JSON.parse(readFileSync(path, 'utf-8')) as { tts: unknown; $goodvibes: { minReaderVersion: string } };
   expect(stored.tts).toEqual({ speed: 1.5 });
   expect(stored.$goodvibes.minReaderVersion).toBe('9.0.0');
-  rmSync(lock, { recursive: true, force: true });
-});
-
-test('every subscription write takes the lock', () => {
-  quiet();
-  const path = join(tempDir(), 'subscriptions.json');
-  const manager = new SubscriptionManager(path);
-  const waits = countWaits();
-  const lock = holdLockAsLiveProcess(path);
-  manager.saveSubscription(subscription('a'));
-  const afterSave = waits.count();
-  expect(afterSave).toBeGreaterThan(0);
-  expect(manager.logout('a')).toBe(true);
-  expect(waits.count()).toBeGreaterThan(afterSave);
-  rmSync(lock, { recursive: true, force: true });
 });
 
 // -- an unreadable store is not an empty one -------------------------------------

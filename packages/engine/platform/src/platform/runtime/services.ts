@@ -1222,7 +1222,7 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     wakeCatchUp: [() => memoryConsolidationScheduler.tick(), () => storeSnapshotScheduler.tick(), async () => { await automationManager.triggerHeartbeat({ source: 'wake-catchup' }); }] });
   // Construct + start the MemoryGovernor (default ON, a safety feature) with the
   // standard KNOWN cache adapters (see wireDaemonMemoryGovernance).
-  const { memoryGovernor } = wireDaemonMemoryGovernance({
+  const { memoryGovernor, configFallback: memoryConfigFallback } = wireDaemonMemoryGovernance({
     config: {
       budgetMb: configManager.get('memory.budgetMb'),
       elevatedPct: configManager.get('memory.tier.elevatedPct'),
@@ -1244,6 +1244,14 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     // Graceful tripwire shutdown flushes in-flight state via ASYNC store snapshots (fs/promises): sync copyFileSync on a stalled disk would block the event loop, so the governor's 10s shutdown ceiling could never fire, threadpool copies keep it enforceable.
     onTripwireShutdown: async () => { await storeSnapshotScheduler.snapshotAllAsync('tripwire'); },
   });
+  // A stored memory budget or tier set the governor refused (a hand edit, or a
+  // budget near this machine's memory) runs on the shipped limits; the owner is
+  // told once per distinct reason, and told again if it comes back after a fix.
+  if (memoryConfigFallback !== undefined) {
+    announcementStore.record(`memory-config-fallback:${memoryConfigFallback}`, `Memory limits: ${memoryConfigFallback}`);
+  } else {
+    announcementStore.forgetMatching((id) => id.startsWith('memory-config-fallback:'));
+  }
   // Late-bind the admission gate now that the governor exists: the expensive
   // entry points captured `admitExpensiveWork` earlier via this holder.
   admitExpensiveWorkRef.current = (label) => memoryGovernor.admitExpensiveWork(label);

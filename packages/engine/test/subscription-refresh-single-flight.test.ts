@@ -1,5 +1,6 @@
 /**
- * A provider subscription refresh is one request per provider at a time, and
+ * A provider subscription refresh is one request per provider at a time, in
+ * one process and across processes sharing the store, and
  * its answer is merged into the store as it is after the request: a logout or
  * another provider's login made meanwhile survives it. An abandoned re-login
  * stops masking a working subscription.
@@ -53,6 +54,23 @@ test('two concurrent token resolutions make one refresh request', async () => {
   expect(await Promise.all([first, second])).toEqual(['new-access', 'new-access']);
   expect(endpoint.calls.count).toBe(1);
   expect(subscriptions.get('synthetic-provider')?.refreshToken).toBe('new-refresh');
+});
+
+test('two processes that need a fresh token send the rotating refresh token once', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gv-subscription-refresh-')); dirs.push(dir);
+  const path = join(dir, 'subscriptions.json');
+  // Separate managers share no in-process request, as two processes do not.
+  const first = new SubscriptionManager(path);
+  const second = new SubscriptionManager(path);
+  first.saveSubscription(expired('synthetic-provider'));
+  const endpoint = heldTokenEndpoint();
+  const fromFirst = first.resolveAccessToken('synthetic-provider', config);
+  await endpoint.entered;
+  const fromSecond = second.resolveAccessToken('synthetic-provider', config);
+  endpoint.release();
+  expect(await Promise.all([fromFirst, fromSecond])).toEqual(['new-access', 'new-access']);
+  expect(endpoint.calls.count).toBe(1);
+  expect(second.get('synthetic-provider')?.refreshingUntil).toBeUndefined();
 });
 
 test('a logout during a refresh stays logged out, and another provider\'s login is kept', async () => {

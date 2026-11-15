@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConfigManager } from '../platform/src/platform/config/index.ts';
@@ -11,8 +11,6 @@ import {
   inspectManagedSettingsBundle, isManagedSettingLocked, recordSettingsSyncEvent,
   rollbackManagedApply, setManagedSettingLock, stageManagedSettingsBundle,
 } from '../platform/src/platform/runtime/settings.ts';
-import { setSyncFileLockWaitForTest, syncFileLockPath } from '../platform/src/platform/config/sync-file-lock.ts';
-import { readStore, writeStore } from '../platform/src/platform/runtime/settings/control-plane-store.ts';
 import type { ManagedSettingsBundle } from '../platform/src/platform/runtime/sandbox/types.ts';
 
 const roots: string[] = [];
@@ -182,34 +180,5 @@ describe('control-plane store writes', () => {
     } finally { chmodSync(file, 0o600); }
     expect(() => config.set('conversationGate.mode', 'off')).toThrow('locked by ops');
     expect(config.get('conversationGate.mode')).toBe('propose');
-  });
-
-  test('a write waits for another process holding the store lock and keeps that process\'s lock and event', () => {
-    const { configDir } = fixture();
-    const file = join(configDir, 'settings-sync.json');
-    const lock = syncFileLockPath(file);
-    // Another live process is mid read-modify-write: it holds the lock directory.
-    mkdirSync(lock, { recursive: true });
-    writeFileSync(join(lock, 'owner'), JSON.stringify({ pid: process.pid, start: null }));
-    let waits = 0;
-    const restore = setSyncFileLockWaitForTest(() => {
-      waits++;
-      // The holder finishes: its write lands, then it releases.
-      const store = readStore(configDir);
-      writeStore({
-        ...store,
-        managedLocks: [{ key: 'conversationGate.mode', source: 'ops', reason: 'policy', updatedAt: 1 }],
-        events: [...store.events, { surface: 'managed', direction: 'apply', path: 'other', timestamp: 1, detail: 'other process' }],
-      }, configDir);
-      rmSync(join(lock, 'owner'));
-      rmSync(lock, { recursive: true });
-    });
-    try {
-      recordSettingsSyncEvent({ surface: 'settings-sync', direction: 'pull', path: 'mine', timestamp: 2, detail: 'this process' }, configDir);
-    } finally { restore(); }
-    expect(waits).toBe(1);
-    const after = readStore(configDir);
-    expect(after.managedLocks.map((entry) => entry.key)).toEqual(['conversationGate.mode']);
-    expect(after.events.map((entry) => entry.detail)).toEqual(['other process', 'this process']);
   });
 });

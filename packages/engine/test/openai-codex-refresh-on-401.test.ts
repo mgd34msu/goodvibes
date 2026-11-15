@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { OpenAICodexProvider } from '../platform/src/platform/providers/openai-codex.js';
-import type { ProviderSubscription, SubscriptionManager } from '../platform/src/platform/config/subscriptions.js';
+import { SubscriptionManager, type ProviderSubscription } from '../platform/src/platform/config/subscriptions.js';
 import { computeConfiguredProviderIds } from '../platform/src/platform/providers/registry-configured-ids.js';
 
 /**
@@ -22,24 +25,16 @@ function fakeJwt(header: string): string {
 const TOKEN_A = fakeJwt('hdrA');
 const TOKEN_B = fakeJwt('hdrB');
 
-function makeManager(record: ProviderSubscription): {
-  manager: Pick<SubscriptionManager, 'get' | 'saveSubscription' | 'resolveAccessToken'>;
-  saved: ProviderSubscription[];
-} {
-  let current = record;
-  const saved: ProviderSubscription[] = [];
-  return {
-    saved,
-    manager: {
-      get: (provider: string) => (provider === 'openai' ? current : null),
-      saveSubscription: (next: ProviderSubscription) => {
-        current = next;
-        saved.push(next);
-        return next;
-      },
-      resolveAccessToken: async () => current.accessToken,
-    } as Pick<SubscriptionManager, 'get' | 'saveSubscription' | 'resolveAccessToken'>,
-  };
+const dirs: string[] = [];
+
+/** A real subscription store in a temporary file, holding `record`. */
+function makeManager(record: ProviderSubscription): { manager: SubscriptionManager; path: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'gv-codex-refresh-'));
+  dirs.push(dir);
+  const path = join(dir, 'subscriptions.json');
+  const manager = new SubscriptionManager(path);
+  manager.saveSubscription(record);
+  return { manager, path };
 }
 
 function liveRecord(): ProviderSubscription {
@@ -58,6 +53,7 @@ function liveRecord(): ProviderSubscription {
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 interface FetchLogEntry { url: string; bearer: string | null }
@@ -110,18 +106,18 @@ describe('OpenAICodexProvider refresh-on-401', () => {
     expect(configured()).toContain('openai-subscriber');
     manager.saveSubscription({ ...liveRecord(), revokedAt: Date.now() });
     expect(configured()).not.toContain('openai-subscriber');
-    manager.get = () => null;
+    manager.logout('openai');
     expect(configured()).not.toContain('openai-subscriber');
   });
 
   test('a dead session surfaces as a subscription-session error, never an API-key one', async () => {
-    const { manager, saved } = makeManager(liveRecord());
+    const { manager } = makeManager(liveRecord());
     const log = stubFetch({
       responses: () => revoked401(),
       tokenExchange: () => new Response('{"error":{"message":"Your session has ended."}}', { status: 401 }),
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
+    const provider = new OpenAICodexProvider(manager);
     const failure = await provider.chat(CHAT_PARAMS as never).then(
       () => null,
       (err: Error) => err,
@@ -136,8 +132,7 @@ describe('OpenAICodexProvider refresh-on-401', () => {
     // The refusal is RECORDED: the store now carries the revocation stamp, so
     // no status surface can derive "healthy" from the expiry timestamp, and
     // the next turn fails fast instead of spending another refresh attempt.
-    expect(saved).toHaveLength(1);
-    expect(typeof saved[0]!.revokedAt).toBe('number');
+    expect(typeof manager.get('openai')?.revokedAt).toBe('number');
   });
 
   test('a stamped-dead session fails fast without touching the token endpoint again', async () => {
@@ -147,7 +142,7 @@ describe('OpenAICodexProvider refresh-on-401', () => {
       tokenExchange: () => { throw new Error('the token endpoint must not be called for a stamped session'); },
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
+    const provider = new OpenAICodexProvider(manager);
     const failure = await provider.chat(CHAT_PARAMS as never).then(
       () => null,
       (err: Error) => err,
@@ -160,7 +155,7 @@ describe('OpenAICodexProvider refresh-on-401', () => {
   });
 
   test('a revoked access token with a live refresh token recovers in one retry', async () => {
-    const { manager, saved } = makeManager(liveRecord());
+    const { manager } = makeManager(liveRecord());
     const log = stubFetch({
       responses: (bearer) => (bearer === TOKEN_B ? sseSuccess() : revoked401()),
       tokenExchange: () => new Response(JSON.stringify({
@@ -171,7 +166,7 @@ describe('OpenAICodexProvider refresh-on-401', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
+    const provider = new OpenAICodexProvider(manager);
     const response = await provider.chat(CHAT_PARAMS as never);
 
     expect(response.content).toContain('ok');
@@ -180,9 +175,8 @@ describe('OpenAICodexProvider refresh-on-401', () => {
     expect(sends[0]!.bearer).toBe(TOKEN_A);
     expect(sends[1]!.bearer).toBe(TOKEN_B);
     // The refreshed session is persisted so the NEXT turn starts healthy.
-    expect(saved).toHaveLength(1);
-    expect(saved[0]!.accessToken).toBe(TOKEN_B);
-    expect(saved[0]!.refreshToken).toBe('refresh-2');
+    expect(manager.get('openai')?.accessToken).toBe(TOKEN_B);
+    expect(manager.get('openai')?.refreshToken).toBe('refresh-2');
   });
 
   test('a second 401 after a successful refresh names the subscription and does not loop', async () => {
@@ -197,7 +191,7 @@ describe('OpenAICodexProvider refresh-on-401', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
+    const provider = new OpenAICodexProvider(manager);
     const failure = await provider.chat(CHAT_PARAMS as never).then(
       () => null,
       (err: Error) => err,
@@ -214,13 +208,13 @@ describe('OpenAICodexProvider refresh-on-401', () => {
   });
 
   test('an unreachable token endpoint surfaces the original rejection, not a sign-in demand', async () => {
-    const { manager, saved } = makeManager(liveRecord());
+    const { manager } = makeManager(liveRecord());
     stubFetch({
       responses: () => revoked401(),
       tokenExchange: () => new Response('bad gateway', { status: 502 }),
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
+    const provider = new OpenAICodexProvider(manager);
     const failure = await provider.chat(CHAT_PARAMS as never).then(
       () => null,
       (err: Error) => err,
@@ -231,11 +225,14 @@ describe('OpenAICodexProvider refresh-on-401', () => {
     expect(failure).not.toBeNull();
     expect(String(failure!.message)).not.toMatch(/subscription session has ended/i);
     expect(String(failure!.message)).toMatch(/401/);
-    expect(saved).toHaveLength(0);
+    // Nothing is stamped, and the claim on the refresh token is released for the next attempt.
+    expect(manager.get('openai')?.accessToken).toBe(TOKEN_A);
+    expect(manager.get('openai')?.revokedAt).toBeUndefined();
+    expect(manager.get('openai')?.refreshingUntil).toBeUndefined();
   });
 
   test('concurrent 401s share one refresh instead of stampeding the rotating token', async () => {
-    const { manager, saved } = makeManager(liveRecord());
+    const { manager } = makeManager(liveRecord());
     const log = stubFetch({
       responses: (bearer) => (bearer === TOKEN_B ? sseSuccess() : revoked401()),
       tokenExchange: () => new Response(JSON.stringify({
@@ -246,7 +243,7 @@ describe('OpenAICodexProvider refresh-on-401', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
+    const provider = new OpenAICodexProvider(manager);
     const [first, second, third] = await Promise.all([
       provider.chat(CHAT_PARAMS as never),
       provider.chat(CHAT_PARAMS as never),
@@ -258,32 +255,34 @@ describe('OpenAICodexProvider refresh-on-401', () => {
     expect(third.content).toContain('ok');
     // One refresh serves all three callers; refresh-1 is spent exactly once.
     expect(log.filter((e) => e.url.includes('oauth/token'))).toHaveLength(1);
-    expect(saved).toHaveLength(1);
+    expect(manager.get('openai')?.accessToken).toBe(TOKEN_B);
   });
 
   test('a store another caller already advanced is used without spending anything', async () => {
-    const { manager, saved } = makeManager(liveRecord());
+    const { manager, path } = makeManager(liveRecord());
+    // Another process renews the session while this call's request is being
+    // refused: by the time the recovery reads the store, the record already
+    // holds a different, working token.
+    const other = new SubscriptionManager(path);
     const log = stubFetch({
-      responses: (bearer) => (bearer === TOKEN_B ? sseSuccess() : revoked401()),
+      responses: (bearer) => {
+        if (bearer === TOKEN_B) return sseSuccess();
+        other.saveSubscription({ ...liveRecord(), accessToken: TOKEN_B, refreshToken: 'refresh-2' });
+        return revoked401();
+      },
       tokenExchange: () => { throw new Error('the refresh token must not be spent in this scenario'); },
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
-    const pending = provider.chat(CHAT_PARAMS as never);
-    // Simulate a concurrent process refreshing between this call's rejection
-    // and its recovery: by the time the recovery re-reads the store, the
-    // record already holds a different, working token.
-    (manager as unknown as { get: () => unknown }).get = () => ({ ...liveRecord(), accessToken: TOKEN_B, refreshToken: 'refresh-2' });
-
-    const response = await pending;
+    const provider = new OpenAICodexProvider(manager);
+    const response = await provider.chat(CHAT_PARAMS as never);
     expect(response.content).toContain('ok');
     expect(log.filter((e) => e.url.includes('oauth/token'))).toHaveLength(0);
-    expect(saved).toHaveLength(0);
+    expect(manager.get('openai')?.refreshToken).toBe('refresh-2');
   });
 
   test('a near-expiry token refreshes silently before the send, with no user-visible failure', async () => {
     const record = { ...liveRecord(), expiresAt: Date.now() + 10_000 } as ProviderSubscription;
-    const { manager, saved } = makeManager(record);
+    const { manager } = makeManager(record);
     const log = stubFetch({
       responses: (bearer) => (bearer === TOKEN_B ? sseSuccess() : revoked401()),
       tokenExchange: () => new Response(JSON.stringify({
@@ -294,7 +293,7 @@ describe('OpenAICodexProvider refresh-on-401', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
+    const provider = new OpenAICodexProvider(manager);
     const response = await provider.chat(CHAT_PARAMS as never);
 
     expect(response.content).toContain('ok');
@@ -303,26 +302,27 @@ describe('OpenAICodexProvider refresh-on-401', () => {
     const sends = log.filter((e) => e.url.includes('/codex/responses'));
     expect(sends).toHaveLength(1);
     expect(sends[0]!.bearer).toBe(TOKEN_B);
-    expect(saved).toHaveLength(1);
+    expect(manager.get('openai')?.accessToken).toBe(TOKEN_B);
   });
 
   test('a failed persist does not throw away a successful refresh', async () => {
-    const base = makeManager(liveRecord());
-    const manager = {
-      ...base.manager,
-      saveSubscription: () => { throw new Error('ENOSPC: no space left on device'); },
-    } as unknown;
+    const { manager, path } = makeManager(liveRecord());
     const log = stubFetch({
       responses: (bearer) => (bearer === TOKEN_B ? sseSuccess() : revoked401()),
-      tokenExchange: () => new Response(JSON.stringify({
-        access_token: TOKEN_B,
-        refresh_token: 'refresh-2',
-        token_type: 'Bearer',
-        expires_in: 3600,
-      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+      tokenExchange: () => {
+        // The store becomes unwritable while the exchange is in flight.
+        rmSync(path);
+        mkdirSync(path);
+        return new Response(JSON.stringify({
+          access_token: TOKEN_B,
+          refresh_token: 'refresh-2',
+          token_type: 'Bearer',
+          expires_in: 3600,
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
     });
 
-    const provider = new OpenAICodexProvider(manager as SubscriptionManager);
+    const provider = new OpenAICodexProvider(manager);
     const response = await provider.chat(CHAT_PARAMS as never);
 
     // The refresh succeeded over the wire and refresh-1 is already rotated

@@ -6,7 +6,7 @@
  * that a network-mode web surface is announced at an address a browser can open.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -15,6 +15,14 @@ import {
   resolveWebSurfaceUrl,
 } from '../platform/src/platform/runtime/feature-announcements.js';
 import { syncFileLockPath } from '../platform/src/platform/config/sync-file-lock.js';
+import { holdProcessLock } from '../platform/src/platform/utils/process-lock.js';
+
+/** True while some holder has the lock for `path`: taking it here fails. */
+function lockHeld(path: string): boolean {
+  const probe = holdProcessLock(syncFileLockPath(path));
+  probe?.release();
+  return probe === null;
+}
 
 const roots: string[] = [];
 afterEach(() => {
@@ -33,7 +41,7 @@ function observeLockAtRead(store: FeatureAnnouncementStore, path: string): boole
   const internals = store as unknown as { read: () => unknown };
   const original = internals.read.bind(store);
   internals.read = () => {
-    seen.push(existsSync(syncFileLockPath(path)));
+    seen.push(lockHeld(path));
     return original();
   };
   return seen;
@@ -46,7 +54,7 @@ describe('FeatureAnnouncementStore across processes', () => {
     const seen = observeLockAtRead(store, path);
     expect(store.record('a', 'line')).toBe(true);
     expect(seen).toEqual([true]);
-    expect(existsSync(syncFileLockPath(path))).toBe(false);
+    expect(lockHeld(path)).toBe(false);
   });
 
   test('drainPending reads the queue with the lock held', () => {

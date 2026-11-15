@@ -1,35 +1,30 @@
 import { getBuiltinSubscriptionProvider } from './subscription-providers.js';
-import type { SubscriptionManager } from './subscriptions.js';
-import { OAuthTokenExchangeError, refreshOAuthAccessToken } from '../runtime/auth/oauth-core.js';
-import { logger } from '../utils/logger.js';
+import { SubscriptionSessionEndedError, type SubscriptionManager } from './subscriptions.js';
 
 /**
- * The stored access token for a provider, or null when no subscription is
- * recorded. Deliberately does NOT refresh a near-expiry OpenAI token any
- * more: the provider's own 401 path owns refresh uniformly (see
- * {@link refreshOpenAISubscriptionAfterRejection}), so an expired token costs
- * one rejected request and then recovers through the same code that handles
- * a mid-lifetime revocation. Two refresh paths was how the expiry path came
- * to throw a raw token-exchange error that the surfaces then captioned as an
- * API-key problem.
+ * The access token to send for a built-in subscription provider, renewed first
+ * when it is at or near its expiry. Null when no sign-in is stored or the
+ * provider refused it; a renewal that could not be judged throws.
  */
 export async function resolveSubscriptionAccessToken(
   provider: string,
-  manager: Pick<SubscriptionManager, 'get' | 'saveSubscription' | 'resolveAccessToken'>,
+  manager: Pick<SubscriptionManager, 'resolveAccessToken'>,
 ): Promise<string | null> {
-  if (provider === 'openai') {
-    return manager.get('openai')?.accessToken ?? null;
-  }
   const builtin = getBuiltinSubscriptionProvider(provider);
   if (!builtin) return null;
-  return manager.resolveAccessToken(provider, builtin.oauth);
+  try {
+    return await manager.resolveAccessToken(provider, builtin.oauth);
+  } catch (error) {
+    if (error instanceof SubscriptionSessionEndedError) return null;
+    throw error;
+  }
 }
 
 /**
  * What one recovery attempt concluded. `refreshed` carries the token to retry
- * with (possibly minted by a concurrent caller rather than this one).
- * `session-dead` means the authorization server refused the grant: the
- * session is over and only a new sign-in helps. `unavailable` means the
+ * with (possibly minted by a concurrent caller or another process rather than
+ * this one). `session-dead` means the authorization server refused the grant:
+ * the session is over and only a new sign-in helps. `unavailable` means the
  * refresh could not be judged (transport failure, a 5xx from the token
  * endpoint, a malformed answer): the session's true state is unknown and the
  * caller must NOT tell the user to sign in again.
@@ -39,149 +34,58 @@ export type SubscriptionRefreshOutcome =
   | { readonly kind: 'session-dead' }
   | { readonly kind: 'unavailable'; readonly error: unknown };
 
-/**
- * OpenAI's refresh tokens rotate (the exchange returns a new one), so a spent
- * refresh token is gone. When a token is
- * revoked, every in-flight call 401s at once, and N concurrent recoveries
- * would each present the same refresh token: one wins, the rest fail and
- * would falsely report a session the winner just healed as dead. One shared
- * in-flight attempt per process closes the in-process race.
- */
-let inFlightOpenAIRefresh: Promise<SubscriptionRefreshOutcome> | null = null;
-
-/**
- * One recovery attempt for a stored OpenAI subscription whose access token
- * the backend has rejected. `rejectedAccessToken` is the token the backend
- * refused: when the store already holds a DIFFERENT token, another caller
- * (or another process) refreshed while this one was in flight, and the
- * stored token is returned without spending anything.
- *
- * The exchange is time-bounded (oauth-core) but deliberately not wired to
- * any one turn's abort signal: the attempt is shared by every concurrent
- * caller, and one caller cancelling its turn must not abort the recovery
- * the others are awaiting.
- */
-export async function refreshOpenAISubscriptionAfterRejection(
-  manager: Pick<SubscriptionManager, 'get' | 'saveSubscription'>,
-  rejectedAccessToken: string,
-): Promise<SubscriptionRefreshOutcome> {
-  const existing = manager.get('openai');
-  if (!existing) return { kind: 'session-dead' };
-  if (existing.accessToken !== rejectedAccessToken) {
-    return { kind: 'refreshed', accessToken: existing.accessToken };
-  }
-  // A session already stamped dead is not retried: hammering the token
-  // endpoint with a refresh token the server already refused cannot help,
-  // and only a new sign-in replaces the record.
-  if (existing.revokedAt !== undefined) return { kind: 'session-dead' };
-  if (!existing.refreshToken) return { kind: 'session-dead' };
-  return runSharedOpenAIRefresh(manager, existing);
+function openaiOAuth() {
+  return getBuiltinSubscriptionProvider('openai')?.oauth ?? null;
 }
 
 /**
- * Interaction-free freshness maintenance, called before a send: a token at
- * or near its expiry is refreshed silently with the rotating refresh token,
- * so the ordinary expiry case never even produces a rejected request, let
- * alone a user-visible error. `unavailable` falls back to the stored token;
- * the send may still work, and the rejection path backstops it if not.
+ * One recovery for the stored OpenAI subscription after the backend refused
+ * `rejectedAccessToken`. The renewal is the store's own
+ * ({@link SubscriptionManager.resolveAccessToken}): one locked claim and one
+ * request across every caller and process, so the rotating refresh token is
+ * spent once, and a store that already holds a different token answers
+ * without spending anything.
+ *
+ * The exchange is time-bounded (oauth-core) but deliberately not wired to any
+ * one turn's abort signal: the attempt is shared by every concurrent caller,
+ * and one caller cancelling its turn must not abort the recovery the others
+ * are awaiting.
+ */
+export async function refreshOpenAISubscriptionAfterRejection(
+  manager: Pick<SubscriptionManager, 'resolveAccessToken'>,
+  rejectedAccessToken: string,
+): Promise<SubscriptionRefreshOutcome> {
+  const oauth = openaiOAuth();
+  if (!oauth) return { kind: 'session-dead' };
+  try {
+    const accessToken = await manager.resolveAccessToken('openai', oauth, { rejectedAccessToken });
+    return accessToken === null ? { kind: 'session-dead' } : { kind: 'refreshed', accessToken };
+  } catch (error) {
+    if (error instanceof SubscriptionSessionEndedError) return { kind: 'session-dead' };
+    return { kind: 'unavailable', error };
+  }
+}
+
+/**
+ * Interaction-free freshness maintenance, called before a send: a token at or
+ * near its expiry is renewed silently, so the ordinary expiry case never even
+ * produces a rejected request. A renewal that could not be judged falls back
+ * to the stored token; the send may still work, and the rejection path
+ * backstops it if not.
  */
 export async function resolveFreshOpenAIAccessToken(
-  manager: Pick<SubscriptionManager, 'get' | 'saveSubscription'>,
+  manager: Pick<SubscriptionManager, 'get' | 'resolveAccessToken'>,
 ): Promise<SubscriptionRefreshOutcome | { kind: 'unconfigured' }> {
   const existing = manager.get('openai');
   if (!existing) return { kind: 'unconfigured' };
   if (existing.revokedAt !== undefined) return { kind: 'session-dead' };
-  const nearExpiry = typeof existing.expiresAt === 'number' && Date.now() + 60_000 >= existing.expiresAt;
-  if (!nearExpiry || !existing.refreshToken) {
+  const oauth = openaiOAuth();
+  if (!oauth) return { kind: 'refreshed', accessToken: existing.accessToken };
+  try {
+    const accessToken = await manager.resolveAccessToken('openai', oauth);
+    return accessToken === null ? { kind: 'unconfigured' } : { kind: 'refreshed', accessToken };
+  } catch (error) {
+    if (error instanceof SubscriptionSessionEndedError) return { kind: 'session-dead' };
     return { kind: 'refreshed', accessToken: existing.accessToken };
   }
-  const outcome = await runSharedOpenAIRefresh(manager, existing);
-  if (outcome.kind === 'unavailable') {
-    return { kind: 'refreshed', accessToken: existing.accessToken };
-  }
-  return outcome;
-}
-
-/** True when the stored record still holds the credentials a refresh started from. */
-function sameCredentials(
-  stored: NonNullable<ReturnType<SubscriptionManager['get']>>,
-  started: NonNullable<ReturnType<SubscriptionManager['get']>>,
-): boolean {
-  return stored.accessToken === started.accessToken && stored.refreshToken === started.refreshToken;
-}
-
-function runSharedOpenAIRefresh(
-  manager: Pick<SubscriptionManager, 'get' | 'saveSubscription'>,
-  existing: NonNullable<ReturnType<SubscriptionManager['get']>>,
-): Promise<SubscriptionRefreshOutcome> {
-  if (inFlightOpenAIRefresh) return inFlightOpenAIRefresh;
-  const attempt = (async (): Promise<SubscriptionRefreshOutcome> => {
-    let refreshed;
-    try {
-      const openai = getBuiltinSubscriptionProvider('openai');
-      if (!openai) return { kind: 'session-dead' };
-      refreshed = await refreshOAuthAccessToken(openai.oauth, existing.refreshToken!);
-    } catch (error) {
-      // Only an answered 4xx is the authorization server refusing the grant.
-      // Anything else (transport, 5xx, malformed 200) leaves the session's
-      // state unknown.
-      if (error instanceof OAuthTokenExchangeError && error.status >= 400 && error.status < 500) {
-        // The refusal answers the refresh token THIS attempt presented. When
-        // another process rotated or re-signed-in meanwhile, the stored record
-        // is newer and healthy; stamping it dead would sign the user out.
-        const stored = manager.get('openai');
-        if (!stored) return { kind: 'session-dead' };
-        if (!sameCredentials(stored, existing)) {
-          return stored.revokedAt === undefined
-            ? { kind: 'refreshed', accessToken: stored.accessToken }
-            : { kind: 'session-dead' };
-        }
-        try {
-          manager.saveSubscription({ ...existing, revokedAt: Date.now(), updatedAt: Date.now() });
-        } catch (saveError) {
-          logger.warn('[subscription-auth] could not record the revoked OpenAI session', {
-            error: saveError instanceof Error ? saveError.message : String(saveError),
-          });
-        }
-        return { kind: 'session-dead' };
-      }
-      return { kind: 'unavailable', error };
-    }
-    try {
-      // Same guard on success: a sign-in another surface completed while this
-      // exchange ran is newer than the answer, and must not be overwritten.
-      const stored = manager.get('openai');
-      if (!stored) return { kind: 'session-dead' };
-      if (!sameCredentials(stored, existing)) {
-        return stored.revokedAt === undefined
-          ? { kind: 'refreshed', accessToken: stored.accessToken }
-          : { kind: 'session-dead' };
-      }
-      const { revokedAt: _cleared, ...rest } = existing;
-      manager.saveSubscription({
-        ...rest,
-        accessToken: refreshed.accessToken,
-        // An answer without a new refresh token or expiry keeps the stored ones, as every other provider's refresh does.
-        refreshToken: refreshed.refreshToken || existing.refreshToken,
-        tokenType: refreshed.tokenType || existing.tokenType,
-        ...(typeof refreshed.expiresAt === 'number' && Number.isFinite(refreshed.expiresAt)
-          ? { expiresAt: refreshed.expiresAt } : typeof existing.expiresAt === 'number' ? { expiresAt: existing.expiresAt } : {}),
-        ...(refreshed.scopes ? { scopes: refreshed.scopes } : existing.scopes ? { scopes: existing.scopes } : {}),
-        updatedAt: Date.now(),
-      });
-    } catch (error) {
-      // The refresh already succeeded over the wire and the old refresh token
-      // is rotated away server-side; discarding the result over a disk error
-      // would cost the user a healthy session. The turn proceeds; the store
-      // heals on the next successful save.
-      logger.warn('[subscription-auth] refreshed OpenAI subscription could not be persisted; continuing with the in-memory token', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    return { kind: 'refreshed', accessToken: refreshed.accessToken };
-  })();
-  inFlightOpenAIRefresh = attempt;
-  return attempt.finally(() => {
-    inFlightOpenAIRefresh = null;
-  });
 }

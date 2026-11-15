@@ -61,7 +61,13 @@ const failingCall = (call: number): ChatResponse => ({ content: '', toolCalls: [
 describe('a turn whose tool rounds keep failing', () => {
   test('ends with a named error after repeated circuit-breaker trips, and each recovery notice reaches the model only once', async () => {
     const prompts: string[] = [];
-    const h = harness((request, call) => { prompts.push(request.systemPrompt ?? ''); return failingCall(call); });
+    const systemPrompts = new Set<string>();
+    const h = harness((request, call) => {
+      const last = request.messages.at(-1);
+      prompts.push(last?.role === 'user' && typeof last.content === 'string' ? last.content : '');
+      systemPrompts.add(request.systemPrompt ?? '');
+      return failingCall(call);
+    });
     await executeOrchestratorTurnLoop(h.context);
     // Three trips of ten consecutive all-failed rounds each.
     expect(h.calls()).toBe(30);
@@ -72,6 +78,11 @@ describe('a turn whose tool rounds keep failing', () => {
     // The first notice is on the call right after the first trip and gone on the next.
     expect(prompts[10]).toContain('[Tool recovery]');
     expect(prompts[11]).not.toContain('[Tool recovery]');
+    // Recovery text travels after the history, so the provider's cached prefix survives every call.
+    expect(systemPrompts.size).toBe(1);
+    // The person sees the recovery as a warning the loop declared; nothing reads its level.
+    expect(h.conversation.getMessageSnapshot().some(message => message.role === 'system' && message.notice?.level === 'warning'
+      && message.content.startsWith('[Tool recovery]'))).toBe(true);
   }, 15_000);
 });
 

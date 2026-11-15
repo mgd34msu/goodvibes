@@ -6,7 +6,7 @@ import type { SplashOptions } from './splash-lines.js';
 import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ProviderMessage, ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { TranscriptEventKind, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import type { NoticeMeta, TranscriptEventKind, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
 // SystemMessageKind imported from runtime directly to avoid cycle: conversation.ts → system-message-router.ts → conversation.ts
 import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { ConversationManager as PlatformConversationManager, TranscriptReadingLifetime, type BlockMeta as PlatformBlockMeta, } from '@goodvibes-jev/engine/platform/platform/core';
@@ -17,6 +17,8 @@ import type { createConversationRenderer } from './conversation-rendering.js';
 export type NoticeSink = (content: string, options: {
     readonly restored: boolean;
     readonly runtimeEvent?: RuntimeEventProvenance | undefined;
+    /** The writer's declaration (addNotice); a sink shows it as given and reads nothing. */
+    readonly notice?: NoticeMeta | undefined;
     readonly signal: AbortSignal;
     readonly assertCurrent: () => void;
 }) => void | Promise<void>;
@@ -176,7 +178,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
                 throw new JudgmentAuthorityRetiredError();
         };
         try {
-            const result = sink(message.content, { restored, runtimeEvent: message.runtimeEvent, signal: lifetime.signal, assertCurrent });
+            const result = sink(message.content, { restored, runtimeEvent: message.runtimeEvent, ...(message.notice ? { notice: message.notice } : {}), signal: lifetime.signal, assertCurrent });
             if (result) {
                 // Unavailable or retired readings leave the original message saved;
                 // neither a guessed severity nor an unhandled rejection is emitted.
@@ -265,6 +267,16 @@ export class TerminalConversationManager extends PlatformConversationManager {
         const nextIndex = this.getMessageCount();
         this.messageKindRegistry.delete(nextIndex);
         super.addSystemMessage(content, runtimeEvent);
+        this.markDirty();
+        this.publishSystemNotice(nextIndex, false);
+    }
+    public override addNotice(content: string, meta: NoticeMeta): void {
+        const nextIndex = this.getMessageCount();
+        if (meta.kind)
+            this.messageKindRegistry.set(nextIndex, meta.kind);
+        else
+            this.messageKindRegistry.delete(nextIndex);
+        super.addNotice(content, meta);
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }
@@ -476,6 +488,13 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.messageKindRegistry = new Map();
         this.dropIndexKeyedView(false);
         this.usageHydrator?.();
+        // The restored history is a copy of data.messages, index for index; reading the input copies nothing.
+        const saved = data.messages ?? [];
+        for (let index = 0; index < saved.length; index++) {
+            const message = saved[index]!;
+            if (message.role === 'system' && message.notice?.kind)
+                this.messageKindRegistry.set(index, message.notice.kind);
+        }
         // A restored session's notices go back into the history (not toasted).
         if (this.noticeSink) {
             const restored = this.getMessageSnapshot();

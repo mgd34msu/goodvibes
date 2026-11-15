@@ -49,13 +49,14 @@ function noDelegation(context: AnswerContext): unknown {
 /** One model reply: a tool round writing `file`, or a final answer. */
 type Reply = { readonly write: string } | { readonly text: string };
 
-function provider(replies: Reply[], seen: { requests: number; systemPrompts?: string[] }): LLMProvider {
+function provider(replies: Reply[], seen: { requests: number; hostMessages?: string[] }): LLMProvider {
   return {
     name: 'fake',
     models: ['fake-model'],
     async chat(request): Promise<ChatResponse> {
       seen.requests += 1;
-      seen.systemPrompts?.push(request.systemPrompt ?? '');
+      const last = request.messages.at(-1);
+      seen.hostMessages?.push(last?.role === 'user' && typeof last.content === 'string' ? last.content : '');
       const next = replies.shift();
       if (next === undefined) throw new Error('the model was called more times than scripted');
       if ('write' in next) {
@@ -204,7 +205,7 @@ describe('session mode (6.6)', () => {
     const h = makeHarness({ plan: oneUnitPlan(1), scripts: {}, port: answers(noDelegation, weakened) });
     harness = h;
     const contractId = await sessionReady(h);
-    const seen = { requests: 0, systemPrompts: [] as string[] };
+    const seen = { requests: 0, hostMessages: [] as string[] };
     const model = provider([{ write: 'src/csv.test.ts' }, { write: 'src/csv.ts' }, { text: 'parser written' }], seen);
     // The second tool round waits for the first round's mid-run nudge to be queued.
     const executeToolCalls = writer(h.root, async (round) => {
@@ -217,10 +218,10 @@ describe('session mode (6.6)', () => {
     const unit = contractOf(h, contractId).units[0]!;
     expect(unit.nudges[0]).toMatchObject({ delivery: 'bus', agentId: 'turn-7', kinds: ['quality'] });
     expect(unit.nudges[0]!.consumedAt).toBeDefined();
-    // The nudge is host instruction: it rides in the next model call's private context, never as a user message.
-    const nudged = seen.systemPrompts.findIndex((prompt) => prompt.includes('Existing tests or checks were deleted, skipped or loosened'));
+    // The nudge is host instruction: it rides in the next model call's host message, never in the saved history.
+    const nudged = seen.hostMessages.findIndex((prompt) => prompt.includes('Existing tests or checks were deleted, skipped or loosened'));
     expect(nudged).toBeGreaterThan(0);
-    expect(seen.systemPrompts.slice(nudged + 1).some((prompt) => prompt.includes('Existing tests or checks were deleted, skipped or loosened'))).toBe(false);
+    expect(seen.hostMessages.slice(nudged + 1).some((prompt) => prompt.includes('Existing tests or checks were deleted, skipped or loosened'))).toBe(false);
     expect(userMessages(conversation).some((text) => text.includes('Existing tests or checks were deleted, skipped or loosened'))).toBe(false);
     expect(contractOf(h, contractId).status).toBe('passed');
     expect(h.manager.list().filter((record) => record.contractRole === 'unit')).toHaveLength(0);

@@ -12,6 +12,7 @@ import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/g
 import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import type { NotificationFeed } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
+import type { NoticeMeta } from '@goodvibes-jev/engine/platform/platform/core';
 /** Receives every system notice added to (or restored into) the conversation. */
 export type NoticeSink = (
   content: string,
@@ -43,7 +44,10 @@ export interface NoticeOptions extends Pick<JudgmentReadingOptions, 'signal' | '
   readonly restored?: boolean | undefined;
   readonly now?: (() => number) | undefined;
   readonly runtimeEvent?: RuntimeEventProvenance | undefined;
+  /** The writer's declaration (ConversationManager.addNotice): recorded at its level, no reading. */
+  readonly notice?: NoticeMeta | undefined;
 }
+const FEED_LEVEL: Readonly<Record<NoticeMeta['level'], 'info' | 'warning' | 'critical'>> = { info: 'info', success: 'info', warning: 'warning', error: 'critical' };
 /** Keep one system notice in the history; the feed's toast bridge toasts it unless restored. */
 export interface NoticePublicationPolicy {
   readonly resolveEvent?:
@@ -130,6 +134,10 @@ export function createNoticePublisher(policy: NoticePublicationPolicy) {
         restored,
         eventKey: event.key,
       });
+      return;
+    }
+    if (options.notice) {
+      feed.recordNotice({ ...parts, level: FEED_LEVEL[options.notice.level], timestamp, restored });
       return;
     }
     const pending = feed.recordNotice({ ...parts, timestamp, restored, severityPending: true });

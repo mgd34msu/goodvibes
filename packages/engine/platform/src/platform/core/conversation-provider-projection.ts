@@ -38,3 +38,13 @@ export function providerConversation(messages: readonly ConversationMessageSnaps
   }
   return result;
 }
+
+/**
+ * The request's messages: the history, then the host channel's text as one
+ * trailing message for this request only. The history array is shared with
+ * other readers, so it is copied only when a host message is added.
+ */
+export function withHostMessage(messages: ProviderMessage[], host: string | undefined): ProviderMessage[] {
+  if (host === undefined) return messages;
+  return [...messages, { role: 'user', content: host }];
+}

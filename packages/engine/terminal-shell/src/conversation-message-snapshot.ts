@@ -1,4 +1,4 @@
-import type { ConversationMessageSnapshot, TokenUsage } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationMessageSnapshot, NoticeMeta, TokenUsage } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 type ToolHostEvidence = NonNullable<Extract<ConversationMessageSnapshot, { role: 'tool' }>['hostEvidence']>;
@@ -31,6 +31,15 @@ function readContent(value: unknown): string | ContentPart[] | null {
     parts.push(part);
   }
   return parts;
+}
+/** A saved notice declaration; an unknown or malformed one is dropped, never guessed. */
+function readNoticeMeta(value: unknown): NoticeMeta | undefined {
+  if (!isRecord(value)) return undefined;
+  const level = value.level;
+  if (level !== 'info' && level !== 'success' && level !== 'warning' && level !== 'error') return undefined;
+  const kind = value.kind === 'system' || value.kind === 'operational' || value.kind === 'contract' ? value.kind : undefined;
+  const priority = value.priority === 'high' || value.priority === 'low' ? value.priority : undefined;
+  return { level, ...(kind ? { kind } : {}), ...(priority ? { priority } : {}) };
 }
 function readTokenUsage(value: unknown): TokenUsage | undefined {
   // Preserve untrusted usage verbatim for the platform fold's strict validation.
@@ -89,7 +98,8 @@ function readConversationMessageSnapshot(value: unknown): ConversationMessageSna
     };
   }
   if (value.role === 'system' && typeof value.content === 'string') {
-    if (!hasOwn(value, 'runtimeEvent')) return { role: 'system', content: value.content };
+    const notice = readNoticeMeta(value.notice);
+    if (!hasOwn(value, 'runtimeEvent')) return { role: 'system', content: value.content, ...(notice ? { notice } : {}) };
     const event = value.runtimeEvent;
     if (!isRecord(event) || typeof event.type !== 'string') return null;
     if (hasOwn(event, 'occurrenceId') && event.occurrenceId !== undefined && typeof event.occurrenceId !== 'string') return null;
@@ -97,6 +107,7 @@ function readConversationMessageSnapshot(value: unknown): ConversationMessageSna
       role: 'system',
       content: value.content,
       runtimeEvent: { type: event.type, ...(typeof event.occurrenceId === 'string' ? { occurrenceId: event.occurrenceId } : {}) },
+      ...(notice ? { notice } : {}),
     };
   }
   if (value.role === 'tool' && typeof value.callId === 'string' && typeof value.content === 'string') {

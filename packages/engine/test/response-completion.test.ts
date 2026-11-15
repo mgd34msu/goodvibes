@@ -799,7 +799,7 @@ test('repeated tool errors trigger recovery instead of terminating the original 
   f.context.toolRegistry.register({ definition: { name: 'probe', description: 'Inspect work', parameters: { type: 'object' } }, execute: async () => ({ success: false }) });
   const provider = { name: 'test', models: ['test'], chat: async (request: ChatRequest): Promise<ChatResponse> => {
     rounds++;
-    if (rounds === 11) expect(request.systemPrompt).toContain('[Tool recovery]');
+    if (rounds === 11) expect(JSON.stringify(request.messages.at(-1))).toContain('[Tool recovery]');
     return { content: rounds > 10 ? 'FINISHED' : '', usage: { inputTokens: 1, outputTokens: 1 },
       stopReason: rounds > 10 ? 'completed' : 'tool_call',
       toolCalls: rounds > 10 ? [] : [{ id: `call-${rounds}`, name: 'probe', arguments: { attempt: rounds } }] };

@@ -11,6 +11,7 @@ export * from './conversation.js';
 export * from './deterministic-replay.js';
 export * from './event-replay.js';
 export * from './execution-plan.js';
+export * from './host-instructions.js';
 export * from './intent-classifier.js';
 export * from './orchestrator-context-runtime.js';
 export * from './orchestrator-follow-up-runtime.js';

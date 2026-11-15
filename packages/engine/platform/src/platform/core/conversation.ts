@@ -1,7 +1,9 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { providerConversation } from './conversation-provider-projection.js';
+import { providerConversation, withHostMessage } from './conversation-provider-projection.js';
+import { HostInstructionChannel, type HostInstructions } from './host-instructions.js';
 import { declaredNoticePresentation } from '../runtime/runtime-event-notices.js';
 import { prepareSystemMessagePresentation, type SystemMessagePresentation } from '../runtime/system-message-presentation.js';
+import type { SystemMessageKind, SystemMessagePriorityLevel } from '../runtime/system-message-policy.js';
 import type { RuntimeEventProvenance } from '../../events/occurrence.js';
 import type { ProviderMessage, ContentPart } from '../providers/interface.js';
 import type { ToolCall, ToolHostEvidence, ToolResult } from '../types/tools.js';
@@ -46,10 +48,26 @@ type AssistantMessage = {
   followUp?: true | undefined;
 };
 
+export type NoticeLevel = 'info' | 'success' | 'warning' | 'error';
+export type NoticeKind = SystemMessageKind;
+/** What the writer of a notice knows about it, stored on the message so no reader has to work it out again. */
+export interface NoticeMeta {
+  readonly level: NoticeLevel;
+  readonly kind?: NoticeKind | undefined;
+  readonly priority?: SystemMessagePriorityLevel | undefined;
+}
+
+/** The transcript colour of a declared notice. */
+export function noticePresentation(notice: NoticeMeta): SystemMessagePresentation {
+  return Object.freeze({ severity: notice.level === 'error' ? 'error' : notice.level === 'warning' ? 'warning' : 'info' });
+}
+
 export type ConversationMessageSnapshot =
   | { role: 'user'; content: string | ContentPart[]; cancelled?: boolean }
   | AssistantMessage
-  | { role: 'system'; content: string; runtimeEvent?: RuntimeEventProvenance | undefined; presentation?: SystemMessagePresentation | undefined }
+  | { role: 'system'; content: string; runtimeEvent?: RuntimeEventProvenance | undefined; presentation?: SystemMessagePresentation | undefined;
+    /** Present when the writer declared the notice (addNotice); absent on older lines. */
+    notice?: NoticeMeta | undefined }
   | {
     role: 'tool';
     callId: string;
@@ -162,6 +180,12 @@ export class ConversationManager {
   readonly #revisionSource = revisionSource('conversation', () => this._messagesRevision);
   private _cachedLLMMessages: ProviderMessage[] | null = null;
   private _cachedLLMRevision = -1;
+  /**
+   * What the host tells the model for the next request(s), sent after the
+   * history as one trailing message (host-instructions.ts). Not history: not
+   * saved, not shown, and it does not move the message revision.
+   */
+  readonly hostInstructions: HostInstructions = new HostInstructionChannel();
 
   constructor() {}
 
@@ -208,6 +232,15 @@ export class ConversationManager {
     this._cachedLLMMessages = result;
     this._cachedLLMRevision = this._messagesRevision;
     return result;
+  }
+
+  /**
+   * The messages of one provider request: the history, then the host channel's
+   * text when any is set. Call once per request and call
+   * `hostInstructions.delivered()` after the provider accepted it.
+   */
+  public getMessagesForRequest(): ProviderMessage[] {
+    return withHostMessage(this.getMessagesForLLM(), this.hostInstructions.render());
   }
 
   public addUserMessage(content: string | ContentPart[]): void {
@@ -328,6 +361,20 @@ export class ConversationManager {
       ...(presentation ? { presentation } : {}),
       ...(runtimeEvent ? { runtimeEvent: { type: runtimeEvent.type, occurrenceId: runtimeEvent.occurrenceId } } : {}),
     });
+    this._messagesRevision++;
+  }
+
+  /**
+   * A line for the person, with what the writer knows about it: its level,
+   * and optionally its kind and priority. Display only: it is saved with the
+   * history and never sent to the model (that is `hostInstructions`). The level
+   * is stored on the message, so showing, restoring or branching it asks no
+   * model what it means.
+   */
+  public addNotice(content: string, meta: NoticeMeta): void {
+    const notice: NoticeMeta = Object.freeze({ level: meta.level,
+      ...(meta.kind ? { kind: meta.kind } : {}), ...(meta.priority ? { priority: meta.priority } : {}) });
+    this.messages.push({ role: 'system', content, notice, presentation: noticePresentation(notice) });
     this._messagesRevision++;
   }
 
@@ -522,6 +569,7 @@ export class ConversationManager {
     resetVerificationArchives(this);
     this.presentationLifetime.abort();
     this.presentationLifetime = new AbortController();
+    this.hostInstructions.reset();
     this.messages = [];
     this._title = '';
     this._titleSource = 'system';
@@ -565,11 +613,7 @@ export class ConversationManager {
     const messages = cloneMessages(stored);
     switchVerificationArchive(this, name);
     this.messages = messages;
-    for (const message of this.messages) if (message.role === 'system') {
-      const presentation = declaredNoticePresentation(message.content, message.runtimeEvent);
-      if (presentation) message.presentation = presentation;
-      else { delete message.presentation; void prepareSystemMessagePresentation(message.content, this.presentationLifetime.signal).catch(() => {}); }
-    }
+    for (const message of this.messages) if (message.role === 'system') this.presentStoredSystemMessage(message);
     this.currentBranch = name;
     this.streamingMessageIndex = -1;
     // The undo stack holds turns removed from the branch just left; redoing
@@ -627,6 +671,13 @@ export class ConversationManager {
     return true;
   }
 
+  /** A restored line keeps its declared level; only an undeclared, unstructured line is read. */
+  private presentStoredSystemMessage(message: Extract<Message, { role: 'system' }>): void {
+    const presentation = message.notice ? noticePresentation(message.notice) : declaredNoticePresentation(message.content, message.runtimeEvent);
+    if (presentation) message.presentation = presentation;
+    else { delete message.presentation; void prepareSystemMessagePresentation(message.content, this.presentationLifetime.signal).catch(() => {}); }
+  }
+
   public getCurrentBranch(): string {
     return this.currentBranch;
   }
@@ -655,11 +706,8 @@ export class ConversationManager {
     titleSource?: ConversationTitleSource | undefined;
   }): void {
     this.messages = cloneMessages(data.messages ?? []);
-    for (const message of this.messages) if (message.role === 'system') {
-      const presentation = declaredNoticePresentation(message.content, message.runtimeEvent);
-      if (presentation) message.presentation = presentation;
-      else { delete message.presentation; void prepareSystemMessagePresentation(message.content, this.presentationLifetime.signal).catch(() => {}); }
-    }
+    for (const message of this.messages) if (message.role === 'system') this.presentStoredSystemMessage(message);
+    this.hostInstructions.reset();
     this._title = typeof data.title === 'string' ? data.title : '';
     this._titleSource = data.titleSource === 'user' || data.titleSource === 'system'
       ? data.titleSource

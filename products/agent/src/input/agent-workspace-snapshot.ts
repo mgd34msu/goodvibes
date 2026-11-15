@@ -6,7 +6,6 @@ import { memoryRecordTemporalStatus, resolveCanonicalMemoryDbPath } from '@goodv
 import { storeFileChangeStamp } from '../agent/store-change-stamp.ts';
 import { describeMemoryPromptEligibility, isPromptActiveMemory } from '../agent/memory-prompt.ts';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
-import { readSetupWizardLiveDurableReceipts } from './setup-wizard-live-receipts.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-media.ts';
@@ -55,7 +54,6 @@ const READ_FAILURE_LABELS: Readonly<Record<string, string>> = {
   'routine-receipts': 'routine schedule receipts',
   'research-sources': 'research sources',
   'research-runs': 'research runs',
-  'setup-receipts': 'host setup receipts',
 };
 
 /** Store ids that map onto a setup checklist item, with that item's id. */
@@ -307,6 +305,31 @@ export function buildAgentWorkspaceEditorContextPart(context: CommandContext): P
 }
 
 /**
+ * What the Personal Ops lanes read: channels, notes, and routines with their
+ * schedule receipts. A lane read builds this part once; comparing it again
+ * before publishing reads only these stores, not the whole workspace.
+ */
+export function buildAgentWorkspacePersonalOpsPart(context: CommandContext): Pick<AgentWorkspaceRuntimeSnapshot,
+  'channels' | 'localNotes' | 'localNoteCount' | 'localNoteReviewQueueCount' | 'localRoutines' | 'localRoutineCount'
+  | 'enabledRoutineCount' | 'routineScheduleReceiptCount' | 'failedRoutineScheduleReceiptCount' | 'latestRoutineScheduleReceipt'> {
+  const notes = buildAgentWorkspaceNoteSnapshot(context);
+  const routines = buildAgentWorkspaceRoutineCounters(context);
+  const receipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context);
+  return {
+    channels: buildAgentWorkspaceChannels(context),
+    localNotes: notes.items,
+    localNoteCount: notes.count,
+    localNoteReviewQueueCount: notes.reviewQueueCount,
+    localRoutines: routines.items,
+    localRoutineCount: routines.count,
+    enabledRoutineCount: routines.enabled,
+    routineScheduleReceiptCount: receipts.count,
+    failedRoutineScheduleReceiptCount: receipts.failed,
+    latestRoutineScheduleReceipt: receipts.latest,
+  };
+}
+
+/**
  * Assembles the full Agent workspace runtime snapshot. Composes the
  * sub-builders in agent-workspace-snapshot-builders.ts (split out of what
  * was previously one ~516-line function) plus the two live-counter builders
@@ -331,10 +354,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const reviewPacket = buildAgentWorkspaceReviewPacketPart(context, readFailures);
   const { artifactListSnapshot, recentReviewerHandoffs, reviewPacketDefaults, reviewerBadge, reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
   const setupSmokeHistory = buildSetupSmokeHistory(artifactListSnapshot.items, artifactListSnapshot.available);
-  const liveSetupReceipts = readSetupWizardLiveDurableReceipts(context);
-  if (liveSetupReceipts.unavailable.length > 0) readFailures.set('setup-receipts', `receipts unavailable: ${liveSetupReceipts.unavailable.join(', ')}`);
-  // Artifact metadata is not setup evidence; only the live read models publish receipts.
-  const durableSetupReceipts = liveSetupReceipts.receipts;
   const discoveredBehavior = summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths);
   const profileBaseHome = inferRuntimeProfileBaseHome(context.workspace?.shellPaths?.homeDirectory ?? '');
   const { runtimeProfiles, runtimeStarterTemplates, selectedRuntimeProfile, runtimeProfileRoot } = buildAgentWorkspaceRuntimeProfilesSnapshot(profileBaseHome);
@@ -393,8 +412,9 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     setupChecklist,
     setupSmokeHistory,
     buildSetupWizardCheckpoint(context),
+    // Setup status comes from the checks this Agent runs itself; artifact
+    // metadata and host read models are not setup evidence.
     setupCompletionMarkerExists(context),
-    durableSetupReceipts,
   );
   warnings.push(...describeReadFailures(readFailures));
   const researchBrowserRunnerContract = buildResearchBrowserRunnerContract(context);

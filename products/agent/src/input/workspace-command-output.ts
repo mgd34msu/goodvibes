@@ -47,25 +47,3 @@ export function captureCommandPrint<T>(context: { print: (text: string) => void 
     }
   })();
 }
-
-/**
- * Command handlers report most failures by printing and returning normally rather than
- * throwing, so a workspace that ran a command can only tell it failed from what it printed.
- * A line opening with one of these words, or a first line that says "failed", counts.
- */
-// "usage:" ends in a colon, so it cannot sit inside a \b group: no word boundary follows a colon.
-const FAILURE_LINE_START = /^(usage:|(error|failed|unknown|invalid|cannot|could not|refused|refusing|not found|missing)\b|no\b.*\bnamed\b)/i;
-const FAILURE_FIRST_LINE = /\bfailed\b/i;
-
-export function capturedOutputReportsFailure(lines: readonly string[]): boolean {
-  const meaningful = lines.flatMap((text) => text.split('\n')).filter((line) => line.trim().length > 0);
-  if (meaningful.length === 0) return false;
-  if (FAILURE_FIRST_LINE.test(meaningful[0]!)) return true;
-  return meaningful.some((line) => FAILURE_LINE_START.test(line));
-}
-
-/** The line that says why a command failed: the first failure-looking line, else the first line. */
-export function firstFailureLine(lines: readonly string[]): string {
-  const meaningful = lines.flatMap((text) => text.split('\n')).map((line) => line.trim()).filter((line) => line.length > 0);
-  return meaningful.find((line) => FAILURE_LINE_START.test(line) || FAILURE_FIRST_LINE.test(line)) ?? meaningful[0] ?? 'the command reported a failure';
-}

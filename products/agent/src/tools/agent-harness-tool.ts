@@ -159,7 +159,32 @@ function detailedHarnessModelAccessGuide(): Record<string, string> {
   };
 }
 
+/**
+ * One harness per tool registry. The registered `agent_harness` and every
+ * facade that forwards to it (memory, models, settings, workspace, execution,
+ * research and the rest) get the same instance, so its definition and schema
+ * are built once per runtime, not once per facade. Different command wiring
+ * gets its own instance; a caller without route sources shares the one that
+ * has them.
+ */
+const harnessByRegistry = new WeakMap<ToolRegistry, { readonly deps: AgentHarnessToolDeps; readonly tool: Tool }>();
+
+function sameHarnessWiring(built: AgentHarnessToolDeps, wanted: AgentHarnessToolDeps): boolean {
+  return built.commandRegistry === wanted.commandRegistry
+    && built.commandContext === wanted.commandContext
+    && built.releaseRoot === wanted.releaseRoot
+    && (wanted.taskRouteSources === undefined || wanted.taskRouteSources === built.taskRouteSources);
+}
+
 export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
+  const built = harnessByRegistry.get(deps.toolRegistry);
+  if (built && sameHarnessWiring(built.deps, deps)) return built.tool;
+  const tool = buildAgentHarnessTool(deps);
+  harnessByRegistry.set(deps.toolRegistry, { deps, tool });
+  return tool;
+}
+
+function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
   const tool: Tool = {
     definition: captureAgentToolDefinition({
       name: 'agent_harness',

@@ -28,7 +28,6 @@ export interface McpWorkspaceForm extends McpWorkspaceFormBase {
 import type { McpServerConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
-import { captureCommandPrint, capturedOutputReportsFailure, firstFailureLine } from './workspace-command-output.ts';
 import type { CommandContext } from './command-registry.ts';
 import { requireMcpApi, requireShellPaths } from './commands/runtime-services.ts';
 
@@ -131,14 +130,14 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
         id: 'confirm',
         label: 'Confirm',
         value: this.form.confirm,
-        help: 'Type yes to save this MCP server through the TUI command dispatcher.',
+        help: 'Type yes to save this MCP server to its config file.',
         editable: true,
       },
       {
         id: 'save',
         label: 'Save server',
         value: '',
-        help: 'Dispatch the confirmed MCP server add/update through the workspace.',
+        help: 'Save the confirmed MCP server and reload the MCP runtime.',
         editable: false,
       },
       { id: 'cancel', label: 'Cancel', value: '', help: 'Return to the MCP server browser without changing config.', editable: false },
@@ -153,37 +152,50 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
   }
 
   async reloadRuntime(): Promise<void> {
-    await this.dispatchMcpCommand(['reload', '--yes'], 'MCP runtime reload');
+    if (!this.context) return;
+    this.lastError = null;
+    try {
+      const result = await requireMcpApi(this.context).reload(requireShellPaths(this.context));
+      this.refreshSnapshot();
+      const connected = this.snapshot.servers.filter((server) => server.connected).length;
+      this.setStatus(
+        `Reloaded MCP runtime: ${connected}/${this.snapshot.servers.length} server(s) connected. Result: +${result.added} ~${result.changed} -${result.removed}, unchanged ${result.unchanged}.`,
+        connected < this.snapshot.servers.length ? 'warning' : 'info',
+      );
+      void this.refreshTools(false);
+    } catch (error) {
+      this.lastError = summarizeError(error);
+      this.setStatus(`MCP runtime reload failed: ${this.lastError}`, 'error');
+    } finally {
+      this.context?.renderRequest();
+    }
   }
 
   async saveForm(): Promise<void> {
     if (!this.context) return;
+    if (!isAffirmative(this.form.confirm)) {
+      this.setStatus('MCP server add/update not confirmed. Type yes on the Confirm field, then press Enter on Save server.', 'warning');
+      this.context.renderRequest();
+      return;
+    }
+    this.lastError = null;
     try {
-      if (!isAffirmative(this.form.confirm)) {
-        this.setStatus('MCP server add/update not confirmed. Type yes on the Confirm field, then press Enter on Save server.', 'warning');
-        this.context.renderRequest();
-        return;
-      }
       const server = formToServerConfig(this.form);
-      // The form's own flags come first and the server's arguments after `--`,
-      // so an argument such as `--yes`, `--host` or `--scope` reaches the server
-      // instead of being read as an `/mcp add` flag.
-      const args = ['add', server.name, server.command, '--scope', this.form.scope];
-      if (server.role) args.push('--role', server.role);
-      if (server.trustMode) args.push('--trust', server.trustMode);
-      for (const [key, value] of Object.entries(server.env ?? {})) args.push('--env', `${key}=${value}`);
-      for (const path of server.allowedPaths ?? []) args.push('--path', path);
-      for (const host of server.allowedHosts ?? []) args.push('--host', host);
-      args.push('--yes', '--', ...(server.args ?? []));
-      // The form stays open until the command reports success, so a failed save can be corrected.
-      if (await this.dispatchMcpCommand(args, `MCP server ${server.name} add/update`)) {
-        this.mode = 'browse';
-        this.editingServerName = null;
-      }
+      // The config writer's own result decides: it throws when the save did not
+      // happen, and the form stays open with what was typed so it can be corrected.
+      const result = await requireMcpApi(this.context).upsertServerConfig(requireShellPaths(this.context), this.form.scope, server);
+      this.mode = 'browse';
+      this.editingServerName = null;
+      this.refreshSnapshot();
+      this.setStatus(
+        `Saved MCP server ${server.name} to ${result.path}. Reload result: +${result.reload.added} ~${result.reload.changed} -${result.reload.removed}, unchanged ${result.reload.unchanged}.`,
+      );
+      void this.refreshTools(false);
     } catch (error) {
       this.lastError = summarizeError(error);
-      this.setStatus(`MCP server save failed before dispatch: ${this.lastError}`, 'error');
-      this.context.renderRequest();
+      this.setStatus(`MCP server save failed: ${this.lastError}`, 'error');
+    } finally {
+      this.context?.renderRequest();
     }
   }
 
@@ -192,50 +204,25 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
     const name = this.editingServerName;
     const server = this.snapshot.effectiveConfig.servers.find((entry) => entry.server.name === name);
     const scope = server?.source.scope === 'global' ? 'global' : 'project';
+    // Leave the confirmation before awaiting, so a repeated y or Enter cannot start a second removal.
     this.mode = 'browse';
     this.editingServerName = null;
-    await this.dispatchMcpCommand(['remove', name, '--scope', scope, '--yes'], `MCP server ${name} removal`);
-  }
-
-  /** Runs `/mcp` and reports what it did. Returns true only when the command ran and did not report a failure. */
-  private async dispatchMcpCommand(args: readonly string[], summary: string): Promise<boolean> {
-    const context = this.context;
-    if (!context?.executeCommand) {
-      this.setStatus(`${summary} blocked: command dispatch is unavailable in this workspace.`, 'error');
-      this.lastError = 'Command dispatch is unavailable.';
-      context?.renderRequest();
-      return false;
-    }
-    this.status = `${summary} dispatched from MCP workspace.`;
     this.lastError = null;
-    context.renderRequest();
-    const executeCommand = context.executeCommand;
-    const outcome = await captureCommandPrint(context, () => executeCommand('mcp', [...args]));
-    // What the command printed still belongs in the transcript.
-    for (const line of outcome.lines) context.print(line);
     try {
-      if (!outcome.ok) {
-        this.lastError = summarizeError(outcome.error);
-        this.setStatus(`${summary} failed: ${this.lastError}`, 'error');
-        return false;
-      }
-      if (!outcome.value) {
-        this.setStatus(`${summary} failed: the command router did not handle /mcp.`, 'error');
-        this.lastError = 'Command router did not handle /mcp.';
-        return false;
-      }
+      const result = await requireMcpApi(this.context).removeServerConfig(requireShellPaths(this.context), scope, name);
       this.refreshSnapshot();
-      // /mcp reports most failures by printing and returning, not by throwing.
-      if (capturedOutputReportsFailure(outcome.lines)) {
-        const reported = firstFailureLine(outcome.lines);
-        this.lastError = reported;
-        this.setStatus(`${summary} failed: ${reported}`, 'error');
-        return false;
+      if (result.removed) {
+        this.setStatus(`Removed MCP server ${name} from ${scope} config ${result.path}. Reload result: +${result.reload.added} ~${result.reload.changed} -${result.reload.removed}.`);
+      } else {
+        this.lastError = `No ${scope} MCP server named ${name} exists in ${result.path}.`;
+        this.setStatus(`${this.lastError} If it still appears, it comes from another config scope or an external MCP config.`, 'warning');
       }
-      this.status = `${summary} completed through MCP workspace.`;
-      return true;
+      void this.refreshTools(false);
+    } catch (error) {
+      this.lastError = summarizeError(error);
+      this.setStatus(`MCP server ${name} removal failed: ${this.lastError}`, 'error');
     } finally {
-      context.renderRequest();
+      this.context?.renderRequest();
     }
   }
 }

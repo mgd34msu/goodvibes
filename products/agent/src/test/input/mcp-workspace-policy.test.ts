@@ -66,7 +66,7 @@ function makeContext(calls: {
 }
 
 describe('McpWorkspace Agent policy', () => {
-  test('requires workspace confirmation before dispatching MCP add, remove, and reload actions', async () => {
+  test('writes and reloads MCP config only after workspace confirmation', async () => {
     const calls = {
       reload: mock(async () => ({ added: 0, changed: 0, removed: 0, unchanged: 1 })),
       upsertServerConfig: mock(async () => ({ path: 'mcp.json', reload: { added: 0, changed: 0, removed: 0, unchanged: 1 } })),
@@ -78,11 +78,8 @@ describe('McpWorkspace Agent policy', () => {
 
     workspace.requestReload();
     expect(calls.reload).toHaveBeenCalledTimes(0);
-    expect(calls.executeCommand).toHaveBeenCalledTimes(0);
-    expect(workspace.status).toContain('Confirm MCP runtime reload');
     await workspace.reloadRuntime();
-    expect(calls.reload).toHaveBeenCalledTimes(0);
-    expect(calls.executeCommand).toHaveBeenCalledWith('mcp', ['reload', '--yes']);
+    expect(calls.reload).toHaveBeenCalledTimes(1);
 
     workspace.openAddForm();
     workspace.form.name = 'docs';
@@ -90,33 +87,40 @@ describe('McpWorkspace Agent policy', () => {
     workspace.form.args = '-y @modelcontextprotocol/server-filesystem docs';
     await workspace.saveForm();
     expect(calls.upsertServerConfig).toHaveBeenCalledTimes(0);
-    expect(calls.executeCommand).toHaveBeenCalledTimes(1);
-    expect(workspace.status).toContain('not confirmed');
+    expect(workspace.mode).toBe('form');
 
     workspace.form.confirm = 'yes';
     await workspace.saveForm();
-    expect(calls.upsertServerConfig).toHaveBeenCalledTimes(0);
-    expect(calls.executeCommand).toHaveBeenCalledWith('mcp', [
-      'add',
-      'docs',
-      'npx',
-      '--scope',
-      'project',
-      '--role',
-      'general',
-      '--trust',
-      'constrained',
-      '--yes',
-      '--',
-      '-y',
-      '@modelcontextprotocol/server-filesystem',
-      'docs',
-    ]);
+    expect(calls.upsertServerConfig).toHaveBeenCalledTimes(1);
+    const [, scope, server] = calls.upsertServerConfig.mock.calls[0] as unknown as [unknown, string, { name: string; command: string; args: string[] }];
+    expect(scope).toBe('project');
+    expect(server).toMatchObject({ name: 'docs', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', 'docs'] });
+    expect(workspace.mode).toBe('browse');
 
     workspace.requestDelete('filesystem');
-    expect(calls.executeCommand).toHaveBeenCalledTimes(2);
-    await workspace.confirmDelete();
     expect(calls.removeServerConfig).toHaveBeenCalledTimes(0);
-    expect(calls.executeCommand).toHaveBeenCalledWith('mcp', ['remove', 'filesystem', '--scope', 'project', '--yes']);
+    await workspace.confirmDelete();
+    expect(calls.removeServerConfig).toHaveBeenCalledTimes(1);
+    expect(calls.executeCommand).toHaveBeenCalledTimes(0);
+  });
+
+  test('a save the config writer refuses keeps the form and what was typed', async () => {
+    const calls = {
+      reload: mock(async () => ({ added: 0, changed: 0, removed: 0, unchanged: 1 })),
+      upsertServerConfig: mock(async () => { throw new Error('the project config is not writable'); }),
+      removeServerConfig: mock(async () => ({ removed: false, path: 'mcp.json', reload: { added: 0, changed: 0, removed: 0, unchanged: 1 } })),
+      executeCommand: mock(async () => true),
+    };
+    const workspace = new McpWorkspace();
+    workspace.open(makeContext(calls));
+    workspace.openAddForm();
+    workspace.form.name = 'docs';
+    workspace.form.command = 'docs-server';
+    workspace.form.confirm = 'yes';
+    await workspace.saveForm();
+    expect(workspace.mode).toBe('form');
+    expect(workspace.form.name).toBe('docs');
+    expect(workspace.statusTone).toBe('error');
+    expect(workspace.lastError).toContain('not writable');
   });
 });

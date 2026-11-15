@@ -166,11 +166,21 @@ async function protectMemoryDoctor(value: MemoryDoctorReport, options: CatalogRa
 }
 
 /**
- * Per-memory usage counters (injected/referenced) from the honest usage-outcome
- * instrumentation. Read-only view built from the same durable sidecar the runtime
- * writes; null when there is no active workspace to resolve the path from.
+ * Per-memory usage counters (injected, assessed, referenced). The turn tracker
+ * writes them as columns on the memory records, so the store this runtime
+ * composed is the one to read; they cover exactly the memories that exist.
+ * Without that store, the counters file an older release kept is read instead.
  */
 function readMemoryUsageSummary(context: CommandContext): MemoryUsageRead {
+  const registry = context.extensions?.memoryRegistry;
+  if (registry) {
+    try {
+      return { summary: new MemoryUsageStatsStore(registry).summary() };
+    } catch (error) {
+      logger.warn('Memory usage counters could not be read', { error: summarizeError(error) });
+      return { summary: null, readError: previewHarnessText(summarizeError(error), 160) };
+    }
+  }
   const shellPaths = context.workspace?.shellPaths;
   if (!shellPaths) return { summary: null };
   try {

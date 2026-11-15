@@ -7,7 +7,6 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
-import { mergeSetupWizardDurableReceipts, readSetupWizardLiveDurableReceipts } from '../input/setup-wizard-live-receipts.ts';
 import { clearSetupWizardCheckpoint, readSetupWizardCheckpoint, saveSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -595,20 +594,14 @@ export function setupWizardCheckpoint(context: CommandContext): AgentSetupWizard
   }
 }
 
-export function setupWizardDurableReceiptRead(context: CommandContext): { readonly receipts: readonly AgentSetupWizardDurableReceipt[]; readonly unavailable: readonly string[] } {
-  const artifactStore = setupSmokeArtifactStore(context);
-  const live = readSetupWizardLiveDurableReceipts(context);
-  const liveReceipts = live.receipts;
-  if (!artifactStore?.list) return { receipts: liveReceipts, unavailable: live.unavailable };
-  try {
-    return { receipts: mergeSetupWizardDurableReceipts(buildSetupWizardDurableReceipts(listEveryArtifact((limit) => artifactStore.list!(limit))), liveReceipts), unavailable: live.unavailable };
-  } catch {
-    return { receipts: liveReceipts, unavailable: live.unavailable };
-  }
-}
-
 export function setupWizardDurableReceipts(context: CommandContext): readonly AgentSetupWizardDurableReceipt[] {
-  return setupWizardDurableReceiptRead(context).receipts;
+  const artifactStore = setupSmokeArtifactStore(context);
+  if (!artifactStore?.list) return [];
+  try {
+    return buildSetupWizardDurableReceipts(listEveryArtifact((limit) => artifactStore.list!(limit)));
+  } catch {
+    return [];
+  }
 }
 
 export function setupCompletionMarkerExists(context: CommandContext): boolean {
@@ -643,20 +636,16 @@ export function setupPlanItemToWizardSource(item: SetupPlanItem): AgentSetupWiza
 
 export function buildSetupWizard(plan: readonly SetupPlanItem[], context: CommandContext): AgentSetupWizard {
   const markerItem = plan.find((item) => item.id === 'finish-onboarding');
-  const durable = setupWizardDurableReceiptRead(context);
-  const wizard = buildAgentSetupWizard({
+  return buildAgentSetupWizard({
     items: plan.map(setupPlanItemToWizardSource),
     smokeHistory: setupWizardSmokeHistory(context),
     checkpoint: setupWizardCheckpoint(context),
     closeoutCriticalStepIds: plan.filter((item) => item.blocksAutonomy).map((item) => item.id),
     receiptRequiredStepIds: ['connected-host-readiness', 'connected-host-auth', 'install-smoke'],
-    durableReceipts: durable.receipts,
+    durableReceipts: setupWizardDurableReceipts(context),
     setupMarkerExists: markerItem?.status === 'ready' || setupCompletionMarkerExists(context),
     repeatedBlockerAliases: SETUP_WIZARD_PLAN_BLOCKER_ALIASES,
   });
-  if (durable.unavailable.length === 0) return wizard;
-  // An unreadable host read model is not the same as a host with no receipts.
-  return { ...wizard, next: `${wizard.next} (receipts unavailable: ${durable.unavailable.join(', ')})` };
 }
 
 export function installSmokeRunSummary(plan: SetupInstallSmokePlan): SetupInstallSmokeRunSummary {

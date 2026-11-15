@@ -30,7 +30,9 @@ import { requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { requireSecretsManager } from './runtime-services.ts';
+import { LOCAL_WRITE_VERB, OUTWARD_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import {
+  MAILBOX_CREDENTIAL_FIELDS,
   MAILBOX_FIELDS,
   MAILBOX_FIELD_LIST,
   mailboxServiceDeps,
@@ -363,8 +365,31 @@ async function handleSend(
   ctx.print(`Email sent to ${to} with subject "${subject}"`);
 }
 
+/**
+ * The mail settings that decide where the stored password is presented and
+ * how: re-pointing them sends the owner's credential somewhere else, so only
+ * the owner's own keystrokes count.
+ */
+const EMAIL_SERVER_SET = ownerOnlyVerb('credential', 'changes where or as whom the stored mail password is presented, or stores the password');
+
+const EMAIL_VERBS: CommandVerbs = {
+  defaultVerb: 'status',
+  verbs: {
+    status: READ_VERB,
+    config: READ_VERB,
+    check: OUTWARD_VERB,
+    send: OUTWARD_VERB,
+    set: (rest) => {
+      const key = (rest.find((arg) => !arg.startsWith('-')) ?? '').trim();
+      const field = resolveMailboxField(key);
+      return field !== null && MAILBOX_CREDENTIAL_FIELDS.has(field) ? EMAIL_SERVER_SET : LOCAL_WRITE_VERB;
+    },
+  },
+  otherwise: READ_VERB,
+};
+
 export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(withCommandVerbs({
     name: 'email',
     aliases: [],
     description: 'Direct IMAP/SMTP email: configure, check inbox, or send a confirmed message',
@@ -406,5 +431,5 @@ export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
         ctx.print(`Email error: ${msg}`);
       }
     },
-  });
+  }, EMAIL_VERBS));
 }

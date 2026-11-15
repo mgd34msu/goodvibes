@@ -639,8 +639,6 @@ function captureDocumentBackend(context: CommandContext) {
     guards.push(() => { if (JSON.stringify(captureCatalogData(Reflect.get(subject, key))) !== revision) throw new ToolInputProjectionError('stale'); });
   };
   retainPublished(context.platform, 'config');
-  const readModels: unknown = Reflect.get(context.platform, 'readModels');
-  if (readModels && typeof readModels === 'object') retainPublished(readModels, 'setup');
   return () => { for (const guard of guards) guard(); };
 }
 

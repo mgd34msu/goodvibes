@@ -10,7 +10,8 @@ import type { RemoteRunnerRegistry } from '../remote/runner-registry.js';
 import type { RemoteSupervisor } from '../remote/supervisor.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
 import type { RuntimeStore } from '../store/index.js';
-import type { RuntimeEventBus, RuntimeEventDomain, RuntimeEventEnvelope, AnyRuntimeEvent } from '../events/index.js';
+import type { RuntimeEventBus, RuntimeEventDomain } from '../events/index.js';
+import { serializeEnvelope } from '../../control-plane/gateway-utils.js';
 import { RUNTIME_EVENT_DOMAINS } from '../../../events/domain-map.js';
 import { buildProviderAccountSnapshot } from '../provider-accounts/registry.js';
 import type { ProviderAccountSnapshot } from '../provider-accounts/registry.js';
@@ -140,17 +141,6 @@ const EVENT_DOMAINS: readonly RuntimeEventDomain[] = RUNTIME_EVENT_DOMAINS;
 /** Approvals raised and not yet decided, cancelled or expired. */
 function countUndecidedApprovals(approvals: readonly { readonly status: string }[]): number {
   return approvals.filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length;
-}
-
-function serializeEnvelope(envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>): Record<string, unknown> {
-  return {
-    type: envelope.type,
-    ts: envelope.ts,
-    traceId: envelope.traceId,
-    sessionId: envelope.sessionId,
-    source: envelope.source,
-    payload: envelope.payload,
-  };
 }
 
 export class IntegrationHelperService {

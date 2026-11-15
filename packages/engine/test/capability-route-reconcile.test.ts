@@ -6,8 +6,11 @@ import { GATEWAY_REST_ROUTES } from '../daemon-api/src/gateway-rest-routes.ts';
 import {
   createDaemonApiRouteProbe,
   findUnreconciledAdvertisements,
+  findUnservedGatewayMethods,
+  markUnservedGatewayMethods,
   reconcileCatalogRoutes,
   reconcileHttpDescriptor,
+  UNSERVED_METHOD_REASON_KEY,
 } from '../platform/src/platform/control-plane/method-catalog-route-reconcile.ts';
 
 function liveCatalogDescriptors() {
@@ -134,113 +137,46 @@ describe('capability-advertisement honesty: route reconcile', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The blind spot: a route that resolves to no registered handler
-// ---------------------------------------------------------------------------
-
 /**
- * The gate used to match the route TABLE and stop there. A gateway-REST path
- * dispatches through `invokeGatewayRestVerb` into `catalog.invoke(methodId)`,
- * so "a route matches" and "a handler exists" are two separate facts, and
- * checking only the first reports `live` for a method whose every call fails.
- *
- * That is how `calendar.*` and `email.*` reconciled `live` while a product's
- * own handlers were the ones answering: the table matched and nobody asked
- * whose handler it reached. A gate reporting green while checking something
- * other than the property it claims is worse than no gate, the same failure
- * class as an api:check that passed on a contract no published subpath could
- * satisfy.
- *
- * These tests mutate the catalog deliberately: unregister a handler and the
- * gate must turn red.
+ * A method that only `catalog.invoke` can answer (no HTTP binding, or a path in
+ * the gateway REST table) and has no handler gets a 501 on every call. The
+ * daemon marks each one uncallable at start so its catalog tells the truth.
  */
-describe('route reconcile sees handlers, not just routes', () => {
+describe('methods that need a catalog handler and have none', () => {
   const SERVED_BY_GATEWAY_REST = 'email.inbox.list';
 
   function catalogWithHandlers(): GatewayMethodCatalog {
     const catalog = new GatewayMethodCatalog();
-    // Attach an inert handler to every gateway-REST method, which is the state
-    // a real composition produces.
     for (const descriptor of catalog.list()) {
-      if (descriptor.http) catalog.register(descriptor, async () => ({}), { replace: true });
+      if (descriptor.invokable !== false) catalog.register(descriptor, async () => ({}), { replace: true });
     }
     return catalog;
   }
 
-  test('a served route WITH a handler still reconciles live: the gate does not cry wolf', async () => {
+  test('a gateway-REST or WebSocket method without a handler is named; one served by its own route module is not', () => {
     const catalog = catalogWithHandlers();
-    const descriptor = catalog.get(SERVED_BY_GATEWAY_REST);
-    expect(descriptor).toBeDefined();
+    expect(findUnservedGatewayMethods(catalog)).toEqual([]);
 
-    const result = await reconcileHttpDescriptor(
-      descriptor!,
-      createDaemonApiRouteProbe(),
-      (id) => catalog.hasHandler(id),
-    );
-    expect(result.status).toBe('live');
+    const restDescriptor = catalog.get(SERVED_BY_GATEWAY_REST)!;
+    const wsDescriptor = catalog.list().find((d) => !d.http && d.invokable !== false)!;
+    const ownRoute = catalog.list().find((d) => d.http && d.invokable !== false && !GATEWAY_REST_ROUTES.some((r) => r.methodId === d.id))!;
+    for (const descriptor of [restDescriptor, wsDescriptor, ownRoute]) catalog.register(descriptor, undefined, { replace: true });
+
+    expect(findUnservedGatewayMethods(catalog)).toEqual([restDescriptor.id, wsDescriptor.id].sort());
   });
 
-  test('MUTATION: unregister the handler and the same route turns red', async () => {
+  test('marking turns each unserved method uncallable in the catalog, and the next sweep is empty', () => {
     const catalog = catalogWithHandlers();
-    const descriptor = catalog.get(SERVED_BY_GATEWAY_REST);
-    expect(catalog.hasHandler(SERVED_BY_GATEWAY_REST)).toBe(true);
+    catalog.register(catalog.get(SERVED_BY_GATEWAY_REST)!, undefined, { replace: true });
 
-    // Re-register with NO handler: the descriptor and its route are untouched,
-    // only the handler is gone. This is exactly the state that used to read
-    // `live`.
-    catalog.register(descriptor!, undefined, { replace: true });
-    expect(catalog.hasHandler(SERVED_BY_GATEWAY_REST)).toBe(false);
-
-    const result = await reconcileHttpDescriptor(
-      descriptor!,
-      createDaemonApiRouteProbe(),
-      (id) => catalog.hasHandler(id),
-    );
-    expect(result.status).toBe('unhandled');
-    expect(result.reason).toContain('no handler is registered');
+    expect(markUnservedGatewayMethods(catalog)).toEqual([SERVED_BY_GATEWAY_REST]);
+    expect(catalog.get(SERVED_BY_GATEWAY_REST)?.invokable).toBe(false);
+    expect(catalog.get(SERVED_BY_GATEWAY_REST)?.metadata?.[UNSERVED_METHOD_REASON_KEY]).toBeString();
+    expect(findUnservedGatewayMethods(catalog)).toEqual([]);
   });
+});
 
-  test('MUTATION: an unhandled method is a violation even though it is marked callable', async () => {
-    const catalog = catalogWithHandlers();
-    const descriptor = catalog.get(SERVED_BY_GATEWAY_REST)!;
-    catalog.register(descriptor, undefined, { replace: true });
-
-    const descriptors = catalog.list();
-    const results = await reconcileCatalogRoutes(
-      descriptors,
-      createDaemonApiRouteProbe(),
-      (id) => catalog.hasHandler(id),
-    );
-    // `invokable: false` says "cataloged, not callable". This method says it IS
-    // callable and reaches nothing, which is the case the gate exists for.
-    expect(descriptor.invokable).not.toBe(false);
-    expect(findUnreconciledAdvertisements(descriptors, results)).toContain(SERVED_BY_GATEWAY_REST);
-  });
-
-  test('a method served by its own route module is not required to have a catalog handler', async () => {
-    // Narrowness matters: demanding a catalog handler everywhere would redden
-    // routes that genuinely work through a dedicated route module.
-    const catalog = new GatewayMethodCatalog();
-    const notGatewayRest = catalog.list().find(
-      (d) => d.http && !GATEWAY_REST_ROUTES.some((r) => r.methodId === d.id),
-    );
-    expect(notGatewayRest, 'expected at least one http method outside the gateway REST table').toBeDefined();
-
-    const result = await reconcileHttpDescriptor(
-      notGatewayRest!,
-      createDaemonApiRouteProbe(),
-      () => false, // no catalog handler anywhere
-    );
-    expect(result.status).not.toBe('unhandled');
-  });
-
-  test('omitting the handler probe keeps the old behaviour, so existing callers are unaffected', async () => {
-    const catalog = new GatewayMethodCatalog();
-    const descriptor = catalog.get(SERVED_BY_GATEWAY_REST)!;
-    const result = await reconcileHttpDescriptor(descriptor, createDaemonApiRouteProbe());
-    expect(result.status).toBe('live');
-  });
-
+describe('route reconcile over the whole catalog', () => {
   test('every descriptor with an http binding is checked, none is skipped for living in a sub-router', async () => {
     const descriptors = liveCatalogDescriptors().filter((d) => d.http);
     const results = await reconcileCatalogRoutes(descriptors, createDaemonApiRouteProbe());

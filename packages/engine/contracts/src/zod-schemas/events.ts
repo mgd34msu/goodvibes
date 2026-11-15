@@ -4,7 +4,9 @@ import { z } from 'zod/v4';
  * Schema for the SSE / WebSocket serialized event envelope that wraps all
  * realtime domain events.
  *
- * Matches `SerializedEventEnvelope<unknown>` from transport-realtime.
+ * Matches `SerializedEventEnvelope<unknown>` from transport-realtime. Unknown
+ * keys are accepted and dropped, so a field a newer daemon adds does not fail
+ * an older reader.
  */
 export const SerializedEventEnvelopeSchema = z.object({
   type: z.string(),
@@ -13,7 +15,7 @@ export const SerializedEventEnvelopeSchema = z.object({
   sessionId: z.string().optional(),
   source: z.string().optional(),
   payload: z.unknown(),
-}).strict();
+});
 
 export type SerializedEventEnvelopeShape = z.infer<typeof SerializedEventEnvelopeSchema>;
 

@@ -28,15 +28,14 @@ export interface GatewayCatalogConformanceView {
 
 export interface ConformanceOptions {
   /**
-   * Restrict the check to these descriptor ids. Use when a catalog carries
-   * builtin descriptors whose handlers are attached by a different layer (host
-   * daemon surfaces) and are legitimately absent in the composition under test.
+   * Restrict the check to these descriptor ids. A hand-kept list misses any
+   * family nobody added to it; prefer a full sweep with `ignoreIds`.
    */
   readonly onlyIds?: readonly string[];
   /**
-   * Descriptor ids allowed to have no handler, descriptors a given
-   * composition intentionally does not answer. Prefer `onlyIds` for the common
-   * case; use `ignoreIds` to carve out a small known set from a full sweep.
+   * Descriptor ids allowed to have no handler: those a composition answers
+   * another way (a dedicated HTTP route module) or declares `invokable: false`.
+   * Derive the set from the descriptors, not by hand, and sweep the rest.
    */
   readonly ignoreIds?: readonly string[];
 }

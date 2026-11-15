@@ -30,7 +30,7 @@ import {
   type LoopbackListener,
   type StartLoopbackListenerOptions,
 } from './oauth-loopback.js';
-import type { CalDavHttpPort, CalDavHttpRequest, CalDavHttpResponse } from './caldav-client.js';
+import { CALDAV_BODY_TOO_LARGE_ERROR, type CalDavHttpPort, type CalDavHttpRequest, type CalDavHttpResponse } from './caldav-client.js';
 
 /** Plain node file reads. Adoption never writes, so there is no write side. */
 export const nodeGoogleFilePort: GoogleFilePort = {
@@ -179,7 +179,9 @@ async function readCappedText(response: Response, maxBytes: number): Promise<str
     received += value.byteLength;
     if (received > maxBytes) {
       await reader.cancel().catch(() => undefined);
-      throw new Error(`the response is larger than ${maxBytes} bytes`);
+      const error = new Error(`the response is larger than ${maxBytes} bytes`);
+      error.name = CALDAV_BODY_TOO_LARGE_ERROR;
+      throw error;
     }
     text += decoder.decode(value, { stream: true });
   }

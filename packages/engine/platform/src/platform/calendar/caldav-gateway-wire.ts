@@ -16,7 +16,7 @@
  */
 
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
-import type { CalDavHttpPort } from '../google/caldav-client.js';
+import { CALDAV_BODY_TOO_LARGE_ERROR, type CalDavHttpPort } from '../google/caldav-client.js';
 
 export interface CalDavWireResponse {
   readonly status: number;
@@ -181,11 +181,18 @@ export function createCalDavRequest(
         },
         ...(body === undefined ? {} : { body }),
       });
-    } catch {
+    } catch (error) {
       // Redacted for the same reason as the HTTP-status branch below: a raw
       // transport error names the calendar host, and these messages reach a
-      // caller verbatim through `calendar.ics.import`'s errors[].
-      throw new GatewayVerbError('CalDAV request failed: network error.', 'CALENDAR_NETWORK_ERROR', 502);
+      // caller verbatim through `calendar.ics.import`'s errors[]. The port's
+      // own deadline and body cap are named, so a caller knows whether to retry.
+      const name = error instanceof Error ? error.name : '';
+      const detail = name === 'TimeoutError'
+        ? 'the calendar server did not answer in time; try again later.'
+        : name === CALDAV_BODY_TOO_LARGE_ERROR
+          ? 'the calendar server sent more data than one request may carry; narrow the time range.'
+          : 'network error.';
+      throw new GatewayVerbError(`CalDAV request failed: ${detail}`, 'CALENDAR_NETWORK_ERROR', 502);
     }
     const status = response.status;
     if (status < 200 || status >= 300) {

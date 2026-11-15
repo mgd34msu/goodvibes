@@ -23,6 +23,7 @@ import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/met
 import { GATEWAY_REST_ROUTES } from '../daemon-api/src/gateway-rest-routes.ts';
 import {
   createDaemonApiRouteProbe,
+  findUnservedGatewayMethods,
   reconcileHttpDescriptor,
 } from '../platform/src/platform/control-plane/method-catalog-route-reconcile.ts';
 import {
@@ -240,9 +241,10 @@ describe('the verbs are callable, and say so', () => {
     const tableIds = new Set(GATEWAY_REST_ROUTES.map((entry) => entry.methodId));
     for (const id of CHANNEL_SYNC_METHOD_IDS) {
       expect(tableIds.has(id), `${id} is missing from GATEWAY_REST_ROUTES`).toBe(true);
-      const result = await reconcileHttpDescriptor(catalog.get(id)!, probe, (probed) => catalog.hasHandler(probed));
+      const result = await reconcileHttpDescriptor(catalog.get(id)!, probe);
       expect(result.status, `${id}: ${result.reason}`).toBe('live');
     }
+    expect(findUnservedGatewayMethods(catalog).filter((id) => CHANNEL_SYNC_METHOD_IDS.includes(id))).toEqual([]);
   });
 
   test('the platform composition root leaves these verbs to the daemon host, which attaches its own handlers', () => {

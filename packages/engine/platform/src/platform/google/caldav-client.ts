@@ -51,6 +51,13 @@ export interface CalDavHttpRequest {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * A port fails a request with an error of this `name` when the response body
+ * exceeds its cap, and with the platform's `TimeoutError` when its deadline
+ * passes, so a caller can say which happened.
+ */
+export const CALDAV_BODY_TOO_LARGE_ERROR = 'CalDavBodyTooLargeError';
+
 export interface CalDavHttpPort {
   request(input: CalDavHttpRequest): Promise<CalDavHttpResponse>;
 }
@@ -369,7 +376,11 @@ export class CalDavClient {
       return {
         ok: false,
         problem: `could not reach the calendar server: ${describeError(error)}`,
-        fix: 'check the server address and the network connection',
+        fix: error instanceof Error && error.name === 'TimeoutError'
+          ? 'the server did not answer in time; try again later'
+          : error instanceof Error && error.name === CALDAV_BODY_TOO_LARGE_ERROR
+            ? 'the server sent more than one request may carry; ask for a shorter time range'
+            : 'check the server address and the network connection',
       };
     }
     const failure = classifyHttpFailure(response.status);

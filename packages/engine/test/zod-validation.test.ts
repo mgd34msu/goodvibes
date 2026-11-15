@@ -9,6 +9,7 @@ import {
   SerializedEventEnvelopeSchema,
 } from '../contracts/src/index.ts';
 import { invokeContractRoute, createHttpTransport } from '../transport-http/src/index.ts';
+import { readEventEnvelope } from '../transport-realtime/src/index.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers, create a transport that returns a fixed JSON body
@@ -172,22 +173,11 @@ describe('zod-validation: schema correctness', () => {
     expect(SerializedEventEnvelopeSchema.safeParse(minimal).success).toBe(true);
   });
 
-  it('SerializedEventEnvelopeSchema accepts ts but rejects timestamp', () => {
-    const current = {
-      type: 'AGENT_SPAWNING',
-      ts: Date.now(),
-      source: 'test',
-      payload: { type: 'AGENT_SPAWNING', agentId: 'agent-1', task: 'inspect' },
-    };
-    const stale = {
-      type: 'AGENT_SPAWNING',
-      timestamp: Date.now(),
-      source: 'test',
-      payload: { type: 'AGENT_SPAWNING', agentId: 'agent-1', task: 'inspect' },
-    };
-
-    expect(SerializedEventEnvelopeSchema.safeParse(current).success).toBe(true);
-    expect(SerializedEventEnvelopeSchema.safeParse(stale).success).toBe(false);
+  it('an envelope field a newer daemon adds is accepted by the schema and by the shared reader', () => {
+    const newer = { type: 'X', ts: 1, seq: 1, payload: { type: 'X' } };
+    expect(SerializedEventEnvelopeSchema.safeParse(newer).success).toBe(true);
+    expect(readEventEnvelope(newer)).toEqual({ type: 'X', ts: 1, payload: { type: 'X' } });
+    expect(readEventEnvelope({ type: 'X' })).toBeNull();
   });
 
   it('ControlAuthLoginResponseSchema rejects partial body', () => {

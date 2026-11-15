@@ -57,9 +57,10 @@
  *     uncallable.
  */
 import { describe, expect, test } from 'bun:test';
-import { assertEveryDescriptorHasHandler } from '@goodvibes-jev/engine/terminal-shell/conformance';
+import { GATEWAY_REST_ROUTES } from '@goodvibes-jev/engine/daemon-api';
+import { findMethodsMissingHandlers } from '@goodvibes-jev/engine/terminal-shell/conformance';
 import { useGatewayFixture } from '../helpers/gateway-route-fixture.js';
-const fixture = useGatewayFixture({ hostSessions: false });
+const fixture = useGatewayFixture({ watchedMailbox: 'sweep@example.invalid' });
 
 // Stop the shared test runtime graph when this file ends, see that helper's doc.
 
@@ -110,6 +111,21 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
     family: 'sessions.turns.cancel',
     reason: 'registerSessionRuntimeGatewayMethods attaches cancellation over the sessionLiveTurnControls threaded by the service graph.',
     methodIds: ['sessions.turns.cancel'],
+  },
+  {
+    family: 'sessions.hosted.*',
+    reason: 'composeHostedSessions (daemon/hosted-sessions-composition.ts) registers them when the product states hostedSessions, as the shipped entrypoint does.',
+    methodIds: ['sessions.hosted.attach', 'sessions.hosted.create', 'sessions.hosted.detach', 'sessions.hosted.kill', 'sessions.hosted.list'],
+  },
+  {
+    family: 'workLedger.turn.*',
+    reason: 'composeHostedSessions registers the native hosted turn verbs when the service graph threads a native conversation owner.',
+    methodIds: ['workLedger.turn.cancel', 'workLedger.turn.session', 'workLedger.turn.start', 'workLedger.turn.startAgent', 'workLedger.turn.status'],
+  },
+  {
+    family: 'email.expectation.* and email.inbound.status',
+    reason: 'daemon/facade-inbound-mail.ts registers them when a watched mailbox is configured; this fixture names one.',
+    methodIds: ['email.expectation.cancel', 'email.expectation.list', 'email.expectation.open', 'email.inbound.status'],
   },
   {
     family: 'update.*',
@@ -439,10 +455,20 @@ describe('gateway verb family parity, over this daemon\'s own composition', () =
     });
   }
 
-  test('every pinned descriptor across all families has an attached handler (shipped conformance gate)', () => {
-    expect(() =>
-      assertEveryDescriptorHasHandler(services().gatewayMethods, { onlyIds: ALL_METHOD_IDS }),
-    ).not.toThrow();
+  test('no method in the composed catalog needs a catalog handler and lacks one', () => {
+    // The whole catalog, not a list, so a family nobody named is checked too.
+    // Exempt: a method served by its own route module (an HTTP path outside the
+    // gateway REST table) and one its descriptor declares uncallable. One the
+    // daemon marked uncallable at start (metadata.unservedReason) is not exempt:
+    // that mark means a handler is missing. Everything else reaches
+    // catalog.invoke and answers 501 without a handler.
+    const catalog = services().gatewayMethods;
+    const gatewayRest = new Set(GATEWAY_REST_ROUTES.map((route) => route.methodId));
+    const exempt = catalog.list()
+      .filter((d) => (d.invokable === false && d.metadata?.['unservedReason'] === undefined)
+        || (d.http !== undefined && !gatewayRest.has(d.id)))
+      .map((d) => d.id);
+    expect(findMethodsMissingHandlers(catalog, { ignoreIds: exempt })).toEqual([]);
   });
 
   test('no family in this pinned list is silently missing from the catalog entirely', () => {

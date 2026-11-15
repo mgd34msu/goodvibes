@@ -19,6 +19,7 @@ import {
 } from './transport-http.js';
 import {
   createTurnLifecycleGate,
+  readEventEnvelope,
   readTurnLifecycleFrame,
 } from './transport-realtime.js';
 import type {
@@ -291,25 +292,14 @@ function createFeed(
   };
 }
 
-function normalizeEnvelope(value: unknown): ScopedRuntimeEventEnvelope | null {
-  if (!value || typeof value !== 'object') return null;
-  const envelope = value as Record<string, unknown>;
-  const payload = envelope.payload;
-  if (!payload || typeof payload !== 'object') return null;
-  const payloadType = (payload as Record<string, unknown>).type;
-  if (typeof payloadType !== 'string') return null;
-  return {
-    type: typeof envelope.type === 'string' ? envelope.type : payloadType,
-    ts: typeof envelope.ts === 'number'
-      ? envelope.ts
-      : typeof envelope.timestamp === 'number'
-        ? envelope.timestamp
-        : Date.now(),
-    traceId: typeof envelope.traceId === 'string' ? envelope.traceId : undefined,
-    sessionId: typeof envelope.sessionId === 'string' ? envelope.sessionId : undefined,
-    source: typeof envelope.source === 'string' ? envelope.source : undefined,
-    payload: payload as { readonly type: string },
-  };
+/**
+ * The shared envelope reader, plus what this feed dispatches on: the payload's
+ * own `type`. It always stamps a time on what it hands out.
+ */
+function readScopedEnvelope(value: unknown): ScopedRuntimeEventEnvelope | null {
+  const envelope = readEventEnvelope(value);
+  if (!envelope || typeof (envelope.payload as { readonly type?: unknown } | null)?.type !== 'string') return null;
+  return { ...envelope, ts: envelope.ts ?? Date.now() };
 }
 
 function buildEventUrl(baseUrl: string, domain: string): string {
@@ -386,7 +376,7 @@ function createScopedRealtime<TDomain extends string>(
             },
             onEvent: (eventName, payload) => {
               if (!isCurrent() || eventName !== domain) return;
-              const envelope = normalizeEnvelope(payload);
+              const envelope = readScopedEnvelope(payload);
               if (!envelope) return;
               const frame = readTurnLifecycleFrame(envelope.sessionId, envelope.payload);
               if (frame && !turnGate.accepts(frame)) return;

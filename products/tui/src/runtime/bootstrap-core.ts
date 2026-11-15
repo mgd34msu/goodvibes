@@ -46,7 +46,7 @@ import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/pl
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { BootstrapOptions } from './context.ts';
-import { type RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { type RuntimeStore } from './store/index.ts';
 import {
   type MutableRuntimeState,
   RuntimeEventBus,

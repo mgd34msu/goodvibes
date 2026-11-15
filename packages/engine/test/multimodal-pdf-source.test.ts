@@ -25,13 +25,16 @@ test('ordinary compressed PDF text is fully local before entity judgment admissi
 });
 
 test('compressed late credentials, excessive expansion and malformed lengths hold without decoding models', async () => {
-  await expect(readMultimodalPdf(pdf(`${'safe '.repeat(1_000)}password=late-credential`), () => {})).rejects.toThrow('Refused before judgment');
-  await expect(readMultimodalPdf(pdf('safe '.repeat(200_000)), () => {})).rejects.toThrow('plain JSON');
+  // Forty-five lines of page text, then the credential on the page (text placed off the page is never extracted).
+  const lateCredential = `BT /F1 12 Tf 72 720 Td ${'(safe safe safe safe safe safe safe safe safe safe) Tj 0 -14 Td '.repeat(45)}(password=late-credential) Tj ET`;
+  await expect(readMultimodalPdf(pdf('', lateCredential), () => {})).rejects.toThrow('Refused before judgment');
+  // Compressed streams that expand beyond 64 MiB are refused before the reader decodes them.
+  await expect(readMultimodalPdf(pdf('', 'q Q '.repeat(17_000_000)), () => {})).rejects.toThrow('plain JSON');
   const broken = Buffer.from(pdf('AI').toString('latin1').replace(/\/Length \d+/, '/Length 99999999'), 'latin1');
   await expect(readMultimodalPdf(broken, () => {})).rejects.toThrow('plain JSON');
 });
 
-for (const filter of ['/Filter 7 0 R', '/F#69lter /FlateDecode', '/Filter null', '/Filter /FlateDecode /DecodeParms 7 0 R']) {
+for (const filter of ['/Filter 7 0 R', '/F#69lter /FlateDecode', '/Filter null']) {
   test(`PDF stream admission rejects unbounded filter syntax: ${filter}`, async () => {
     const bytes = Buffer.from(pdf('safe '.repeat(200_000)).toString('latin1').replace('/Filter /FlateDecode', filter), 'latin1');
     await expect(readMultimodalPdf(bytes, () => {})).rejects.toThrow('plain JSON');
@@ -43,9 +46,9 @@ test('unrecognized stream delimiters and empty text cannot become successful PDF
   await expect(readMultimodalPdf(pdf(''), () => {})).rejects.toThrow('OCR');
 });
 
-test('inline image filters cannot recursively decompress outside the ordinary-stream budget', async () => {
-  const bytes = pdf('', 'q BI /W 1 /H 1 /BPC 8 /F /Fl ID hostile EI Q');
-  await expect(readMultimodalPdf(bytes, () => {})).rejects.toThrow('plain JSON');
+test('a page with an inline picture is read for its text', async () => {
+  const bytes = pdf('', 'BT /F1 12 Tf 72 720 Td (caption beside a picture) Tj ET q 1 0 0 1 72 600 cm BI /W 1 /H 1 /BPC 8 /CS /G ID x EI Q');
+  expect((await readMultimodalPdf(bytes, () => {})).source).toContain('caption beside a picture');
 });
 
 test('decoded PDF metadata and real numeric content remain privacy screened', async () => {

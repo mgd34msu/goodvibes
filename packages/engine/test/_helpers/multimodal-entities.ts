@@ -35,3 +35,21 @@ export function multimodalFixture(kind: ArtifactKind = 'image', text = 'receipt 
   const service = new MultimodalService(publicationStore as never, mediaProviders as never, voiceService as never, knowledgeService as never);
   return { service, records, bodies, writes, ingests, usages, add, artifactStore: publicationStore, mediaProviders, voiceService, knowledgeService, providerCalls };
 }
+
+/**
+ * A fake-port answerer for the one entity request: each term's share of the
+ * Choice is its weight (unnamed terms weigh 0), "none" weighs `none`. Any other
+ * question (a document's readability reading) is answered yes.
+ */
+export function termChoice(weights: Readonly<Record<string, number>>, none = 0) {
+  return (_name: string, question: { readonly criteria?: unknown }, state: unknown) => {
+    const candidates = (state as { candidates?: { id: string; content: { term: string } }[] } | undefined)?.candidates;
+    if (!Array.isArray(candidates)) return { type: 'noul', noul: 0.99 };
+    const options = Object.keys(question.criteria as Record<string, unknown>);
+    const raw = options.map(option => option === 'none' ? none : weights[candidates.find(candidate => candidate.id === option)?.content.term ?? ''] ?? 0);
+    const total = raw.reduce((sum, value) => sum + value, 0);
+    const probabilities = Object.fromEntries(options.map((option, index) => [option, total > 0 ? raw[index]! / total : option === 'none' ? 1 : 0]));
+    const choice = options.reduce((best, option) => probabilities[option]! > probabilities[best]! ? option : best, options[0]!);
+    return { type: 'choice', choice, confidence: probabilities[choice]!, probabilities };
+  };
+}

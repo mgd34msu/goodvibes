@@ -15,7 +15,7 @@ for (const kind of ['image', 'audio', 'document', 'video'] as const) {
     const f = multimodalFixture(kind);
     if (kind === 'video') f.add('transcript', 'document');
     await withDecisionModelPolicy(() => policy, async () => {
-      const result = await f.service.analyze({ artifactId: 'source', ...(kind === 'video' ? { metadata: { transcriptArtifactId: 'transcript' } } : {}) });
+      const result = await f.service.analyze({ artifactId: 'source', detail: 'detailed', ...(kind === 'video' ? { metadata: { transcriptArtifactId: 'transcript' } } : {}) });
       expect(result.entities).toEqual([]);
       expect(result.metadata).toMatchObject({ provenance: 'classic', entityAssessment: 'not-evaluated' });
       expect(result.text ?? result.summary ?? result.segments.map(segment => segment.text).join(' ')).toContain('AI');
@@ -37,7 +37,7 @@ for (const kind of ['image', 'audio', 'document', 'video'] as const) {
 test('Preferred missing decision runtime does not block ordinary media processing', async () => {
   install(undefined); const f = multimodalFixture();
   await withDecisionModelPolicy(() => 'Preferred', async () => {
-    const result = await f.service.analyze({ artifactId: 'source' });
+    const result = await f.service.analyze({ artifactId: 'source', detail: 'detailed' });
     expect(result.metadata.entityAssessment).toBe('not-evaluated');
     expect(decisionModelPolicyState().operation).toBe('classic'); expect(f.providerCalls.image).toBe(1);
   });
@@ -54,7 +54,7 @@ test('Classic does not inherit semantic candidate caps for an otherwise admitted
 });
 
 for (const outcome of ['uncertain', 'malformed', 'rejected', 'invalid-response', 'aborted'] as const) {
-  test(`Preferred ${outcome} entity reading remains held without replaying media processing`, async () => {
+  test(`Preferred ${outcome} entity reading leaves the analysis whole without replaying media processing`, async () => {
     const fake = fakePort(() => {
       if (outcome === 'uncertain') return noulAnswer(0.5);
       if (outcome === 'malformed') return { type: 'noul', noul: Number.NaN };
@@ -62,23 +62,22 @@ for (const outcome of ['uncertain', 'malformed', 'rejected', 'invalid-response',
     }); install(fake.port);
     const f = multimodalFixture();
     await withDecisionModelPolicy(() => 'Preferred', async () => {
-      await expect(f.service.analyze({ artifactId: 'source' })).rejects.toThrow();
+      const result = await f.service.analyze({ artifactId: 'source', detail: 'detailed' });
+      expect(result.entities).toEqual([]); expect(result.metadata).toMatchObject({ entityAssessment: 'not-evaluated', entityAssessmentSkipped: 'unavailable' });
       expect(decisionModelPolicyState().operation).toBe('decision'); expect(f.providerCalls.image).toBe(1);
       expect(f.writes).toEqual([]); expect(f.ingests).toEqual([]);
     });
   });
 }
 
-test('Classic retained analysis stays bound to the real artifact and cannot be forged into assessed entities', async () => {
+test('Classic write-back stays bound to the real artifact and cannot be forged into assessed entities', async () => {
   const fake = fakePort(() => noulAnswer(0.99)); install(fake.port);
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     const f = multimodalFixture();
     const result = await f.service.analyze({ artifactId: 'source' });
     const forged = { ...result, entities: ['invented'] };
-    expect(() => f.service.buildPacket(forged)).toThrow();
     await expect(f.service.writeBackAnalysis(forged)).rejects.toThrow();
     f.records.set('source', { ...result.artifact, sha256: 'replaced' });
-    expect(() => f.service.buildPacket(result)).toThrow();
     await expect(f.service.writeBackAnalysis(result)).rejects.toThrow();
     expect(f.writes).toEqual([]); expect(fake.requests).toHaveLength(0);
   });

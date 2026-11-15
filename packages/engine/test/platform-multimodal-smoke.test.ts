@@ -68,9 +68,9 @@ describe('platform/multimodal: provider listing', () => {
 
 import { afterEach, spyOn } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort, captureJudgmentPort } from '../errors/src/index.js';
-import { entityCentrality, rankMultimodalEntities } from '../platform/src/platform/multimodal/entity-centrality.js';
-import { multimodalFixture } from './_helpers/multimodal-entities.js';
+import { installJudgmentPort } from '../errors/src/index.js';
+import { assessMultimodalEntities } from '../platform/src/platform/multimodal/entity-centrality.js';
+import { multimodalFixture, termChoice } from './_helpers/multimodal-entities.js';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
 let installed = false;
@@ -79,65 +79,52 @@ function usePort(port: Parameters<typeof installJudgmentPort>[0]) {
   else installJudgmentPort(port);
 }
 afterEach(() => { if (installed) installJudgmentPort(previousPort); installed = false; });
-function centralPort() {
-  return fakePort((_name, _question, state) => {
-    const term = (state as { candidate: { term: string } }).candidate.term;
-    return noulAnswer(term === 'AI' ? 0.99 : term === 'EU' ? 0.95 : 0.01);
-  });
-}
+const centralPort = () => fakePort(termChoice({ AI: 0.6, EU: 0.3, receipt: 0.1 }));
+/** Entity requests only; a document's extraction also asks one readability question. */
+const entityRequests = (requests: readonly { readonly state?: unknown }[]) => requests.filter(request => Array.isArray((request.state as { candidates?: unknown } | undefined)?.candidates)).length;
 
 for (const kind of ['image', 'audio', 'document', 'video'] as const) {
-  test(`${kind}: short central terms outrank repeated filler through analysis, packet, and explicit persistence`, async () => {
+  test(`${kind}: entities asked for cost one decision-model request and reach the packet and write-back`, async () => {
     const fake = centralPort(); usePort(fake.port);
     const fixture = multimodalFixture(kind);
     if (kind === 'video') fixture.add('transcript', 'document');
-    const result = await fixture.service.analyze({ artifactId: 'source', ...(kind === 'video' ? { metadata: { transcriptArtifactId: 'transcript' } } : {}) });
+    const result = await fixture.service.analyze({ artifactId: 'source', detail: 'detailed', ...(kind === 'video' ? { metadata: { transcriptArtifactId: 'transcript' } } : {}) });
     expect(result.entities).toEqual(['AI', 'EU']);
-    const terms = fake.requests.map(request => (request.state as { candidate: { term: string } }).candidate.term);
-    expect(terms.filter(term => term === 'receipt')).toHaveLength(1);
+    expect(entityRequests(fake.requests)).toBe(1);
     expect(fixture.service.buildPacket(result).rendered).toContain('Entities: AI, EU');
-    expect(fixture.writes).toHaveLength(0);
     await fixture.service.writeBackAnalysis(JSON.parse(JSON.stringify(result)) as typeof result, { metadata: { sourceArtifactId: 'forged' } });
-    expect(fixture.writes).toHaveLength(1);
+    expect(entityRequests(fake.requests)).toBe(1);
     expect(fixture.ingests[0]).toMatchObject({ tags: expect.arrayContaining(['AI', 'EU']), metadata: { sourceArtifactId: 'source' } });
-    expect(fixture.usages).toHaveLength(1);
   });
 }
 
-test('empty content needs no judgment and settled none stays empty', async () => {
-  usePort(undefined);
-  const empty = await multimodalFixture('image', '').service.analyze({ artifactId: 'source' });
-  expect(empty.entities).toEqual([]);
-  const fake = fakePort(() => noulAnswer(0.01)); usePort(fake.port);
-  const fixture = multimodalFixture();
+test('decision-model requests for an analysis that does not ask for entities: 0; its write-back asks once', async () => {
+  const fake = centralPort(); usePort(fake.port);
+  const fixture = multimodalFixture('image', Array.from({ length: 60 }, (_, index) => `word${index}`).join(' ') + ' AI EU');
   const result = await fixture.service.analyze({ artifactId: 'source' });
+  expect(fake.requests).toHaveLength(0);
   expect(result.entities).toEqual([]);
-  expect(fixture.service.buildPacket(result).rendered).not.toContain('Entities:');
+  expect(result.metadata).toMatchObject({ entityAssessment: 'not-evaluated', entityAssessmentSkipped: 'not-requested' });
+  await fixture.service.writeBackAnalysis(result);
+  expect(fake.requests).toHaveLength(1);
+  expect(fixture.ingests[0]).toMatchObject({ tags: expect.arrayContaining(['AI', 'EU']) });
 });
 
-for (const [name, answer] of [['uncertain', noulAnswer(0.5)], ['malformed', noulAnswer(Number.NaN)], ['wrong answer type', { type: 'text', text: 'AI' }]] as const) {
-  test(`${name} never becomes empty success or writes`, async () => {
+for (const [name, answer] of [['malformed', noulAnswer(Number.NaN)], ['wrong answer type', { type: 'text', text: 'AI' }]] as const) {
+  test(`a ${name} entity reading leaves the analysis whole, with entities not assessed`, async () => {
     usePort(fakePort(() => answer).port);
     const fixture = multimodalFixture();
-    await expect(fixture.service.analyze({ artifactId: 'source' })).rejects.toThrow('held');
-    expect(fixture.writes).toHaveLength(0);
+    const result = await fixture.service.analyze({ artifactId: 'source', detail: 'detailed' });
+    expect(result.text).toContain('AI');
+    expect(result.entities).toEqual([]);
+    expect(result.metadata).toMatchObject({ entityAssessment: 'not-evaluated', entityAssessmentSkipped: 'unavailable' });
   });
 }
 
-test('unavailable has no frequency fallback', async () => {
+test('no decision model leaves the analysis whole, with entities not assessed', async () => {
   usePort(undefined);
-  await expect(multimodalFixture().service.analyze({ artifactId: 'source' })).rejects.toThrow('unavailable');
-});
-
-test('contrary-to-frequency order and existing image/audio caps are retained', async () => {
-  usePort(fakePort((_name, _question, state) => {
-    const term = (state as { candidate: { term: string } }).candidate.term;
-    return noulAnswer(term === 'Z' ? 0.999 : 0.95);
-  }).port);
-  for (const [kind, cap] of [['image', 8], ['audio', 10]] as const) {
-    const result = await multimodalFixture(kind, 'A A A A B C D E F G H I J K Z').service.analyze({ artifactId: 'source' });
-    expect(result.entities).toHaveLength(cap); expect(result.entities[0]).toBe('Z');
-  }
+  const result = await multimodalFixture().service.analyze({ artifactId: 'source', detail: 'detailed' });
+  expect(result.entities).toEqual([]); expect(result.metadata.entityAssessment).toBe('not-evaluated');
 });
 
 test('full image, audio, document and video text is screened before clipping, budget or port lookup', async () => {
@@ -146,59 +133,47 @@ test('full image, audio, document and video text is screened before clipping, bu
   for (const kind of ['image', 'audio', 'document', 'video'] as const) {
     const fixture = multimodalFixture(kind, text);
     if (kind === 'video') fixture.add('transcript', 'document', text);
-    await expect(fixture.service.analyze({ artifactId: 'source', ...(kind === 'video' ? { metadata: { transcriptArtifactId: 'transcript' } } : {}) })).rejects.toThrow('Refused before judgment');
+    await expect(fixture.service.analyze({ artifactId: 'source', detail: 'detailed', ...(kind === 'video' ? { metadata: { transcriptArtifactId: 'transcript' } } : {}) })).rejects.toThrow('Refused before judgment');
     expect(fixture.writes).toHaveLength(0);
   }
   expect(fake.requests).toHaveLength(0);
 });
 
-test('foreign and duplicate rank IDs are rejected before publication', async () => {
+test('a replaced artifact or a changed analysis is not written back', async () => {
   usePort(centralPort().port);
-  const spy = spyOn(entityCentrality, 'rerank');
-  try {
-    for (const id of ['foreign', 'term:0']) {
-      spy.mockResolvedValue({ ranked: [0, 1].map(() => ({ id, probability: 0.99, reading: { verdict: 'yes', outcome: 'act' }, decisionId: undefined })), top: undefined } as never);
-      await expect(rankMultimodalEntities('AI EU', 8, { assertCurrent() {}, authority: captureJudgmentPort('multimodal.entity-centrality') })).rejects.toThrow('malformed');
-    }
-  } finally { spy.mockRestore(); }
-});
-
-test('retired port blocks both packet and persistence of an earlier reading', async () => {
-  usePort(centralPort().port);
-  const fixture = multimodalFixture();
-  const result = await fixture.service.analyze({ artifactId: 'source' });
-  usePort(centralPort().port);
-  expect(() => fixture.service.buildPacket(result)).toThrow();
-  await expect(fixture.service.writeBackAnalysis(result)).rejects.toThrow();
-  expect(fixture.writes).toHaveLength(0);
-});
-
-test('replaced artifacts, forged analyses and cancelled requests cannot persist', async () => {
-  usePort(centralPort().port);
-  for (const condition of ['artifact', 'forged', 'request'] as const) {
-    const fixture = multimodalFixture(); const controller = new AbortController();
-    const result = await fixture.service.analyze({ artifactId: 'source' }, { signal: controller.signal });
+  for (const condition of ['artifact', 'changed'] as const) {
+    const fixture = multimodalFixture();
+    const result = await fixture.service.analyze({ artifactId: 'source' });
     if (condition === 'artifact') fixture.records.set('source', { ...fixture.records.get('source')!, sha256: 'replacement' });
-    if (condition === 'request') controller.abort();
-    const offered = condition === 'forged' ? { ...result, entities: ['unauthorized'] } : result;
-    expect(() => fixture.service.buildPacket(offered)).toThrow();
+    const offered = condition === 'changed' ? { ...result, entities: ['unauthorized'] } : result;
     await expect(fixture.service.writeBackAnalysis(offered)).rejects.toThrow();
     expect(fixture.writes).toHaveLength(0);
   }
 });
 
-test('port retirement interrupts a non-cooperating in-flight reading', async () => {
+test('an analysis this service does not hold is refused with the way forward', async () => {
+  usePort(centralPort().port);
+  const result = await multimodalFixture().service.analyze({ artifactId: 'source' });
+  const restarted = multimodalFixture();
+  const refused = await restarted.service.writeBackAnalysis(result).catch((error: unknown) => error) as { refusal?: { code: string; next: readonly string[] }; status?: number };
+  expect(refused.refusal?.code).toBe('MULTIMODAL_ANALYSIS_NOT_HELD');
+  expect(refused.refusal?.next[0]).toContain('writeback');
+  expect(restarted.writes).toHaveLength(0);
+  expect(restarted.service.buildPacket(result).rendered).toContain('## Multimodal Analysis');
+});
+
+test('cancelling the analysis stops a decision model that does not answer', async () => {
   const controller = new AbortController();
   const fixture = multimodalFixture();
   usePort({ model: 'jev-1.13.0', ask: async () => { controller.abort(); return await new Promise<never>(() => {}); } });
-  await expect(fixture.service.analyze({ artifactId: 'source' }, { signal: controller.signal })).rejects.toThrow();
+  await expect(fixture.service.analyze({ artifactId: 'source', detail: 'detailed' }, { signal: controller.signal })).rejects.toThrow();
   expect(fixture.writes).toHaveLength(0);
 });
 
-test('video retains keyframe and audio ownership and complete text', async () => {
+test('video write-back refuses when a keyframe it read is gone', async () => {
   usePort(centralPort().port);
   const fixture = multimodalFixture('video'); fixture.add('frame', 'image'); fixture.add('audio', 'audio');
-  const result = await fixture.service.analyze({ artifactId: 'source', metadata: { keyframeArtifactIds: ['frame'], audioArtifactId: 'audio' } });
+  const result = await fixture.service.analyze({ artifactId: 'source', detail: 'detailed', metadata: { keyframeArtifactIds: ['frame'], audioArtifactId: 'audio' } });
   expect(result.entities).toEqual(['AI', 'EU']);
   fixture.records.delete('frame');
   await expect(fixture.service.writeBackAnalysis(result)).rejects.toThrow();
@@ -220,7 +195,7 @@ test('Office admission reads late XML text and refuses expansion bombs before a 
   expect(fake.requests).toHaveLength(0);
 });
 
-test('new explicit write-back owner cancellation blocks writes despite an exact retained analysis', async () => {
+test('a cancelled write-back request writes nothing', async () => {
   usePort(centralPort().port);
   const fixture = multimodalFixture();
   const result = await fixture.service.analyze({ artifactId: 'source' });
@@ -241,16 +216,6 @@ test('provider-bound stored metadata is screened before the first image/audio ca
   }
 });
 
-test('original port installation owns the provider await', async () => {
-  usePort(centralPort().port);
-  const fixture = multimodalFixture();
-  fixture.mediaProviders.findProvider = () => ({ analyze: async () => {
-    usePort(centralPort().port);
-    return { providerId: 'fixture', text: 'AI', labels: [], metadata: {} };
-  } });
-  await expect(fixture.service.analyze({ artifactId: 'source' })).rejects.toThrow();
-});
-
 test('missing and over-budget video sources hold instead of dropping evidence', async () => {
   usePort(centralPort().port);
   const fixture = multimodalFixture('video');
@@ -269,6 +234,6 @@ test('Office entity corpus includes unsampled sheets and slides as decoded sourc
   const source = await readKnowledgeArtifactJudgmentSource({ id: 'office', filename: 'source.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, await zip.generateAsync({ type: 'nodebuffer' }));
   expect(source).toContain('AI'); expect(source).toContain('EU'); expect(source).not.toContain('worksheet');
   usePort(centralPort().port);
-  const ranked = await rankMultimodalEntities(source, 10, { assertCurrent() {}, authority: captureJudgmentPort('multimodal.entity-centrality') });
-  expect(ranked.entities).toEqual(['AI', 'EU']);
+  const assessed = await assessMultimodalEntities(source, 10);
+  expect(assessed.entities).toEqual(['AI', 'EU']);
 });

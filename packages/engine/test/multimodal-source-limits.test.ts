@@ -10,12 +10,12 @@ function usePort(port: Parameters<typeof installJudgmentPort>[0]) {
 }
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });
 
-test('a source with more distinct terms than one ranking request can carry is analyzed, and says its entities were not assessed', async () => {
+test('a source with more distinct terms than one entity request can carry is analyzed, and says its entities were not assessed', async () => {
   const fake = fakePort(() => noulAnswer(0.01));
   usePort(fake.port);
-  const words = Array.from({ length: 200 }, (_, index) => `term${index}`).join(' ');
-  const fixture = multimodalFixture('document', words);
-  const result = await fixture.service.analyze({ artifactId: 'source' });
+  const words = Array.from({ length: 300 }, (_, index) => `term${index}`).join(' ');
+  const fixture = multimodalFixture('image', words);
+  const result = await fixture.service.analyze({ artifactId: 'source', detail: 'detailed' });
   expect(result.entities).toEqual([]);
   expect(result.metadata).toMatchObject({ entityAssessment: 'not-evaluated', entityAssessmentSkipped: 'budget', provenance: 'decision' });
   expect(fake.requests).toHaveLength(0);
@@ -23,9 +23,12 @@ test('a source with more distinct terms than one ranking request can carry is an
 });
 
 test('an inline artifact made for a failed analysis is not left behind', async () => {
-  usePort(fakePort(() => noulAnswer(0.5)).port); // an uncertain reading holds the analysis after the artifact exists
+  usePort(fakePort(() => noulAnswer(0.5)).port);
   const fixture = multimodalFixture('document');
-  await expect(fixture.service.analyze({ artifact: { dataBase64: 'aGk=', mimeType: 'text/plain' } })).rejects.toThrow('held');
+  // The caller cancels once the inline artifact exists.
+  const controller = new AbortController(), readContent = fixture.artifactStore.readContent;
+  fixture.artifactStore.readContent = async (id: string) => { controller.abort(); return readContent(id); };
+  await expect(fixture.service.analyze({ artifact: { dataBase64: 'aGk=', mimeType: 'text/plain' } }, { signal: controller.signal })).rejects.toThrow();
   expect(fixture.writes).toHaveLength(1);
   expect([...fixture.records.keys()]).toEqual(['source']);
 });
@@ -43,10 +46,9 @@ test('an audio type without a dedicated name is sent under its own container nam
   expect(format).toBe('m4a');
 });
 
-test('a packet larger than the requested budget says so', async () => {
+test('a packet stays within the budget it was given', async () => {
   usePort(fakePort(() => noulAnswer(0.01)).port);
-  const fixture = multimodalFixture('document', 'budget words '.repeat(50));
+  const fixture = multimodalFixture('document', 'budget words '.repeat(400));
   const result = await fixture.service.analyze({ artifactId: 'source' });
-  expect(fixture.service.buildPacket(result, 'standard', 1_000).rendered).not.toContain('Over budget');
-  expect(fixture.service.buildPacket(result, 'standard', 1).rendered).toContain('Over budget');
+  for (const budget of [60, 120, 280, 1_000]) expect(fixture.service.buildPacket(result, 'detailed', budget).estimatedTokens).toBeLessThanOrEqual(budget);
 });

@@ -1,10 +1,10 @@
 import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { logger } from '../utils/logger.js';
-import { captureJudgmentPort, decisionModelPolicyState, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { readMultimodalPdf } from './pdf-source.js';
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
-import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { rankMultimodalEntities, MultimodalEntityHeldError } from './entity-centrality.js';
+import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { assessMultimodalEntities, MultimodalEntityHeldError, notAssessed, type MultimodalEntityAssessment } from './entity-centrality.js';
 import { ArtifactStore } from '../artifacts/index.js';
 import type { ArtifactDescriptor, ArtifactRecord } from '../artifacts/types.js';
 import { MediaProviderRegistry } from '../media/index.js';
@@ -32,6 +32,48 @@ const PACKET_BUDGETS: Record<MultimodalDetail, number> = {
 function estimateTokens(...values: Array<string | undefined>): number {
   const total = values.reduce((sum, value) => sum + (value?.length ?? 0), 0);
   return Math.max(1, Math.ceil(total / 4));
+}
+
+/** Analyses kept for write-back in this process; the oldest goes first. */
+const HELD_ANALYSES = 128;
+/** Tokens a packet keeps free for the line that says what was left out. */
+const PACKET_NOTE_TOKENS = 32;
+
+const entityLimit = (kind: MultimodalKind): number => kind === 'image' ? 8 : 10;
+const stringList = (value: unknown): string[] => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+
+/** The result with its entity assessment recorded; provider metadata cannot mint these fields. */
+function withAssessment(result: MultimodalAnalysisResult, assessment: MultimodalEntityAssessment): MultimodalAnalysisResult {
+  const metadata = Object.fromEntries(Object.entries(result.metadata).filter(([key]) => key !== 'entityAssessmentSkipped'));
+  return captureOwnedJson({ ...result, entities: assessment.entities, metadata: {
+    ...metadata,
+    provenance: assessment.provenance, entityAssessment: assessment.assessment,
+    ...(assessment.skipped ? { entityAssessmentSkipped: assessment.skipped } : {}),
+  } }) as MultimodalAnalysisResult;
+}
+
+/** What a packet says when entities were not listed. */
+function entityNote(metadata: Record<string, unknown>): string | undefined {
+  if (metadata.entityAssessment !== 'not-evaluated') return undefined;
+  switch (metadata.entityAssessmentSkipped) {
+    case 'budget': return 'Entities were not assessed: the source is too large for one assessment.';
+    case 'unavailable': return 'Entities were not assessed: no decision model answered.';
+    case 'not-requested': return metadata.provenance === 'classic'
+      ? 'Classic: semantic entity assessment was not performed.'
+      : 'Entities were not requested; analyze with detail "detailed", or write the analysis back, to list them.';
+    default: return metadata.provenance === 'classic' ? 'Classic: semantic entity assessment was not performed.' : undefined;
+  }
+}
+
+interface HeldAnalysis {
+  readonly result: MultimodalAnalysisResult;
+  /** The result exactly as it was returned; write-back compares a caller's copy to it. */
+  readonly serialized: string;
+  /** The full analysed text, screened, for an entity assessment write-back asks for. */
+  readonly source: string;
+  /** Every artifact the analysis read is still the one it read. */
+  readonly assertArtifacts: () => void;
+  enriched?: Promise<MultimodalAnalysisResult> | undefined;
 }
 
 function compactText(value: string | undefined, maxLength = 240): string | undefined {
@@ -92,28 +134,66 @@ function mergeUnique(...groups: Array<readonly string[] | undefined>): string[] 
 
 /** What a stored analysis must say about entities that were not semantically assessed. */
 function evaluationMarkers(result: MultimodalAnalysisResult): Record<string, unknown> {
+  const skipped = result.metadata.entityAssessmentSkipped;
   return {
     ...(result.metadata.provenance === 'classic' ? { provenance: 'classic' } : {}),
     ...(result.metadata.entityAssessment === 'not-evaluated' ? { entityAssessment: 'not-evaluated' } : {}),
-    ...(result.metadata.entityAssessmentSkipped === 'budget' ? { entityAssessmentSkipped: 'budget' } : {}),
+    ...(typeof skipped === 'string' ? { entityAssessmentSkipped: skipped } : {}),
   };
 }
 
 export class MultimodalService {
   private readonly sources = new WeakMap<MultimodalAnalysisResult, { text: string; artifacts: readonly ArtifactDescriptor[] }>();
-  private readonly analyses = new Map<string, { result: MultimodalAnalysisResult; assertCurrent: () => void }>();
+  /** The one owner of a finished analysis until write-back; held in memory, bounded, never re-admitted after eviction. */
+  private readonly analyses = new Map<string, HeldAnalysis>();
 
   private source(result: MultimodalAnalysisResult, text: string, artifacts: readonly ArtifactDescriptor[] = [result.artifact]): MultimodalAnalysisResult {
     this.sources.set(result, { text, artifacts });
     return result;
   }
 
-  private ownedResult(result: MultimodalAnalysisResult): { result: MultimodalAnalysisResult; assertCurrent: () => void } {
+  /** The held analysis a caller's copy names, refused with the reason and next step when it is gone or was changed. */
+  private held(result: MultimodalAnalysisResult): HeldAnalysis {
     const snapshot = captureOwnedJson(result) as MultimodalAnalysisResult;
-    const retained = this.analyses.get(snapshot.id);
-    if (!retained || JSON.stringify(snapshot) !== JSON.stringify(retained.result)) throw new MultimodalEntityHeldError('stale');
-    retained.assertCurrent();
-    return retained;
+    const id = typeof snapshot?.id === 'string' ? snapshot.id : undefined;
+    const held = id === undefined ? undefined : this.analyses.get(id);
+    if (!held) {
+      throw new RefusalError(refusal({
+        code: 'MULTIMODAL_ANALYSIS_NOT_HELD', status: 410,
+        state: 'the analysis is no longer held by this daemon',
+        reason: `Analysis ${id ?? '(no id)'} cannot be written back: the daemon restarted after it ran, or ${HELD_ANALYSES} later analyses replaced it`,
+        next: ['Run the analysis again with "writeback": true (POST /api/multimodal/analyze) to analyse and store it in one step'],
+      }));
+    }
+    if (JSON.stringify(snapshot) !== held.serialized) {
+      throw new RefusalError(refusal({
+        code: 'MULTIMODAL_ANALYSIS_CHANGED', status: 409,
+        state: 'the analysis differs from the one this daemon returned',
+        reason: `Analysis ${id} was changed after it was returned; write-back stores an analysis only as the daemon produced it`,
+        next: ['Send the analysis unchanged', 'Or run the analysis again'],
+      }));
+    }
+    return held;
+  }
+
+  private hold(result: MultimodalAnalysisResult, source: string, assertArtifacts: () => void): MultimodalAnalysisResult {
+    if (this.analyses.size >= HELD_ANALYSES) this.analyses.delete(this.analyses.keys().next().value!);
+    this.analyses.set(result.id, { result, serialized: JSON.stringify(result), source, assertArtifacts });
+    return result;
+  }
+
+  /** The held result, with entities assessed now when the analysis did not ask for them. One request per analysis at most. */
+  private entitiesFor(held: HeldAnalysis, signal: AbortSignal | undefined, retried = false): Promise<MultimodalAnalysisResult> {
+    if (held.result.metadata.entityAssessmentSkipped !== 'not-requested') return Promise.resolve(held.result);
+    held.enriched ??= withConfiguredDecisionModelPolicy(async () =>
+      withAssessment(held.result, await assessMultimodalEntities(held.source, entityLimit(held.result.kind), { signal })));
+    const enriched = held.enriched;
+    return enriched.catch((error: unknown) => {
+      if (held.enriched === enriched) held.enriched = undefined;
+      // The assessment throws only for an abort; when another write-back's abort ended it, this one asks once more.
+      if (signal?.aborted || retried) throw error;
+      return this.entitiesFor(held, signal, true);
+    });
   }
 
   constructor(
@@ -172,58 +252,38 @@ export class MultimodalService {
   async analyze(request: MultimodalAnalysisRequest, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<MultimodalAnalysisResult> {
     return withConfiguredDecisionModelPolicy(async () => {
       const owned = captureOwnedJson(request) as MultimodalAnalysisRequest;
-      const policy = decisionModelPolicyState().policy;
-      const active = () => {
-        if (options.signal?.aborted || decisionModelPolicyState().policy !== policy) throw new MultimodalEntityHeldError('stale');
-      };
-      active();
+      const signal = options.signal;
+      signal?.throwIfAborted();
       assertJudgmentInput({ prompt: owned.prompt, metadata: owned.metadata, artifactInput: owned.artifact ? {
         filename: owned.artifact.filename, mimeType: owned.artifact.mimeType, uri: owned.artifact.uri, metadata: owned.artifact.metadata,
       } : undefined });
-      let authority: JudgmentPortCapture | undefined;
-      let classic = isClassicOperation();
-      if (!classic) {
-        try { authority = captureJudgmentPort('multimodal.entity-centrality', { signal: options.signal, assertCurrent: active }); }
-        catch (error) {
-          classic = activateClassicFallback(error);
-          // An absent Default port cannot be replaced by a later installation.
-        }
-      }
       const { descriptor, record, buffer, assertCurrent: contentCurrent, createdHere } = await this.resolveArtifactInput(owned);
       try {
-        if (!classic && !isClassicOperation()) authority?.assertCurrent();
         const initial = captureOwnedJson(descriptor) as ArtifactDescriptor;
-        const assertArtifact = (artifact: ArtifactDescriptor) => {
-          active();
+        const sameArtifact = (artifact: ArtifactDescriptor) => {
           if (JSON.stringify(this.artifactStore.get(artifact.id)) !== JSON.stringify(artifact)) throw new MultimodalEntityHeldError('stale');
         };
+        const assertArtifact = (artifact: ArtifactDescriptor) => { signal?.throwIfAborted(); sameArtifact(artifact); };
         assertArtifact(initial);
         assertJudgmentInput({ filename: initial.filename, metadata: initial.metadata, prompt: owned.prompt, metadataInput: owned.metadata, artifactMetadata: owned.artifact?.metadata });
-        const assertEntryCurrent = () => { try { contentCurrent?.(); } catch { throw new MultimodalEntityHeldError('stale'); } assertArtifact(initial); if (!classic && !isClassicOperation()) authority?.assertCurrent(); };
+        const assertEntryCurrent = () => { try { contentCurrent?.(); } catch { throw new MultimodalEntityHeldError('stale'); } assertArtifact(initial); };
         let result: MultimodalAnalysisResult;
         switch (this.resolveKind(initial)) {
-          case 'image': result = await this.analyzeImage(initial, owned); break;
+          case 'image': result = await this.analyzeImage(initial, owned, signal); break;
           case 'audio': result = await this.analyzeAudio(initial, buffer, owned); break;
-          case 'video': result = await this.analyzeVideo(initial, owned, assertEntryCurrent); break;
+          case 'video': result = await this.analyzeVideo(initial, owned, assertEntryCurrent, signal); break;
           default: result = await this.analyzeDocument(record, buffer, owned, assertEntryCurrent); break;
         }
         const source = this.sources.get(result)!;
+        // The full text is what an agent, a later assessment and write-back read: screened once, here.
+        assertJudgmentInput(source.text);
         const artifacts = captureOwnedJson(source.artifacts) as readonly ArtifactDescriptor[];
-        const assertCurrent = () => { assertEntryCurrent(); for (const artifact of artifacts) assertArtifact(artifact); };
-        assertCurrent();
-        const ranked = await rankMultimodalEntities(source.text, result.kind === 'image' ? 8 : 10, { signal: options.signal, assertCurrent, authority });
-        classic = ranked.provenance === 'classic';
-        ranked.assertCurrent();
-        const retained = captureOwnedJson({ ...result, entities: ranked.entities, metadata: {
-          ...result.metadata,
-          // Provider metadata cannot mint the host's assessment/provenance fields.
-          provenance: classic ? 'classic' : 'decision', entityAssessment: ranked.assessment,
-          ...(ranked.skipped ? { entityAssessmentSkipped: ranked.skipped } : {}),
-        } }) as MultimodalAnalysisResult;
-        // Bounded retention supports explicit HTTP packet/write-back round trips. Eviction is a hold, never re-admission.
-        if (this.analyses.size >= 128) this.analyses.delete(this.analyses.keys().next().value!);
-        this.analyses.set(retained.id, { result: retained, assertCurrent: ranked.assertCurrent });
-        return retained;
+        // Entities are enrichment: assessed only when asked for, and never a reason to fail the analysis.
+        const assessment = owned.detail === 'detailed'
+          ? await assessMultimodalEntities(source.text, entityLimit(result.kind), { signal })
+          : notAssessed('not-requested');
+        // Write-back runs under its own request; this request's signal has no say after it returns.
+        return this.hold(withAssessment(result, assessment), source.text, () => { for (const artifact of artifacts) sameArtifact(artifact); });
       } catch (error) {
         // An artifact made only to hold this call's inline input has no analysis to belong to.
         if (createdHere) { try { this.artifactStore.delete(descriptor.id); } catch { logger.warn('Multimodal inline artifact cleanup was not confirmed.'); } }
@@ -232,29 +292,48 @@ export class MultimodalService {
     });
   }
 
+  /**
+   * A packet of the analysis within `budgetLimit` tokens. It renders the copy it
+   * is given and writes nothing, so any analysis can be packed, including one
+   * from before a restart. What does not fit is cut or left out, and the last
+   * line says so.
+   */
   buildPacket(result: MultimodalAnalysisResult, detail: MultimodalDetail = 'standard', budgetLimit = PACKET_BUDGETS[detail]): MultimodalPacket {
-    result = this.ownedResult(result).result;
+    const value = captureOwnedJson(result) as Partial<MultimodalAnalysisResult> | null;
+    const metadata = value?.metadata && typeof value.metadata === 'object' ? value.metadata : {};
+    const summary = typeof value?.summary === 'string' ? value.summary : undefined;
+    const text = typeof value?.text === 'string' ? value.text : undefined;
+    const labels = stringList(value?.labels), entities = stringList(value?.entities);
+    const segments = (Array.isArray(value?.segments) ? value.segments : [])
+      .filter((segment): segment is MultimodalAnalysisResult['segments'][number] => !!segment && typeof segment === 'object');
     const highlights = [
-      result.summary,
-      ...result.labels.slice(0, detailLimit(detail, 2, 4, 8)),
-      ...result.segments.map((segment) => compactText(segment.text, detailLimit(detail, 100, 180, 260))).filter((segment): segment is string => Boolean(segment)),
+      summary,
+      ...labels.slice(0, detailLimit(detail, 2, 4, 8)),
+      ...segments.map((segment) => compactText(segment.text, detailLimit(detail, 100, 180, 260))),
     ].filter((entry): entry is string => Boolean(entry));
-    const lines = [
-      '## Multimodal Analysis',
-      `Kind: ${result.kind} | detail: ${detail} | artifact: ${result.artifact.id}`,
-    ];
-    if (result.summary) lines.push(`Summary: ${result.summary}`);
-    if (result.labels.length > 0) lines.push(`Labels: ${result.labels.join(', ')}`);
-    if (result.entities.length > 0) lines.push(`Entities: ${result.entities.join(', ')}`);
-    if (result.metadata.entityAssessmentSkipped === 'budget') lines.push('Entities were not assessed: the source is too large for one assessment.');
-    else if (result.metadata.entityAssessment === 'not-evaluated') lines.push('Classic: semantic entity assessment was not performed.');
-    if (result.text) lines.push(`Text: ${compactText(result.text, detailLimit(detail, 180, 320, 520))}`);
-    for (const segment of result.segments.slice(0, detailLimit(detail, 2, 4, 8))) {
-      const segmentLabel = segment.title ? `${segment.kind}:${segment.title}` : segment.kind;
-      if (segment.text) lines.push(`- ${segmentLabel}: ${compactText(segment.text, detailLimit(detail, 120, 220, 360))}`);
+    const lines = ['## Multimodal Analysis', `Kind: ${String(value?.kind)} | detail: ${detail} | artifact: ${String(value?.artifact?.id)}`];
+    let used = estimateTokens(lines.join('\n')), left = 0, cut = false;
+    const room = budgetLimit - PACKET_NOTE_TOKENS;
+    for (const line of [
+      summary ? `Summary: ${summary}` : undefined,
+      labels.length > 0 ? `Labels: ${labels.join(', ')}` : undefined,
+      entities.length > 0 ? `Entities: ${entities.join(', ')}` : undefined,
+      entityNote(metadata),
+      text ? `Text: ${compactText(text, detailLimit(detail, 180, 320, 520))}` : undefined,
+      ...segments.slice(0, detailLimit(detail, 2, 4, 8)).map((segment) => {
+        const segmentLabel = segment.title ? `${segment.kind}:${segment.title}` : segment.kind;
+        return segment.text ? `- ${segmentLabel}: ${compactText(segment.text, detailLimit(detail, 120, 220, 360))}` : undefined;
+      }),
+    ]) {
+      if (!line) continue;
+      const cost = estimateTokens(line, '\n');
+      if (used + cost <= room) { lines.push(line); used += cost; continue; }
+      // Cut the first line that does not fit into the room left; leave out the rest.
+      const chars = (room - used) * 4 - 1;
+      const shortened = chars >= 48 ? compactText(line, chars) : undefined;
+      if (shortened) { lines.push(shortened); used += estimateTokens(shortened, '\n'); cut = true; } else left++;
     }
-    // The budget is a limit callers rely on, so an overrun is stated, never silently clipped or ignored.
-    if (estimateTokens(lines.join('\n')) > budgetLimit) lines.push(`Over budget: this packet is about ${estimateTokens(lines.join('\n'))} tokens, above the ${budgetLimit} requested.`);
+    if (cut || left > 0) lines.push(`Cut to fit ${budgetLimit} tokens${left > 0 ? `; ${left} more line${left === 1 ? '' : 's'} left out` : ''}. Ask for detail "detailed" or a larger budget for more.`);
     const rendered = lines.join('\n');
     return {
       detail,
@@ -276,15 +355,16 @@ export class MultimodalService {
     } = {},
     options: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined } = {},
   ): Promise<MultimodalWritebackResult> {
-    const retained = this.ownedResult(result), signal = options.signal, assertOwner = options.assertCurrent?.bind(options);
-    const owned = { result: retained.result, assertCurrent: () => {
-      if (signal?.aborted) throw new MultimodalEntityHeldError('stale');
+    const held = this.held(result), signal = options.signal, assertOwner = options.assertCurrent?.bind(options);
+    const owned = { assertCurrent: () => {
+      signal?.throwIfAborted();
       const value: unknown = assertOwner?.();
       if (value !== undefined) { drainOwned(value); throw new TypeError('Multimodal write owner must complete synchronously and return no value.'); }
-      retained.assertCurrent();
+      held.assertArtifacts();
     } };
-    result = owned.result;
     input = captureOwnedJson(input) as typeof input;
+    owned.assertCurrent();
+    result = await this.entitiesFor(held, signal);
     owned.assertCurrent();
     const created = await this.artifactStore.createForPublication({
       kind: 'document',
@@ -397,8 +477,13 @@ export class MultimodalService {
       ...(artifact.filename ? { filename: artifact.filename } : {}),
       metadata: artifact.metadata ?? {},
     });
-    const acquired = await this.artifactStore.readContent(created.id);
-    return { descriptor: created, record: acquired.record, buffer: acquired.buffer, assertCurrent: acquired.assertCurrent?.bind(acquired), createdHere: true };
+    try {
+      const acquired = await this.artifactStore.readContent(created.id);
+      return { descriptor: created, record: acquired.record, buffer: acquired.buffer, assertCurrent: acquired.assertCurrent?.bind(acquired), createdHere: true };
+    } catch (error) {
+      try { this.artifactStore.delete(created.id); } catch { logger.warn('Multimodal inline artifact cleanup was not confirmed.'); }
+      throw error;
+    }
   }
 
   private resolveKind(descriptor: ArtifactDescriptor): MultimodalKind {
@@ -417,6 +502,7 @@ export class MultimodalService {
   private async analyzeImage(
     descriptor: ArtifactDescriptor,
     request: MultimodalAnalysisRequest,
+    signal?: AbortSignal,
   ): Promise<MultimodalAnalysisResult> {
     assertJudgmentInput({ metadata: descriptor.metadata, filename: descriptor.filename, prompt: request.prompt, requestMetadata: request.metadata });
     const provider = this.mediaProviders.findProvider('understand', request.imageProviderId);
@@ -434,6 +520,7 @@ export class MultimodalService {
       prompt: request.prompt,
       modelId: request.modelId,
       metadata: request.metadata,
+      signal,
     });
     const result = captureOwnedJson(response) as typeof response;
     assertJudgmentInput(result);
@@ -515,12 +602,13 @@ export class MultimodalService {
     const extraction = captureOwnedJson(pdf?.extraction ?? await extractKnowledgeArtifact(record, buffer)) as Awaited<ReturnType<typeof extractKnowledgeArtifact>>;
     assertCurrent();
     assertJudgmentInput(extraction);
-    const segments = extraction.sections.slice(0, 12).map((section) => ({
-      kind: 'section' as const,
-      title: section,
-      text: section,
-      metadata: {},
-    }));
+    // A PDF has pages, not headings: each page is a segment titled by its number, never a label.
+    const segments: MultimodalAnalysisResult['segments'][number][] = pdf
+      ? pdf.pages.slice(0, 12).flatMap((page, index) => {
+        const text = compactText(page, 2_000);
+        return text ? [{ kind: 'section' as const, title: `Page ${index + 1}`, text, metadata: { page: index + 1 } }] : [];
+      })
+      : extraction.sections.slice(0, 12).map((section) => ({ kind: 'section' as const, title: section, text: section, metadata: {} }));
     const text = compactText([extraction.summary ?? '', extraction.excerpt ?? ''].join('\n\n'), 4_000);
     return this.source({
       id: `mm-${opaqueUuid()}`,
@@ -545,6 +633,7 @@ export class MultimodalService {
     descriptor: ArtifactDescriptor,
     request: MultimodalAnalysisRequest,
     assertCurrent: () => void,
+    signal?: AbortSignal,
   ): Promise<MultimodalAnalysisResult> {
     const requestMetadata = request.metadata ?? {};
     const keyframeIds = coerceStringList(requestMetadata.keyframeArtifactIds ?? descriptor.metadata.keyframeArtifactIds);
@@ -586,7 +675,7 @@ export class MultimodalService {
         modelId: request.modelId,
         prompt: request.prompt ? `${request.prompt}\nFocus on this video keyframe.` : 'Describe this video keyframe.',
         metadata: request.metadata,
-      });
+      }, signal);
       sourceTexts.push(this.sources.get(frameAnalysis)!.text);
       sourceArtifacts.push(captureOwnedJson(frameDescriptor) as ArtifactDescriptor);
       for (const providerId of frameAnalysis.providerIds) providerIds.add(providerId);

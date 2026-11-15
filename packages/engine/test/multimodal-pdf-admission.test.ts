@@ -34,10 +34,18 @@ test('a PDF with an embedded JPEG picture is read for its text', async () => {
 });
 
 test('a refusal names the rule that held the file, so it can be told from a corrupt PDF', async () => {
-  const error = await readMultimodalPdf(pdf('q BI /W 1 /H 1 /BPC 8 /F /Fl ID hostile EI Q'), () => {}).catch((failure: unknown) => failure) as Error;
+  const lzw = Buffer.from(pdf('BT /F1 12 Tf 72 720 Td (AI) Tj ET').toString('latin1').replace('/Filter /FlateDecode', '/Filter /LZWDecode'), 'latin1');
+  const error = await readMultimodalPdf(lzw, () => {}).catch((failure: unknown) => failure) as Error;
   expect(error).toBeInstanceOf(Error);
-  expect(error.message).toContain('inline image');
+  expect(error.message).toContain('unsupported filter');
   expect(error.message).toContain('Refused before judgment');
+});
+
+test('numbers in drawing operators are not read as card numbers; only page text is screened', async () => {
+  const result = await readMultimodalPdf(pdf('4111 1111 1111 1111 re f BT /F1 12 Tf 72 720 Td (quarterly report) Tj ET'), () => {});
+  expect(result.source).toContain('quarterly report');
+  expect(result.extraction.sections).toEqual([]);
+  expect(result.pages).toHaveLength(1);
 });
 
 test('an encrypted PDF and a file that is not a PDF are refused with their own reasons', async () => {

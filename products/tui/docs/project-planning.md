@@ -9,12 +9,10 @@ New terminal requests use native conversation intake. The historical project-pla
 | Exact original terminal input capture and native request/recovery display | TUI |
 | Semantic routing, admission and autonomous execution decisions | Native engine and Jev |
 | Passive display of saved historical planning records | TUI |
-| Explicit compatibility edits to saved answers/approval metadata | TUI commands through the revision-guarded platform action |
 | Durable project-scoped planning artifacts in `project:<projectId>` knowledge spaces | platform |
-| Historical readiness evaluation and next-question API compatibility | platform; not a TUI interview |
-| Project-language, decision, task and verification records | platform |
+| Decision records and the work plan | platform |
 
-Saved readiness, questions, answers and approval metadata describe historical artifacts. They are not native criteria, current execution evidence or authority to admit/start/resume native work. This change does not rewrite stored records, alter platform APIs or schemas, or add a native reply protocol.
+Saved readiness, questions, answers and approval metadata describe historical artifacts. They are read-only: nothing answers, approves, re-evaluates or rewrites them, and they are not native criteria, current execution evidence or authority to admit/start/resume native work.
 
 ## Native input and recovery
 
@@ -22,7 +20,7 @@ Saved readiness, questions, answers and approval metadata describe historical ar
 
 Command syntax and its first whitespace separator are removed; the remaining text is retained exactly, including additional leading spaces, trailing whitespace, line breaks and Unicode. A CRLF delimiter is one separator. Folded paste/image markers and file/context references remain unsupported source references instead of being expanded into replacement authority.
 
-There is no legacy planning or ordinary-turn fallback when native intake, the paired host, the verified principal or durable journal is unavailable. Uncertain submissions retain the original IDs and source. Use `/work intake-status`, `/work intake-retry`, `/work intake-resume` and `/work intake-cancel` to inspect or recover them. Historical inspection and edits do not replace that source or silently retry it. See [terminal workstream intake](../README.md#terminal-workstream-intake) for the shared recovery boundary.
+There is no legacy planning or ordinary-turn fallback when native intake, the paired host, the verified principal or durable journal is unavailable. Uncertain submissions retain the original IDs and source. Use `/work intake-status`, `/work intake-retry`, `/work intake-resume` and `/work intake-cancel` to inspect or recover them. Historical inspection does not replace that source or silently retry it. See [terminal workstream intake](../README.md#terminal-workstream-intake) for the shared recovery boundary.
 
 Plain conversation, including planning-related language, uses native intake. It does not open an interview or become an answer to a saved question. A new complete request must come from new original terminal input; opening saved history never manufactures one from saved goal/scope/task fields.
 
@@ -46,7 +44,7 @@ Opening and refreshing are passive reads. The modal does not call readiness eval
 | Navigation keys | Inspect and scroll saved content |
 | `Esc` | Close the view |
 
-Closing, reopening, refreshing or repeatedly pressing former action keys cannot write historical state or dispatch native work. Explicit saved-record edits remain separate commands below.
+Closing, reopening, refreshing or repeatedly pressing former action keys cannot write historical state or dispatch native work.
 
 ## `/project-plan`
 
@@ -55,15 +53,11 @@ Closing, reopening, refreshing or repeatedly pressing former action keys cannot 
 | `/project-plan` or `/project-plan panel` | Open native work and recovery |
 | `/project-plan history` | Inspect saved historical planning records without evaluating or starting an interview |
 | `/project-plan <goal>` | Submit the exact original terminal request through native conversation intake |
-| `/project-plan answer <question-number\|question-id> <text>` | Explicitly record an answer to an existing saved historical question; does not ask a next question or authorize native work |
-| `/project-plan approve` | Explicitly update saved historical approval metadata; does not authorize native work |
-| `/project-plan dismiss` | Archive the historical execution plan and mark saved historical planning inactive; refused while that execution plan is mid-execution, with `/workstream cancel` guidance |
+| `/project-plan dismiss` | Archive the active execution plan; refused while it is mid-execution, with `/workstream cancel` guidance. Saved planning records are not changed |
 | `/project-plan list` and `/project-plan show <id>` | Inspect older execution-plan records |
 | `/project-plan mode\|explain\|override\|status\|clear` | Route to the existing adaptive runtime controls |
 
-Both current-record and selected-revision answer/approve forms remain compatible. Manual commands capture the current source revision once; selected commands retain their explicit planning/source/generation binding. Both use the platform's atomic revision guard. A stale or malformed selected revision cannot fall back to another record, a fresh interview or native intake. Numeric references in manual answers remain one-based question indexes; selected-revision answers keep opaque question IDs, including numeric IDs.
-
-Successful historical edits report only the saved action. They do not print fresh readiness, recommended answers or a next question. platform normalization within an explicitly requested write is unchanged; the TUI does not consume its evaluation hints. Existing saved approval metadata is retained by passive inspection and is never reinterpreted as native execution authority.
+`/project-plan approve` and `/project-plan answer` are retired. They change nothing, say so, and point at the work plan and `/workstream`; `/project-plan -- approve ...` submits the words as a goal instead.
 
 `/project-plan` is unrelated to `/plan`, which toggles the session's existing read-only permission plan mode. `/plan` never touches project-planning state; `Shift+Tab` cycles that same permission mode. These retained compatibility controls do not claim that other legacy permission/runtime consumers have already completed their autonomous migration.
 
@@ -110,15 +104,14 @@ When the selected item has linked ids (`item.linked` holds any of `agentId`, `wr
 
 ## platform routes and operator methods
 
-The platform retains its passive historical storage/evaluation routes and matching operator methods. Their compatibility contract is unchanged. Opening or refreshing the TUI historical view only reads saved records; it does not call the evaluation route or turn its next-question hints into an interview:
+The platform serves saved planning records read-only. Opening or refreshing the TUI historical view only reads them. The former state, evaluate and language write routes answer `410` with code `PLANNING_STATE_READ_ONLY`:
 
 | Route | Operator method(s) | Purpose |
 | --- | --- | --- |
-| `GET /api/projects/planning/status` | `projectPlanning.status` | Read planning readiness and artifact counts |
-| `GET\|POST /api/projects/planning/state` | `projectPlanning.state.get` / `projectPlanning.state.upsert` | Read or write the planning state artifact |
-| `POST /api/projects/planning/evaluate` | `projectPlanning.evaluate` | Run readiness evaluation |
+| `GET /api/projects/planning/status` | `projectPlanning.status` | Read artifact counts and capabilities |
+| `GET /api/projects/planning/state` | `projectPlanning.state.get` | Read a saved planning state |
 | `GET\|POST /api/projects/planning/decisions` | `projectPlanning.decisions.list` / `projectPlanning.decisions.record` | List or record durable decisions |
-| `GET\|POST /api/projects/planning/language` | `projectPlanning.language.get` / `projectPlanning.language.upsert` | Read or write project-language records |
+| `GET /api/projects/planning/language` | `projectPlanning.language.get` | Read saved project-language records |
 
 A separate set of routes covers the task graph shown in the modal:
 

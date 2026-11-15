@@ -131,7 +131,7 @@ function buildConstantTable(files: readonly string[]): ReadonlyMap<string, strin
   // alone matched newlines, so `declare const secrets: {...};` swallowed the
   // NEXT declaration's name and the real constant never entered the table.
   const declaration = /(?:export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::\s*[^=;\n]+?)?=\s*([^;\n]+);/g;
-  // `GOOGLE_SECRET_KEYS = { appPassword: daemonSecretKeyFor('email.passwordRef') }`
+  // `GOOGLE_SECRET_KEYS = { appPassword: daemonSecretKeyFor('surfaces.email.password') }`
   //, a member of an object literal, which is how the derived key sets are
   // written. Resolved to `OBJECT.member` entries so a call that names one is
   // checked rather than written off as computed.

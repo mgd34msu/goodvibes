@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
-import { ensureConnectorConfigSections } from '../platform/src/platform/config/connector-config-sections.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function write(path: string, value: unknown) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(value)); }
@@ -59,13 +58,12 @@ test('runtime provenance retains daemon/shared ownership and resets on supersedi
   expect(config.describeConfigKeySource('surfaces.email.host')).toMatchObject({ tier: 'daemon', effectiveOrigin: 'daemon', value: 'chosen.example.test' });
 });
 
-test('unknown extension values disappear on deletion and connector seeders stay no-op', () => {
+test('unknown extension values disappear on deletion', () => {
   const { config, paths } = fixture();
   config.mergeCategory('helper', { syntheticExtension: true } as never); config.load();
   expect(config.getCategory('helper')).toHaveProperty('syntheticExtension');
   write(paths.global, {}); config.load();
   expect(config.getCategory('helper')).not.toHaveProperty('syntheticExtension');
-  const before = config.getRaw(); ensureConnectorConfigSections(config); expect(config.getRaw()).toEqual(before);
 });
 
 test('separate managers retain independent invocation authority over shared files', () => {

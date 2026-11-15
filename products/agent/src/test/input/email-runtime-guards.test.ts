@@ -1,7 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { ensureEmailConfigDefaults } from '@goodvibes-jev/engine/platform/platform/email';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { formatInboxSummaries, registerEmailRuntimeCommands } from '../../input/commands/email-runtime.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -39,13 +38,12 @@ describe('/email check output', () => {
   });
 });
 
-describe('/email set email.passwordRef', () => {
+describe('/email set password', () => {
   function rig(options: { readonly masked: boolean }) {
     const root = makeProjectTempDir('gv-email-password');
     const out: string[] = [];
     const stored = new Map<string, string>();
     const config = new ConfigManager({ surfaceRoot: 'tui', workingDir: root, homeDir: root, configDir: join(root, '.goodvibes', 'global-tui') });
-    ensureEmailConfigDefaults(config);
     const prompts: Array<{ readonly label?: string | undefined; readonly onSubmit: (value: string) => void | Promise<void>; readonly onCancel?: (() => void) | undefined }> = [];
     const ctx = {
       session: {} as never, provider: {} as never, workspace: {} as never, ops: {} as never, extensions: {} as never, clients: {} as never,
@@ -61,7 +59,7 @@ describe('/email set email.passwordRef', () => {
 
   test('without a value the password is asked for masked and stored only after it is entered', async () => {
     const { run, prompts, stored, out } = rig({ masked: true });
-    await run(['set', 'email.passwordRef', '--yes']);
+    await run(['set', 'password', '--yes']);
     expect(prompts).toHaveLength(1);
     expect(stored.size).toBe(0);
     await prompts[0]!.onSubmit('mailbox-secret-value');
@@ -71,7 +69,7 @@ describe('/email set email.passwordRef', () => {
 
   test('cancelling the masked prompt stores nothing', async () => {
     const { run, prompts, stored, out } = rig({ masked: true });
-    await run(['set', 'email.passwordRef', '--yes']);
+    await run(['set', 'password', '--yes']);
     prompts[0]!.onCancel?.();
     expect(stored.size).toBe(0);
     expect(out.at(-1)).toContain('Nothing was stored');
@@ -79,7 +77,7 @@ describe('/email set email.passwordRef', () => {
 
   test('a password typed on the command line is still stored, with a warning that it may be in history', async () => {
     const { run, stored, out } = rig({ masked: true });
-    await run(['set', 'email.passwordRef', 'typed-secret-value', '--yes']);
+    await run(['set', 'password', 'typed-secret-value', '--yes']);
     expect([...stored.values()]).toEqual(['typed-secret-value']);
     expect(out.join('\n')).toContain('may be kept in input history');
     expect(out.join('\n')).not.toContain('typed-secret-value');
@@ -87,7 +85,7 @@ describe('/email set email.passwordRef', () => {
 
   test('where no masked prompt exists a value is still required', async () => {
     const { run, stored, out } = rig({ masked: false });
-    await run(['set', 'email.passwordRef', '--yes']);
+    await run(['set', 'password', '--yes']);
     expect(stored.size).toBe(0);
     expect(out.join('\n')).toContain('Value is required');
   });

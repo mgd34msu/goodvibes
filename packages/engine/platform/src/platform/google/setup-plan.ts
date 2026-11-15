@@ -30,7 +30,6 @@
  *     treats reaching "In production" as a first-class, verified step.
  */
 
-import { ensureConnectorConfigSections } from '../config/connector-config-sections.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 import type { GoogleSetupStepSpec, GoogleStepId, GoogleSetupPath } from './types.js';
 
@@ -198,33 +197,17 @@ export const REQUIRED_SERVICES: readonly string[] = [
 ];
 
 
-/**
- * Seed every config section this connector touches.
- *
- * All three, not just `google`. The flow writes `email.*`, `calendar.google.*`
- * and `google.oauth.*`, and ConfigManager throws on a section that is not on
- * the live config object, so seeding only `google` left the first
- * `calendar.google.clientId` write throwing "section 'calendar' does not
- * exist" in every product that did not separately carry a calendar seeder. One
- * did (goodvibes-agent, locally); the daemon, the TUI and the web UI did not,
- * which meant the connector could only ever run in one place. See
- * config/connector-config-sections.ts.
- */
-export function ensureGoogleConfigDefaults(configManager: object): void {
-  ensureConnectorConfigSections(configManager);
-}
 
-/** Config keys written by the app-password path. */
+/** Config keys written by the app-password path: the one mailbox every product and the daemon read. */
 export const GOOGLE_CONFIG_KEYS = {
-  emailEnabled: 'email.enabled',
-  emailImapHost: 'email.imapHost',
-  emailImapPort: 'email.imapPort',
-  emailSmtpHost: 'email.smtpHost',
-  emailSmtpPort: 'email.smtpPort',
-  emailSmtpSecurity: 'email.smtpSecurity',
-  emailUsername: 'email.username',
-  emailFromAddress: 'email.fromAddress',
-  emailPasswordRef: 'email.passwordRef',
+  emailImapHost: 'surfaces.email.imap.host',
+  emailImapPort: 'surfaces.email.imap.port',
+  emailSmtpHost: 'surfaces.email.smtp.host',
+  emailSmtpPort: 'surfaces.email.smtp.port',
+  emailSmtpSecure: 'surfaces.email.smtp.secure',
+  emailUsername: 'surfaces.email.user',
+  emailFromAddress: 'surfaces.email.from',
+  emailPassword: 'surfaces.email.password',
   oauthClientId: 'calendar.google.clientId',
   oauthClientSecretRef: 'calendar.google.clientSecretRef',
   oauthProjectId: 'google.oauth.projectId',
@@ -243,13 +226,13 @@ export const GOOGLE_CONFIG_KEYS = {
  * than cosmetic: the daemon decides which credentials it owns, and therefore
  * which replicate to another node, by deriving names from daemon-owned config
  * paths with exactly this call. A hand-written name like
- * `goodvibes.email.passwordRef` matches nothing that derivation produces, so
+ * `goodvibes.email.password` matches nothing that derivation produces, so
  * the credential would silently sit outside daemon ownership and fail to
  * follow a handover. The symptom would be email going quiet on the node that
  * took over, with nothing in the logs to explain it.
  */
 export const GOOGLE_SECRET_KEYS = {
-  appPassword: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.emailPasswordRef),
+  appPassword: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.emailPassword),
   oauthClientSecret: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.oauthClientSecretRef),
   oauthRefreshToken: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.oauthRefreshToken),
   calendarIcsUrl: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.calendarIcsUrl),

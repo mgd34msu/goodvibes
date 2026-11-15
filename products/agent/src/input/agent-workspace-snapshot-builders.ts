@@ -26,9 +26,8 @@ import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { summarizePersonaItem, summarizeNoteItem, summarizeResearchRunItem, summarizeRoutineScheduleReceipt, summarizeSkillBundleItem, summarizeSkillItem } from './agent-workspace-local-library-snapshot.ts';
 import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './agent-workspace-review-packet-utils.ts';
-import { ensureEmailConfigDefaults, readEmailConfig, validateEmailConfig } from '@goodvibes-jev/engine/platform/platform/email';
+import { readMailboxStatus } from './commands/email-settings.ts';
 import { CALENDAR_OAUTH_CLIENT_ID_KEYS } from '../agent/calendar/calendar-oauth-service.ts';
-import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/platform/platform/config';
 import { readConfigBoolean, readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
 import type { AgentWorkspaceCalendarOAuthConfigStatus } from './agent-workspace-calendar-oauth-editor.ts';
 import type { AgentWorkspaceEmailConnectStatus } from './agent-workspace-types.ts';
@@ -315,15 +314,13 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
  */
 export function buildAgentWorkspaceEmailConnectStatus(context: CommandContext): AgentWorkspaceEmailConnectStatus | null {
   try {
-    ensureEmailConfigDefaults(context.platform.configManager);
     const cm = context.platform.configManager as unknown as { get: (key: string) => unknown };
-    const config = readEmailConfig((key) => cm.get(key));
-    const errors = validateEmailConfig(config);
+    const status = readMailboxStatus((key) => cm.get(key));
     return {
-      connected: errors.length === 0 && config.enabled,
-      username: config.username,
-      imapHost: config.imapHost,
-      errors,
+      connected: status.ready,
+      username: status.settings.username ?? '',
+      imapHost: status.settings.imapHost ?? '',
+      errors: [...status.problems],
     };
   } catch {
     return null;
@@ -341,7 +338,6 @@ export function buildAgentWorkspaceEmailConnectStatus(context: CommandContext): 
  */
 export function buildAgentWorkspaceCalendarOAuthConfigStatus(context: CommandContext): AgentWorkspaceCalendarOAuthConfigStatus | null {
   try {
-    ensureCalendarConfigDefaults(context.platform.configManager);
     const cm = context.platform.configManager as unknown as { get: (key: string) => unknown };
     const hasClientId = (key: string): boolean => {
       let value: unknown;

@@ -74,6 +74,8 @@ export interface DaemonHandlerCompositionOptions {
   readonly checkoutSeam: BrowserCheckoutSeamHolder['get'];
   readonly channelDeliveryRouter: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>;
   readonly inboxFactory: DaemonInboxFactory;
+  /** Purchase notices are posted here as well as on the configured channels. */
+  readonly ownerInbox?: import('./payments-composition.js').PaymentsCompositionOptions['ownerInbox'];
 }
 
 /** Return only after each real surface is ready; failed acquisition rolls back. */
@@ -135,6 +137,7 @@ export async function createDaemonHandlerComposition(
       checkoutSeam: options.checkoutSeam,
       channelDeliveryRouter: options.channelDeliveryRouter,
       ownerMail,
+      ownerInbox: options.ownerInbox,
     }),
   });
 }

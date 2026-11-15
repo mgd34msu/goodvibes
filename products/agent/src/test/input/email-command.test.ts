@@ -22,7 +22,6 @@ import { join } from 'node:path';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerEmailRuntimeCommands } from '../../input/commands/email-runtime.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { ensureEmailConfigDefaults } from '@goodvibes-jev/engine/platform/platform/email';
 import type { ConfigKey } from '../../config/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -59,7 +58,7 @@ function makeMemorySecretsManager(): {
 
 /**
  * Build a CommandContext suitable for /email command tests.
- * Provides a real ConfigManager (with email defaults injected) and
+ * Provides a real ConfigManager and
  * the in-memory SecretsManager stub. All other services are stub-minimal.
  */
 function makeContext(
@@ -68,7 +67,6 @@ function makeContext(
   secretsManager: ReturnType<typeof makeMemorySecretsManager>['manager'],
 ): CommandContext {
   const cm = createConfigManager(root);
-  ensureEmailConfigDefaults(cm);
 
   return {
     session: {} as never,
@@ -96,7 +94,7 @@ function makeContext(
  * Every file a config write may legitimately land in.
  *
  * The daemon tier is one of them: email runs in the daemon, so
- * email.passwordRef is daemon-owned and the daemon's store is its only home.
+ * surfaces.email.password is daemon-owned and the daemon's store is its only home.
  * Reading only the surface files reported the reference missing when it had
  * simply been routed to its owner, while the assertion that matters, that no
  * raw password reaches any of these files, is unchanged.
@@ -121,8 +119,8 @@ function readPersistedSettings(root: string): string {
  * `readPersistedSettings` concatenates them, which is right for the assertion
  * it was written for ("no raw password appears in any of these") and wrong for
  * anything that then calls JSON.parse: two objects back to back are not JSON.
- * That only ever worked because exactly one of these files existed. Making
- * email.* daemon-owned means a value now lands in the daemon store while the
+ * That only ever worked because exactly one of these files existed. The
+ * mailbox settings being daemon-owned means a value now lands in the daemon store while the
  * surface file already exists, so the concatenation became unparseable and the
  * test failed on its own helper rather than on the behaviour it checks.
  */
@@ -150,14 +148,14 @@ describe('/email command handler: end-to-end real handler dispatch', () => {
   // -------------------------------------------------------------------------
   // 1. passwordRef without --yes: refusal, SecretsManager empty, no ref in config
   // -------------------------------------------------------------------------
-  test('set email.passwordRef without --yes prints refusal; no secret stored; config has no ref', async () => {
+  test('set password without --yes prints refusal; no secret stored; config has no ref', async () => {
     const registry = new CommandRegistry();
     registerEmailRuntimeCommands(registry);
     const out: string[] = [];
     const { store, manager } = makeMemorySecretsManager();
     const ctx = makeContext(tmpDir, out, manager);
 
-    await registry.get('email')!.handler(['set', 'email.passwordRef', 'raw-secret-value'], ctx);
+    await registry.get('email')!.handler(['set', 'password', 'raw-secret-value'], ctx);
 
     const output = out.join('\n');
     // Must refuse, some form of "without --yes" or "--yes to apply"
@@ -173,14 +171,14 @@ describe('/email command handler: end-to-end real handler dispatch', () => {
   // -------------------------------------------------------------------------
   // 2. passwordRef with --yes: secret stored; settings.json has ref not plaintext
   // -------------------------------------------------------------------------
-  test('set email.passwordRef --yes stores secret in SecretsManager; settings.json has goodvibes:// ref', async () => {
+  test('set password --yes stores secret in SecretsManager; settings.json has goodvibes:// ref', async () => {
     const registry = new CommandRegistry();
     registerEmailRuntimeCommands(registry);
     const out: string[] = [];
     const { store, manager } = makeMemorySecretsManager();
     const ctx = makeContext(tmpDir, out, manager);
 
-    await registry.get('email')!.handler(['set', 'email.passwordRef', 'my-real-password', '--yes'], ctx);
+    await registry.get('email')!.handler(['set', 'password', 'my-real-password', '--yes'], ctx);
 
     const output = out.join('\n');
     // Command must confirm success, not a refusal
@@ -188,7 +186,7 @@ describe('/email command handler: end-to-end real handler dispatch', () => {
     expect(output).toContain('goodvibes://');
 
     // SecretsManager received the raw value under the expected key
-    const expectedSecretKey = 'GOODVIBES_EMAIL_PASSWORD_REF';
+    const expectedSecretKey = 'GOODVIBES_SURFACES_EMAIL_PASSWORD';
     expect(store.has(expectedSecretKey)).toBe(true);
     expect(store.get(expectedSecretKey)).toBe('my-real-password');
 
@@ -201,7 +199,7 @@ describe('/email command handler: end-to-end real handler dispatch', () => {
 
     // config.get returns the goodvibes:// ref
     const cm = ctx.platform.configManager as unknown as { get: (k: string) => unknown };
-    const ref = cm.get('email.passwordRef') as string;
+    const ref = cm.get('surfaces.email.password') as string;
     expect(ref).toMatch(/^goodvibes:\/\/secrets\//);
   });
 
@@ -219,7 +217,7 @@ describe('/email command handler: end-to-end real handler dispatch', () => {
 
     const output = out.join('\n');
     // Plain-language rejection, must mention the unknown key
-    expect(output.toLowerCase()).toContain('unknown email config key');
+    expect(output.toLowerCase()).toContain('unknown mailbox field');
     // No secret side-effect
     expect(store.size).toBe(0);
     // settings.json must not exist or must not contain the value
@@ -230,14 +228,14 @@ describe('/email command handler: end-to-end real handler dispatch', () => {
   // -------------------------------------------------------------------------
   // 4. Invalid port: plain-language error; no write
   // -------------------------------------------------------------------------
-  test('set email.imapPort 99999 prints invalid-port error; no config write', async () => {
+  test('set imap.port 99999 prints invalid-port error; no config write', async () => {
     const registry = new CommandRegistry();
     registerEmailRuntimeCommands(registry);
     const out: string[] = [];
     const { store, manager } = makeMemorySecretsManager();
     const ctx = makeContext(tmpDir, out, manager);
 
-    await registry.get('email')!.handler(['set', 'email.imapPort', '99999'], ctx);
+    await registry.get('email')!.handler(['set', 'imap.port', '99999'], ctx);
 
     const output = out.join('\n');
     expect(output.toLowerCase()).toContain('invalid port');
@@ -249,14 +247,14 @@ describe('/email command handler: end-to-end real handler dispatch', () => {
   // -------------------------------------------------------------------------
   // 5. Valid port: coerced to number 993 in persisted config
   // -------------------------------------------------------------------------
-  test('set email.imapPort 993 coerces to number 993 in persisted settings', async () => {
+  test('set imap.port 993 coerces to number 993 in persisted settings', async () => {
     const registry = new CommandRegistry();
     registerEmailRuntimeCommands(registry);
     const out: string[] = [];
     const { manager } = makeMemorySecretsManager();
     const ctx = makeContext(tmpDir, out, manager);
 
-    await registry.get('email')!.handler(['set', 'email.imapPort', '993'], ctx);
+    await registry.get('email')!.handler(['set', 'imap.port', '993'], ctx);
 
     const output = out.join('\n');
     expect(output).toContain('Email config updated');
@@ -264,44 +262,43 @@ describe('/email command handler: end-to-end real handler dispatch', () => {
 
     // config.get must return the numeric value
     const cm = ctx.platform.configManager as unknown as { get: (k: string) => unknown };
-    expect(cm.get('email.imapPort')).toBe(993);
+    expect(cm.get('surfaces.email.imap.port')).toBe(993);
 
-    // Persisted settings must store the number (JSON does not quote it).
-    // email.imapPort is daemon-owned, so the file carrying it is the daemon
+    // Persisted settings must store the number (JSON does not quote it). The
+    // mailbox settings are daemon-owned, so the file carrying it is the daemon
     // store rather than the surface one, hence looking across every settings
     // file rather than assuming which of them holds it.
     const sections = readPersistedSettingsObjects(tmpDir)
-      // May be nested under "email" or flat, depending on ConfigManager shape.
-      .map((parsed) => (parsed['email'] ?? parsed) as Record<string, unknown>)
-      .filter((section) => 'imapPort' in section);
+      .map((parsed) => ((parsed['surfaces'] as Record<string, Record<string, Record<string, unknown>>> | undefined)?.['email']?.['imap'] ?? {}))
+      .filter((section) => 'port' in section);
 
     expect(
       sections.length,
-      'no settings file persisted email.imapPort at all, so the coercion this test checks was never written down',
+      'no settings file persisted surfaces.email.imap.port at all, so the coercion this test checks was never written down',
     ).toBeGreaterThan(0);
     for (const section of sections) {
-      expect(typeof section['imapPort']).toBe('number');
-      expect(section['imapPort']).toBe(993);
+      expect(typeof section['port']).toBe('number');
+      expect(section['port']).toBe(993);
     }
   });
 
   // -------------------------------------------------------------------------
-  // 6. Boolean coercion: set email.enabled true stores boolean
+  // 6. Boolean coercion: set smtp.secure false stores boolean
   // -------------------------------------------------------------------------
-  test('set email.enabled true coerces to boolean true in config', async () => {
+  test('set smtp.secure false coerces to boolean false in config', async () => {
     const registry = new CommandRegistry();
     registerEmailRuntimeCommands(registry);
     const out: string[] = [];
     const { manager } = makeMemorySecretsManager();
     const ctx = makeContext(tmpDir, out, manager);
 
-    await registry.get('email')!.handler(['set', 'email.enabled', 'true'], ctx);
+    await registry.get('email')!.handler(['set', 'smtp.secure', 'false'], ctx);
 
     const output = out.join('\n');
     expect(output).toContain('Email config updated');
 
-    // config.get must return true as a boolean, not the string 'true'
+    // config.get must return false as a boolean, not the string 'false'
     const cm = ctx.platform.configManager as unknown as { get: (k: string) => unknown };
-    expect(cm.get('email.enabled')).toBe(true);
+    expect(cm.get('surfaces.email.smtp.secure')).toBe(false);
   });
 });

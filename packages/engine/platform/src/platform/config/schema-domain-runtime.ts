@@ -679,14 +679,14 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'batch.fallback',
     type: 'enum',
     default: 'live',
-    description: 'Reported in the batch runtime description only. Job creation always rejects a live execution mode for a batch job whatever this says.',
+    description: 'What a batch job does when its provider has no Batch API: live runs the request once, now, as an ordinary request and answers the job already finished; fail refuses the job. A job that asks for a live execution mode is refused either way: the batch API only queues.',
     enumValues: ['live', 'fail'],
   },
   {
     key: 'batch.queueBackend',
     type: 'enum',
     default: 'local',
-    description: 'Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare is meant to be used with cloudflare.enabled; the pairing is reported, not enforced.',
+    description: 'Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare sends them through the provisioned Worker\'s queue. /cloudflare provision switches this to cloudflare only after the Worker reaches the daemon.',
     enumValues: ['local', 'cloudflare'],
   },
   {
@@ -721,7 +721,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'batch.maxQueueMessagesPerDay',
     type: 'number',
     default: 1_000,
-    description: 'Reported only: the intended daily Cloudflare queue message budget. Nothing counts queue messages or refuses past it yet.',
+    description: 'Daily Cloudflare queue message budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets, and nothing more is queued. 0 means no limit. Takes effect at the next /cloudflare provision.',
     ...intRange(0, 10_000_000),
   },
   {
@@ -734,7 +734,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.freeTierMode',
     type: 'boolean',
     default: true,
-    description: 'Reported only: marks the intent to use Cloudflare within the free tier (small queue signals, local daemon storage). It does not change daemon behavior.',
+    description: 'Keep job bodies out of Cloudflare Queues: the provisioned Worker stores each body in R2 and queues only its key, and refuses a job when R2 is not provisioned (409 QUEUE_PAYLOADS_NEED_R2). Off, a body up to batch.maxQueuePayloadBytes travels in the queue message. Takes effect at the next /cloudflare provision.',
   },
   {
     key: 'cloudflare.accountId',
@@ -867,7 +867,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.kvNamespaceName',
     type: 'string',
     default: 'goodvibes-runtime',
-    description: 'Cloudflare KV namespace name used for optional edge runtime state',
+    description: 'Cloudflare KV namespace that records each queued job\'s delivery state (queued, delivered with the daemon job id, rejected), served by the Worker at /batch/queue/jobs/<id>, so a redelivered message is acknowledged without a second daemon call.',
   },
   {
     key: 'cloudflare.kvNamespaceId',
@@ -879,19 +879,19 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.durableObjectNamespaceName',
     type: 'string',
     default: 'GoodVibesCoordinator',
-    description: 'Cloudflare Durable Object class/namespace name used for optional edge coordination',
+    description: 'Cloudflare Durable Object class whose coordinator counts queue operations and messages per UTC day for the queue budgets; added automatically when a budget is set.',
   },
   {
     key: 'cloudflare.durableObjectNamespaceId',
     type: 'string',
     default: '',
-    description: 'Cloudflare Durable Object namespace id discovered after Worker migration',
+    description: 'Cloudflare Durable Object namespace id, recorded by provisioning after the Worker migration (not an input).',
   },
   {
     key: 'cloudflare.r2BucketName',
     type: 'string',
     default: 'goodvibes-artifacts',
-    description: 'Cloudflare R2 Standard bucket name used for optional GoodVibes artifacts',
+    description: 'Cloudflare R2 bucket that holds queued job bodies so queue messages carry only their key; a body is deleted once the daemon has the job.',
   },
   {
     key: 'cloudflare.secretsStoreName',
@@ -909,7 +909,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.maxQueueOpsPerDay',
     type: 'number',
     default: 10_000,
-    description: 'Reported only: the intended daily Cloudflare queue operation budget. Nothing counts operations or warns against it yet.',
+    description: 'Daily Cloudflare queue operation budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets. 0 means no limit. Takes effect at the next /cloudflare provision.',
     ...intRange(0, 10_000_000),
   },
 ];

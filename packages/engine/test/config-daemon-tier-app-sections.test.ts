@@ -90,17 +90,17 @@ describe('a ConfigManager constructed over a daemon tier holding app-layer keys'
     const root = makeTempRoot('gv-daemon-tier-');
     const daemonDir = join(root, 'daemon');
     mkdirSync(daemonDir, { recursive: true });
-    // Exactly what a surface writes once the mail connection is daemon-owned.
+    // Exactly what a surface writes once the calendar connection is daemon-owned.
     writeFileSync(
       join(daemonDir, 'settings.json'),
       // Nested, which is how the daemon tier is actually stored.
-      JSON.stringify({ email: { imapHost: 'imap.gmail.com', enabled: true } }, null, 2),
+      JSON.stringify({ calendar: { google: { clientId: 'client-1' } } }, null, 2),
       'utf-8',
     );
 
     const { ConfigManager } = await import('../platform/src/platform/config/manager.ts');
     // The regression: this constructor used to throw
-    // "section 'email' does not exist" and take the whole daemon down with it.
+    // "section ... does not exist" and take the whole daemon down with it.
     const manager = new ConfigManager({
       homeDir: root,
       surfaceRoot: 'goodvibes',
@@ -109,13 +109,7 @@ describe('a ConfigManager constructed over a daemon tier holding app-layer keys'
     expect(manager).toBeDefined();
     // And the daemon's value is the one that answers, which is the whole point
     // of the tier: a surface stored it, the daemon reads it back.
-    // 'email.*' is an app-layer section, not a CONFIG_SCHEMA key, `get()`'s
-    // generic signature has no ConfigKey literal for it, so the key is cast to
-    // `never` (the only type assignable to every `K extends ConfigKey`) and the
-    // resulting `ConfigValue<never>` (itself `never`) is widened to `unknown`
-    // before asserting, rather than casting to a specific expected shape.
-    expect(manager.get('email.imapHost' as never) as unknown).toBe('imap.gmail.com');
-    expect(manager.get('email.enabled' as never) as unknown).toBe(true);
+    expect(manager.get('calendar.google.clientId')).toBe('client-1');
   });
 });
 
@@ -246,19 +240,19 @@ describe('settings ingestion: a key this build does not know', () => {
   });
 
   test('a key close to no known name lists the section instead', () => {
-    const { manager } = managerOverDaemonTier({ email: { imapHost: 'imap.example.com', someProductKey: 1 } });
+    const { manager } = managerOverDaemonTier({ calendar: { google: { clientId: 'client-1' }, someProductKey: 1 } });
     const [entry] = manager.getIngestionQuarantine();
-    expect(entry?.key).toBe('email.someProductKey');
-    expect(entry?.reason).toContain('email has ');
+    expect(entry?.key).toBe('calendar.someProductKey');
+    expect(entry?.reason).toContain('calendar has ');
     expect(readings.requests).toHaveLength(0);
   });
 });
 
 describe('settings ingestion: a secret reference that cannot be resolved', () => {
   test('is skipped loudly, and the notice never contains the value', () => {
-    const { manager } = managerOverDaemonTier({ email: { passwordRef: 'goodvibes://secrets/' } });
+    const { manager } = managerOverDaemonTier({ calendar: { google: { clientSecretRef: 'goodvibes://secrets/' } } });
     const [entry] = manager.getIngestionQuarantine();
-    expect(entry?.key).toBe('email.passwordRef');
+    expect(entry?.key).toBe('calendar.google.clientSecretRef');
     // A credential is never in the refusing class: one connector down is a
     // degraded surface, not an open door, and it must not crash-loop.
     expect(entry?.action).toBe('skipped');
@@ -267,7 +261,7 @@ describe('settings ingestion: a secret reference that cannot be resolved', () =>
 
   test('a reference-shaped credential is described by shape only, never quoted', () => {
     const secret = 'goodvibes://secrets/hunter2-not-a-real-provider-path';
-    const { lines } = ingestCapturing({ email: { passwordRef: secret } });
+    const { lines } = ingestCapturing({ calendar: { google: { clientSecretRef: secret } } });
     expect(lines).toHaveLength(1);
     expect(lines[0]).not.toContain('hunter2');
   });

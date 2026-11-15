@@ -39,9 +39,12 @@ import {
   channelBackedPaymentNotifier,
   configBackedAddressStore,
   readNotifyChannels,
+  readPaymentsServiceConfig,
+  withOwnerInbox,
   registerPaymentsMethods,
   type CheckoutComposition,
   type PaymentNotifier,
+  type PaymentOwnerInbox,
   type PaymentsSecretStore,
 } from '@goodvibes-jev/engine/platform/platform/payments';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
@@ -69,6 +72,12 @@ export interface PaymentsCompositionOptions {
   readonly channelDeliveryRouter: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>;
   /** Where the owner's mailbox hands over each screened message; absent means no order-confirmation reports. */
   readonly ownerMail?: Pick<OwnerMailRelay, 'attach'> | undefined;
+  /**
+   * The owner inbox: every purchase notice is also posted there and can be
+   * answered there, so a window always reaches the owner (terminal apps and web
+   * UI) whatever payments.notifyChannels names.
+   */
+  readonly ownerInbox?: PaymentOwnerInbox | undefined;
 }
 
 /** Most messages remembered so a poll that offers one again is not reported twice. */
@@ -247,7 +256,13 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
       || operations.list().some(operation => operation.totalMinorUnits !== null
         && operation.phase !== null && ['awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(operation.phase)),
   );
-  const notifier = liveChannelPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies);
+  const channelNotifier = liveChannelPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies);
+  const notifier = options.ownerInbox === undefined
+    ? channelNotifier
+    : withOwnerInbox(channelNotifier, options.ownerInbox, (kind) => {
+      const windows = readPaymentsServiceConfig(config);
+      return kind === 'approval' ? windows.approvalMinutes : windows.vetoMinutes;
+    });
   const detachOwnerMail = options.ownerMail?.attach(createOrderMailObserver({ purchases, notifier, operations }));
   const checkout: CheckoutComposition = {
     seam: options.checkoutSeam,

@@ -105,8 +105,8 @@ describe('writes no permission can authorize', () => {
     expect(validateAgentSettingsMechanics({ mode: 'set', key: 'surfaces.ntfy.token', value: 12345 })).toContain('never a literal value');
   });
 
-  test('the mail password references keep pointing at the daemon mailbox password', () => {
-    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'email.passwordRef', value: 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD' })).toBeNull();
-    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'email.passwordRef', value: 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_NTFY_TOKEN' })).toContain('may only point at its own stored secret');
+  test('the mailbox password points only at its own stored secret', () => {
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'surfaces.email.password', value: 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD' })).toBeNull();
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'surfaces.email.password', value: 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_NTFY_TOKEN' })).toContain('may only point at its own stored secret');
   });
 });

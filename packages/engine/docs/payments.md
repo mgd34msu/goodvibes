@@ -695,7 +695,7 @@ email in**, and the design must never add an email strategy for these prompts.
 Belt and braces on top of that structural fact:
 
 ```ts
-export type CommandAuthorityChannel = 'tui' | 'agent-terminal' | 'telegram';
+export type CommandAuthorityChannel = 'tui' | 'agent-terminal' | 'telegram' | 'owner-inbox';
 ```
 
 Email is not a member, so routing a payment prompt to it is a compile error.
@@ -704,8 +704,18 @@ Setting `payments.notifyChannels` to a name outside this union is
 narrower than the union: only `telegram` is accepted, because no delivery
 strategy yet carries a notice to `tui` or `agent-terminal`. A test asserts
 `'email'` never parses. A value that reached the config file some other way, such
-as a hand edit, is skipped with a logged warning and that channel is not notified;
-with no channel left an in-budget purchase proceeds without a notice.
+as a hand edit, is skipped with a logged warning and that channel is not notified.
+
+`owner-inbox` is never configured: every notice (approval and veto windows,
+confirmations, recovery settlements) is also posted to the owner inbox, which
+both terminal apps (`/questions`) and the web UI list and answer
+(`payments/host/notifier.ts` `withOwnerInbox`). A window's item offers
+`approve`/`deny` or `go`/`stop`, the first answer from any channel or the inbox
+settles the window, and the item is withdrawn when the window closes. So an
+in-budget purchase is always announced and waits its veto window, even with
+`notifyChannels` empty. The inbox is not restart-readable for a window
+(`RESTART_READABLE_CHANNELS` stays `telegram`): a restart during a window it
+reached ends the purchase unbought.
 
 ### 8.2.2 Answering is not entering, and these must never be merged
 

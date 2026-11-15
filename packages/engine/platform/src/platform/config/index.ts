@@ -361,12 +361,6 @@ export type {
   SweepableSecrets,
 } from './plaintext-credential-sweep.js';
 export {
-  ensureCalendarConfigDefaults,
-  ensureConnectorConfigSections,
-  ensureGoogleOAuthConfigDefaults,
-  ensureMailboxConfigDefaults,
-} from './connector-config-sections.js';
-export {
   SecretsManager,
   captureSecretsReadSource,
   SecretWriteCommittedError,

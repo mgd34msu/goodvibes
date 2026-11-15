@@ -179,7 +179,7 @@ function appPasswordRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
         `Remove the unused "${APP_PASSWORD_LABEL}" app password at https://myaccount.google.com/apppasswords, fix the secret store, then re-run.`,
       );
     }
-    deps.config.set(GOOGLE_CONFIG_KEYS.emailPasswordRef, secretReferenceFor(GOOGLE_SECRET_KEYS.appPassword));
+    deps.config.set(GOOGLE_CONFIG_KEYS.emailPassword, secretReferenceFor(GOOGLE_SECRET_KEYS.appPassword));
     return done('Created a Gmail app password and stored it in the encrypted secret store.');
   };
 }
@@ -205,10 +205,10 @@ function gmailConfigRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
     deps.config.set(GOOGLE_CONFIG_KEYS.emailImapPort, GMAIL_IMAP_PORT);
     deps.config.set(GOOGLE_CONFIG_KEYS.emailSmtpHost, GMAIL_SMTP_HOST);
     deps.config.set(GOOGLE_CONFIG_KEYS.emailSmtpPort, GMAIL_SMTP_PORT);
-    deps.config.set(GOOGLE_CONFIG_KEYS.emailSmtpSecurity, 'starttls');
+    // Gmail's submission port 587 upgrades with STARTTLS: not implicit TLS.
+    deps.config.set(GOOGLE_CONFIG_KEYS.emailSmtpSecure, false);
     deps.config.set(GOOGLE_CONFIG_KEYS.emailFromAddress, username);
-    deps.config.set(GOOGLE_CONFIG_KEYS.emailPasswordRef, secretReferenceFor(GOOGLE_SECRET_KEYS.appPassword));
-    deps.config.set(GOOGLE_CONFIG_KEYS.emailEnabled, true);
+    deps.config.set(GOOGLE_CONFIG_KEYS.emailPassword, secretReferenceFor(GOOGLE_SECRET_KEYS.appPassword));
     return done(`Pointed the mail surface at Gmail for ${username}.`);
   };
 }

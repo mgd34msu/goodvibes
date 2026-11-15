@@ -25,12 +25,12 @@ Live TUI, companion, and daemon chat behavior remains live unless a client uses 
 - `explicit`: accept requests sent to the batch job API. This is the intended default when a client exposes a per-message "run as batch" control.
 - `eligible-by-default`: intended to accept batch-capable daemon requests as batch by default, without a client having to call the batch job API explicitly. As shipped, the daemon does not yet implement that automatic routing: `off` is the only value that changes daemon behavior (it disables `/api/batch/jobs`), and `explicit` and `eligible-by-default` are currently equivalent, both simply leave the batch job API open. `batch.mode` is reported to clients (`/api/batch/config`) so a client can read the configured value today and adopt automatic routing on its own, ahead of daemon-side enforcement. Streaming chat paths stay live regardless, because provider Batch APIs are asynchronous and non-streaming.
 
-`batch.fallback` is published for clients that need a policy decision when a request cannot be batched:
+`batch.fallback` decides what a job does when its provider has no Batch API:
 
-- `live`: clients may retry through their normal live path.
-- `fail`: clients should surface the batch ineligibility as a hard error.
+- `live` (default): the daemon runs the request once, now, as an ordinary request and answers the job already finished (completed with the result, or failed with the provider's error), marked `goodvibes.execution: live-fallback`. It is not billed at batch rates.
+- `fail`: the job is refused.
 
-The `/api/batch/jobs` endpoint itself never executes a live response. It only queues provider-batch jobs.
+A job that asks for `executionMode: live` is refused either way: `/api/batch/jobs` only queues.
 
 Finished jobs (completed, failed, cancelled, expired or dead-lettered) are kept for 7 days and at most 1000 are kept; older ones are removed from the store, after which `GET /api/batch/jobs/{id}` answers 404. A job moves `queued` -> `submitting` -> `submitted` -> `running` -> a finished state. `submitting` is saved before the provider is called, together with a submission id sent to the provider as batch metadata: if the daemon stops during that call, the next pass asks the provider for the batch by that id and resumes it, or queues the job again when the provider has none, instead of paying for a second batch. A provider that cannot be asked (Anthropic) is not sent the job twice; the job fails with `BATCH_SUBMISSION_UNCONFIRMED` and says what to check. When a provider batch ends (completed, failed, cancelled or expired), every job it returned no result for takes that end state (failed for a completed batch) instead of being polled again.
 

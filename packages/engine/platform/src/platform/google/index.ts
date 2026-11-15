@@ -108,7 +108,6 @@ export {
   GOOGLE_CONFIG_KEYS,
   GOOGLE_SECRET_KEYS,
   GOOGLE_SETUP_STEPS,
-  ensureGoogleConfigDefaults,
   stepsForPath,
   stepSpec,
   runbookAnchor,

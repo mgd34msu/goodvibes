@@ -6,16 +6,16 @@
  *
  * The mail and calendar connection was made daemon-owned so setup performed in
  * any surface reaches the daemon instead of stranding in that surface's silo.
- * But `email.*`, `calendar.*` and `google.*` are not CONFIG_SCHEMA sections,
- * a product materializes them at runtime through `ensureEmailConfigDefaults`
+ * But `calendar.*` and `google.*` were once not CONFIG_SCHEMA sections,
+ * a product materialized them at runtime through an `ensure*` seeder
  * and friends.
  *
  * Those two facts collided. The daemon-tier overlay runs inside the
  * ConfigManager CONSTRUCTOR, before any product can call its `ensure*`, and the
  * path resolver threw on a section that was not already present. The result was
- * the worst possible shape: writing `email.imapHost` to the daemon store, the
+ * the worst possible shape: writing a connector key to the daemon store, the
  * correct place, by the platform's own ownership rule, made every later
- * ConfigManager built against that directory throw "section 'email' does not
+ * ConfigManager built against that directory throw "section ... does not
  * exist" on construction. Storing the value bricked reading it back.
  *
  * The fix materializes the section. These tests pin both halves of why that is
@@ -69,24 +69,24 @@ function readPath(manager: ConfigManager, path: string): unknown {
 }
 
 describe('a daemon-owned app-layer section does not brick config construction', () => {
-  test('email.* in the daemon tier constructs, and the value is readable', () => {
+  test('a mailbox stored under the retired email.* keys constructs, and is read under surfaces.email.*', () => {
     const root = configRootWithDaemonTier({
       email: { imapHost: 'imap.example.org', imapPort: 993 },
     });
 
     const manager = managerFor(root);
 
-    // The point of the round trip: the value the daemon store held is the value
-    // a reader gets back, not a default and not a throw.
-    expect(readPath(manager, 'email.imapHost')).toBe('imap.example.org');
-    expect(readPath(manager, 'email.imapPort')).toBe(993);
+    // The value the daemon store held is the value a reader gets back, under
+    // the one spelling every mail reader uses: not a default and not a throw.
+    expect(manager.get('surfaces.email.imap.host')).toBe('imap.example.org');
+    expect(manager.get('surfaces.email.imap.port')).toBe(993);
   });
 
   test('a second manager over the same directory sees it too', () => {
     const root = configRootWithDaemonTier({ email: { imapHost: 'imap.example.org' } });
     managerFor(root);
     // Survives a fresh process: this is what "the daemon reads it at 3am" means.
-    expect(readPath(managerFor(root), 'email.imapHost')).toBe('imap.example.org');
+    expect(managerFor(root).get('surfaces.email.imap.host')).toBe('imap.example.org');
   });
 
   test('google.* and calendar.* behave the same way', () => {
@@ -99,30 +99,30 @@ describe('a daemon-owned app-layer section does not brick config construction', 
     expect(readPath(manager, 'calendar.google.clientId')).toBe('client-1');
   });
 
-  test('a schema-declared daemon key still loads normally alongside them', () => {
+  test('where the daemon mailbox is already set, the retired email.* value does not override it', () => {
     const root = configRootWithDaemonTier({
       email: { imapHost: 'imap.example.org' },
       surfaces: { email: { host: 'mail.example.org' } },
     });
     const manager = managerFor(root);
-    expect(readPath(manager, 'email.imapHost')).toBe('imap.example.org');
     expect(manager.get('surfaces.email.host')).toBe('mail.example.org');
+    expect(manager.get('surfaces.email.imap.host')).not.toBe('imap.example.org');
   });
 });
 
 describe('materializing a section is not a hole for arbitrary keys', () => {
   test('a section the daemon does not own is not overlaid from the daemon tier', () => {
     const root = configRootWithDaemonTier({
-      email: { imapHost: 'imap.example.org' },
+      calendar: { google: { clientId: 'client-1' } },
       // Not on any daemon-owned prefix or path. The overlay enumerates
       // daemon-owned paths, so this must not be picked up, and must not be
-      // created as a side effect of the email section being created.
+      // created as a side effect of the calendar section being read.
       notADaemonDomain: { invented: 'value' },
     });
 
     const manager = managerFor(root);
 
-    expect(readPath(manager, 'email.imapHost')).toBe('imap.example.org');
+    expect(readPath(manager, 'calendar.google.clientId')).toBe('client-1');
     expect(readPath(manager, 'notADaemonDomain.invented')).toBeUndefined();
   });
 });

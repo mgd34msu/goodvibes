@@ -35,22 +35,6 @@ declare module './schema-types.js' {
   }
 }
 
-export const occasionsConfigDefaults: { occasions: OccasionsConfig } = {
-  occasions: {
-    enabled: true,
-    leadDays: 10,
-    activeHours: '08:00-22:00',
-    nudgeChannel: 'telegram',
-    cadenceDays: 3,
-    awayAdjust: true,
-    calendarMirror: false,
-    suppressMirroredNudges: true,
-    interviewQuestions: 3,
-    giftHistoryYears: 10,
-    sweepIntervalMinutes: 60,
-  },
-};
-
 export const occasionsConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'occasions.enabled',
@@ -135,3 +119,10 @@ export const occasionsConfigSettings: ConfigSettingDefinition[] = [
     ...intRange(5, 1440),
   },
 ];
+
+/** Each default is stated once, on its settings row above; the defaults tree is read off the rows. */
+export const occasionsConfigDefaults: { occasions: OccasionsConfig } = {
+  occasions: Object.fromEntries(
+    occasionsConfigSettings.map((row) => [row.key.slice('occasions.'.length), row.default]),
+  ) as unknown as OccasionsConfig,
+};

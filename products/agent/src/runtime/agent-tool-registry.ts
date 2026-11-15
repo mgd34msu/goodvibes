@@ -10,10 +10,9 @@ import { agentBrowserProfileRoot, agentBrowserScreenshotRoot } from './agent-bro
 import { registerAgentBrowserTool } from '../tools/agent-browser-tool.ts';
 import { registerAgentDocumentsTool } from '../tools/agent-documents-tool.ts';
 import { registerAgentAccountsTool } from '../tools/agent-accounts-tool.ts';
-import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS, ensureGoogleConfigDefaults } from '@goodvibes-jev/engine/platform/platform/google';
+import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS } from '@goodvibes-jev/engine/platform/platform/google';
 import { containsSecretLikeText } from '../agent/memory-safety.ts';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './bootstrap-google-tool.ts';
-import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/platform/platform/config';
 import { registerAgentKnowledgeIngestTool } from '../tools/agent-knowledge-ingest-tool.ts';
 import { registerAgentKnowledgeTool } from '../tools/agent-knowledge-tool.ts';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
@@ -37,6 +36,7 @@ import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compa
 import { installToolExecutionSafetyGuard } from '../tools/tool-execution-safety.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { readSurfaceEmailSettings } from '@goodvibes-jev/engine/platform/platform/email';
 import type { RuntimeServices } from './services.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { agentOwnerQuestions } from './client/owner-questions.ts';
@@ -170,10 +170,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     // A file: page is a local read, held to the same decision the read tool gets.
     readAccess: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',
   });
-  // google.* and calendar.* are app-layer sections absent from the platform schema;
-  // resolvePath throws on a section that is not there.
-  ensureGoogleConfigDefaults(configManager);
-  ensureCalendarConfigDefaults(configManager);
   // The native Gmail/Calendar route, wired in bootstrap-google-tool.ts, its
   // write ports carry an argument long enough to deserve its own file.
   wireAgentGoogleTool(toolRegistry, {
@@ -198,8 +194,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
       containsSecretLikeText,
     }),
     baseAddress: () => {
-      const value = (configManager as { get: (key: string) => unknown }).get('email.fromAddress');
-      return typeof value === 'string' && value.trim() ? value.trim() : null;
+      return readSurfaceEmailSettings((key) => (configManager as { get: (key: string) => unknown }).get(key)).fromAddress ?? null;
     },
   });
   registerAgentDocumentsTool(toolRegistry, services.shellPaths, services.artifactStore);

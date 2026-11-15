@@ -85,7 +85,7 @@ describe('the credentials land in the daemon secret tier', () => {
   );
 
   test('every secret name is the platform derivation of its config path, not a hand-written string', () => {
-    expect(GOOGLE_SECRET_KEYS.appPassword).toBe(daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.emailPasswordRef));
+    expect(GOOGLE_SECRET_KEYS.appPassword).toBe(daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.emailPassword));
     expect(GOOGLE_SECRET_KEYS.oauthClientSecret).toBe(daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.oauthClientSecretRef));
     expect(GOOGLE_SECRET_KEYS.oauthRefreshToken).toBe(daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.oauthRefreshToken));
     expect(GOOGLE_SECRET_KEYS.calendarIcsUrl).toBe(daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.calendarIcsUrl));

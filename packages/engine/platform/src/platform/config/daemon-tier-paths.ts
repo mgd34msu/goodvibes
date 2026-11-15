@@ -4,19 +4,13 @@
  *
  * ── The defect this exists to fix ─────────────────────────────────────────
  *
- * Not every daemon-owned path is a CONFIG_SCHEMA key. `email.*`, `calendar.*`
- * and `google.*` are app-layer sections a product materializes at runtime
- * (`ensureEmailConfigDefaults`, `ensureGoogleConfigDefaults`,
- * `ensureCalendarConfigDefaults`), and the whole mail and calendar connection
- * was made daemon-owned so a value set from ANY surface reaches the daemon
- * instead of stranding in that surface's silo.
- *
- * Those two facts collided. The daemon-tier overlay runs inside the
- * `ConfigManager` CONSTRUCTOR, before any product has had a chance to call its
- * `ensure*` seeding. So a daemon settings file containing `email.imapHost`, a
- * path the platform itself declares daemon-owned, made `resolvePath` throw
- * "section 'email' does not exist", and every `ConfigManager` built against
- * that directory failed to construct. Storing a value correctly bricked
+ * Not every daemon-owned path is a CONFIG_SCHEMA key (the Google refresh
+ * token's path, the gated-surfaces map), and the calendar connection was once
+ * an app-layer section a product materialized at runtime. The daemon-tier
+ * overlay runs inside the `ConfigManager` CONSTRUCTOR, so a daemon settings
+ * file naming a daemon-owned path whose section did not exist yet made
+ * `resolvePath` throw "section ... does not exist", and every `ConfigManager`
+ * built against that directory failed to construct. Storing a value correctly bricked
  * reading it back, which is a worse failure than the stranding it was meant to
  * cure.
  *

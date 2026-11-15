@@ -1,10 +1,9 @@
 /**
  * connector-config-schema.test.ts
  *
- * Gate tests for promoting the mail and calendar connector's `email.*`,
- * `calendar.*` and `google.*` keys from an app-layer cast
- * (`connector-config-sections.ts`) into real CONFIG_SCHEMA rows
- * (`schema-domain-connectors.ts`).
+ * Gate tests for the calendar connector's `calendar.*` and `google.*` keys
+ * being real CONFIG_SCHEMA rows (`schema-domain-connectors.ts`). The mailbox
+ * is `surfaces.email.*`.
  *
  * The defect this closes: the daemon really stores a Google client id, a
  * Gmail app-password reference and a calendar OAuth refresh token under
@@ -16,7 +15,7 @@
  * schema's rows. Modelled on test/inbound-email-config-schema.test.ts (the
  * same migration for `surfaces.email.inbound.*`) and
  * test/platform-secret-daemon-routing.test.ts (the same daemon-ownership
- * double-count regression, for `email.passwordRef` and its siblings).
+ * double-count regression).
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -26,7 +25,6 @@ import { join } from 'node:path';
 import { afterEach } from 'bun:test';
 import { CONFIG_SCHEMA, DEFAULT_CONFIG, isValidConfigKey } from '../platform/src/platform/config/schema.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
-import { ConfigError } from '../platform/src/platform/types/errors.js';
 import {
   DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS,
   isDaemonOwnedConfigKey,
@@ -49,19 +47,6 @@ function freshManager(): ConfigManager {
 
 /** The promoted rows, with their exact seeded default and whether the value is a secret-store reference. */
 const EXPECTED: { key: string; default: unknown; secret: boolean }[] = [
-  { key: 'email.enabled', default: false, secret: false },
-  { key: 'email.imapHost', default: '', secret: false },
-  { key: 'email.imapPort', default: 993, secret: false },
-  { key: 'email.imapSecurity', default: 'tls', secret: false },
-  { key: 'email.smtpHost', default: '', secret: false },
-  { key: 'email.smtpPort', default: 587, secret: false },
-  { key: 'email.smtpSecurity', default: 'auto', secret: false },
-  { key: 'email.username', default: '', secret: false },
-  { key: 'email.passwordRef', default: '', secret: true },
-  { key: 'email.smtpPasswordRef', default: '', secret: true },
-  { key: 'email.fromAddress', default: '', secret: false },
-  { key: 'email.mailbox', default: '', secret: false },
-  { key: 'email.draftsMailbox', default: '', secret: false },
   { key: 'calendar.google.clientId', default: '', secret: false },
   { key: 'calendar.google.clientSecretRef', default: '', secret: true },
   { key: 'calendar.google.icsUrl', default: '', secret: true },
@@ -74,19 +59,9 @@ const EXPECTED: { key: string; default: unknown; secret: boolean }[] = [
 
 /** The paths that used to be hand-enumerated because nothing else declared them. */
 const FORMERLY_NON_SCHEMA_PATHS = [
-  'email.passwordRef',
-  'email.smtpPasswordRef',
   'calendar.google.clientSecretRef',
   'calendar.microsoft.clientSecretRef',
   'calendar.google.icsUrl',
-  'email.enabled',
-  'email.imapHost',
-  'email.imapPort',
-  'email.smtpHost',
-  'email.smtpPort',
-  'email.smtpSecurity',
-  'email.username',
-  'email.fromAddress',
   'calendar.google.clientId',
   'calendar.microsoft.clientId',
   'google.oauth.projectId',
@@ -155,17 +130,6 @@ describe('every registered key resolves through a real ConfigManager without thr
     expect(mgr.get('calendar.microsoft.clientId' as never) as unknown).toBe('');
   });
 
-  test('imapSecurity and smtpSecurity reject a value outside their enum', () => {
-    const mgr = freshManager();
-    expect(() => mgr.set('email.imapSecurity' as never, 'starttls' as never)).toThrow(ConfigError);
-    expect(() => mgr.set('email.imapSecurity' as never, 'tls' as never)).not.toThrow();
-    expect(() => mgr.set('email.imapSecurity' as never, 'plaintext' as never)).not.toThrow();
-
-    expect(() => mgr.set('email.smtpSecurity' as never, 'ssl' as never)).toThrow(ConfigError);
-    expect(() => mgr.set('email.smtpSecurity' as never, 'auto' as never)).not.toThrow();
-    expect(() => mgr.set('email.smtpSecurity' as never, 'tls' as never)).not.toThrow();
-    expect(() => mgr.set('email.smtpSecurity' as never, 'starttls' as never)).not.toThrow();
-  });
 });
 
 describe('every promoted key is daemon-owned, exactly once, in the owned-path walk', () => {

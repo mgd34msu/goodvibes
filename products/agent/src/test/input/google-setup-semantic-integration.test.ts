@@ -62,7 +62,7 @@ function readings() {
 }
 test('the real command composition selects localized create instead of the first overlapping control and stores only through the secret port', async () => {
   installJudgmentPort(readings().port); const rig = fixture();
-  rig.config.setDynamic('email.username', 'synthetic@example.test');
+  rig.config.setDynamic('surfaces.email.user', 'synthetic@example.test');
   const report = await runGoogleSetup('app-password', rig.context, progress, undefined, { browser: async () => rig.browser });
   expect(report.steps.find(step => step.id === 'app-password')?.outcome).toBe('done');
   expect(report.steps.find(step => step.id === 'gmail-config')?.outcome).toBe('done');

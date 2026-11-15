@@ -12,8 +12,9 @@
  *    can otherwise write what the owner reads on their phone.
  *
  *  - `CommandAuthorityChannel` has no `'email'` member. Approval and veto answers
- *    arrive over the TUI, the agent terminal, or a channel like Telegram, and
- *    never over email, permanently. Expressing that as a union means routing a
+ *    arrive over the TUI, the agent terminal, the owner inbox (both terminal
+ *    apps and the web UI), or a channel like Telegram, and never over email,
+ *    permanently. Expressing that as a union means routing a
  *    payment prompt to email does not typecheck.
  *
  * Money is integer minor units everywhere. There is no floating-point arithmetic
@@ -71,13 +72,18 @@ export function unsafeOwnerSuppliedTextForTests(value: string): OwnerSuppliedTex
  * delivery strategy, and this union is the second lock. See docs/payments.md
  * §8.2.
  */
-export type CommandAuthorityChannel = 'tui' | 'agent-terminal' | 'telegram';
+export type CommandAuthorityChannel = 'tui' | 'agent-terminal' | 'telegram' | 'owner-inbox';
 
 /** Authenticated operator buttons/commands are answers, not notification routes.
  * This deliberately does not add email or an operator destination to delivery. */
 export type PaymentAnswerChannel = CommandAuthorityChannel | 'operator';
 
-const COMMAND_AUTHORITY_CHANNELS: readonly string[] = ['tui', 'agent-terminal', 'telegram'];
+/**
+ * `owner-inbox` is always notified (host/notifier.ts) and is never a
+ * `payments.notifyChannels` entry; it is parsed here so a recorded delivery to
+ * it reads back after a restart.
+ */
+const COMMAND_AUTHORITY_CHANNELS: readonly string[] = ['tui', 'agent-terminal', 'telegram', 'owner-inbox'];
 
 /**
  * Parse a configured channel name, rejecting anything unknown.

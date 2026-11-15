@@ -12,7 +12,6 @@ import { CREDENTIAL_DESTINATION_KEYS } from '../../config/credential-destination
 import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey } from '../../config/structured-credential-config.js';
-import { SURFACE_EMAIL_PASSWORD_REF, SURFACE_EMAIL_SMTP_PASSWORD_REF } from '../../email/surface-config.js';
 import { configKeyFacts } from '../../config/config-key-facts.js';
 
 /** The settings tool's argument shape. */
@@ -20,12 +19,6 @@ export type SettingsToolArgs = {
   readonly mode?: unknown;
   readonly key?: unknown;
   readonly [name: string]: unknown;
-};
-
-/** The only references besides the key's own derived one that a key may point at. */
-const SHARED_REFERENCES: Readonly<Record<string, string>> = {
-  'email.passwordRef': SURFACE_EMAIL_PASSWORD_REF,
-  'email.smtpPasswordRef': SURFACE_EMAIL_SMTP_PASSWORD_REF,
 };
 
 const SECRET_REF_PREFIX = 'goodvibes://secrets/goodvibes/';
@@ -55,10 +48,7 @@ export function agentSettingsWriteRefusal(args: SettingsToolArgs): string | null
       return `${key} takes only a stored secret reference, ${SECRET_REF_PREFIX}${encodeURIComponent(own)}, never a literal value. Nothing was changed. Store the credential for this key first, then set that reference, or ask the owner to enter it in the settings screen.`;
     }
     if (args.value.trim() === '') return null;
-    const secretKey = referencedSecretKey(args.value);
-    const shared = SHARED_REFERENCES[key];
-    const allowed = secretKey !== null && (secretKey === own || (shared !== undefined && referencedSecretKey(shared) === secretKey));
-    if (!allowed) {
+    if (referencedSecretKey(args.value) !== own) {
       return `${key} may only point at its own stored secret, ${SECRET_REF_PREFIX}${encodeURIComponent(own)}. Nothing was changed. Store the credential for this key first, then set that reference, or ask the owner to enter it in the settings screen.`;
     }
   }

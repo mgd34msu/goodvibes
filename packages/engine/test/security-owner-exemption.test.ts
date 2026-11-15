@@ -55,8 +55,6 @@ function sendHandler(ledger: UntrustedContentLedger, owners: ReadonlySet<string>
 describe('the owner identity comes from configuration and nowhere else', () => {
   test('it reads exactly the declared config keys', () => {
     expect([...OWNER_ADDRESS_CONFIG_KEYS]).toEqual([
-      'email.fromAddress',
-      'email.username',
       'surfaces.email.from',
       'surfaces.email.user',
     ]);
@@ -76,14 +74,14 @@ describe('the owner identity comes from configuration and nowhere else', () => {
   });
 
   test('a non-address value is not an identity', () => {
-    expect(resolveOwnerAddresses(configWith({ 'email.username': 'avery' })).size).toBe(0);
-    expect(resolveOwnerAddresses(configWith({ 'email.fromAddress': '' })).size).toBe(0);
+    expect(resolveOwnerAddresses(configWith({ 'surfaces.email.user': 'avery' })).size).toBe(0);
+    expect(resolveOwnerAddresses(configWith({ 'surfaces.email.from': '' })).size).toBe(0);
   });
 
   test('an unreadable config section reads as not-configured rather than throwing', () => {
     const owners = resolveOwnerAddresses((key: string) => {
-      if (key.startsWith('surfaces.')) throw new Error(`Invalid config path: ${key}`);
-      return key === 'email.fromAddress' ? OWNER : undefined;
+      if (key === 'surfaces.email.user') throw new Error(`Invalid config path: ${key}`);
+      return key === 'surfaces.email.from' ? OWNER : undefined;
     });
     expect(owners.has(OWNER)).toBe(true);
   });

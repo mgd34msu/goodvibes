@@ -42,7 +42,8 @@ export { CHECKOUT_APPROVAL_ACTION, checkoutApprovalContent } from './checkout-ha
 
 export { configBackedAddressStore } from './address-store.js';
 
-export { channelBackedPaymentNotifier } from './notifier.js';
+export { channelBackedPaymentNotifier, withOwnerInbox } from './notifier.js';
+export type { PaymentOwnerInbox } from './notifier.js';
 
 export {
   HandlerError,

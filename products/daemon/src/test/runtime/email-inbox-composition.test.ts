@@ -266,7 +266,7 @@ test('legacy flat IMAP-only configuration seeds and serves redacted rows without
   const service = f.provider.services[0]!;
   expect(service.getInboxReadStatus()).toMatchObject({ ready: true, errors: [], config: { enabled: true, imapHost: account.host, username: account.username, smtpHost: '' } });
   expect(service.getStatus()).toMatchObject({ ready: false, config: { enabled: false, smtpHost: '' } });
-  expect(service.getStatus().errors).toContain('email.smtpHost is required');
+  expect(service.getStatus().errors).toContain('surfaces.email.smtp.host (or surfaces.email.host) is required');
   expect(f.configManager.get('surfaces.email.host')).toBeFalsy(); expect(f.configManager.get('surfaces.email.user')).toBeFalsy();
   expect(stored(f.storePath)).toMatchObject({ items: [], checkpoint: { uidValidity: 7, lastTerminalUid: null } });
   expect(f.provider.sourceParts).toEqual([]);

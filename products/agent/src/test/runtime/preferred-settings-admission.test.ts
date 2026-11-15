@@ -312,7 +312,7 @@ test('reentrant cancellation between companion writes yields truthful partial re
   expect(f.runtime.configManager.get('voice.wake.enabled')).toBe(true); expect(f.runtime.configManager.get('voice.wake.surfaces.agent')).toBe(false);
 });
 
-test.each(['email.passwordRef', 'surfaces.email.password'] as const)('secret reset %s deletes exactly the captured daemon scope before local override removal', async configKey => {
+test.each(['surfaces.email.password'] as const)('secret reset %s deletes exactly the captured daemon scope before local override removal', async configKey => {
   const f = await fixture(); const client = agentDaemonConfigClient(); installAgentDaemonConfigClient(null); restoreOthers.push(() => installAgentDaemonConfigClient(client));
   const key = buildGoodVibesSecretKey(configKey); const daemon = join(f.home, '.goodvibes', 'daemon', 'secrets.json');
   const user = join(f.home, '.goodvibes', 'agent.secrets.json'); mkdirSync(join(f.home, '.goodvibes', 'daemon'), { recursive: true });
@@ -329,12 +329,12 @@ test('secret settlement callback revocation after the config change reports part
   const f = await fixture(); const client = agentDaemonConfigClient(); installAgentDaemonConfigClient(null); restoreOthers.push(() => installAgentDaemonConfigClient(client));
   const key = 'GOODVIBES_EMAIL_PASSWORD_REF'; const daemon = join(f.home, '.goodvibes', 'daemon', 'secrets.json');
   mkdirSync(join(f.home, '.goodvibes', 'daemon'), { recursive: true }); writeFileSync(daemon, JSON.stringify({ version: 1, secrets: { [key]: 'synthetic-copy' } }));
-  const reference = 'goodvibes://secrets/goodvibes/' + key; f.runtime.configManager.set('email.passwordRef', reference);
+  const reference = 'goodvibes://secrets/goodvibes/' + key; f.runtime.configManager.set('surfaces.email.password', reference);
   restoreOthers.push(f.runtime.secretsManager.onDidChange(() => { f.source.goal = 'Stop remaining effects'; }));
-  const result = await f.run('settings', mutation('settings', 'reset', 'email.passwordRef'));
+  const result = await f.run('settings', mutation('settings', 'reset', 'surfaces.email.password'));
   expect(result.success).toBe(false); expect(JSON.parse(result.output!).status).toBe('partial');
   // The configuration is published before the credential is cleared, so it never points at a deleted credential.
-  expect(f.runtime.configManager.get('email.passwordRef')).toBe('');
+  expect(f.runtime.configManager.get('surfaces.email.password')).toBe('');
   expect(result.error).toContain('PARTLY applied');
 });
 
@@ -433,14 +433,14 @@ test('replacement of the registered physical settings owner during admission pre
 
 test('post-config credential replacement reports partial without a verified-store claim and keeps the replaced credential', async () => {
   const f = await fixture(); const client = agentDaemonConfigClient(); installAgentDaemonConfigClient(null); restoreOthers.push(() => installAgentDaemonConfigClient(client));
-  const key = buildGoodVibesSecretKey('email.passwordRef'); const daemon = join(f.home, '.goodvibes', 'daemon', 'secrets.json');
+  const key = buildGoodVibesSecretKey('surfaces.email.password'); const daemon = join(f.home, '.goodvibes', 'daemon', 'secrets.json');
   mkdirSync(join(f.home, '.goodvibes', 'daemon'), { recursive: true });
   writeFileSync(daemon, JSON.stringify({ version: 1, secrets: { [key]: 'synthetic-initial' } }));
-  f.runtime.configManager.set('email.passwordRef', 'goodvibes://secrets/goodvibes/' + key);
-  restoreOthers.push(f.runtime.configManager.subscribe('email.passwordRef', () => {
+  f.runtime.configManager.set('surfaces.email.password', 'goodvibes://secrets/goodvibes/' + key);
+  restoreOthers.push(f.runtime.configManager.subscribe('surfaces.email.password', () => {
     writeFileSync(daemon, JSON.stringify({ version: 1, secrets: { [key]: 'synthetic-replaced' } }));
   }));
-  const result = await f.run('settings', mutation('settings', 'reset', 'email.passwordRef'));
+  const result = await f.run('settings', mutation('settings', 'reset', 'surfaces.email.password'));
   expect(result.success).toBe(false); expect(JSON.parse(result.output!).status).toBe('partial');
   expect(JSON.parse(result.output!).verifiedInOwningStore).toBe(false);
   expect(JSON.parse(readFileSync(daemon, 'utf8')).secrets[key]).toBe('synthetic-replaced');

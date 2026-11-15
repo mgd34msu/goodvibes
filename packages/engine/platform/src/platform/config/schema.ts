@@ -134,7 +134,6 @@ export const DEFAULT_CONFIG = {
   agents: featureConfigDefaults.agents,
   pricing: pricingConfigDefaults.pricing,
   payments: paymentsConfigDefaults.payments,
-  email: connectorConfigDefaults.email,
   calendar: connectorConfigDefaults.calendar,
   google: connectorConfigDefaults.google,
 } as GoodVibesConfig;

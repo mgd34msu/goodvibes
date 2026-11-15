@@ -47,7 +47,6 @@ import { join, resolve } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { secretWriteTarget } from '../platform/src/platform/config/secrets-store-paths.ts';
-import { ensureConnectorConfigSections } from '../platform/src/platform/config/connector-config-sections.ts';
 import { migrateDaemonNeededCredentials } from '../platform/src/platform/config/daemon-credential-migration.ts';
 import { migrateDaemonOwnedConfig } from '../platform/src/platform/config/daemon-config-migration.ts';
 import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.ts';
@@ -203,24 +202,15 @@ function managers(home: string, surfaceRoot: string): Side {
   };
 }
 
-/**
- * A surface: the agent, the TUI, the web UI.
- *
- * A product seeds the connector's config sections itself, in one call, before
- * the connector touches anything, that is what `ensureConnectorConfigSections`
- * is for and what every surface is expected to do.
- */
+/** A surface: the agent, the TUI, the web UI. */
 function openSurface(home: string, surfaceRoot: string): Side {
-  const side = managers(home, surfaceRoot);
-  ensureConnectorConfigSections(side.configManager);
-  return side;
+  return managers(home, surfaceRoot);
 }
 
 /**
  * The daemon, started the way a host starts it.
  *
- * Deliberately does NOT call `ensureConnectorConfigSections`, seed a section,
- * or migrate anything by hand. Everything the daemon needs to have happened by
+ * Deliberately does NOT seed a section or migrate anything by hand. Everything the daemon needs to have happened by
  * the time it answers a question has to have happened inside
  * `runDaemonBootGuarantees`, or it has not happened on the owner's machine
  * either.
@@ -731,7 +721,6 @@ describe('a setup that only half landed is finished by the daemon, not started b
 
     // Before: half a credential, which reads as no account at all.
     const before = managers(home, 'daemon');
-    ensureConnectorConfigSections(before.configManager);
     expect((await detectGoogleSetupState({ config: before.config, secrets: before.secrets })).oauthClientId).toBeNull();
 
     // Boot repairs it, without anyone calling the repair.

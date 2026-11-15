@@ -117,7 +117,7 @@ function googleTool(fixture: GmailFixture = {}) {
   const tool = createAgentGoogleTool({
     homeDirectory: home,
     configGet: (key: string) =>
-      (key === 'email.fromAddress' ? 'owner@example.com' : STORED_CONFIG[key]),
+      (key === 'surfaces.email.from' ? 'owner@example.com' : STORED_CONFIG[key]),
     secretGet: storedSecretGet,
     fetchImpl: async (url: string, init: RequestInit) => {
       const json = (value: unknown, status = 200): Response =>

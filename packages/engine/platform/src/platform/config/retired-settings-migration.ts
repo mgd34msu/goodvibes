@@ -26,6 +26,8 @@ interface RetiredSpelling {
   readonly from: string;
   readonly to: string;
   readonly shadowedBy: readonly string[];
+  /** The value in the new spelling's terms, read against the file as it was loaded. */
+  readonly convert?: (value: unknown, original: Record<string, unknown>) => unknown;
 }
 
 export const RETIRED_SETTINGS: readonly RetiredSetting[] = [
@@ -37,13 +39,33 @@ export const RETIRED_SETTINGS: readonly RetiredSetting[] = [
     key: 'google.oauth.refreshToken',
     instead: 'Nothing read it: the Google refresh token is kept only in the secret store, where setup puts it.',
   },
+  {
+    key: 'email.enabled',
+    instead: 'The mailbox is on once surfaces.email has a host, an account and a password; there is no separate switch.',
+  },
 ];
 
 /**
- * The daemon's mailbox has one spelling of each setting: `surfaces.email.host`,
+ * The connector's `email.*` keys described the same mailbox a second time. The
+ * daemon never read them, so where the daemon's own mailbox is set (a host
+ * under surfaces.email) that one stays and the `email.*` value is dropped.
+ */
+const DAEMON_MAILBOX_SET: readonly string[] = ['surfaces.email.host', 'surfaces.email.imap.host', 'surfaces.email.smtp.host'];
+
+function smtpImplicitTls(value: unknown, original: Record<string, unknown>): boolean {
+  if (value === 'tls') return true;
+  if (value === 'starttls') return false;
+  // 'auto' picked implicit TLS on 465 and STARTTLS on every other port.
+  const port = readDotPath(original, 'email.smtpPort');
+  return port.present && Number(port.value) === 465;
+}
+
+/**
+ * The mailbox has one spelling of each setting: `surfaces.email.host`,
  * `.user`, `.from`, `.password`, and `.imap.*` / `.smtp.*` for what differs per
  * protocol. Order matters: `username` before `imapUser`, the order the account
- * name was resolved in.
+ * name was resolved in; the `surfaces.email.*` spellings before the connector's
+ * `email.*` ones, so the daemon's own values win.
  */
 export const RETIRED_SPELLINGS: readonly RetiredSpelling[] = [
   { from: 'surfaces.email.username', to: 'surfaces.email.user', shadowedBy: [] },
@@ -51,6 +73,21 @@ export const RETIRED_SPELLINGS: readonly RetiredSpelling[] = [
   { from: 'surfaces.email.imapHost', to: 'surfaces.email.imap.host', shadowedBy: ['surfaces.email.host'] },
   { from: 'surfaces.email.imapPort', to: 'surfaces.email.imap.port', shadowedBy: [] },
   { from: 'surfaces.email.imapPassword', to: 'surfaces.email.imap.password', shadowedBy: [] },
+  { from: 'email.imapHost', to: 'surfaces.email.imap.host', shadowedBy: DAEMON_MAILBOX_SET },
+  { from: 'email.imapPort', to: 'surfaces.email.imap.port', shadowedBy: DAEMON_MAILBOX_SET },
+  { from: 'email.imapSecurity', to: 'surfaces.email.imap.secure', shadowedBy: DAEMON_MAILBOX_SET, convert: (value) => value !== 'plaintext' },
+  { from: 'email.smtpHost', to: 'surfaces.email.smtp.host', shadowedBy: DAEMON_MAILBOX_SET },
+  { from: 'email.smtpPort', to: 'surfaces.email.smtp.port', shadowedBy: DAEMON_MAILBOX_SET },
+  { from: 'email.smtpSecurity', to: 'surfaces.email.smtp.secure', shadowedBy: DAEMON_MAILBOX_SET, convert: smtpImplicitTls },
+  { from: 'email.username', to: 'surfaces.email.user', shadowedBy: DAEMON_MAILBOX_SET },
+  { from: 'email.fromAddress', to: 'surfaces.email.from', shadowedBy: DAEMON_MAILBOX_SET },
+  { from: 'email.mailbox', to: 'surfaces.email.imap.mailbox', shadowedBy: DAEMON_MAILBOX_SET },
+  { from: 'email.draftsMailbox', to: 'surfaces.email.imap.draftsMailbox', shadowedBy: DAEMON_MAILBOX_SET },
+  // A secret reference, carried as is: the mail readers follow it, and the
+  // daemon copies the secret to the name the new setting derives at start
+  // (email/carried-mail-password.ts).
+  { from: 'email.passwordRef', to: 'surfaces.email.password', shadowedBy: DAEMON_MAILBOX_SET },
+  { from: 'email.smtpPasswordRef', to: 'surfaces.email.smtp.password', shadowedBy: DAEMON_MAILBOX_SET },
 ];
 
 /** Every key this pass takes out of a file, so the unknown-key screen does not report them first. */
@@ -83,13 +120,13 @@ export function migrateRetiredSettings(parsed: Record<string, unknown>): Retired
     if (deleteRawDotPath(config, key)) removed.push(key);
   }
   const moves: { from: string; to: string; moved: boolean }[] = [];
-  for (const { from, to, shadowedBy } of RETIRED_SPELLINGS) {
+  for (const { from, to, shadowedBy, convert } of RETIRED_SPELLINGS) {
     const found = readDotPath(config, from);
     if (!found.present) continue;
     deleteRawDotPath(config, from);
     const inForce = found.value !== '' && found.value !== null && !shadowedBy.some((key) => isSet(config, key));
     const moved = inForce && !isSet(config, to);
-    if (moved) writeRawDotPath(config, to, found.value);
+    if (moved) writeRawDotPath(config, to, convert ? convert(found.value, parsed) : found.value);
     moves.push({ from, to, moved });
   }
   return { config, migrated: true, removed, moves };

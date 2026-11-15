@@ -43,7 +43,7 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
   void distributedRuntimeReady.catch(() => {});
   try {
     observeNativeStartupPhase('handler-surfaces');
-    const daemonHandlers = await createDaemonHandlerComposition({ ...handlerOptions, distributedRuntimeReady });
+    const daemonHandlers = await createDaemonHandlerComposition({ ...handlerOptions, distributedRuntimeReady, ownerInbox: services.ownerInbox });
     scope.registry.add('daemon handler surfaces', daemonHandlers.close);
     // Peers must be loaded before the device recovery sweep decides which
     // grants belong to a departed node, and a failed load must stop the boot

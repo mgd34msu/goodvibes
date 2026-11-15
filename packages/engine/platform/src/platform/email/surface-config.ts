@@ -1,12 +1,12 @@
 /**
- * surface-config.ts, driving `EmailService` from the daemon's own mailbox keys.
+ * surface-config.ts, driving `EmailService` from the mailbox settings.
  *
- * `EmailService` reads a flat `email.*` namespace (`email.imapHost`,
- * `email.passwordRef`, …). The daemon's own mailbox is configured under
- * `surfaces.email.*`, which is a different shape for a good reason: it sits in
- * the `surfaces.` domain so it inherits that domain's daemon-ownership rule,
- * the daemon is the process that acts on the mailbox, so the daemon tier is the
- * only home for its settings and its password.
+ * `EmailService` reads a flat internal namespace (`email.imapHost`,
+ * `email.passwordRef`, …) that is not a setting. The mailbox is configured
+ * once, under `surfaces.email.*`, by every product: it sits in the `surfaces.`
+ * domain so it inherits that domain's daemon-ownership rule, the daemon is the
+ * process that acts on the mailbox, so the daemon tier is the home for its
+ * settings and its password.
  *
  * This module is the adapter between the two, and nothing else. It is a
  * translation of key names and precedence; no setting is invented here, and
@@ -27,9 +27,10 @@
  *   drafts     imap.draftsMailbox  →  the server's own `\Drafts` folder
  *
  * The flat spellings earlier builds also read (`username`, `imapHost`,
- * `imapPort`, `imapUser`, `imapPassword`) are moved onto these when a settings
- * file loads (config/retired-settings-migration.ts), so a mailbox configured
- * either way resolves the same.
+ * `imapPort`, `imapUser`, `imapPassword`), and the connector's `email.*` keys,
+ * are moved onto these when a settings file loads
+ * (config/retired-settings-migration.ts), so a mailbox configured any of those
+ * ways resolves the same.
  *
  * A port counts as set only when the operator set it: the config manager answers an
  * unset key with its default, so the security answer could otherwise never pick
@@ -41,7 +42,8 @@
  * Passwords never come from config
  * ────────────────────────────────
  * Every password is fetched from the secret store under the name the config key
- * derives (`daemonSecretKeyFor`), never read out of a settings file. The
+ * derives (`daemonSecretKeyFor`), never read out of a settings file; a mail
+ * secret named by a reference the setting holds is tried after those. The
  * fallbacks are the ones the mail handlers used:
  *
  *   IMAP/shared  surfaces.email.password → surfaces.email.imap.password
@@ -53,6 +55,7 @@
  */
 
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
+import { parseEmailSecretRef } from './email-config.js';
 import type { EmailServiceDeps } from './email-service.js';
 
 export const SURFACE_EMAIL_PREFIX = 'surfaces.email';
@@ -75,7 +78,33 @@ const SHARED_PASSWORD_CHAIN: readonly string[] = [
   daemonSecretKeyFor(IMAP_PASSWORD_CONFIG_KEY),
 ];
 
-const SMTP_PASSWORD_CHAIN: readonly string[] = [SMTP_PASSWORD_SECRET_KEY, ...SHARED_PASSWORD_CHAIN];
+/**
+ * The mail secret a password setting's stored reference names, when that is
+ * not the name the setting derives. A mailbox carried over from the connector's
+ * `email.passwordRef` holds such a reference until the daemon copies the secret
+ * to the derived name at start (carried-mail-password.ts), so a product that
+ * reads mail before that still finds the password. Only a key that is about
+ * mail is followed (`parseEmailSecretRef`).
+ */
+function referencedSecretKeys(getConfig: ConfigReader | undefined, configKeys: readonly string[]): string[] {
+  if (getConfig === undefined) return [];
+  const keys: string[] = [];
+  for (const configKey of configKeys) {
+    const ref = readString(getConfig, configKey);
+    if (ref === undefined) continue;
+    const parsed = parseEmailSecretRef(configKey, ref);
+    if ('key' in parsed && parsed.key !== daemonSecretKeyFor(configKey)) keys.push(parsed.key);
+  }
+  return keys;
+}
+
+function sharedPasswordChain(getConfig?: ConfigReader): readonly string[] {
+  return [...SHARED_PASSWORD_CHAIN, ...referencedSecretKeys(getConfig, [SHARED_PASSWORD_CONFIG_KEY, IMAP_PASSWORD_CONFIG_KEY])];
+}
+
+function smtpPasswordChain(getConfig?: ConfigReader): readonly string[] {
+  return [SMTP_PASSWORD_SECRET_KEY, ...referencedSecretKeys(getConfig, [SMTP_PASSWORD_CONFIG_KEY]), ...sharedPasswordChain(getConfig)];
+}
 
 /** The `email.passwordRef` value that points at the daemon's shared mail password. */
 export const SURFACE_EMAIL_PASSWORD_REF =
@@ -340,13 +369,13 @@ async function firstStoredSecret(
  * would mean inventing a ref syntax, and every reader of that string would have
  * to learn it.
  */
-export function createSurfaceEmailSecretReader(secrets: SecretReader): SecretReader {
+export function createSurfaceEmailSecretReader(secrets: SecretReader, getConfig?: ConfigReader): SecretReader {
   return {
     ...(secrets.getCredentialMutationState ? { getCredentialMutationState: () => secrets.getCredentialMutationState!() } : {}),
     ...(secrets.onDidInvalidateCredentials ? { onDidInvalidateCredentials: (listener: () => void) => secrets.onDidInvalidateCredentials!(listener) } : {}),
     async get(key: string): Promise<string | null> {
-      if (key === SHARED_PASSWORD_SECRET_KEY) return firstStoredSecret(secrets, SHARED_PASSWORD_CHAIN);
-      if (key === SMTP_PASSWORD_SECRET_KEY) return firstStoredSecret(secrets, SMTP_PASSWORD_CHAIN);
+      if (key === SHARED_PASSWORD_SECRET_KEY) return firstStoredSecret(secrets, sharedPasswordChain(getConfig));
+      if (key === SMTP_PASSWORD_SECRET_KEY) return firstStoredSecret(secrets, smtpPasswordChain(getConfig));
       return secrets.get(key);
     },
   };
@@ -386,7 +415,7 @@ export async function describeSurfaceEmailConfigProblem(
       code: 'EMAIL_NOT_CONFIGURED',
     };
   }
-  const password = await firstStoredSecret(secrets, SHARED_PASSWORD_CHAIN);
+  const password = await firstStoredSecret(secrets, sharedPasswordChain(getConfig));
   if (password === null) {
     return {
       message: 'Email password secret is missing from the daemon credential store.',
@@ -406,6 +435,6 @@ export function withSurfaceEmailConfig(deps: EmailServiceDeps): EmailServiceDeps
     ...deps,
     getConfig: createSurfaceEmailConfigReader(deps.getConfig),
     getInboxConfig: createSurfaceEmailInboxConfigReader(deps.getConfig),
-    secretsManager: createSurfaceEmailSecretReader(deps.secretsManager),
+    secretsManager: createSurfaceEmailSecretReader(deps.secretsManager, deps.getConfig),
   };
 }

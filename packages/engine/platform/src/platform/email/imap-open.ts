@@ -197,8 +197,8 @@ function unexplainedRefusalMessage(phaseReason: ImapOpenFailureReason, attempt: 
   const signIn = phaseReason === 'authentication-rejected';
   const what = signIn ? 'the sign-in' : `opening the folder '${mailbox}'`;
   const remedy = signIn
-    ? 'replace the password in the secret named by email.passwordRef, at daemon scope, and reconnect'
-    : 'check that email.mailbox names a folder that exists on the server';
+    ? 'replace the mailbox password (surfaces.email.password) at daemon scope, and reconnect'
+    : 'check that surfaces.email.imap.mailbox names a folder that exists on the server';
   if (attempt < MAX_UNEXPLAINED_REFUSALS) {
     return `The mail server refused ${what} without giving a reason (attempt ${String(attempt)} of `
       + `${String(MAX_UNEXPLAINED_REFUSALS)}). It is retried on a longer backoff; if it keeps happening, ${remedy}.`;
@@ -398,14 +398,14 @@ export function ownerMessageForFailure(
   switch (reason) {
     case 'credential-unavailable':
       return 'No mail password is stored where the daemon reads secrets. Nothing '
-        + 'will be read until the secret named by email.passwordRef exists at '
-        + 'daemon scope. A credential saved by another surface is not visible '
+        + 'will be read until the mailbox password (surfaces.email.password) is '
+        + 'stored at daemon scope. A credential saved by another surface is not visible '
         + 'here and is deliberately not searched for, reading one would work on '
         + 'the machine that saved it and fail everywhere else.';
     case 'authentication-rejected':
       return 'The mail server rejected the sign-in. Nothing will be read until '
-        + 'the stored password is replaced: put a working password in the secret '
-        + 'named by email.passwordRef, at daemon scope, and reconnect. The '
+        + 'the stored password is replaced: store a working mailbox password '
+        + '(surfaces.email.password) at daemon scope, and reconnect. The '
         + 'rejected credential is not retried, because repeated rejected '
         + 'sign-ins are how an account gets locked.';
     case 'mailbox-unavailable':

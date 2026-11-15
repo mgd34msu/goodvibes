@@ -4,36 +4,14 @@ export class EmailConfigurationError extends Error {
 /**
  * Email service, config, secret resolution, and orchestration.
  *
- * Config namespace: email.*
- * ─────────────────────────
- * The ConfigKey union is sealed and does not include email keys.
- * Email settings are accessed via ensureEmailConfigDefaults(), which
- * injects the email section into the ConfigManager's live config object
- * before first use. This follows the same pattern as other categories that
- * extend beyond the built-in schema.
- *
- * Settings registered:
- *   email.enabled        boolean  , feature gate (default: false)
- *   email.imapHost       string   , IMAP TLS host (default: '')
- *   email.imapPort       number   , default 993
- *   email.smtpHost       string   , SMTP submission host (default: '')
- *   email.smtpPort       number   , 465 (TLS) or 587 (STARTTLS, default)
- *   email.username       string   , login username (default: '')
- *   email.passwordRef    string   , goodvibes:// secret reference only;
- *                                    NEVER a raw password
- *   email.smtpPasswordRef string  , optional; a second goodvibes:// reference
- *                                    for providers that issue separate SMTP
- *                                    credentials. Empty means "same password"
- *   email.fromAddress    string   , From: address for outbound mail
- *   email.mailbox        string   , mailbox to read; empty means INBOX
- *   email.draftsMailbox  string   , Drafts folder; empty means ask the server
- *
- * Secret resolution
- * ─────────────────
- * `email.passwordRef` must be a goodvibes secret reference string.
- * The service calls `secretsManager.get(resolvedKey)` using the same
- * SecretsManager instance the product already has wired.
- * Plaintext passwords in config are rejected at validation time.
+ * Config: the mailbox settings, `surfaces.email.*`
+ * ───────────────────────────────────────────────
+ * The service reads an internal, flat key namespace through its `getConfig`
+ * port (`email.imapHost`, `email.passwordRef`, …; see `readEmailConfig`). That
+ * namespace is not a setting: every product builds the service with
+ * `withSurfaceEmailConfig` (surface-config.ts), which answers it from the one
+ * set of mailbox settings, `surfaces.email.*`, and resolves the password from
+ * the secret store under the name that setting derives.
  *
  * Everything is injected
  * ──────────────────────
@@ -51,7 +29,6 @@ import { listEmailInbox } from './email-inbox-list.js';
 import { readEmailMessage } from './email-message-reader.js';
 import type { EmailMailboxObservation, EmailReplySubjectSourceOwner } from './reply-subject-source.js';
 import { IMAP_ATTACHMENT_LITERAL_BYTES, type ImapAttachmentContent, type ImapDraftSummary, type ImapMessageAction, type ImapMessageActionResult } from './imap-mailbox-actions.js';
-import { ensureMailboxConfigDefaults } from '../config/connector-config-sections.js';
 import { withEmailReadConnection } from './email-read-connection.js';
 import { SmtpClient, validateSmtpAddress, validateSmtpSubject, validateSmtpThreadHeader } from './smtp-client.js';
 import {
@@ -83,31 +60,6 @@ import type { Socket } from 'node:net';
 
 // Re-exported so this module stays the one entry point callers already import.
 export type { EmailInboxUnreadableResponse, EmailMessageRead } from './email-read-results.js';
-
-// ---------------------------------------------------------------------------
-// Email defaults injection
-// ---------------------------------------------------------------------------
-
-
-/**
- * Inject the email config section into the ConfigManager's live config
- * object if it is not already present.
- *
- * DEFAULT_CONFIG does not include an email section. ConfigManager.resolvePath()
- * walks the live config object and throws for any section that does not exist.
- * Calling this helper once before any email.* access ensures the traversal
- * succeeds.
- *
- * The helper is safe to call multiple times, it is a no-op after the first
- * call for a given configManager instance.
- */
-export function ensureEmailConfigDefaults(
-  configManager: object,
-): void {
-  // One definition of the section, in config/connector-config-sections.ts,
-  // beside the two sections it is always seeded alongside.
-  ensureMailboxConfigDefaults(configManager);
-}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -306,7 +258,7 @@ export interface EmailDraftInput {
   readonly to: string;
   readonly subject: string;
   readonly body: string;
-  /** Defaults to `email.fromAddress`. */
+  /** Defaults to the mailbox's From address (`surfaces.email.from`). */
   readonly from?: string | undefined;
   readonly inReplyTo?: string | undefined;
   readonly references?: string | undefined;
@@ -660,7 +612,7 @@ export class EmailService {
       : config.fromAddress;
     if (from.trim().length === 0) {
       throw new EmailConfigurationError(
-        'A draft needs a From address and none is set. Pass from, or set email.fromAddress.', 'invalid');
+        'A draft needs a From address and none is set. Pass from, or set surfaces.email.from.', 'invalid');
     }
     const account = draftsAccountKey(config);
     // A configured name is an operator saying the server's own answer is wrong
@@ -907,7 +859,7 @@ export class EmailService {
 
 /** Which setting holds the SMTP secret reference actually in use, for refusals that name it. */
 function smtpSettingFor(config: EmailConfig): string {
-  return config.smtpPasswordRef.length > 0 ? 'email.smtpPasswordRef' : 'email.passwordRef';
+  return config.smtpPasswordRef.length > 0 ? 'surfaces.email.smtp.password' : 'surfaces.email.password';
 }
 
 /** The mailbox account a drafts folder belongs to. */

@@ -15,7 +15,7 @@ async function toolRig(options: { readonly approved?: boolean; readonly account?
   const root = makeProjectTempDir('google-connect');
   const config = new ConfigManager({ configDir: join(root, 'config'), homeDir: root, workingDir: root, surfaceRoot: 'agent', diagnosticMode: 'structural' });
   config.load();
-  if (options.account) config.setDynamic('email.username', options.account);
+  if (options.account) config.setDynamic('surfaces.email.user', options.account);
   const secrets = new SecretsManager({ projectRoot: root, globalHome: root, surfaceRoot: 'agent', configManager: config, diagnosticMode: 'structural',
     secureProjectFilePath: join(root, 'project-secrets.enc'), plaintextProjectFilePath: join(root, 'project-secrets.json'),
     secureUserFilePath: join(root, 'user-secrets.enc'), plaintextUserFilePath: join(root, 'user-secrets.json') });
@@ -168,7 +168,7 @@ describe('Google model credential setup uses native opaque plans', () => {
     const path = rig.secrets.inspectPreparedImport(plan).destinations.find(item => item.tier === 'daemon')!.path;
     rig.afterRefresh(async () => {
       if (change === 'account-aba') {
-        rig.config.setDynamic('email.username', 'other@example.com'); rig.config.setDynamic('email.username', 'agent@example.com');
+        rig.config.setDynamic('surfaces.email.user', 'other@example.com'); rig.config.setDynamic('surfaces.email.user', 'agent@example.com');
       } else if (change === 'credential-aba') {
         await rig.secrets.set(GOOGLE_SECRET_KEYS.oauthRefreshToken, 'other-refresh-token');
         await rig.secrets.set(GOOGLE_SECRET_KEYS.oauthRefreshToken, 'synthetic-refresh-token');

@@ -51,8 +51,8 @@ test('generic explicitly enabled IMAP-only deps permit owned reads while sends r
   const f = fixture(false, { 'email.smtpPasswordRef': 'not-a-secret-reference', 'email.fromAddress': '' });
   expect(f.service.getInboxReadStatus().ready).toBe(true); expect(f.service.getStatus().ready).toBe(false);
   expect(f.service.getInboxReadStatus().config.smtpPasswordRef).toBe('[configured]');
-  expect(f.service.getStatus().errors).toContain('email.smtpHost is required');
-  expect(f.service.getStatus().errors).toContain('email.fromAddress is required');
+  expect(f.service.getStatus().errors).toContain('surfaces.email.smtp.host (or surfaces.email.host) is required');
+  expect(f.service.getStatus().errors).toContain('surfaces.email.from (or surfaces.email.user) is required');
   expect(f.service.getStatus().errors).toContain('email.smtpPasswordRef must be a goodvibes secret reference (goodvibes://secrets/...)');
   await expect(f.service.sendMail({ to: 'recipient@fixture.invalid', subject: 'Synthetic', body: 'Synthetic', confirm: true })).rejects.toThrow('config is invalid');
   expect(f.smtp()).toBe(0); expect(f.secrets()).toBe(0);

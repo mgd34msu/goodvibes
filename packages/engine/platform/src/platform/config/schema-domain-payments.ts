@@ -267,7 +267,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 10,
     description:
-      'How long you get to STOP an in-budget purchase, in minutes, starting once the final total is known and before payment. This is a VETO, not an approval: if you say nothing, the purchase GOES AHEAD. One word cancels it. The window always runs its full length wherever you are, no presence, focus or activity signal shortens it, and an explicit acknowledgement buys immediately.',
+      'How long you get to STOP an in-budget purchase, in minutes, starting once the final total is known and before payment. The notice is always in your owner inbox, and on the channels in payments.notifyChannels. This is a VETO, not an approval: if you say nothing, the purchase GOES AHEAD. One word (stop) cancels it. The window always runs its full length wherever you are, no presence, focus or activity signal shortens it, and an explicit acknowledgement buys immediately.',
     ...intRange(1, 1_440),
   },
   {
@@ -318,7 +318,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      "Comma-separated, ordered list of surfaces that receive approval and veto prompts and may answer them. Today only 'telegram' has a delivery path; 'tui' and 'agent-terminal' are rejected until the daemon can deliver a notice to a terminal window, because a channel you believe will reach you and does not is worse than none. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means an above-budget purchase has nowhere to ask and is refused, while an in-budget one proceeds unannounced.",
+      "Comma-separated, ordered list of channels that ALSO receive approval and veto prompts and may answer them. Every purchase notice, window and confirmation is always posted to your owner inbox (/questions in both terminal apps, and the web UI), where it can be answered, whatever this says; these channels reach you away from them. Today only 'telegram' has a delivery path. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means the owner inbox only: an in-budget purchase is announced there and waits its veto window, and an above-budget one is asked there.",
     validate: (value: unknown): boolean => {
       if (typeof value !== 'string') return false;
       if (value.trim().length === 0) return true;

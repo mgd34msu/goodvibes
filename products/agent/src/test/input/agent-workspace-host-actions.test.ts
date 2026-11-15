@@ -122,7 +122,7 @@ describe('inbox connect form', () => {
     imapPort: '993',
     smtpHost: 'smtp.example.test',
     smtpPort: '587',
-    smtpSecurity: 'auto',
+    smtpSecure: 'false',
     username: 'user@example.test',
     password: 'mailbox-password',
     fromAddress: 'user@example.test',
@@ -148,35 +148,35 @@ describe('inbox connect form', () => {
     const editor = createEmailConnectWizardEditor(null);
     // Prime the defaults so the "before" value is what a real config holds.
     await submitAgentWorkspaceEmailConnectWizardEditor(h, editor, ctx, reader({ ...VALID, confirm: 'no' }));
-    const before = cm.get('email.imapHost' as never);
+    const before = cm.get('surfaces.email.imap.host');
     await submitAgentWorkspaceEmailConnectWizardEditor(h, editor, ctx, reader({ ...VALID, smtpPort: '0' }));
     expect(h.lastActionResult?.kind).toBe('error');
     expect(h.localEditor).not.toBeNull();
-    expect(cm.get('email.imapHost' as never)).toBe(before);
-    expect(cm.get('email.imapHost' as never)).not.toBe('imap.example.test');
+    expect(cm.get('surfaces.email.imap.host')).toBe(before);
+    expect(cm.get('surfaces.email.imap.host')).not.toBe('imap.example.test');
   });
 
   test('the non-secret settings are written to a connected host that owns the email keys', async () => {
     const { ctx, cm } = contextAt(makeProjectTempDir('host-actions-email-routed'));
     const writes: { key: string; value: unknown }[] = [];
     installAgentDaemonConfigClient({
-      ownsKey: (key) => key.startsWith('email.'),
+      ownsKey: (key) => key.startsWith('surfaces.email.'),
       set: async (key, value) => { writes.push({ key, value }); },
       get: async () => undefined,
       snapshot: async () => null,
     });
     const h = host();
     await submitAgentWorkspaceEmailConnectWizardEditor(h, createEmailConnectWizardEditor(null), ctx, reader({ ...VALID, confirm: 'no' }));
-    const before = cm.get('email.imapHost' as never);
+    const before = cm.get('surfaces.email.imap.host');
     await submitAgentWorkspaceEmailConnectWizardEditor(h, createEmailConnectWizardEditor(null), ctx, reader(VALID), () => ({
       testConnection: async () => ({ ok: true }),
     }));
-    expect(writes.filter((w) => w.key === 'email.imapHost')).toEqual([{ key: 'email.imapHost', value: 'imap.example.test' }]);
-    expect(writes.some((w) => w.key === 'email.username' && w.value === 'user@example.test')).toBe(true);
-    expect(cm.get('email.imapHost' as never)).toBe(before);
+    expect(writes.filter((w) => w.key === 'surfaces.email.imap.host')).toEqual([{ key: 'surfaces.email.imap.host', value: 'imap.example.test' }]);
+    expect(writes.some((w) => w.key === 'surfaces.email.user' && w.value === 'user@example.test')).toBe(true);
+    expect(cm.get('surfaces.email.imap.host')).toBe(before);
   });
 
-  test('on a connected host the wizard enables the inbox on the host without a local password check', async () => {
+  test('on a connected host the wizard saves the mailbox on the host without a local password check', async () => {
     const { ctx, cm } = contextAt(makeProjectTempDir('host-actions-email-verify'));
     const hostConfig: Record<string, unknown> = {};
     const setNested = (key: string, value: unknown) => {
@@ -187,7 +187,7 @@ describe('inbox connect form', () => {
     };
     const writes: string[] = [];
     installAgentDaemonConfigClient({
-      ownsKey: (key) => key.startsWith('email.'),
+      ownsKey: (key) => key.startsWith('surfaces.email.'),
       set: async (key, value) => { writes.push(key); setNested(key, value); },
       get: async () => undefined,
       snapshot: async () => hostConfig,
@@ -205,20 +205,20 @@ describe('inbox connect form', () => {
       tested = true;
       return { testConnection: async () => ({ ok: false, stage: 'config', error: 'no secret by that name was found' }) };
     });
-    // No local verification that could never pass: enabled on the host, with the skipped check stated.
+    // No local verification that could never pass: saved on the host, with the skipped check stated.
     expect(tested).toBe(false);
     expect(h.localEditor).toBeNull();
     expect(h.lastActionResult?.kind).toBe('refreshed');
     expect(h.lastActionResult?.detail).toContain('not verified');
-    expect(writes).toContain('email.enabled');
-    expect(cm.get('email.enabled' as never)).not.toBe(true);
+    expect(writes).toContain('surfaces.email.imap.host');
+    expect(cm.get('surfaces.email.imap.host')).not.toBe('imap.example.test');
   });
 
-  test('a password that cannot be stored says what was stored and leaves the inbox disabled', async () => {
+  test('a password that cannot be stored says what was stored and leaves the settings as they were', async () => {
     const { ctx, cm } = contextAt(makeProjectTempDir('host-actions-email-throw'));
     const h = host();
     await submitAgentWorkspaceEmailConnectWizardEditor(h, createEmailConnectWizardEditor(null), ctx, reader({ ...VALID, confirm: 'no' }));
-    const before = cm.get('email.imapHost' as never);
+    const before = cm.get('surfaces.email.imap.host');
     (ctx.platform as unknown as { secretsManager: unknown }).secretsManager = {
       ...secrets,
       set: async () => { throw new Error('secret store unavailable'); },
@@ -228,8 +228,7 @@ describe('inbox connect form', () => {
     }));
     expect(h.lastActionResult?.kind).toBe('error');
     expect(h.status).toContain('secret store unavailable');
-    expect(cm.get('email.enabled' as never)).not.toBe(true);
-    expect(cm.get('email.imapHost' as never)).toBe(before);
-    expect(cm.get('email.imapHost' as never)).not.toBe('imap.example.test');
+    expect(cm.get('surfaces.email.imap.host')).toBe(before);
+    expect(cm.get('surfaces.email.imap.host')).not.toBe('imap.example.test');
   });
 });

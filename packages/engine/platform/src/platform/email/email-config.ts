@@ -43,7 +43,7 @@ function readSmtpSecurity(value: unknown): SmtpSecurityMode {
 }
 
 /**
- * `email.imapSecurity`, defaulting to TLS.
+ * The IMAP security answer (`surfaces.email.imap.secure`), defaulting to TLS.
  *
  * Anything unrecognised, including an absent value, which is what a config that
  * predates the key produces, reads as 'tls'. The safe direction for a value
@@ -60,21 +60,19 @@ function readImapSecurity(value: unknown): ImapSecurityMode {
  * A transport with no `connectImapPlain` cannot honour a plaintext request, and
  * is refused by name: silently handing back the TLS factory would open a TLS
  * handshake against a plain listener and report a protocol error from a port the
- * operator never asked to be encrypted. `setting` is the key the caller read the
- * security choice from, so the refusal names the setting the operator actually
- * has: `email.imapSecurity` for the mail tools, `surfaces.email.imap.secure`
- * for the inbound watcher.
+ * operator never asked to be encrypted. The refusal names the setting the
+ * operator has, `surfaces.email.imap.secure`.
  */
 export function imapSocketFactoryFor(
   transport: Pick<EmailTransportPort, 'connectImapTls' | 'connectImapPlain'>,
   security: ImapSecurityMode | undefined,
-  setting: 'email.imapSecurity' | 'surfaces.email.imap.secure' = 'email.imapSecurity',
+  setting = 'surfaces.email.imap.secure',
 ): EmailSocketFactory {
   if (security !== 'plaintext') return transport.connectImapTls;
   const plain = transport.connectImapPlain;
   if (!plain) {
     throw new Error(
-      `${setting} asks for a plaintext IMAP connection, and this email transport provides no `
+      `${setting} is false, which asks for a plaintext IMAP connection, and this email transport provides no `
       + 'connectImapPlain to open one. Use TLS, or run with a transport that can open a plaintext connection.',
     );
   }
@@ -121,8 +119,8 @@ const GOODVIBES_SECRET_PREFIX = 'goodvibes://secrets/goodvibes/';
 /**
  * A mail secret reference may only name a key that is about mail: `EMAIL`,
  * `MAIL`, `IMAP` or `SMTP` as an underscore-delimited word of the key. The
- * password is sent as the LOGIN password to whatever host `email.imapHost`
- * names, so a reference to an unrelated secret (a provider API key) would hand
+ * password is sent as the LOGIN password to whatever host the mailbox settings
+ * name, so a reference to an unrelated secret (a provider API key) would hand
  * that secret to any host a config points at.
  */
 const MAIL_KEY_WORD = /(^|_)(EMAIL|MAIL|IMAP|SMTP)(_|$)/i;
@@ -167,27 +165,27 @@ function isLoopbackMailHost(host: string): boolean {
 
 function validateConfiguration(config: EmailConfig, submission: boolean): string[] {
   const errors: string[] = [];
-  if (!config.imapHost) errors.push('email.imapHost is required');
+  if (!config.imapHost) errors.push('surfaces.email.imap.host (or surfaces.email.host) is required');
   if (config.imapHost && config.imapSecurity === 'plaintext' && !isLoopbackMailHost(config.imapHost)) {
     // The mailbox password is sent as typed; off this machine that is a password on the wire.
-    errors.push('email.imapSecurity is plaintext, which is only allowed for a loopback host (localhost, 127.x, ::1); use tls for a remote mail server');
+    errors.push('surfaces.email.imap.secure is false (a plaintext connection), which is only allowed for a loopback host (localhost, 127.x, ::1); set it to true for a remote mail server');
   }
-  if (submission && !config.smtpHost) errors.push('email.smtpHost is required');
-  if (!config.username) errors.push('email.username is required');
+  if (submission && !config.smtpHost) errors.push('surfaces.email.smtp.host (or surfaces.email.host) is required');
+  if (!config.username) errors.push('surfaces.email.user is required');
   if (!config.passwordRef) {
-    errors.push('email.passwordRef is required (must be a secret reference, not a raw password)');
+    errors.push('the mailbox password is required (surfaces.email.password, kept in the secret store, never in config)');
   } else {
-    const problem = secretRefProblem('email.passwordRef', config.passwordRef);
+    const problem = secretRefProblem('surfaces.email.password', config.passwordRef);
     if (problem) errors.push(problem);
   }
   // Optional: an empty value means "same password as IMAP", which is the common
   // case. A non-empty one is held to the same rule as passwordRef, a raw
   // password here would be a raw password in a settings file.
   if (submission && config.smtpPasswordRef.length > 0) {
-    const problem = secretRefProblem('email.smtpPasswordRef', config.smtpPasswordRef);
+    const problem = secretRefProblem('surfaces.email.smtp.password', config.smtpPasswordRef);
     if (problem) errors.push(problem);
   }
-  if (submission && !config.fromAddress) errors.push('email.fromAddress is required');
+  if (submission && !config.fromAddress) errors.push('surfaces.email.from (or surfaces.email.user) is required');
   return errors;
 }
 
@@ -244,7 +242,7 @@ export class EmailCredentialUnavailableError extends Error {
 export async function resolveEmailPassword(
   passwordRef: string,
   secretsManager: { readonly get: (key: string) => Promise<string | null> },
-  setting = 'email.passwordRef',
+  setting = 'surfaces.email.password',
 ): Promise<string> {
   // The store is asked for a KEY; it never parses references, so a reference of
   // any other form could only ever be reported as a missing secret.

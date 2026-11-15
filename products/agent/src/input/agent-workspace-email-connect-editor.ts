@@ -14,20 +14,21 @@
  * Order of a save: every field is validated first (no writes); then, where
  * this terminal holds the password, the connection is tested with the typed
  * values held in memory; only a validated (and, where possible, verified)
- * set is written, the password reference with the plain values, and
- * `email.enabled` last. A refused or failed save leaves the stored
- * configuration as it was. Validation and persistence reuse the helpers the
- * /email set command uses, one storage path, not a fork.
+ * set is written: the password first, then the plain values. A refused or
+ * failed save leaves the stored configuration as it was. Validation and
+ * persistence reuse the helpers the /email set command uses (email-settings.ts),
+ * one storage path, not a fork, and the keys are `surfaces.email.*`, the
+ * mailbox the daemon reads.
  */
 import type { CommandContext } from './command-registry.ts';
 import { isAffirmative } from './agent-workspace-editors.ts';
-import { EmailService, ensureEmailConfigDefaults, readEmailConfig, type EmailConnectionTestResult } from '@goodvibes-jev/engine/platform/platform/email';
+import { EmailService, type EmailConnectionTestResult } from '@goodvibes-jev/engine/platform/platform/email';
+import { daemonSecretKeyFor } from '@goodvibes-jev/engine/platform/platform/config';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { describeSenderClaim } from '../agent/untrusted-content.ts';
 import { requireSecretsManager } from './commands/runtime-services.ts';
 import { agentDaemonConfigClient, openEffectiveConfigView, routeConfigWrite } from '../config/daemon-config-routing.ts';
-import { persistEmailConfigField, validateEmailConfigFieldValue } from './commands/email-runtime.ts';
-import { buildGoodVibesSecretRef } from '../config/secret-config.ts';
+import { MAILBOX_FIELDS, mailboxServiceDeps, persistMailboxField, readMailboxStatus, validateMailboxFieldValue, type MailboxField } from './commands/email-settings.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 import type { AgentWorkspaceActionResult, AgentWorkspaceEmailConnectStatus, AgentWorkspaceLocalEditor, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 
@@ -46,7 +47,8 @@ export interface AgentWorkspaceEmailConnectPrefill {
   readonly imapPort: number;
   readonly smtpHost: string;
   readonly smtpPort: number;
-  readonly smtpSecurity: string;
+  /** True: implicit TLS (465). False: STARTTLS (587). */
+  readonly smtpSecure: boolean;
   readonly username: string;
   readonly fromAddress: string;
   /** A password reference is stored; a blank password field keeps it. */
@@ -57,18 +59,17 @@ export interface AgentWorkspaceEmailConnectPrefill {
 export function readAgentWorkspaceEmailConnectPrefill(context: CommandContext | null): AgentWorkspaceEmailConnectPrefill | null {
   if (!context) return null;
   try {
-    ensureEmailConfigDefaults(context.platform.configManager);
     const cm = context.platform.configManager as unknown as { get: (key: string) => unknown };
-    const config = readEmailConfig((key) => cm.get(key));
+    const { settings, passwordStored } = readMailboxStatus((key) => cm.get(key));
     return {
-      imapHost: config.imapHost,
-      imapPort: config.imapPort,
-      smtpHost: config.smtpHost,
-      smtpPort: config.smtpPort,
-      smtpSecurity: config.smtpSecurity,
-      username: config.username,
-      fromAddress: config.fromAddress,
-      hasStoredPassword: config.passwordRef.length > 0,
+      imapHost: settings.imapHost ?? '',
+      imapPort: settings.imapPort,
+      smtpHost: settings.smtpHost ?? '',
+      smtpPort: settings.smtpPort,
+      smtpSecure: settings.smtpSecure,
+      username: settings.username ?? '',
+      fromAddress: settings.fromAddress ?? '',
+      hasStoredPassword: passwordStored,
     };
   } catch {
     return null;
@@ -96,8 +97,8 @@ export function createEmailConnectWizardEditor(
       { id: 'imapHost', label: 'IMAP host', value: stored?.imapHost || status?.imapHost || '', required: true, multiline: false, hint: 'For example imap.gmail.com.' },
       { id: 'imapPort', label: 'IMAP port', value: String(stored?.imapPort ?? 993), required: true, multiline: false, hint: 'Default 993 (implicit TLS).' },
       { id: 'smtpHost', label: 'SMTP host', value: stored?.smtpHost ?? '', required: true, multiline: false, hint: 'For example smtp.gmail.com.' },
-      { id: 'smtpPort', label: 'SMTP port', value: String(stored?.smtpPort ?? 587), required: true, multiline: false, hint: 'Default 587 (STARTTLS) or 465 (TLS).' },
-      { id: 'smtpSecurity', label: 'SMTP security', value: stored?.smtpSecurity || 'auto', required: true, multiline: false, hint: 'tls, starttls, or auto (port-based).' },
+      { id: 'smtpPort', label: 'SMTP port', value: String(stored?.smtpPort ?? 465), required: true, multiline: false, hint: '465 (implicit TLS) or 587 (STARTTLS).' },
+      { id: 'smtpSecure', label: 'SMTP implicit TLS', value: String(stored?.smtpSecure ?? true), required: true, multiline: false, hint: 'true for port 465 (implicit TLS), false for port 587 (STARTTLS).' },
       { id: 'username', label: 'Username', value: stored?.username || status?.username || '', required: true, multiline: false, hint: 'Mailbox login, usually your email address.' },
       {
         id: 'password',
@@ -116,24 +117,28 @@ export function createEmailConnectWizardEditor(
   };
 }
 
-/** Field ids that persistEmailConfigField expects, in order, 'password' input maps to the 'passwordRef' config field. */
-const FIELD_TO_EMAIL_KEY: Record<string, string> = {
-  imapHost: 'imapHost',
-  imapPort: 'imapPort',
-  smtpHost: 'smtpHost',
-  smtpPort: 'smtpPort',
-  smtpSecurity: 'smtpSecurity',
-  username: 'username',
-  fromAddress: 'fromAddress',
+/** Form field id to the mailbox field it stores; the password is stored on its own, first. */
+const FIELD_TO_MAILBOX_FIELD: Readonly<Record<string, MailboxField>> = {
+  imapHost: 'imap.host',
+  imapPort: 'imap.port',
+  smtpHost: 'smtp.host',
+  smtpPort: 'smtp.port',
+  smtpSecure: 'smtp.secure',
+  username: 'user',
+  fromAddress: 'from',
 };
+
+/** The name the mailbox password is stored under, the one every mail reader looks under. */
+const MAILBOX_PASSWORD_SECRET_KEY = daemonSecretKeyFor(MAILBOX_FIELDS.password);
 
 export type EmailConnectionTester = (
   getConfig: (key: string) => unknown,
   secretsManager: { readonly get: (key: string) => Promise<string | null> },
 ) => { testConnection(): Promise<EmailConnectionTestResult> };
 
+/** `getConfig` answers the `surfaces.email.*` settings; the service reads them through the mailbox adapter. */
 const defaultTester: EmailConnectionTester = (getConfig, secretsManager) =>
-  new EmailService({
+  new EmailService(mailboxServiceDeps({
     getConfig,
     secretsManager,
     // The real sockets, and this product's own sender-claim wording. The
@@ -141,7 +146,7 @@ const defaultTester: EmailConnectionTester = (getConfig, secretsManager) =>
     // phrasing of a trust boundary belongs to the surface that renders it.
     transport: nodeEmailTransport,
     describeSenderClaim,
-  });
+  }));
 
 export async function submitAgentWorkspaceEmailConnectWizardEditor(
   host: AgentWorkspaceEmailConnectEditorHost,
@@ -165,9 +170,9 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
 
   // 1. Validate every field before anything is written.
   const candidate = new Map<string, unknown>();
-  for (const [fieldId, emailKey] of Object.entries(FIELD_TO_EMAIL_KEY)) {
+  for (const [fieldId, field] of Object.entries(FIELD_TO_MAILBOX_FIELD)) {
     const raw = readField(fieldId).trim();
-    const checked = validateEmailConfigFieldValue(emailKey, raw);
+    const checked = validateMailboxFieldValue(field, raw);
     if (!raw || !checked.ok) {
       const error = !raw ? `${fieldId} is required.` : (checked as { readonly error: string }).error;
       host.localEditor = { ...editor, message: `Nothing was saved: ${error} Correct the field and press Enter.` };
@@ -175,7 +180,7 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
       host.lastActionResult = { kind: 'error', title: 'Inbox settings invalid', detail: `Nothing was saved: ${error}`, safety: 'safe' };
       return;
     }
-    candidate.set(`email.${emailKey}`, checked.value);
+    candidate.set(MAILBOX_FIELDS[field], checked.value);
   }
   const password = readField('password');
   const keepStoredPassword = password.length === 0;
@@ -186,13 +191,12 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
   const written: string[] = [];
   try {
     const secretsManager = requireSecretsManager(context);
-    ensureEmailConfigDefaults(configManager);
     const cm = configManager as unknown as {
       get: (key: string) => unknown;
       setDynamic: (key: string, value: unknown) => void;
       save: () => void;
     };
-    if (keepStoredPassword && !String(cm.get('email.passwordRef') ?? '')) {
+    if (keepStoredPassword && !readMailboxStatus((key) => cm.get(key)).passwordStored) {
       host.localEditor = { ...editor, message: 'Nothing was saved: a password is required because none is stored yet.' };
       host.status = 'Inbox password required; nothing was saved.';
       return;
@@ -200,20 +204,16 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
 
     // On a connected host the mailbox password lives only on the host, so this
     // terminal cannot test the connection; it stores the validated set there.
-    const hostHoldsPassword = agentDaemonConfigClient()?.ownsKey('email.passwordRef') === true;
+    const hostHoldsPassword = agentDaemonConfigClient()?.ownsKey(MAILBOX_FIELDS.password) === true;
     if (!hostHoldsPassword) {
       // 2. Test with the typed values held in memory: the candidate password is
-      // served from memory under a mail key, nothing touches the store.
+      // served from memory under the mailbox password's name, nothing touches the store.
       const view = await openEffectiveConfigView(configManager, homeDir ? { homeDir } : {});
-      const candidateKey = 'GOODVIBES_EMAIL_CONNECT_CANDIDATE_PASSWORD';
-      const candidateRef = buildGoodVibesSecretRef(candidateKey);
-      const readCandidate = (key: string): unknown => {
-        if (key === 'email.passwordRef' && !keepStoredPassword) return candidateRef;
-        if (key === 'email.enabled') return true;
-        return candidate.has(key) ? candidate.get(key) : view.get(key);
-      };
+      const readCandidate = (key: string): unknown => (candidate.has(key) ? candidate.get(key) : view.get(key));
       const candidateSecrets = {
-        get: (key: string): Promise<string | null> => key === candidateKey ? Promise.resolve(password) : secretsManager.get(key),
+        get: (key: string): Promise<string | null> => (key === MAILBOX_PASSWORD_SECRET_KEY && !keepStoredPassword
+          ? Promise.resolve(password)
+          : secretsManager.get(key)),
       };
       const test = await buildTester(readCandidate, candidateSecrets).testConnection();
       if (!test.ok) {
@@ -228,20 +228,17 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     }
 
     // 3. Write the validated set: the password first (the secret store is the
-    // write most likely to refuse, and then nothing else has changed), the
-    // plain values, then `email.enabled` last, so the inbox is enabled only on
-    // a complete set.
+    // write most likely to refuse, and then nothing else has changed), then the
+    // plain values. The mailbox is in use once the set is complete.
     if (!keepStoredPassword) {
-      const stored = await persistEmailConfigField(cm, secretsManager, 'passwordRef', password);
+      const stored = await persistMailboxField(cm, secretsManager, 'password', password);
       if (!stored.ok) throw new Error(stored.error ?? 'Could not store the password.');
-      written.push('email.passwordRef');
+      written.push(MAILBOX_FIELDS.password);
     }
     for (const [key, value] of candidate) {
       await writeRouted(key, value);
       written.push(key);
     }
-    await writeRouted('email.enabled', true);
-    written.push('email.enabled');
     cm.save();
 
     host.localEditor = null;
@@ -251,7 +248,7 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
       host.lastActionResult = {
         kind: 'refreshed',
         title: 'Inbox settings saved',
-        detail: `The mailbox settings for ${readField('username')} were saved on the connected host and the inbox was enabled. The IMAP/SMTP connection was not verified from this terminal: the password is stored on the host. Run /email status to see the inbox state.`,
+        detail: `The mailbox settings for ${readField('username')} were saved on the connected host. The IMAP/SMTP connection was not verified from this terminal: the password is stored on the host. Run /email status to see the inbox state.`,
         safety: 'safe',
       };
       return;
@@ -268,7 +265,7 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     // A transport or store failure part-way: say exactly what is stored.
     const detail = written.length === 0
       ? `Nothing was saved: ${reason}`
-      : `Saving stopped part-way: ${reason} Stored: ${written.join(', ')}. The inbox was not enabled. Press Enter to save the whole set again.`;
+      : `Saving stopped part-way: ${reason} Stored: ${written.join(', ')}. The set is incomplete. Press Enter to save the whole set again.`;
     host.localEditor = { ...editor, message: detail };
     host.status = detail;
     host.lastActionResult = { kind: 'error', title: 'Inbox connect failed', detail, safety: 'safe' };

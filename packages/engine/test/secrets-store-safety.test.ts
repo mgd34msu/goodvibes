@@ -218,7 +218,7 @@ describe('credential keys', () => {
   // Declared credentials that are deliberately not routed through the secret store by the
   // platform's own set: references by design, or written by a dedicated flow.
   const NOT_ROUTED: ReadonlySet<string> = new Set([
-    'email.passwordRef', 'email.smtpPasswordRef', 'calendar.google.clientSecretRef', 'calendar.microsoft.clientSecretRef',
+    'calendar.google.clientSecretRef', 'calendar.microsoft.clientSecretRef',
     'calendar.google.icsUrl', 'google.oauth.refreshToken',
     'cloudflare.apiTokenRef', 'cloudflare.workerTokenRef', 'cloudflare.workerClientTokenRef',
     'cloudflare.tunnelTokenRef', 'cloudflare.accessServiceTokenRef',

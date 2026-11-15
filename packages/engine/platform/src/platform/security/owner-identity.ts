@@ -28,9 +28,8 @@
  *
  * ── Where the identity comes from, and what it would take to spoof ────────
  *
- * ONLY from configuration the owner set, read through an injected reader:
- * `email.fromAddress`, `email.username`, and the daemon's own
- * `surfaces.email.from` / `.user` / `.username`.
+ * ONLY from configuration the owner set, read through an injected reader: the
+ * mailbox's `surfaces.email.from` and `surfaces.email.user`.
  *
  * Never from anything a message can influence, not a `From:` header, not
  * `Reply-To:`, not delivery evidence, not the ledger, not the body. A
@@ -60,8 +59,6 @@ export type OwnerConfigReader = (key: string) => unknown;
  * the daemon tier rather than from whichever surface happened to be running.
  */
 export const OWNER_ADDRESS_CONFIG_KEYS: readonly string[] = [
-  'email.fromAddress',
-  'email.username',
   'surfaces.email.from',
   'surfaces.email.user',
 ];

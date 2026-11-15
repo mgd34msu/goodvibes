@@ -33,14 +33,14 @@ import {
 } from '../../config/credential-scope.ts';
 import { CalendarSubscriptionRegistry } from '../../agent/calendar-subscription-registry.ts';
 import { CalendarOAuthService, daemonScopedSecrets } from '../../agent/calendar/calendar-oauth-service.ts';
-import { persistEmailConfigField } from '../../input/commands/email-runtime.ts';
+import { persistMailboxField } from '../../input/commands/email-settings.ts';
 import { setSecretBackedSettingValue } from '../../input/settings-modal-secrets.ts';
 import { resetHarnessSetting, setHarnessSetting } from '../../agent/harness-control.ts';
 import { handleSecrets } from '../../cli/management-commands.ts';
 import type { CliCommandRuntime } from '../../cli/management.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';
 
-const EMAIL_PASSWORD_SECRET_KEY = 'GOODVIBES_EMAIL_PASSWORD_REF';
+const EMAIL_PASSWORD_SECRET_KEY = 'GOODVIBES_SURFACES_EMAIL_PASSWORD';
 
 /**
  * A config manager stand-in that behaves the way the real one does for the two
@@ -100,16 +100,16 @@ describe('a credential captured in the agent survives the agent closing', () => 
   test('the mailbox password entered here is readable when only the daemon is left', async () => {
     const config = makeConfigStub();
 
-    const storedRef = await persistEmailConfigField(
-      config as unknown as Parameters<typeof persistEmailConfigField>[0],
-      agentSecrets as unknown as Parameters<typeof persistEmailConfigField>[1],
-      'passwordRef',
+    const storedRef = await persistMailboxField(
+      config as unknown as Parameters<typeof persistMailboxField>[0],
+      agentSecrets as unknown as Parameters<typeof persistMailboxField>[1],
+      'password',
       'the-app-password',
     );
 
     expect(storedRef.ok).toBe(true);
     // The config side holds a reference and never the password itself.
-    expect(config.written.get('email.passwordRef')).toBe(`goodvibes://secrets/goodvibes/${EMAIL_PASSWORD_SECRET_KEY}`);
+    expect(config.written.get('surfaces.email.password')).toBe(`goodvibes://secrets/goodvibes/${EMAIL_PASSWORD_SECRET_KEY}`);
 
     // The whole point: a process with none of this surface's directories reads it.
     expect(await daemonReader.get(EMAIL_PASSWORD_SECRET_KEY)).toBe('the-app-password');
@@ -307,10 +307,10 @@ describe('the scope each credential path asks for', () => {
     const store = recorder();
     const config = makeConfigStub();
 
-    await persistEmailConfigField(
-      config as unknown as Parameters<typeof persistEmailConfigField>[0],
-      store as unknown as Parameters<typeof persistEmailConfigField>[1],
-      'passwordRef',
+    await persistMailboxField(
+      config as unknown as Parameters<typeof persistMailboxField>[0],
+      store as unknown as Parameters<typeof persistMailboxField>[1],
+      'password',
       'a-password',
     );
 

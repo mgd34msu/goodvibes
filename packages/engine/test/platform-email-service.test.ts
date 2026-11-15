@@ -90,10 +90,10 @@ describe('validateEmailConfig', () => {
 
   test('rejects missing required fields', () => {
     const base = readEmailConfig((k) => makeConfig()[k]);
-    expect(validateEmailConfig({ ...base, imapHost: '' })).toContain('email.imapHost is required');
-    expect(validateEmailConfig({ ...base, smtpHost: '' })).toContain('email.smtpHost is required');
-    expect(validateEmailConfig({ ...base, username: '' })).toContain('email.username is required');
-    expect(validateEmailConfig({ ...base, fromAddress: '' })).toContain('email.fromAddress is required');
+    expect(validateEmailConfig({ ...base, imapHost: '' })).toContain('surfaces.email.imap.host (or surfaces.email.host) is required');
+    expect(validateEmailConfig({ ...base, smtpHost: '' })).toContain('surfaces.email.smtp.host (or surfaces.email.host) is required');
+    expect(validateEmailConfig({ ...base, username: '' })).toContain('surfaces.email.user is required');
+    expect(validateEmailConfig({ ...base, fromAddress: '' })).toContain('surfaces.email.from (or surfaces.email.user) is required');
   });
 
   test('rejects raw password in passwordRef', () => {
@@ -105,7 +105,7 @@ describe('validateEmailConfig', () => {
   test('rejects empty passwordRef', () => {
     const base = readEmailConfig((k) => makeConfig()[k]);
     const errors = validateEmailConfig({ ...base, passwordRef: '' });
-    expect(errors.some((e) => e.includes('email.passwordRef is required'))).toBe(true);
+    expect(errors.some((e) => e.includes('the mailbox password is required'))).toBe(true);
   });
 });
 
@@ -133,7 +133,7 @@ describe('resolveEmailPassword', () => {
         return 'env-password';
       },
     };
-    await expect(resolveEmailPassword('op://Private/Email/password', secrets)).rejects.toThrow('email.passwordRef');
+    await expect(resolveEmailPassword('op://Private/Email/password', secrets)).rejects.toThrow('surfaces.email.password');
     expect(calls).toEqual([]);
   });
 
@@ -152,7 +152,7 @@ describe('resolveEmailPassword', () => {
     // Terminal: waiting does not make a secret appear.
     expect(notice?.terminal).toBe(true);
     // The owner is told the step, and which store was actually consulted.
-    expect(notice?.ownerMessage).toContain('email.passwordRef');
+    expect(notice?.ownerMessage).toContain('surfaces.email.password');
     expect(notice?.ownerMessage).toContain('daemon scope');
     // ...including that another surface's store is not searched, because doing
     // so would work on one machine and fail on every other.

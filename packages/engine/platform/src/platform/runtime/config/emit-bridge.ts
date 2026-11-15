@@ -85,6 +85,9 @@ const NON_SCHEMA_PATH_SECRET: Readonly<Record<DaemonOwnedNonSchemaConfigPath, bo
   'conversationGate.gatedSurfaces': false,
   'cluster.peers': false,
   'cluster.groupMaterial': true,
+  'google.oauth.refreshToken': true,
+  'email.passwordRef': true,
+  'email.smtpPasswordRef': true,
 };
 
 export interface ConfigEmitBridgeDeps {

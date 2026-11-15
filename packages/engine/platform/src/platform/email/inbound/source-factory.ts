@@ -283,7 +283,7 @@ function sourceIdentity(deps: InboundMailSourceFactoryDeps): string {
 export function createInboundMailSourceFactory(
   deps: InboundMailSourceFactoryDeps,
 ): InboundMailSourceFactory {
-  const secrets = createSurfaceEmailSecretReader(deps.secrets);
+  const secrets = createSurfaceEmailSecretReader(deps.secrets, deps.getConfig);
   const identity = sourceIdentity(deps);
   return {
     async create(input): Promise<InboundMailSource | null> {

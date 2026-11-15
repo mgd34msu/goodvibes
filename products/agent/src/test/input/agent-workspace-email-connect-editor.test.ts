@@ -63,7 +63,7 @@ function readPersistedSettings(root: string): string {
   const candidates = [
     join(root, '.goodvibes', 'global-tui', 'settings.json'),
     join(root, '.goodvibes', 'global-tui', 'user-settings.json'),
-    // email.* is daemon-owned, so the daemon store is where the reference lands.
+    // The mailbox settings are daemon-owned, so the daemon store is where the reference lands.
     join(root, '.goodvibes', 'daemon', 'settings.json'),
   ];
   return candidates.filter((f) => existsSync(f)).map((f) => readFileSync(f, 'utf-8')).join('');
@@ -78,7 +78,7 @@ const VALID_FIELDS: Record<string, string> = {
   imapPort: '993',
   smtpHost: 'smtp.example.test',
   smtpPort: '587',
-  smtpSecurity: 'auto',
+  smtpSecure: 'false',
   username: 'user@example.test',
   password: RAW_PASSWORD,
   fromAddress: 'user@example.test',
@@ -95,7 +95,7 @@ describe('createEmailConnectWizardEditor', () => {
     expect(editor.kind).toBe('email-connect-wizard');
     expect(editor.message).toContain('secret manager');
     const ids = editor.fields.map((f) => f.id);
-    expect(ids).toEqual(['imapHost', 'imapPort', 'smtpHost', 'smtpPort', 'smtpSecurity', 'username', 'password', 'fromAddress', 'confirm']);
+    expect(ids).toEqual(['imapHost', 'imapPort', 'smtpHost', 'smtpPort', 'smtpSecure', 'username', 'password', 'fromAddress', 'confirm']);
     const passwordField = editor.fields.find((f) => f.id === 'password');
     expect(passwordField?.redact).toBe(true);
     expect(passwordField?.value).toBe('');
@@ -108,7 +108,7 @@ describe('createEmailConnectWizardEditor', () => {
   });
 
   test('unconfigured status: honest "Not connected" wording, not a dead description', () => {
-    const editor = createEmailConnectWizardEditor({ connected: false, username: '', imapHost: '', errors: ['email.imapHost is required'] });
+    const editor = createEmailConnectWizardEditor({ connected: false, username: '', imapHost: '', errors: ['surfaces.email.imap.host (or surfaces.email.host) is required'] });
     expect(editor.message).toContain('Not connected');
     expect(editor.message).toContain('connect your inbox');
   });
@@ -160,7 +160,7 @@ describe('submitAgentWorkspaceEmailConnectWizardEditor', () => {
     expect(persisted).not.toContain(RAW_PASSWORD);
   });
 
-  test('successful connection: stores the real secret via secretsManager, persists non-secret fields, enables email, never logs the raw password', async () => {
+  test('successful connection: stores the real secret via secretsManager, persists non-secret fields, never logs the raw password', async () => {
     const { store, manager } = makeMemorySecretsManager();
     const context = makeContext(tmpDir, manager);
     const host = makeHost();
@@ -179,17 +179,17 @@ describe('submitAgentWorkspaceEmailConnectWizardEditor', () => {
     // The raw password reached the secrets manager (real store, not a config write)
     expect([...store.values()]).toContain(RAW_PASSWORD);
 
-    // email.enabled flipped true only after a verified connection
+    // The mailbox settings were written only after a verified connection
     const cm = context.platform.configManager as unknown as { get: (k: string) => unknown };
-    expect(cm.get('email.enabled')).toBe(true);
-    expect(cm.get('email.imapHost')).toBe('imap.example.test');
+    expect(cm.get('surfaces.email.imap.host')).toBe('imap.example.test');
+    expect(cm.get('surfaces.email.smtp.secure')).toBe(false);
 
     // The raw password never appears in the persisted settings file, the
     // workspace status line, or the rendered action result.
     const persisted = readPersistedSettings(tmpDir);
     expect(persisted).not.toContain(RAW_PASSWORD);
     // The daemon store holds the secret reference, proving the guard reads the file the value lands in.
-    const passwordRef = cm.get('email.passwordRef');
+    const passwordRef = cm.get('surfaces.email.password');
     expect(typeof passwordRef === 'string' && passwordRef.startsWith('goodvibes://secrets/')).toBe(true);
     expect(persisted).toContain(passwordRef as string);
     expect(host.status).not.toContain(RAW_PASSWORD);
@@ -217,10 +217,9 @@ describe('submitAgentWorkspaceEmailConnectWizardEditor', () => {
     expect(JSON.stringify(host.lastActionResult)).not.toContain(RAW_PASSWORD);
 
     const cm = context.platform.configManager as unknown as { get: (k: string) => unknown };
-    expect(cm.get('email.enabled')).not.toBe(true);
     // A failed test stores nothing: a working configuration is never replaced by a broken one.
-    expect(cm.get('email.imapHost')).not.toBe('imap.example.test');
-    expect(cm.get('email.passwordRef')).toBeFalsy();
+    expect(cm.get('surfaces.email.imap.host')).not.toBe('imap.example.test');
+    expect(cm.get('surfaces.email.password')).toBeFalsy();
     expect(host.localEditor).not.toBeNull();
   });
 });

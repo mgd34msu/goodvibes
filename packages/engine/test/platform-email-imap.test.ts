@@ -1226,7 +1226,7 @@ describe('ImapClient open() reports capability, and names its failures', () => {
     expect(notice?.reason).toBe('authentication-rejected');
     expect(notice?.terminal).toBe(true);
     expect(notice?.mailbox).toBe('Alias-42');
-    expect(notice?.ownerMessage).toContain('email.passwordRef');
+    expect(notice?.ownerMessage).toContain('surfaces.email.password');
     expect(notice?.ownerMessage).toContain('daemon scope');
     expect(notice?.ownerMessage).toContain('not retried');
     expect(notice?.serverMessage).toBe('');

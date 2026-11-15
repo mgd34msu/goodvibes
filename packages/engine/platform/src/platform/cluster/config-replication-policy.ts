@@ -72,15 +72,14 @@ export const REPLICATED_CONFIG_DOMAINS: readonly string[] = [
   // the secret store. Spend remains in the leader's local ledger; only the
   // elected payments leader may act. See docs/payments.md §5.1.
   'payments.',
-  // The operator's mailbox and calendar belong to the operator, not to the
-  // machine that happens to be holding the surface this minute. A node that
-  // takes over a handover has to be able to read and send as them, or the
-  // handover moves the responsibility without the means to meet it.
+  // The operator's calendar belongs to the operator, not to the machine that
+  // happens to be holding the surface this minute (the mailbox replicates with
+  // `surfaces.`). A node that takes over a handover has to be able to read as
+  // them, or the handover moves the responsibility without the means to meet it.
   //
   // These are credential pointers, so what crosses the wire is the credential
   // itself: it lands in the receiving node's daemon tier, which is the one
   // home that does not depend on which directory the daemon started in.
-  'email.',
   'calendar.',
   'google.oauth.',
   // How the owner profile behaves, whether it is loaded, whether facts are
@@ -180,6 +179,11 @@ const NODE_LOCAL_CONFIG_KEYS: readonly string[] = [
   // own pass. Replicating the marker would tell it the work was done and leave
   // the credentials sitting in the clear where nobody looks again.
   'google.credentials.migratedFrom',
+  // The mailbox password references earlier builds kept under `email.*`. Each
+  // node copies its own stored secret to the mailbox password's name at start
+  // (email/carried-mail-password.ts), and that name replicates with `surfaces.`.
+  'email.passwordRef',
+  'email.smtpPasswordRef',
   // How many daemon-hosted conversation loops THIS machine may hold at once.
   // Each one is a composed runtime with a model stack, a tool registry and a
   // transcript in memory, so the right number on a laptop and the right number

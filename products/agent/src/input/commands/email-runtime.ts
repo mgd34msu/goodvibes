@@ -3,22 +3,23 @@
  *
  * Subcommands:
  *   status                                        Show config readiness (redacted, no secrets)
- *   config                                        Show current email config (keys redacted)
- *   set <key> <value> [--yes]                     Set an email config key; --yes required for passwordRef
+ *   config                                        Show current mailbox settings (password redacted)
+ *   set <field> <value> [--yes]                   Set a mailbox setting; --yes required for the password
  *   check [n]                                     List up to n unread inbox summaries (default 10);
  *                                                  includes a 2-line body preview of the newest message
  *   send <to> <subject words> -- <body words> --yes  Send a plain-text email; preview without --yes
  *
- * Settable keys:
- *   email.enabled, email.imapHost, email.imapPort, email.smtpHost, email.smtpPort,
- *   email.smtpSecurity, email.username, email.passwordRef (requires --yes), email.fromAddress
+ * Settable fields (email-settings.ts), each a `surfaces.email.*` setting, the
+ * mailbox the daemon reads too:
+ *   host, imap.host, imap.port, imap.secure, imap.mailbox, smtp.host, smtp.port,
+ *   smtp.secure, user, from, password (requires --yes)
  *
  * Safety policy:
  *   - All inbox reads use EXAMINE (read-only); unread status is never modified.
  *   - Sending requires explicit --yes; previews are shown without it.
- *   - No credential values are ever printed; passwordRef is displayed as [configured].
- *   - email.passwordRef is always stored as a goodvibes:// secret reference; the raw value
- *     is passed to SecretsManager and never written to settings.json.
+ *   - No credential values are ever printed; the password is displayed as [stored].
+ *   - The password goes to the secret store; settings.json holds only a
+ *     goodvibes:// reference.
  */
 
 import type { CommandRegistry } from '../command-registry.ts';
@@ -26,27 +27,17 @@ import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.
 import { describeSenderClaim, type DisplayedSenderConfidence } from '../../agent/untrusted-content.ts';
 import type { CommandContext } from '../command-registry.ts';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
-import { EmailService, readEmailConfig, validateEmailConfig, ensureEmailConfigDefaults } from '@goodvibes-jev/engine/platform/platform/email';
+import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { requireSecretsManager } from './runtime-services.ts';
-import type { ConfigKey } from '../../config/index.ts';
-import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
-
-/**
- * Whitelist of settable email config fields (without the 'email.' prefix).
- * Reject any key not in this set to prevent accidental writes to unknown paths.
- */
-const KNOWN_EMAIL_FIELDS = new Set([
-  'enabled',
-  'imapHost',
-  'imapPort',
-  'smtpHost',
-  'smtpPort',
-  'smtpSecurity',
-  'username',
-  'passwordRef',
-  'fromAddress',
-]);
+import {
+  MAILBOX_FIELDS,
+  MAILBOX_FIELD_LIST,
+  mailboxServiceDeps,
+  persistMailboxField,
+  readMailboxStatus,
+  resolveMailboxField,
+} from './email-settings.ts';
 
 /**
  * Header and body text comes from the sender. Control characters (newlines, escape
@@ -64,125 +55,14 @@ function readLimitArg(arg: string | undefined, fallback: number): number {
 }
 
 function getConfigManager(ctx: CommandContext): { get: (key: string) => unknown } {
-  ensureEmailConfigDefaults(ctx.platform.configManager);
   return ctx.platform.configManager as unknown as { get: (key: string) => unknown };
-}
-
-/** Config manager surface needed to persist one email field. Matches ctx.platform.configManager. */
-export interface EmailConfigManagerLike {
-  get: (key: string) => unknown;
-  setDynamic: (key: string, value: unknown) => void;
-}
-
-/**
- * SecretsManager surface needed to store the raw password. The real
- * ctx.platform.secretsManager (platform SecretsManager) has more methods;
- * persistSecretBackedConfigValue is called through an opaque cast, matching
- * the existing /email set pattern.
- */
-export interface EmailSecretsManagerLike {
-  readonly get: (key: string) => Promise<string | null>;
-}
-
-export interface PersistEmailConfigFieldResult {
-  readonly ok: boolean;
-  readonly error?: string;
-  readonly configKey?: string;
-  /** Set only for the passwordRef field, the stored goodvibes:// reference (never the raw value). */
-  readonly secretRef?: string;
-}
-
-/**
- * The stored form of one non-secret `email.<field>` value, or why it is not
- * valid. Pure: no write, no I/O, so a form can check every field before it
- * stores any of them.
- */
-export function validateEmailConfigFieldValue(
-  fieldName: string,
-  rawValue: string,
-): { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: string } {
-  if (fieldName === 'imapPort' || fieldName === 'smtpPort') {
-    const n = parseInt(rawValue, 10);
-    if (!isFinite(n) || n < 1 || n > 65535) {
-      return { ok: false, error: `Invalid port number: ${rawValue}. Must be an integer between 1 and 65535.` };
-    }
-    return { ok: true, value: n };
-  }
-  if (fieldName === 'smtpSecurity') {
-    if (rawValue !== 'tls' && rawValue !== 'starttls' && rawValue !== 'auto') {
-      return { ok: false, error: `Invalid smtpSecurity value: "${rawValue}". Valid values: tls, starttls, auto.` };
-    }
-    return { ok: true, value: rawValue };
-  }
-  if (fieldName === 'enabled') {
-    const lower = rawValue.toLowerCase();
-    if (lower === 'true' || lower === '1' || lower === 'yes') return { ok: true, value: true };
-    if (lower === 'false' || lower === '0' || lower === 'no') return { ok: true, value: false };
-    return { ok: false, error: `Invalid boolean value: ${rawValue}. Use true or false.` };
-  }
-  return { ok: true, value: rawValue };
-}
-
-/**
- * Persist one `email.<field>` config value through the single reviewed path:
- * non-secret fields go through cm.setDynamic after per-field validation; the
- * password field (fieldName 'passwordRef', rawValue is the RAW password) is
- * routed through persistSecretBackedConfigValue so only a goodvibes:// secret
- * reference ever reaches settings.json. Never logs or returns the raw value.
- *
- * Reused by both the /email set CLI subcommand (handleSet, below) and the
- * Agent workspace connect wizard editor, one persistence path, no fork.
- */
-export async function persistEmailConfigField(
-  cm: EmailConfigManagerLike,
-  secretsManager: EmailSecretsManagerLike,
-  fieldName: string,
-  rawValue: string,
-  /**
-   * How a validated non-secret value is written. Defaults to the local
-   * setDynamic; a caller that must reach a connected host's own settings (the
-   * email keys are daemon-owned) passes a routed writer so the value lands in
-   * the same store as the password reference.
-   */
-  writeValue?: (key: string, value: unknown) => Promise<unknown> | unknown,
-): Promise<PersistEmailConfigFieldResult> {
-  if (!KNOWN_EMAIL_FIELDS.has(fieldName)) {
-    return { ok: false, error: `Unknown email config key: ${fieldName}` };
-  }
-  const configKey = `email.${fieldName}`;
-
-  if (fieldName === 'passwordRef') {
-    // No scope argument, deliberately. The mailbox password is what the DAEMON
-    // authenticates with when it sends or reads mail on a schedule, and
-    // `email.passwordRef` is a daemon-owned config path, so
-    // persistSecretBackedConfigValue's ownership default files the value in the
-    // daemon tier. Pinning it to 'user' here, which this did until now, put
-    // the reference in the daemon's settings file and the password in a tier the
-    // daemon never reads: mail configured from this terminal, and a daemon that
-    // reports no email integration the moment the terminal closes.
-    const storedRef = await persistSecretBackedConfigValue(
-      cm as unknown as Parameters<typeof persistSecretBackedConfigValue>[0],
-      secretsManager as unknown as Parameters<typeof persistSecretBackedConfigValue>[1],
-      configKey as unknown as ConfigKey,
-      rawValue,
-    );
-    return { ok: true, configKey, secretRef: storedRef };
-  }
-
-  const validated = validateEmailConfigFieldValue(fieldName, rawValue);
-  if (!validated.ok) return { ok: false, error: validated.error, configKey };
-  const coerced = validated.value;
-
-  if (writeValue) await writeValue(configKey, coerced);
-  else cm.setDynamic(configKey, coerced);
-  return { ok: true, configKey };
 }
 
 function buildEmailService(ctx: CommandContext): EmailService {
   const secretsManager = requireSecretsManager(ctx);
   const cm = getConfigManager(ctx);
   const ledger = getSessionUntrustedContentLedger();
-  return new EmailService({
+  return new EmailService(mailboxServiceDeps({
     getConfig: (key: string) => cm.get(key),
     secretsManager,
     // The real sockets. The platform service opens none itself, so the node
@@ -195,29 +75,29 @@ function buildEmailService(ctx: CommandContext): EmailService {
     // does. Without this the guard sees a clean turn after the agent has just
     // read something a stranger wrote.
     recordUntrustedIngest: (ingest) => { ledger.record(ingest); },
-  });
+  }));
 }
 
 function formatStatus(ctx: CommandContext): void {
   const cm = getConfigManager(ctx);
-  const config = readEmailConfig((key) => cm.get(key));
-  const errors = validateEmailConfig(config);
+  const status = readMailboxStatus((key) => cm.get(key));
+  const { settings } = status;
   const lines = [
     'Email Status',
-    `  enabled: ${config.enabled ? 'yes' : 'no'}`,
-    `  imap: ${config.imapHost || '[not set]'}:${config.imapPort}`,
-    `  smtp: ${config.smtpHost || '[not set]'}:${config.smtpPort}`,
-    `  username: ${config.username || '[not set]'}`,
-    `  password: ${config.passwordRef ? '[configured]' : '[missing]'}`,
-    `  from: ${config.fromAddress || '[not set]'}`,
-    `  ready: ${errors.length === 0 && config.enabled ? 'yes' : 'no'}`,
+    `  imap: ${settings.imapHost ?? '[not set]'}:${settings.imapPort}`,
+    `  smtp: ${settings.smtpHost ?? '[not set]'}:${settings.smtpPort}`,
+    `  user: ${settings.username ?? '[not set]'}`,
+    `  password: ${status.passwordStored ? '[stored]' : '[missing]'}`,
+    `  from: ${settings.fromAddress ?? '[not set]'}`,
+    `  ready: ${status.ready ? 'yes' : 'no'}`,
   ];
-  if (errors.length > 0) {
-    lines.push(`  issues (${errors.length}):`);
-    for (const err of errors) lines.push(`    - ${err}`);
+  if (status.problems.length > 0) {
+    lines.push(`  issues (${status.problems.length}):`);
+    for (const problem of status.problems) lines.push(`    - ${problem}`);
   }
-  lines.push('  policy: credentials are never printed; passwordRef displays as [configured]');
-  lines.push('  Usage: /email set email.<key> <value> [--yes], see /email config');
+  lines.push('  These are the surfaces.email.* settings, the same mailbox the daemon uses.');
+  lines.push('  policy: credentials are never printed; the password displays as [stored]');
+  lines.push('  Usage: /email set <field> <value> [--yes], see /email config');
   ctx.print(lines.join('\n'));
 }
 
@@ -318,23 +198,24 @@ function parseSendArgs(args: readonly string[]): { to: string; subject: string; 
 
 function formatConfig(ctx: CommandContext): void {
   const cm = getConfigManager(ctx);
-  const config = readEmailConfig((key) => cm.get(key));
+  const status = readMailboxStatus((key) => cm.get(key));
+  const { settings } = status;
   const lines = [
-    'Email Config',
-    `  email.enabled:       ${String(config.enabled)}`,
-    `  email.imapHost:      ${config.imapHost || '[not set]'}`,
-    `  email.imapPort:      ${config.imapPort}`,
-    `  email.smtpHost:      ${config.smtpHost || '[not set]'}`,
-    `  email.smtpPort:      ${config.smtpPort}`,
-    `  email.smtpSecurity:  ${config.smtpSecurity} (tls|starttls|auto)`,
-    `  email.username:      ${config.username || '[not set]'}`,
-    `  email.passwordRef:   ${config.passwordRef ? '[configured]' : '[not set]'}`,
-    `  email.fromAddress:   ${config.fromAddress || '[not set]'}`,
+    'Email Config (surfaces.email.*)',
+    `  imap.host:     ${settings.imapHost ?? '[not set]'}`,
+    `  imap.port:     ${settings.imapPort}`,
+    `  imap.secure:   ${String(settings.imapSecure)}`,
+    `  imap.mailbox:  ${settings.mailbox ?? 'INBOX'}`,
+    `  smtp.host:     ${settings.smtpHost ?? '[not set]'}`,
+    `  smtp.port:     ${settings.smtpPort}`,
+    `  smtp.secure:   ${String(settings.smtpSecure)} (true: implicit TLS on 465; false: STARTTLS on 587)`,
+    `  user:          ${settings.username ?? '[not set]'}`,
+    `  password:      ${status.passwordStored ? '[stored]' : '[not set]'}`,
+    `  from:          ${settings.fromAddress ?? '[not set]'}`,
     '',
-    '  Settable keys: email.enabled, email.imapHost, email.imapPort, email.smtpHost,',
-    '                 email.smtpPort, email.smtpSecurity, email.username,',
-    '                 email.passwordRef (--yes required), email.fromAddress',
-    '  Usage: /email set email.<key> <value> [--yes]',
+    `  Settable fields: ${MAILBOX_FIELD_LIST} (password needs --yes)`,
+    '  host sets IMAP and SMTP together; imap.host and smtp.host override it.',
+    '  Usage: /email set <field> <value> [--yes]',
   ];
   ctx.print(lines.join('\n'));
 }
@@ -350,46 +231,33 @@ async function handleSet(
   const rawValue = rawArgs.slice(1).join(' ');
 
   if (!rawKey) {
-    ctx.print(
-      'Usage: /email set email.<key> <value> [--yes]\n' +
-      'Keys: email.enabled, email.imapHost, email.imapPort, email.smtpHost,\n' +
-      '      email.smtpPort, email.username, email.passwordRef (--yes required),\n' +
-      '      email.fromAddress',
-    );
+    ctx.print(`Usage: /email set <field> <value> [--yes]\nFields: ${MAILBOX_FIELD_LIST} (password needs --yes)`);
     return;
   }
 
-  // Accept both "email.imapHost" and "imapHost" forms
-  const fieldName = rawKey.startsWith('email.') ? rawKey.slice('email.'.length) : rawKey;
-  const configKey = `email.${fieldName}`;
-
-  if (!KNOWN_EMAIL_FIELDS.has(fieldName)) {
-    ctx.print(
-      `Unknown email config key: ${rawKey}\n` +
-      'Valid keys: email.enabled, email.imapHost, email.imapPort, email.smtpHost,\n' +
-      '            email.smtpPort, email.username, email.passwordRef (--yes required),\n' +
-      '            email.fromAddress',
-    );
+  // Accepts `imap.host`, `surfaces.email.imap.host`, and the older `imapHost`.
+  const field = resolveMailboxField(rawKey);
+  if (field === null) {
+    ctx.print(`Unknown mailbox field: ${rawKey}\nFields: ${MAILBOX_FIELD_LIST} (password needs --yes)`);
     return;
   }
+  const configKey = MAILBOX_FIELDS[field];
 
   // The mailbox password is taken through the masked prompt when the terminal has
   // one, so it is never typed into the command line or kept in input history.
-  const maskedPasswordEntry = fieldName === 'passwordRef' && rawValue === '' && ctx.beginConcealedInput !== undefined;
+  const maskedPasswordEntry = field === 'password' && rawValue === '' && ctx.beginConcealedInput !== undefined;
   if (rawValue === '' && !maskedPasswordEntry) {
     ctx.print(`Usage: /email set ${configKey} <value>\nValue is required.`);
     return;
   }
 
-  // Ensure the email section exists in the config manager before any writes
-  ensureEmailConfigDefaults(ctx.platform.configManager);
   const cm = ctx.platform.configManager as unknown as {
     get: (key: string) => unknown;
     setDynamic: (key: string, value: unknown) => void;
     save: () => void;
   };
 
-  if (fieldName === 'passwordRef') {
+  if (field === 'password') {
     // Secret path: --yes is required; raw value is routed through SecretsManager
     if (!parsed.yes) {
       const lines = [
@@ -402,15 +270,15 @@ async function handleSet(
       ctx.print(lines.join('\n'));
       requireYesFlag(
         ctx,
-        'set email.passwordRef secret',
-        ctx.beginConcealedInput === undefined ? '/email set email.passwordRef <password> --yes' : '/email set email.passwordRef --yes (the password is then asked for masked)',
+        'store the mailbox password',
+        ctx.beginConcealedInput === undefined ? '/email set password <password> --yes' : '/email set password --yes (the password is then asked for masked)',
       );
       return;
     }
 
     const secretsManager = requireSecretsManager(ctx);
     const storePassword = async (password: string): Promise<void> => {
-      const result = await persistEmailConfigField(cm, secretsManager, fieldName, password);
+      const result = await persistMailboxField(cm, secretsManager, field, password);
       if (!result.ok) {
         ctx.print(result.error ?? `Could not store ${configKey}.`);
         return;
@@ -439,7 +307,7 @@ async function handleSet(
       return;
     }
     if (ctx.beginConcealedInput !== undefined) {
-      ctx.print('Note: the password was typed on the command line and may be kept in input history. Next time run /email set email.passwordRef --yes to enter it masked.');
+      ctx.print('Note: the password was typed on the command line and may be kept in input history. Next time run /email set password --yes to enter it masked.');
     }
     await storePassword(rawValue);
     return;
@@ -447,7 +315,7 @@ async function handleSet(
 
   // Non-secret path: coerce, validate, and persist through the shared field helper
   const secretsManager = requireSecretsManager(ctx);
-  const result = await persistEmailConfigField(cm, secretsManager, fieldName, rawValue);
+  const result = await persistMailboxField(cm, secretsManager, field, rawValue);
   if (!result.ok) {
     ctx.print(result.error ?? `Could not update ${configKey}.`);
     return;

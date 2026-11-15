@@ -4,7 +4,6 @@ import { routeDaemonOwnedConfigWrite } from './daemon-config-routing.ts';
 export { normalizeSecretKeyPart, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isGoodVibesSecretReferenceValue as isSecretReferenceValue, isMalformedGoodVibesSecretReferenceValue, getSecretWriteMedium, buildSecretBackedConfigUpdate, defaultSecretBackedScope } from '@goodvibes-jev/engine/platform/platform/config';
 export type { SecretBackedConfigUpdate, SecretBackedConfigManager, SecretBackedSecretStore } from '@goodvibes-jev/engine/platform/platform/config';
 export const { SECRET_CONFIG_KEYS, isSecretConfigKey } = createSecretConfigKeyRegistry([
-  'email.passwordRef' as ConfigKey,
   'calendar.google.clientSecretRef' as ConfigKey,
   'calendar.microsoft.clientSecretRef' as ConfigKey,
 ]);

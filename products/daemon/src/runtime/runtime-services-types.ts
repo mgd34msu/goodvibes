@@ -150,6 +150,8 @@ export interface RuntimeServices {
   readonly channelDeliveryRouter: ChannelDeliveryRouter;
   readonly watcherRegistry: WatcherRegistry;
   readonly approvalBroker: ApprovalBroker;
+  /** The one owner inbox: approvals, questions, claims, purchase windows and queued actions. */
+  readonly ownerInbox?: import('@goodvibes-jev/engine/platform/platform/control-plane').OwnerInbox | undefined;
   /** Loopback-fetch approval that rides the approval broker; shared by the tool registry and orchestrator so every surface asks the same way. */
   readonly localhostFetchApproval: ReturnType<typeof buildLocalhostFetchApproval>;
   /** Terminal prompt-answer handler that rides the approval broker; shared by the tool registry and orchestrator so an interactive command's prompt gets an ask/card on every surface. */

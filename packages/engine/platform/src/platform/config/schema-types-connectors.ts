@@ -1,6 +1,7 @@
 /**
- * schema-types-connectors.ts, the `email.*` / `calendar.*` / `google.*`
- * connector domains' types.
+ * schema-types-connectors.ts, the `calendar.*` / `google.*` connector
+ * domains' types. The mailbox is configured under `surfaces.email.*`
+ * (schema-domain-daemon-mailbox.ts).
  *
  * Split out the same way schema-types-owner-profile.ts and
  * schema-types-occasions.ts were: the shape, the key union and the key->value
@@ -13,29 +14,6 @@
  * module` merge into `GoodVibesConfig` lives, co-located with the defaults,
  * as every other domain does it.
  */
-
-/** IMAP connection security for the mail connector. No 'auto': the operator either asked for TLS or asked not to have it. */
-export type EmailConnectorImapSecurity = 'tls' | 'plaintext';
-
-/** SMTP connection security for the mail connector. 'auto' picks TLS on 465 and STARTTLS elsewhere. */
-export type EmailConnectorSmtpSecurity = 'tls' | 'starttls' | 'auto';
-
-/** The mail connector's account (`email.*`): what the daemon composes, sends and lists mail through. */
-export interface EmailConnectorConfig {
-  enabled: boolean;
-  imapHost: string;
-  imapPort: number;
-  imapSecurity: EmailConnectorImapSecurity;
-  smtpHost: string;
-  smtpPort: number;
-  smtpSecurity: EmailConnectorSmtpSecurity;
-  username: string;
-  passwordRef: string;
-  smtpPasswordRef: string;
-  fromAddress: string;
-  mailbox: string;
-  draftsMailbox: string;
-}
 
 /** One OAuth calendar provider's registered app (`calendar.<provider>.*`). */
 export interface CalendarConnectorProviderConfig {
@@ -60,21 +38,8 @@ export interface GoogleConnectorConfig {
   };
 }
 
-/** Dot-path keys for the `email.*` / `calendar.*` / `google.*` connector domains. */
+/** Dot-path keys for the `calendar.*` / `google.*` connector domains. */
 export type ConnectorsConfigKey =
-  | 'email.enabled'
-  | 'email.imapHost'
-  | 'email.imapPort'
-  | 'email.imapSecurity'
-  | 'email.smtpHost'
-  | 'email.smtpPort'
-  | 'email.smtpSecurity'
-  | 'email.username'
-  | 'email.passwordRef'
-  | 'email.smtpPasswordRef'
-  | 'email.fromAddress'
-  | 'email.mailbox'
-  | 'email.draftsMailbox'
   | 'calendar.google.clientId'
   | 'calendar.google.clientSecretRef'
   | 'calendar.google.icsUrl'
@@ -94,19 +59,6 @@ export type ConnectorsConfigKey =
  * default arm would make most of them invisible to it.
  */
 export type ConnectorsConfigValue<K extends ConnectorsConfigKey> =
-  K extends 'email.enabled' ? boolean :
-  K extends 'email.imapHost' ? string :
-  K extends 'email.imapPort' ? number :
-  K extends 'email.imapSecurity' ? EmailConnectorImapSecurity :
-  K extends 'email.smtpHost' ? string :
-  K extends 'email.smtpPort' ? number :
-  K extends 'email.smtpSecurity' ? EmailConnectorSmtpSecurity :
-  K extends 'email.username' ? string :
-  K extends 'email.passwordRef' ? string :
-  K extends 'email.smtpPasswordRef' ? string :
-  K extends 'email.fromAddress' ? string :
-  K extends 'email.mailbox' ? string :
-  K extends 'email.draftsMailbox' ? string :
   K extends 'calendar.google.clientId' ? string :
   K extends 'calendar.google.clientSecretRef' ? string :
   K extends 'calendar.google.icsUrl' ? string :

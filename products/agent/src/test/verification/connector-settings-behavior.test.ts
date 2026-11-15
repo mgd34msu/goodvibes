@@ -1,63 +1,23 @@
 /**
- * connector-settings-behavior.test.ts, behaviour coverage for the connector
- * settings platform runtime 2.0.8 declared: the daemon's mail and calendar keys
- * (`email.*`, `calendar.*`).
+ * connector-settings-behavior.test.ts, behaviour coverage for the calendar
+ * connector's settings (`calendar.*`). The mailbox is `surfaces.email.*`.
  *
- * ## Why this file exists
- *
- * Before 2.0.8 these keys were cast onto the live config object at runtime by
- * `connector-config-sections.ts` and were absent from CONFIG_SCHEMA, so this
- * surface answered "Unknown setting calendar.google.clientId" for a key the
- * daemon reads and writes every time it composes mail or refreshes a calendar.
- * Declaring them fixed that, and it also put 21 of them into the settings
- * DENOMINATOR the verification ledger measures (this repo references all 21),
- * with no matching entry in the numerator.
- *
- * The floor is not the thing that moves. settings-behavior-coverage.ts states
- * the bar an entry has to clear, and these tests are written to it rather than
- * around it: every key below is driven to at least two distinct values through
- * the REAL code in this repository that consumes it, and each assertion is an
+ * Every key below is driven to at least two distinct values through the REAL
+ * code in this repository that consumes it, and each assertion is an
  * observable difference in outcome between those values. A ConfigManager
- * set/get round-trip would verify ConfigManager, not the setting, and that file
- * rules it out by name, so nothing here is one.
+ * set/get round-trip would verify ConfigManager, not the setting, and
+ * settings-behavior-coverage.ts rules it out by name, so nothing here is one.
  *
- * ## The consumers being driven
- *
- *  - `buildAgentWorkspaceEmailConnectStatus` (agent-workspace-snapshot-builders.ts)
- *    is what the inbox connect wizard's entry card reports: it reads every
- *    `email.*` key through the platform's `readEmailConfig`, runs
- *    `validateEmailConfig`, and answers connected / not-connected with the
- *    specific reasons. A key that stopped being honoured changes that answer.
- *  - `persistEmailConfigField` (input/commands/email-runtime.ts) is the single
- *    persistence path shared by `/email set` and the workspace connect wizard.
- *    It validates per field before writing, so a rejected value writes nothing.
  *  - `CalendarOAuthService` (agent/calendar/calendar-oauth-service.ts) resolves
  *    the operator's own OAuth app out of config plus the secret store.
  *  - `resolveCapabilityIndex` (capabilities/capability-index.ts) decides what
  *    the agent tells its owner it can do, and `calendar.google.icsUrl` is one
  *    of the two configuration-evidence probes behind "read the calendar".
- *
- * The remaining declared connector keys are deliberately NOT claimed here.
- * `email.imapSecurity`, `email.mailbox` and `email.draftsMailbox` are read by
- * `readEmailConfig` and consumed by the daemon's own mail service; this repo
- * has no code whose outcome differs between two of their values, so claiming
- * them would be the padding settings-behavior-coverage.ts exists to prevent.
- * `google.oauth.refreshToken` is named here only by the support-bundle
- * redactor's name list, which classifies keys rather than acting on values.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CalendarConnector } from '@goodvibes-jev/engine/platform/platform/calendar';
-import type { CommandContext } from '../../input/command-registry.ts';
-import { buildAgentWorkspaceEmailConnectStatus } from '../../input/agent-workspace-snapshot-builders.ts';
-import {
-  persistEmailConfigField,
-  type EmailConfigManagerLike,
-  type EmailSecretsManagerLike,
-} from '../../input/commands/email-runtime.ts';
 import {
   CalendarOAuthService,
   type CalendarSecretSlice,
@@ -69,186 +29,6 @@ import {
 } from '../../capabilities/capability-index.ts';
 import { emptyProbeContext, type ProbeContext } from '../../capabilities/capability-probe-runner.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-
-// ---------------------------------------------------------------------------
-// email.* through the workspace connect status
-// ---------------------------------------------------------------------------
-
-/** A mailbox that validates clean, so each test can break exactly one key. */
-const COMPLETE_MAILBOX: Readonly<Record<string, unknown>> = {
-  'email.enabled': true,
-  'email.imapHost': 'imap.example.com',
-  'email.smtpHost': 'smtp.example.com',
-  'email.username': 'operator@example.com',
-  'email.passwordRef': 'goodvibes://secrets/goodvibes/GOODVIBES_EMAIL_PASSWORDREF',
-  'email.fromAddress': 'GoodVibes <operator@example.com>',
-};
-
-let emailRoot = '';
-
-function emailContext(overrides: Readonly<Record<string, unknown>> = {}): CommandContext {
-  const configManager = new ConfigManager({
-    surfaceRoot: 'agent',
-    workingDir: emailRoot,
-    homeDir: emailRoot,
-    configDir: join(emailRoot, '.goodvibes', 'agent'),
-  });
-  const dynamic = configManager as unknown as { setDynamic: (key: string, value: unknown) => void };
-  for (const [key, value] of Object.entries({ ...COMPLETE_MAILBOX, ...overrides })) {
-    dynamic.setDynamic(key, value);
-  }
-  return { platform: { configManager } } as unknown as CommandContext;
-}
-
-describe('email.* settings decide what the connect wizard reports', () => {
-  beforeEach(() => {
-    emailRoot = makeProjectTempDir('gv-connector-email');
-  });
-
-  afterEach(() => {
-    rmSync(emailRoot, { recursive: true, force: true });
-  });
-
-  test('email.enabled: a mailbox that validates clean still reports not-connected while it is off', () => {
-    const on = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.enabled': true }));
-    const off = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.enabled': false }));
-
-    expect(on?.connected).toBe(true);
-    expect(off?.connected).toBe(false);
-    // The difference is the switch alone: nothing is wrong with the mailbox.
-    expect(off?.errors).toEqual([]);
-  });
-
-  test('email.imapHost: unset is a named, blocking reason; set clears it and is what the card shows', () => {
-    const unset = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.imapHost': '' }));
-    const set = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.imapHost': 'imap.fastmail.com' }));
-
-    expect(unset?.connected).toBe(false);
-    expect(unset?.errors).toContain('email.imapHost is required');
-    expect(set?.connected).toBe(true);
-    expect(set?.errors).not.toContain('email.imapHost is required');
-    expect(set?.imapHost).toBe('imap.fastmail.com');
-  });
-
-  test('email.smtpHost: unset is a named, blocking reason; set clears it', () => {
-    const unset = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.smtpHost': '' }));
-    const set = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.smtpHost': 'smtp.fastmail.com' }));
-
-    expect(unset?.connected).toBe(false);
-    expect(unset?.errors).toContain('email.smtpHost is required');
-    expect(set?.connected).toBe(true);
-  });
-
-  test('email.username: unset is a named, blocking reason; set clears it and is what the card shows', () => {
-    const unset = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.username': '' }));
-    const set = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.username': 'owner@example.net' }));
-
-    expect(unset?.connected).toBe(false);
-    expect(unset?.errors).toContain('email.username is required');
-    expect(set?.connected).toBe(true);
-    expect(set?.username).toBe('owner@example.net');
-  });
-
-  test('email.passwordRef: a raw password is refused by name, a secret reference is accepted', () => {
-    const raw = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.passwordRef': 'hunter2' }));
-    const ref = buildAgentWorkspaceEmailConnectStatus(emailContext({
-      'email.passwordRef': 'goodvibes://secrets/goodvibes/GOODVIBES_EMAIL_PASSWORDREF',
-    }));
-
-    // A settings file must never hold the value itself, and the card says so
-    // rather than reporting a mailbox that cannot authenticate.
-    expect(raw?.connected).toBe(false);
-    expect(raw?.errors.some((line) => line.includes('email.passwordRef must be a goodvibes secret reference'))).toBe(true);
-    expect(ref?.connected).toBe(true);
-  });
-
-  test('email.smtpPasswordRef: empty means "same as IMAP", a raw value is refused, a reference is accepted', () => {
-    const empty = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.smtpPasswordRef': '' }));
-    const raw = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.smtpPasswordRef': 'submission-password' }));
-    const ref = buildAgentWorkspaceEmailConnectStatus(emailContext({
-      'email.smtpPasswordRef': 'goodvibes://secrets/goodvibes/GOODVIBES_EMAIL_SMTPPASSWORDREF',
-    }));
-
-    expect(empty?.connected).toBe(true);
-    expect(raw?.connected).toBe(false);
-    expect(raw?.errors.some((line) => line.includes('email.smtpPasswordRef must be a goodvibes secret reference'))).toBe(true);
-    expect(ref?.connected).toBe(true);
-  });
-
-  test('email.fromAddress: unset is a named, blocking reason; set clears it', () => {
-    const unset = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.fromAddress': '' }));
-    const set = buildAgentWorkspaceEmailConnectStatus(emailContext({ 'email.fromAddress': 'owner@example.net' }));
-
-    expect(unset?.connected).toBe(false);
-    expect(unset?.errors).toContain('email.fromAddress is required');
-    expect(set?.connected).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// email.* through the one persistence path
-// ---------------------------------------------------------------------------
-
-/** The `{ get, setDynamic }` slice persistEmailConfigField writes through. */
-function recordingConfig(): EmailConfigManagerLike & { readonly written: Map<string, unknown> } {
-  const written = new Map<string, unknown>();
-  return {
-    written,
-    get: (key: string) => written.get(key),
-    setDynamic: (key: string, value: unknown) => { written.set(key, value); },
-  };
-}
-
-/** Never reached: none of the fields below is the secret-backed one. */
-const NO_SECRETS: EmailSecretsManagerLike = {
-  get: async () => { throw new Error('the secret store must not be touched for a non-secret field'); },
-};
-
-describe('email.* settings are validated before anything is written', () => {
-  test('email.imapPort: an out-of-range port is refused and writes nothing; a real port persists as a number', async () => {
-    const rejected = recordingConfig();
-    const refusal = await persistEmailConfigField(rejected, NO_SECRETS, 'imapPort', '99999');
-    expect(refusal.ok).toBe(false);
-    expect(refusal.error).toContain('Invalid port number');
-    expect(refusal.configKey).toBe('email.imapPort');
-    expect(rejected.written.size).toBe(0);
-
-    const accepted = recordingConfig();
-    const stored = await persistEmailConfigField(accepted, NO_SECRETS, 'imapPort', '993');
-    expect(stored.ok).toBe(true);
-    // A number, not the string it arrived as, a string here reaches the IMAP
-    // client as a port it cannot dial.
-    expect(accepted.written.get('email.imapPort')).toBe(993);
-  });
-
-  test('email.smtpPort: an out-of-range port is refused and writes nothing; a real port persists as a number', async () => {
-    const rejected = recordingConfig();
-    const refusal = await persistEmailConfigField(rejected, NO_SECRETS, 'smtpPort', '0');
-    expect(refusal.ok).toBe(false);
-    expect(refusal.error).toContain('Invalid port number');
-    expect(refusal.configKey).toBe('email.smtpPort');
-    expect(rejected.written.size).toBe(0);
-
-    const accepted = recordingConfig();
-    const stored = await persistEmailConfigField(accepted, NO_SECRETS, 'smtpPort', '465');
-    expect(stored.ok).toBe(true);
-    expect(accepted.written.get('email.smtpPort')).toBe(465);
-  });
-
-  test('email.smtpSecurity: an unknown mode is refused with the valid ones named; a known mode persists', async () => {
-    const rejected = recordingConfig();
-    const refusal = await persistEmailConfigField(rejected, NO_SECRETS, 'smtpSecurity', 'sometimes');
-    expect(refusal.ok).toBe(false);
-    expect(refusal.error).toContain('Valid values: tls, starttls, auto');
-    expect(refusal.configKey).toBe('email.smtpSecurity');
-    expect(rejected.written.size).toBe(0);
-
-    const accepted = recordingConfig();
-    const stored = await persistEmailConfigField(accepted, NO_SECRETS, 'smtpSecurity', 'starttls');
-    expect(stored.ok).toBe(true);
-    expect(accepted.written.get('email.smtpSecurity')).toBe('starttls');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // calendar.google.clientSecretRef through the real OAuth service

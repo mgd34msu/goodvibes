@@ -350,7 +350,7 @@ test('malformed managed policy observed after admission prevents persistence wit
 });
 
 test.each(['goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD', ''] as const)('adopted credential reference or clear preserves empty-old posture: %s', async value => {
-  const f = await fixture(); const key = 'email.passwordRef';
+  const f = await fixture(); const key = 'surfaces.email.password';
   f.runtime.configManager.set(key, '');
   const result = await f.run('goodvibes_settings', { mode: 'set', key, value, confirm: true });
   expect(result.success).toBe(true);
@@ -362,7 +362,7 @@ test.each(['goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD', ''
 });
 
 test('known credential old material stays posture-only and raw intended values never reach judgment', async () => {
-  const f = await fixture(); const key = 'email.passwordRef'; const synthetic = 'synthetic-old-only-credential';
+  const f = await fixture(); const key = 'surfaces.email.password'; const synthetic = 'synthetic-old-only-credential';
   f.runtime.configManager.set(key, synthetic);
   const safe = await f.run('goodvibes_settings', { mode: 'set', key, value: 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD', confirm: true });
   expect(safe.success).toBe(true);
@@ -461,7 +461,7 @@ test('settings admission and prepared mutation cannot be replayed after a commit
 });
 
 test.each(['goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD', ''] as const)('actual Agent remote credential change preserves unavailable previous posture: %s', async value => {
-  const f = await fixture('normal'); const serving = f.serving!; const key = 'email.passwordRef';
+  const f = await fixture('normal'); const serving = f.serving!; const key = 'surfaces.email.password';
   await serving.config.set(key, 'synthetic-server-only-old-credential');
   const result = await f.run('goodvibes_settings', { mode: 'set', key, value, confirm: true });
   expect(result.success).toBe(true); expect(serving.config.get(key)).toBe(value);

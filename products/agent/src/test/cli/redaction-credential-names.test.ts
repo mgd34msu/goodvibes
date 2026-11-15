@@ -29,8 +29,8 @@ import { cliRedactionAnswer } from '../helpers/cli-redaction-readings.ts';
 /** Every path that holds credential material and is missed by the word list. */
 const CREDENTIAL_PATHS: readonly string[] = [
   // Mail.
-  'email.passwordRef',
-  'email.smtpPasswordRef',
+  'surfaces.email.password',
+  'surfaces.email.smtp.password',
   'surfaces.email.imap.password',
   // Calendar, including the private feed address, which grants calendar read
   // access to anyone holding it.
@@ -152,8 +152,8 @@ describe('support-bundle redaction covers credentials named by full key', () => 
   }
 
   test('a goodvibes:// reference at a credential path is left visible, being a pointer not a value', async () => {
-    const ref = 'goodvibes://secrets/goodvibes/GOODVIBES_EMAIL_PASSWORD_REF';
-    const result = await redactConfig(nest('email.passwordRef', ref));
+    const ref = 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD';
+    const result = await redactConfig(nest('surfaces.email.password', ref));
     expect(JSON.stringify(result.value)).toContain(ref);
     expect(result.redactedPaths).toHaveLength(0);
   });

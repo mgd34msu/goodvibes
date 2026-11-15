@@ -32,7 +32,7 @@
 
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { readEmailConfig, validateEmailConfig } from '@goodvibes-jev/engine/platform/platform/email';
+import { readMailboxStatus } from '../input/commands/email-settings.ts';
 import { buildProbeContext } from '../capabilities/capability-boot-check.ts';
 import { resolveCapabilityIndex } from '../capabilities/capability-index.ts';
 import { configValueIsPresent, safeMcpServerPosture, secretValueIsPresent, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
@@ -181,16 +181,15 @@ function describeGoogleRoute(inputs: CapabilityStatusInputs): string[] {
 /** The separate direct-mailbox verdict, read from the same config `/email status` reads. */
 export function readMailboxVerdict(configGet: (key: string) => unknown): MailboxVerdict {
   try {
-    const config = readEmailConfig(configGet);
-    const errors = validateEmailConfig(config);
-    const ready = config.enabled && errors.length === 0;
-    if (ready) {
+    const status = readMailboxStatus(configGet);
+    if (status.ready) {
       return { configured: true, detail: 'A direct mailbox is configured and ready. Manage it with: /email status' };
     }
+    const started = status.settings.imapHost !== undefined || status.settings.username !== undefined || status.passwordStored;
     return {
       configured: false,
-      detail: config.enabled
-        ? `A direct mailbox is switched on but incomplete (${errors.length} setting(s) outstanding). See: /email status`
+      detail: started
+        ? `A direct mailbox is partly set up (${status.problems.length} setting(s) outstanding). See: /email status`
         : 'No direct mailbox is configured. That is a separate feature from Google; set one up with /email set only if the account is not a Google account.',
     };
   } catch {

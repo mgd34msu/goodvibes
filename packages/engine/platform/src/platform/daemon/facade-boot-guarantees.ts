@@ -20,10 +20,10 @@ import {
   type MigratableSecretStore,
 } from '../config/daemon-credential-migration.js';
 import { DAEMON_CONFIG_ROOT } from '../config/daemon-config-tier.js';
-import { ensureConnectorConfigSections } from '../config/connector-config-sections.js';
 import { describePlaintextSweep, sweepPlaintextCredentials } from '../config/plaintext-credential-sweep.js';
 import { raiseReaderFloorInFile } from '../config/shared-config-tier.js';
 import { SWEPT_CREDENTIAL_READER_FLOOR } from '../config/settings-reader-floor.js';
+import { adoptCarriedMailPasswords } from '../email/carried-mail-password.js';
 import { repairHalfLandedGoogleConnection } from '../google/connection-repair.js';
 import { nodeGoogleFilePort } from '../google/node.js';
 import { resolveSharedDirectory } from '../runtime/surface-root.js';
@@ -228,6 +228,7 @@ export async function runDaemonBootGuarantees(
   await migrateDaemonNeededCredentialsOnBoot(services.secretsManager, services.shellPaths.homeDirectory);
   await repairGoogleConnectionOnBoot(configManager, services);
   await sweepPlaintextCredentialsOnBoot(configManager, services);
+  await adoptCarriedMailPasswordsOnBoot(configManager, services);
   // The live watch was armed during graph acquisition, before these owned
   // migrations. Consume their disk generations before readiness. This uses
   // the ordinary reload/invalidation path and also observes external edits
@@ -248,7 +249,6 @@ async function sweepPlaintextCredentialsOnBoot(
   services: DaemonBootServices,
 ): Promise<void> {
   try {
-    ensureConnectorConfigSections(configManager);
     const manager = configManager as unknown as { get(key: string): unknown; setDynamic(key: string, value: unknown): void };
     const daemonTierPath = configManager.getDaemonTierPath();
     const report = await sweepPlaintextCredentials(
@@ -277,6 +277,31 @@ async function sweepPlaintextCredentialsOnBoot(
 }
 
 /**
+ * A mailbox carried over from the connector's `email.*` keys keeps its password
+ * under the old name; copy it to the name every mail reader looks under. See
+ * email/carried-mail-password.ts.
+ */
+async function adoptCarriedMailPasswordsOnBoot(
+  configManager: ConfigManager,
+  services: DaemonBootServices,
+): Promise<void> {
+  try {
+    const manager = configManager as unknown as { get(key: string): unknown; setDynamic(key: string, value: unknown): void };
+    const adopted = await adoptCarriedMailPasswords(
+      { get: (key) => manager.get(key), set: (key, value) => { manager.setDynamic(key, value); } },
+      services.secretsManager,
+    );
+    if (adopted.length === 0) return;
+    logger.info('DaemonServer: the mailbox password carried over from email.passwordRef now lives under its setting\'s own name', { settings: adopted });
+  } catch (error) {
+    logger.warn('DaemonServer: could not move the carried-over mailbox password', {
+      error: summarizeError(error),
+      detail: 'mail still finds it through the stored reference; the next start tries again',
+    });
+  }
+}
+
+/**
  * Finish a Google setup that only half landed.
  *
  * The migration above moves credentials between tiers. It cannot help a
@@ -293,7 +318,6 @@ async function repairGoogleConnectionOnBoot(
   services: DaemonBootServices,
 ): Promise<void> {
   try {
-    ensureConnectorConfigSections(configManager);
     const manager = configManager as unknown as { get(key: string): unknown; setDynamic(key: string, value: unknown): void };
     const result = await repairHalfLandedGoogleConnection({
       files: nodeGoogleFilePort,

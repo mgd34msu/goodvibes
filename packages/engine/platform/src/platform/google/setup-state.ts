@@ -44,7 +44,7 @@ export interface GoogleSetupState {
   readonly hasAppPassword: boolean;
   /** Every Gmail IMAP/SMTP config key needed to connect is populated. */
   readonly hasGmailConfig: boolean;
-  /** The mail surface is switched on. */
+  /** The mailbox is usable: the Gmail settings are complete and the app password is stored. */
   readonly gmailEnabled: boolean;
   /** The account address Gmail is configured for, or null. Not a secret. */
   readonly gmailUsername: string | null;
@@ -82,7 +82,7 @@ export async function detectGoogleSetupState(deps: {
   const username = safeConfigString(config, GOOGLE_CONFIG_KEYS.emailUsername);
   const imapHost = safeConfigString(config, GOOGLE_CONFIG_KEYS.emailImapHost);
   const smtpHost = safeConfigString(config, GOOGLE_CONFIG_KEYS.emailSmtpHost);
-  const passwordRef = safeConfigString(config, GOOGLE_CONFIG_KEYS.emailPasswordRef);
+  const passwordRef = safeConfigString(config, GOOGLE_CONFIG_KEYS.emailPassword);
 
   const secretStates = await Promise.all([
     readGoogleSecretState(secrets, GOOGLE_SECRET_KEYS.appPassword),
@@ -95,7 +95,7 @@ export async function detectGoogleSetupState(deps: {
   return {
     hasAppPassword: hasAppPassword === true,
     hasGmailConfig: username !== null && imapHost !== null && smtpHost !== null && passwordRef !== null,
-    gmailEnabled: safeConfigGet(config, GOOGLE_CONFIG_KEYS.emailEnabled) === true,
+    gmailEnabled: hasAppPassword === true && username !== null && imapHost !== null && smtpHost !== null && passwordRef !== null,
     gmailUsername: username,
     hasCalendarAddress: hasCalendarAddress === true,
     oauthClientId: safeConfigString(config, GOOGLE_CONFIG_KEYS.oauthClientId),
@@ -126,7 +126,7 @@ export function describeGoogleSetupState(state: GoogleSetupState): readonly stri
 
   if (state.hasGmailConfig && state.hasAppPassword) {
     const account = state.gmailUsername ?? 'an account';
-    lines.push(`Gmail: configured for ${account} with a stored app password${state.gmailEnabled ? '' : ' (currently switched off)'}.`);
+    lines.push(`Gmail: configured for ${account} with a stored app password.`);
   } else if (state.hasAppPassword) {
     lines.push('Gmail: an app password is stored but the mail settings are incomplete.');
   } else {

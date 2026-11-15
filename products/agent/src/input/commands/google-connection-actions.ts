@@ -65,7 +65,6 @@ import {
   nodeGoogleFilePort,
   startLoopbackListener,
 } from '@goodvibes-jev/engine/platform/platform/google/node';
-import { ensureConnectorConfigSections } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   agentBrowserProfileRoot,
   agentBrowserScreenshotRoot,
@@ -78,11 +77,6 @@ import {
 
 export function googleConfigPort(ctx: CommandContext): GoogleConfigPort {
   const raw = requirePlatform(ctx).configManager;
-  // The flow spans three app-layer config sections. Seed all of them before any
-  // access: resolvePath throws on a section that is not there. One call rather
-  // than three: seeding a subset is how the connector came to work on one
-  // surface and throw on the others.
-  ensureConnectorConfigSections(raw);
   const manager = raw as {
     get: (key: string) => unknown;
     setDynamic: (key: string, value: unknown) => void;

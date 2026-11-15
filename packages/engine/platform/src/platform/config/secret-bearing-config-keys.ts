@@ -52,12 +52,9 @@ export const SECRET_BEARING_CONFIG_PATHS: readonly string[] = [
   'surfaces.email.smtp.password',
   'surfaces.calendar.caldavPassword',
 
-  // The connector's app-layer mail and calendar connection. These hold a
-  // REFERENCE by design (`email.passwordRef`), which is exactly why they belong
-  // here: a reference field that has been handed a literal password is the
-  // failure this set exists to catch and repair.
-  'email.passwordRef',
-  'email.smtpPasswordRef',
+  // The calendar connector. These hold a REFERENCE by design, which is exactly
+  // why they belong here: a reference field that has been handed a literal
+  // password is the failure this set exists to catch and repair.
   'calendar.google.clientSecretRef',
   'calendar.microsoft.clientSecretRef',
   'calendar.google.icsUrl',
@@ -101,7 +98,7 @@ export const SECRET_BEARING_CONFIG_PATHS: readonly string[] = [
   'surfaces.telephony.token',
   'surfaces.telephony.webhookSecret',
 
-  // Cloudflare tokens, held as references like `email.passwordRef` and for the
+  // Cloudflare tokens, held as references like `calendar.google.clientSecretRef` and for the
   // same reason. Found by the credential-key readings (config.credential-key),
   // which the old trailing-word pattern missed: none ends in `token`.
   'cloudflare.apiTokenRef',

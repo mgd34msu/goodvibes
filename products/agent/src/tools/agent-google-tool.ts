@@ -64,6 +64,7 @@ import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platfo
 import { createGoogleSettingsProjector, commitGoogleSettings, NO_GOOGLE_CLIENT_SECRET, retainGoogleConnectionOwners, retainGoogleCredentials, retainGooglePreparedEffectSource, type GooglePendingCredential } from './agent-google-admission.ts';
 import { nodeGoogleFilePort } from '@goodvibes-jev/engine/platform/platform/google/node';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
+import { readSurfaceEmailSettings } from '@goodvibes-jev/engine/platform/platform/email';
 import {
   evaluateOutwardEffect,
   getSessionUntrustedContentLedger,
@@ -384,8 +385,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       controller.signal.throwIfAborted();
       credentialsCurrent();
     } };
-    const loginHint = readString(options.configGet('email.username'))
-      || readString(options.configGet('email.fromAddress'));
+    const mailbox = readSurfaceEmailSettings(options.configGet);
+    const loginHint = mailbox.username ?? mailbox.fromAddress ?? '';
     let session: GoogleConsentSession;
     try {
       session = beginGoogleConsent({

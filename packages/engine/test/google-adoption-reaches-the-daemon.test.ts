@@ -36,11 +36,9 @@ import {
   adoptExistingGoogleCredentials,
   detectGoogleSetupState,
   repairHalfLandedGoogleConnection,
-  ensureGoogleConfigDefaults,
   GOOGLE_CONFIG_KEYS,
   GOOGLE_SECRET_KEYS,
 } from '../platform/src/platform/google/index.ts';
-import { ensureEmailConfigDefaults } from '../platform/src/platform/email/index.ts';
 import type { GoogleConfigPort, GoogleSecretPort } from '../platform/src/platform/google/types.ts';
 // GoogleFilePort is declared by credential-adoption.ts, not types.ts, and
 // reaches consumers through the barrel above. Importing it from types.ts
@@ -111,10 +109,6 @@ const nodeFiles: GoogleFilePort = {
  */
 function surface(home: string, surfaceRoot: string) {
   const configManager = new ConfigManager({ homeDir: home, surfaceRoot });
-  // The connector spans three app-layer sections; the real wiring seeds them
-  // before any access, so this does too.
-  ensureGoogleConfigDefaults(configManager);
-  ensureEmailConfigDefaults(configManager);
   const secretsManager = new SecretsManager({
     projectRoot: join(home, 'workdir'),
     globalHome: home,

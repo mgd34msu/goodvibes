@@ -1,5 +1,6 @@
 /**
- * Integration test: email.* config keys with a real ConfigManager instance.
+ * Integration test: the mailbox password setting (surfaces.email.password) with
+ * a real ConfigManager instance.
  *
  * Covers CRIT-A/CRIT-B: the user-facing setter path (/email set) via
  * persistSecretBackedConfigValue for secret keys. These tests exercise the
@@ -10,7 +11,6 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { ensureEmailConfigDefaults } from '@goodvibes-jev/engine/platform/platform/email';
 import type { ConfigKey } from '../../config/index.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -44,8 +44,7 @@ function emailGet(cm: ConfigManager, key: string): unknown {
 
 /**
  * Cast a ConfigManager to the SecretBackedConfigManager interface accepted
- * by persistSecretBackedConfigValue. The email section must already be
- * injected via ensureEmailConfigDefaults before calling.
+ * by persistSecretBackedConfigValue.
  */
 function asSecretBacked(cm: ConfigManager): Parameters<typeof persistSecretBackedConfigValue>[0] {
   return cm as unknown as Parameters<typeof persistSecretBackedConfigValue>[0];
@@ -82,10 +81,9 @@ describe('email set command path: user-facing setter via persistSecretBackedConf
   test('passwordRef path routes raw secret through SecretsManager; settings.json stores only goodvibes:// ref', async () => {
     const configDir = join(tmpDir, '.goodvibes', 'global-tui');
     const cm = createConfigManager(tmpDir);
-    ensureEmailConfigDefaults(cm);
     const { store, manager } = makeMemorySecretsManager();
 
-    const configKey = 'email.passwordRef' as unknown as ConfigKey;
+    const configKey = 'surfaces.email.password' as ConfigKey;
     const rawPassword = 'super-secret-password-123';
 
     // This is the exact call made by handleSet for the passwordRef path
@@ -99,13 +97,13 @@ describe('email set command path: user-facing setter via persistSecretBackedConf
     (cm as unknown as { save: () => void }).save();
 
     // (a) The plain key round-trips: configManager returns the goodvibes:// ref
-    expect(emailGet(cm, 'email.passwordRef')).toBe(storedRef);
+    expect(emailGet(cm, 'surfaces.email.password')).toBe(storedRef);
     expect(storedRef).toMatch(/^goodvibes:\/\/secrets\//);
 
     // (b) settings.json contains the goodvibes:// ref, NOT the plaintext password
     mkdirSync(configDir, { recursive: true });
     // The daemon tier is in this list because that is where the value now
-    // legitimately lives: email runs in the daemon, so email.passwordRef is
+    // legitimately lives: email runs in the daemon, so surfaces.email.password is
     // daemon-owned and the daemon's store is its only home. What this test
     // guards is unchanged, the raw password reaches no settings file, and a
     // goodvibes:// reference reaches one, but looking only in the surface
@@ -130,17 +128,16 @@ describe('email set command path: user-facing setter via persistSecretBackedConf
 
     // (c) SecretsManager received the raw value under the expected key
     // Key shape is GOODVIBES_<SECTION>_<CAMEL_TO_UPPER_SNAKE> per buildGoodVibesSecretKey
-    const expectedSecretKey = 'GOODVIBES_EMAIL_PASSWORD_REF';
+    const expectedSecretKey = 'GOODVIBES_SURFACES_EMAIL_PASSWORD';
     expect(store.has(expectedSecretKey)).toBe(true);
     expect(store.get(expectedSecretKey)).toBe(rawPassword);
   });
 
   test('passwordRef path: new ConfigManager loaded from same configDir sees the goodvibes:// ref', async () => {
     const cm = createConfigManager(tmpDir);
-    ensureEmailConfigDefaults(cm);
     const { manager } = makeMemorySecretsManager();
 
-    const configKey = 'email.passwordRef' as unknown as ConfigKey;
+    const configKey = 'surfaces.email.password' as ConfigKey;
     const storedRef = await persistSecretBackedConfigValue(
       asSecretBacked(cm),
       manager,
@@ -152,10 +149,9 @@ describe('email set command path: user-facing setter via persistSecretBackedConf
 
     // Load a brand-new ConfigManager from the same directory
     const cm2 = createConfigManager(tmpDir);
-    ensureEmailConfigDefaults(cm2);
 
     // The ref must survive the save → load round-trip
-    expect(emailGet(cm2, 'email.passwordRef')).toBe(storedRef);
-    expect(String(emailGet(cm2, 'email.passwordRef'))).toMatch(/^goodvibes:\/\/secrets\//);
+    expect(emailGet(cm2, 'surfaces.email.password')).toBe(storedRef);
+    expect(String(emailGet(cm2, 'surfaces.email.password'))).toMatch(/^goodvibes:\/\/secrets\//);
   });
 });

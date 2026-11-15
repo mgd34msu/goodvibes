@@ -96,8 +96,8 @@ export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'cli
   profile: 'daemon',
   // The occasions sweep runs in the daemon on a timer.
   occasions: 'daemon',
-  // The mail and calendar connector the daemon reads and sends through unattended.
-  email: 'daemon',
+  // The calendar connector the daemon reads through unattended (the mailbox is
+  // `surfaces.email.*`, daemon-owned with the rest of `surfaces`).
   calendar: 'daemon',
   google: 'daemon',
   // The daemon asks the decision layer for every engine judgment, and the
@@ -218,26 +218,18 @@ export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS = [
   // ruled replicated, which is what carries the token to a node that takes
   // over a handover.
   'google.oauth.refreshToken',
-  // NOTE: the mail and calendar connector's `email.*`, `calendar.google.*`,
-  // `calendar.microsoft.*` and `google.*` keys, nineteen of them, were
-  // listed here for a while, for the same reason `surfaces.email.*` and
-  // `surfaces.calendar.*` were listed above this note before they moved:
-  // they were app-layer paths seeded onto the live config object by a
-  // structural cast (`connector-config-sections.ts`), not CONFIG_SCHEMA
-  // keys, and the derivation below walks the ENUMERATED daemon-owned paths
-  // rather than matching an `email.`/`calendar.`/`google.` prefix that did
-  // not exist yet, so nothing enumerating them meant no daemon-owned
-  // credential name was derived from them, and a stored app password or
-  // OAuth client secret went to whichever client silo the operator happened
-  // to be in.
-  //
-  // They are gone from this list because they are now real CONFIG_SCHEMA
-  // entries (schema-domain-connectors.ts), which is the better home: it
-  // makes them daemon-owned AND renders them in the settings modal, so an
-  // operator can actually see and edit the connection the daemon is using.
-  // This list is for paths that are NOT scalar schema keys, and keeping them
-  // here as well would double-count them in every owned-set walk, the same
-  // reason the `surfaces.` pair is not repeated here either.
+  // The mailbox password references earlier builds kept under `email.*`. The
+  // settings are gone (moved to surfaces.email.* at load), but the secrets they
+  // named stay daemon-owned so the daemon lifts them into its own store at boot
+  // and copies them to the mailbox password's own name
+  // (email/carried-mail-password.ts).
+  'email.passwordRef',
+  'email.smtpPasswordRef',
+  // The calendar connector's `calendar.*` and `google.*` keys are real
+  // CONFIG_SCHEMA entries (schema-domain-connectors.ts), daemon-owned by their
+  // prefix, so they are not repeated here: this list is for paths that are NOT
+  // scalar schema keys, and a repeat would double-count them in every
+  // owned-set walk.
 ] as const;
 
 /** A daemon-owned path that has no scalar CONFIG_SCHEMA entry. */

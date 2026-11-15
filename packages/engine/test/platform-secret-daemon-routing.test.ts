@@ -63,7 +63,6 @@ const DAEMON_MAIL_AND_CALENDAR_CREDENTIAL_PATHS: string[] = [
 /** Correctly-routed from the start. Kept here so a regression shows up as a diff, not a silence. */
 const ALREADY_CORRECT_PATHS: string[] = [
   'surfaces.slack.botToken',
-  'email.passwordRef',
   'calendar.google.clientSecretRef',
   'google.oauth.refreshToken',
 ];

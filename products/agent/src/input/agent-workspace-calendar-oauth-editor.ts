@@ -25,7 +25,6 @@ import {
   CALENDAR_OAUTH_CLIENT_ID_KEYS,
   CALENDAR_OAUTH_CLIENT_SECRET_KEYS,
 } from '../agent/calendar/calendar-oauth-service.ts';
-import { ensureCalendarConfigDefaults } from '@goodvibes-jev/engine/platform/platform/config';
 import type { AgentWorkspaceActionResult, AgentWorkspaceEditorKind, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 
 type FieldReader = (id: string) => string;
@@ -117,7 +116,6 @@ export async function submitAgentWorkspaceCalendarOAuthEditor(
   let idStored = false;
   try {
     const secretsManager = requireSecretsManager(context);
-    ensureCalendarConfigDefaults(context.platform.configManager);
     const cm = context.platform.configManager as unknown as {
       get: (key: ConfigKey) => unknown;
       setDynamic: (key: ConfigKey, value: unknown) => void;

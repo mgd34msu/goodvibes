@@ -1,14 +1,12 @@
 /** Platform module maintained in the GoodVibes engine. */
 
 import { randomUUID } from 'node:crypto';
-import { lstatSync, mkdirSync, rmdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { rename, rm } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { PersistentStore } from '../state/persistent-store.js';
-import { captureFileMutation, captureMutationDescriptors } from '../utils/file-mutation.js';
-import { types as nodeTypes } from 'node:util';
+import { withProcessLock } from '../utils/process-lock.js';
 
 export interface FavoriteEntry {
   registryKey: string;
@@ -96,12 +94,18 @@ export interface FavoritesStoreOptions {
   readonly dir: string;
 }
 
-/** Additional operation lifetime restrictions; these never grant write authority. */
+/** A caller's own cancellation and currency check, consulted once before a write starts; never write authority. */
 export interface FavoritesUsageRestriction {
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
 }
 
+/**
+ * The model picker's pinned list and usage counts, shared by every product on
+ * one home. Every change (pin, unpin, usage) is one read, change and rename
+ * under the file's process lock, so a pin made in one product while another
+ * records usage keeps both.
+ */
 export class FavoritesStore {
   private readonly dir: string;
   private cache: FavoritesData | null = null;
@@ -119,79 +123,62 @@ export class FavoritesStore {
   }
 
   async load(ownership?: FavoritesUsageRestriction): Promise<FavoritesData> {
-    const assertOptions = ownership && captureMutationDescriptors(ownership, ['signal', 'assertCurrent']);
-    const signal = ownership?.signal, suppliedCurrent = ownership?.assertCurrent;
-    const assertOwner = ownership && captureMutationDescriptors(this, ['dir', 'getPath', 'load']);
-    const ownedPath = this.getPath(), path = ownership ? resolve(ownedPath) : ownedPath;
-    const physical = ownership && captureFileMutation(path);
-    const current = () => {
-      if (!ownership) return;
-      assertOptions?.(); signal?.throwIfAborted();
-      const result: unknown = suppliedCurrent ? Reflect.apply(suppliedCurrent, ownership, []) : undefined;
-      if (result !== undefined) {
-        if (nodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
-        throw new Error('Favorites read lifetime check is unavailable.');
-      }
-      assertOptions?.(); assertOwner?.();
-      if (this.getPath() !== ownedPath || resolve(this.getPath()) !== path) throw new Error('Favorites read owner changed.');
-      physical?.assertCurrent(); signal?.throwIfAborted();
-    };
-    current();
+    ownership?.signal?.throwIfAborted();
+    const loaded = await this.readFile();
+    this.cache = loaded;
+    return loaded;
+  }
+
+  private async readFile(): Promise<FavoritesData> {
+    const path = this.getPath();
     const file = Bun.file(path);
-    const exists = await file.exists();
-    current();
-    if (!exists) {
-      const empty = emptyData();
-      this.cache = empty;
-      return empty;
-    }
+    if (!(await file.exists())) return emptyData();
     try {
-      const text = await file.text();
-      current();
-      const parsed = JSON.parse(text) as unknown;
-      const { data: loaded, warnings } = parseFavoritesData(parsed);
-      if (warnings.length > 0) {
-        logger.warn('[favorites] Ignoring malformed favorites data', {
-          path: ownership ? path : this.getPath(),
-          warnings,
-        });
-      }
-      current(); this.cache = loaded;
-      return loaded;
+      const { data, warnings } = parseFavoritesData(JSON.parse(await file.text()) as unknown);
+      if (warnings.length > 0) logger.warn('[favorites] Ignoring malformed favorites data', { path, warnings });
+      return data;
     } catch (error) {
-      logger.warn('[favorites] Favorites load failed; preserving existing file', {
-        path: ownership ? path : this.getPath(),
-        error: summarizeError(error),
-      });
+      logger.warn('[favorites] Favorites load failed; preserving existing file', { path, error: summarizeError(error) });
       throw error;
     }
   }
 
   async save(data: FavoritesData): Promise<void> {
+    await this.mutate(() => data);
+  }
+
+  /** Read what is on disk now, change it, and replace the file, all under the process lock. */
+  private async mutate(change: (data: FavoritesData) => FavoritesData | void, signal?: AbortSignal): Promise<void> {
     mkdirSync(this.dir, { recursive: true });
     const path = this.getPath();
-    const tmp = `${path}.tmp.${randomUUID()}`;
-    try {
-      await Bun.write(tmp, JSON.stringify(data, null, 2));
-      await rename(tmp, path);
-    } catch (error) {
-      await rm(tmp, { force: true }).catch(() => undefined);
-      throw error;
-    }
-    this.cache = data;
+    await withProcessLock(`${path}.writer.sqlite`, async () => {
+      const current = await this.readFile();
+      const next = change(current) ?? current;
+      signal?.throwIfAborted();
+      const tmp = `${path}.tmp.${randomUUID()}`;
+      try {
+        await Bun.write(tmp, JSON.stringify(next, null, 2));
+        await rename(tmp, path);
+      } catch (error) {
+        await rm(tmp, { force: true }).catch(() => undefined);
+        throw error;
+      }
+      this.cache = next;
+    }, signal ? { signal } : {});
   }
 
   async pinModel(registryKey: string): Promise<void> {
-    const data = await this.getFreshData();
-    if (data.pinned.some((entry) => entry.registryKey === registryKey)) return;
-    data.pinned.push({ registryKey, pinnedAt: new Date().toISOString() });
-    await this.save(data);
+    await this.mutate((data) => {
+      if (!data.pinned.some((entry) => entry.registryKey === registryKey)) {
+        data.pinned.push({ registryKey, pinnedAt: new Date().toISOString() });
+      }
+    });
   }
 
   async unpinModel(registryKey: string): Promise<void> {
-    const data = await this.getFreshData();
-    data.pinned = data.pinned.filter((entry) => entry.registryKey !== registryKey);
-    await this.save(data);
+    await this.mutate((data) => {
+      data.pinned = data.pinned.filter((entry) => entry.registryKey !== registryKey);
+    });
   }
 
   async getPinned(): Promise<string[]> {
@@ -205,76 +192,22 @@ export class FavoritesStore {
   }
 
   async recordUsage(registryKey: string, ownership?: FavoritesUsageRestriction): Promise<void> {
-    const assertOptions = ownership && captureMutationDescriptors(ownership, ['signal', 'assertCurrent']);
-    const signal = ownership?.signal, suppliedCurrent = ownership?.assertCurrent;
-    const assertOwner = ownership && captureMutationDescriptors(this, ['dir', 'getPath', 'recordUsage']);
-    const ownedPath = this.getPath();
-    const path = ownership ? resolve(ownedPath) : ownedPath;
-    const physical = ownership && captureFileMutation(path);
-    const current = () => {
-      assertOptions?.(); signal?.throwIfAborted();
-      const result: unknown = suppliedCurrent ? Reflect.apply(suppliedCurrent, ownership, []) : undefined;
-      if (result !== undefined) {
-        if (nodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
-        throw new Error('Favorites usage lifetime check is unavailable.');
+    ownership?.signal?.throwIfAborted();
+    ownership?.assertCurrent?.();
+    await this.mutate((data) => {
+      const now = new Date().toISOString();
+      const existing = data.history.find((entry) => entry.registryKey === registryKey);
+      if (existing) {
+        existing.count += 1;
+        existing.lastUsed = now;
+      } else {
+        data.history.push({ registryKey, lastUsed: now, count: 1 });
       }
-      assertOptions?.(); assertOwner?.();
-      if (this.getPath() !== ownedPath || (ownership && resolve(this.getPath()) !== path)) throw new Error('Favorites usage owner changed.');
-      physical?.assertCurrent(); signal?.throwIfAborted();
-    };
-    current();
-    const store = ownership ? new PersistentStore<Record<string, unknown>>(path) : undefined;
-    const snapshot = store ? await store.load() : undefined;
-    current();
-    const data = store ? snapshot === null ? emptyData() : parseFavoritesData(snapshot).data : await this.getFreshData();
-    current();
-    const now = new Date().toISOString();
-    const existing = data.history.find((entry) => entry.registryKey === registryKey);
-    if (existing) {
-      existing.count += 1;
-      existing.lastUsed = now;
-    } else {
-      data.history.push({ registryKey, lastUsed: now, count: 1 });
-    }
-    if (data.history.length > MAX_HISTORY) {
-      data.history.sort((a, b) => a.lastUsed.localeCompare(b.lastUsed));
-      data.history = data.history.slice(data.history.length - MAX_HISTORY);
-    }
-    if (store && physical) {
-      current();
-      const directory = dirname(path);
-      mkdirSync(directory, { recursive: true, mode: 0o700 });
-      physical.onEffect();
-      current();
-      const stage = join(directory, `.favorites-usage-${randomUUID()}`);
-      mkdirSync(stage, { mode: 0o700 });
-      physical.onEffect();
-      const stageStat = lstatSync(stage, { bigint: true });
-      const isOwnedStage = () => {
-        const actual = lstatSync(stage, { bigint: true, throwIfNoEntry: false });
-        return actual?.isDirectory() && !actual.isSymbolicLink()
-          && actual.dev === stageStat.dev && actual.ino === stageStat.ino;
-      };
-      let completed = false;
-      try {
-        current();
-        await store.persist({ pinned: data.pinned, history: data.history }, {
-          durable: true, synchronousPublish: true, temporaryDirectory: stage, assertCurrent: current, beforePublish: current,
-          onEffect: published => { if (published) physical.onEffect(true); else physical.assertCurrent(); },
-          afterPublish: () => { current(); this.cache = data; },
-        });
-        current(); completed = true;
-      } finally {
-        if (isOwnedStage()) {
-          if (completed) {
-            current(); rmdirSync(stage); physical.onEffect(); current();
-          } else {
-            // Only the original empty private namespace may be removed after retirement.
-            try { rmdirSync(stage); } catch { /* Preserve foreign contents and the original failure. */ }
-          }
-        }
+      if (data.history.length > MAX_HISTORY) {
+        data.history.sort((a, b) => a.lastUsed.localeCompare(b.lastUsed));
+        data.history = data.history.slice(data.history.length - MAX_HISTORY);
       }
-    } else await this.save(data);
+    }, ownership?.signal);
   }
 
   async getRecentModels(n: number): Promise<string[]> {
@@ -284,20 +217,6 @@ export class FavoritesStore {
       .sort((a, b) => b.lastUsed.localeCompare(a.lastUsed))
       .slice(0, n)
       .map((entry) => entry.registryKey);
-  }
-
-  /**
-   * A private copy of what is on disk now, for a read-modify-write: another
-   * process (TUI, daemon, agent on the same home) may have changed the file
-   * since this store cached it, and writing back the cache would drop that.
-   * The cache is replaced only by a successful save.
-   */
-  private async getFreshData(): Promise<FavoritesData> {
-    const loaded = await this.load();
-    return {
-      pinned: loaded.pinned.map((entry) => ({ ...entry })),
-      history: loaded.history.map((entry) => ({ ...entry })),
-    };
   }
 
   private async getData(): Promise<FavoritesData> {

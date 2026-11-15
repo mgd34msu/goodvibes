@@ -14,12 +14,12 @@
  * Provenance ladder (highest to lowest):
  *   provider_api    , value from /v1/models max_context_length
  *   configured_cap  , explicit contextWindow in custom provider config
- *   fallback        , DEFAULT_CONTEXT_WINDOW constant
+ *   fallback        , FALLBACK_CONTEXT_WINDOW constant
  */
 
 import { logger } from '../utils/logger.js';
 import { discoverContextWindows } from './context-discovery.js';
-import { LEGACY_GUESSED_CONTEXT_WINDOW } from './context-window-catalog.js';
+import { FALLBACK_CONTEXT_WINDOW } from './context-window-fallback.js';
 import type { ContextWindowProvenance as RegistryContextWindowProvenance } from './registry-types.js';
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ import type { ContextWindowProvenance as RegistryContextWindowProvenance } from 
  *
  * - `provider_api`  , sourced from the provider's /v1/models endpoint
  * - `configured_cap`, explicit value from the custom provider config file
- * - `fallback`      , DEFAULT_CONTEXT_WINDOW (no config, no API response); a guess, not a measured limit
+ * - `fallback`      , FALLBACK_CONTEXT_WINDOW (no config, no API response); a guess, not a measured limit
  */
 export type ContextWindowProvenance = Extract<RegistryContextWindowProvenance, 'provider_api' | 'configured_cap' | 'fallback'>;
 
@@ -60,10 +60,11 @@ export interface ResolvedContextWindow {
 // ---------------------------------------------------------------------------
 
 /**
- * Default fallback context window when neither the API nor the config
- * provides a value.
+ * Kept for importers of the old name: the window used when neither the API nor
+ * the config provides a value is the one fallback, `FALLBACK_CONTEXT_WINDOW`,
+ * the same figure a remote model nobody measured is budgeted at.
  */
-export const DEFAULT_CONTEXT_WINDOW = LEGACY_GUESSED_CONTEXT_WINDOW;
+export const DEFAULT_CONTEXT_WINDOW = FALLBACK_CONTEXT_WINDOW;
 
 /**
  * Grace period between ingestion attempts for the same provider.
@@ -165,7 +166,7 @@ export class LocalContextIngestionService {
  * Priority ladder:
  *   1. provider_api , `apiContextLength` when valid (> 0)
  *   2. configured_cap, `configuredContextWindow` when valid (> 0)
- *   3. fallback     , `DEFAULT_CONTEXT_WINDOW`
+ *   3. fallback     , `FALLBACK_CONTEXT_WINDOW`
  *
  * @param modelId                - Model ID (for logging).
  * @param apiContextLength       - Context length from /v1/models (null if not available).
@@ -195,10 +196,10 @@ export function resolveContextWindow(
 
   logger.debug('[local-context-ingestion] No context window available, using fallback', {
     modelId,
-    fallback: DEFAULT_CONTEXT_WINDOW,
+    fallback: FALLBACK_CONTEXT_WINDOW,
   });
   return {
-    tokens: DEFAULT_CONTEXT_WINDOW,
+    tokens: FALLBACK_CONTEXT_WINDOW,
     provenance: 'fallback',
   };
 }

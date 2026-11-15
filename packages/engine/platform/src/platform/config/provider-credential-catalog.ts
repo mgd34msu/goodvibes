@@ -13,14 +13,16 @@ export const BUILTIN_PROVIDER_ENV_KEYS: Record<string, readonly string[]> = {
   huggingface: ['HF_API_KEY', 'HUGGINGFACE_API_KEY', 'HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN'],
   nvidia: ['NVIDIA_API_KEY', 'NIM_API_KEY'],
   llm7: ['LLM7_API_KEY'],
-  // AWS_PROFILE configures the provider on its own. AWS_REGION and AWS_SESSION_TOKEN are
-  // deliberately not listed: every name here counts as "configured" when set, and neither is a credential.
+  // The names a Bedrock-family provider reads. Whether they configure it is the provider's own rule
+  // (hasAwsCredentials: a bearer token, a full access-key pair, or a profile). AWS_REGION and
+  // AWS_SESSION_TOKEN are not credentials and are not listed.
   'amazon-bedrock': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_PROFILE'],
   'amazon-bedrock-mantle': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_PROFILE'],
   'anthropic-vertex': ['GOOGLE_APPLICATION_CREDENTIALS', 'ANTHROPIC_VERTEX_PROJECT_ID', 'GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT_ID'],
   deepseek: ['DEEPSEEK_API_KEY'],
   fireworks: ['FIREWORKS_API_KEY'],
-  'github-copilot': ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'],
+  // GH_TOKEN and GITHUB_TOKEN are repository credentials, not a Copilot grant.
+  'github-copilot': ['COPILOT_GITHUB_TOKEN'],
   'microsoft-foundry': ['AZURE_OPENAI_API_KEY'],
   minimax: ['MINIMAX_API_KEY'],
   moonshot: ['MOONSHOT_API_KEY'],
@@ -39,6 +41,12 @@ export const BUILTIN_PROVIDER_ENV_KEYS: Record<string, readonly string[]> = {
   litellm: ['LITELLM_API_KEY'],
   'copilot-proxy': ['COPILOT_PROXY_API_KEY'],
   perplexity: ['PERPLEXITY_API_KEY'],
+  cohere: ['COHERE_API_KEY', 'CO_API_KEY'],
+  deepinfra: ['DEEPINFRA_API_KEY'],
+  sambanova: ['SAMBANOVA_API_KEY'],
+  'opencode-zen': ['OPENCODE_ZEN_API_KEY', 'OPENCODE_API_KEY'],
+  zenmux: ['ZENMUX_API_KEY'],
+  'zenmux-anthropic': ['ZENMUX_API_KEY'],
   deepgram: ['DEEPGRAM_API_KEY'],
   elevenlabs: ['ELEVENLABS_API_KEY', 'XI_API_KEY'],
   microsoft: [],
@@ -49,6 +57,19 @@ export const BUILTIN_PROVIDER_ENV_KEYS: Record<string, readonly string[]> = {
   runway: ['RUNWAYML_API_SECRET', 'RUNWAY_API_KEY'],
   alibaba: ['MODELSTUDIO_API_KEY', 'DASHSCOPE_API_KEY', 'QWEN_API_KEY'],
 };
+
+/**
+ * Chat providers whose credential is one plain API key, resolved from the
+ * environment and then the secrets store under the names above. Cloud IAM
+ * providers (Bedrock, Vertex) and media or voice services are left out.
+ */
+export const API_KEY_PROVIDER_IDS: readonly string[] = [
+  'openai', 'anthropic', 'gemini', 'inceptionlabs', 'openrouter', 'aihubmix', 'groq', 'cerebras', 'mistral',
+  'ollama-cloud', 'huggingface', 'nvidia', 'llm7', 'deepseek', 'fireworks', 'github-copilot', 'microsoft-foundry',
+  'minimax', 'moonshot', 'qianfan', 'qwen', 'sglang', 'stepfun', 'together', 'venice', 'volcengine', 'xai',
+  'xiaomi', 'zai', 'cloudflare-ai-gateway', 'vercel-ai-gateway', 'litellm', 'copilot-proxy',
+  'perplexity', 'cohere', 'deepinfra', 'sambanova', 'opencode-zen', 'zenmux', 'zenmux-anthropic',
+];
 
 export function getBuiltinProviderEnvVars(providerId: string): readonly string[] {
   return Object.hasOwn(BUILTIN_PROVIDER_ENV_KEYS, providerId) ? BUILTIN_PROVIDER_ENV_KEYS[providerId]! : [];

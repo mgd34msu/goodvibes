@@ -22,6 +22,7 @@ import { findModelDefinition } from '../../providers/registry-models.js';
 import { resolveModelReference } from '../../providers/model-id-resolution.js';
 import { BUILTIN_COMPAT_PROVIDERS } from '../../providers/builtin-catalog.js';
 import { BUILTIN_PROVIDER_ENV_KEYS } from '../../config/provider-credential-catalog.js';
+import { BEDROCK_PROVIDER_LABELS, hasAwsCredentials } from '../../providers/amazon-bedrock.js';
 import {
   REASONING_EFFORT_SEVERITY,
   readReasoningEffortLevel,
@@ -41,8 +42,7 @@ const BUILTIN_LABEL_MAP: Record<string, string> = {
   anthropic: 'Anthropic',
   gemini: 'Gemini',
   inceptionlabs: 'Inception Labs',
-  'amazon-bedrock': 'Amazon Bedrock',
-  'amazon-bedrock-mantle': 'Amazon Bedrock (Mantle)',
+  ...BEDROCK_PROVIDER_LABELS,
   'anthropic-vertex': 'Anthropic (Vertex)',
   'github-copilot': 'GitHub Copilot',
   groq: 'Groq',
@@ -190,11 +190,14 @@ function getConfiguredViaFromLocalSignals(
   secretKeys?: ReadonlySet<string>,
   routesAuthoritative = false,
 ): ConfiguredVia | undefined {
-  // Tier 1: env var present
-  const hasEnvKey = envVars.some((v) => {
-    const val = process.env[v]!;
-    return typeof val === 'string' && val.length > 0;
-  });
+  // Tier 1: env var present. A Bedrock-family provider answers by its own rule: an
+  // access key id alone signs nothing, so only a token, a full pair or a profile counts.
+  const hasEnvKey = Object.hasOwn(BEDROCK_PROVIDER_LABELS, providerId)
+    ? hasAwsCredentials()
+    : envVars.some((v) => {
+      const val = process.env[v]!;
+      return typeof val === 'string' && val.length > 0;
+    });
   if (hasEnvKey) return 'env';
 
   // Tier 2: SecretsManager has a stored value for any of the provider's env var names.

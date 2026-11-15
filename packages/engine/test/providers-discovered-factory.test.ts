@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
-import { LocalAIProvider, TGIProvider, VLLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createDiscoveredProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { LlamaCppProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { LMStudioProvider } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -36,12 +35,12 @@ describe('createDiscoveredProvider', () => {
     expect(provider).toBeInstanceOf(OllamaProvider);
   });
 
-  test('uses dedicated compat subclasses for vLLM, llama.cpp, TGI, and LocalAI', () => {
+  test('llama.cpp servers use LlamaCppProvider and vLLM, TGI and LocalAI use the generic compat provider', () => {
     const cases: Array<[DiscoveredServer['serverType'], new (...args: never[]) => object]> = [
-      ['vllm', VLLMProvider],
+      ['vllm', OpenAICompatProvider],
       ['llamacpp', LlamaCppProvider],
-      ['tgi', TGIProvider],
-      ['localai', LocalAIProvider],
+      ['tgi', OpenAICompatProvider],
+      ['localai', OpenAICompatProvider],
     ];
 
     for (const [serverType, klass] of cases) {

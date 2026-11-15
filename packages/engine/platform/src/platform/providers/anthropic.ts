@@ -1,4 +1,3 @@
-import { JudgmentHeldError } from '../types/judgment-held.js';
 import { revalidateProviderAttempt } from './attempt-guard.js';
 import type {
   LLMProvider,
@@ -20,11 +19,8 @@ import {
   type LiveModelDiscoveryResult,
 } from './live-model-discovery.js';
 import { applyAnthropicReasoning, isAnthropicThinkingEnabled } from './anthropic-stream.js';
-import { prepareReasoningEffort } from './reasoning-effort-families.js';
-import { knownAnthropicOutputCapRow, readAnthropicOutputCapRow } from '../routing/model-limit-readings.js';
-import { knownCatalogMaxOutput } from './model-catalog-facts.js';
-import type { AnthropicOutputCapRow } from '../routing/batteries/model-limits.js';
-import { describeReasoningRejection } from './reasoning-effort.js';
+import { documentedMaxOutput } from './anthropic-output-caps.js';
+import { reasoningRejectionHint } from './reasoning-rejection-hint.js';
 import { getCacheCapability } from './cache-capability.js';
 import { mapAnthropicStopReason } from './stop-reason-maps.js';
 import { resolveCacheStrategy } from './cache-strategy.js';
@@ -86,48 +82,12 @@ interface AnthropicResponseBody {
 }
 
 
-/**
- * Each documented output-cap row, for a model GET /v1/models has not
- * reported a `max_tokens` for (no API key, or the live call failed). Which
- * row a model id belongs to is read by routing.anthropic-output-cap
- * (routing/batteries/model-limits.ts) and remembered per id; the id prefixes
- * and substrings it replaces are gone.
- *
- * platform.claude.com/docs/en/about-claude/models/overview and its legacy
- * models table: 128K for Fable 5, Mythos 5, Opus 5, Opus 4.8 / 4.7 / 4.6,
- * Sonnet 5 and Sonnet 4.6; 64K for Sonnet 4.5, Haiku 4.5, Opus 4.5, Sonnet 4
- * and Sonnet 3.7; 32K for Opus 4 and 4.1; 8192 for Claude 3.5 Sonnet and
- * Haiku; 4096 for Claude 3 Opus, Sonnet and Haiku and every earlier Claude.
- */
-const ANTHROPIC_OUTPUT_CAPS: Readonly<Record<AnthropicOutputCapRow, number>> = {
-  'output-128k': 128000,
-  'output-64k': 64000,
-  'output-32k': 32000,
-  'output-8k': 8192,
-  'output-4k': 4096,
-};
-
-/**
- * The cap of a model with no documented row, or whose row reading does not
- * settle: the smallest documented cap, since a max_tokens above a model's
- * real cap is a 400 on every request.
- */
-const ANTHROPIC_SMALLEST_OUTPUT_CAP = Math.min(...Object.values(ANTHROPIC_OUTPUT_CAPS));
-
-const OUTPUT_CAP_SITE = 'providers.anthropic.output-cap';
-
 const NOOP_CACHE_HIT_TRACKER: Pick<CacheHitTracker, 'getHitRate' | 'recordTurn'> = {
   getHitRate: () => 0,
   recordTurn: () => {},
 };
 
-/** Repository output limit, then an interpreted documented row. Live endpoint limits win in `clampMaxTokens`. */
-export function documentedMaxOutput(model: string): number {
-  const published = knownCatalogMaxOutput('anthropic', model);
-  if (published !== undefined) return published;
-  const row = knownAnthropicOutputCapRow(model);
-  return row ? ANTHROPIC_OUTPUT_CAPS[row] : ANTHROPIC_SMALLEST_OUTPUT_CAP;
-}
+export { documentedMaxOutput } from './anthropic-output-caps.js';
 
 /**
  * AnthropicProvider, calls the Anthropic Messages API directly via fetch.
@@ -203,7 +163,6 @@ export class AnthropicProvider implements LLMProvider {
 
     return (await instrumentedLlmCall(() => withRetry(async () => {
       const resolvedModel = normalizeAnthropicModel(model);
-      await this.prepareMaxOutput(resolvedModel);
       // Build Anthropic-formatted messages and tools early so we can inject cache_control.
       const anthropicMessages = toAnthropicMessages(messages);
       const anthropicTools = (tools && tools.length > 0) ? toAnthropicTools(tools) : null;
@@ -328,7 +287,6 @@ export class AnthropicProvider implements LLMProvider {
 
       body['messages'] = anthropicMessages;
 
-      await prepareReasoningEffort(reasoningEffort, { provider: this.name, modelId: resolvedModel, ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}) }, 'providers.anthropic.reasoning-family');
       const resolvedEffort = applyAnthropicReasoning(
         body,
         { provider: this.name, model: resolvedModel, reasoningEffort, ...(params.reasoningEffortSpec ? { reasoningEffortSpec: params.reasoningEffortSpec } : {}) },
@@ -373,7 +331,7 @@ export class AnthropicProvider implements LLMProvider {
 
       if (!res.ok) {
         const text = await res.text().catch(() => 'unknown error');
-        const effortHint = (await describeReasoningRejection(res.status, text, resolvedEffort.value, 'providers.anthropic.reasoning-rejection')) ?? '';
+        const effortHint = reasoningRejectionHint(res.status, text, resolvedEffort.value);
         const retryAfterMs = parseRateLimitHeaders(res.headers)?.retryAfterMs;
         throw new ProviderError(`${formatAnthropicErrorText(res.status, text)}${effortHint}`, {
           statusCode: res.status,
@@ -519,34 +477,15 @@ export class AnthropicProvider implements LLMProvider {
   /**
    * Clamp a requested max_tokens to what this model actually allows.
    *
-   * Live endpoint limit first, repository output limit second, interpreted documented row last. A
-   * model the live call did not cover, because there is no API key, or
-   * because the call failed, still gets its row's cap once
-   * `prepareMaxOutput` has read it, and the smallest documented cap when the
-   * reading does not settle. The caller's request already carries the
-   * catalog's output limit, which the min keeps.
+   * Live endpoint limit first, then the repository output limit, then the
+   * documented table, then the smallest documented cap. The caller's request
+   * already carries the catalog's output limit, which the min keeps.
    */
   private clampMaxTokens(model: string, requested: number): number {
     return Math.min(requested, this._liveMaxOutput.get(model) ?? documentedMaxOutput(model));
   }
 
-  /** Interpret a documented cap only when live and repository limits are both absent. */
-  private async prepareMaxOutput(model: string): Promise<void> {
-    if (this._liveMaxOutput.has(model) || knownCatalogMaxOutput(this.name, model) !== undefined) return;
-    try { await readAnthropicOutputCapRow(model, OUTPUT_CAP_SITE); }
-    catch (error) {
-      // clampMaxTokens uses the smallest documented cap while unresolved;
-      // uncertainty is never cached as a settled absence of a model family.
-      if (!(error instanceof JudgmentHeldError)) throw error;
-    }
-  }
-
   private async createChatBatch(input: ProviderBatchCreateInput): Promise<ProviderBatchCreateResult> {
-    await Promise.all(input.requests.map((request) => this.prepareMaxOutput(normalizeAnthropicModel(request.params.model))));
-    await Promise.all(input.requests.map((request) => prepareReasoningEffort(request.params.reasoningEffort, {
-      provider: this.name, modelId: normalizeAnthropicModel(request.params.model),
-      ...(request.params.reasoningEffortSpec ? { spec: request.params.reasoningEffortSpec } : {}),
-    }, 'providers.anthropic.reasoning-family')));
     const res = await instrumentedFetch(`${ANTHROPIC_API_BASE}/messages/batches`, {
       method: 'POST',
       headers: this.batchHeaders(),
@@ -605,6 +544,7 @@ export class AnthropicProvider implements LLMProvider {
     if (!isAnthropicApiUrl(resultsUrl)) {
       throw new ProviderError('Anthropic batch results_url points outside the Anthropic API; it was not fetched and the API key was not sent.', {
         statusCode: 502,
+        guidance: 'Fetch the results again later; if the batch keeps naming another host, ask Anthropic support about the batch.',
         provider: this.name,
         operation: 'batch.results',
         phase: 'response',

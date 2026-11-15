@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { AUTO_REGISTER_CATALOG } from '../platform/src/platform/providers/auto-register.js';
+import { BUILTIN_COMPAT_PROVIDERS } from '../platform/src/platform/providers/builtin-catalog.js';
 import { inferProviderFromModel } from '../terminal-shell/src/cli-command-catalog.js';
 
 describe('inferProviderFromModel', () => {
-  test('every auto-registerable provider id names its provider', () => {
-    for (const entry of AUTO_REGISTER_CATALOG) {
+  test('every catalog provider id names its provider', () => {
+    for (const entry of BUILTIN_COMPAT_PROVIDERS) {
       expect(inferProviderFromModel(`${entry.id}:some-model`)).toBe(entry.id);
     }
   });

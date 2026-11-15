@@ -58,7 +58,6 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
 import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { DaemonHostedSessionsOptions } from '@goodvibes-jev/engine/platform/platform/daemon';
 import type {
   HostedSessionExecPosture,
@@ -161,9 +160,6 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         // One store owns the rule file: a remembered approval in a hosted session
         // is the one the gateway lists and deletes.
         userPermissionRuleStore: services.userPermissionRuleStore,
-        // A workspace with broken or absent provider credentials must degrade,
-        // not take the daemon down on a create call.
-        providerRegistryFactory: createLaunchTolerantProviderRegistry,
         // Workers a hosted turn delegates to run under the turn's own posture.
         execContainment: containmentFor(hostedExecPosture()),
       });

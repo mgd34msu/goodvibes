@@ -190,15 +190,13 @@ for (const captured of [false, true]) {
     const { ConfigManager } = await import('../platform/src/platform/config/index.js');
     const { createClientRuntimeServices } = await import('../platform/src/platform/runtime/bootstrap.js');
     const { createRuntimeStore, RuntimeEventBus } = await import('../platform/src/platform/runtime/state.js');
-    const { createLaunchTolerantProviderRegistry } = await import('../platform/src/platform/providers/index.js');
-    const { unitTemplate } = await import('../platform/src/platform/contract/workstreams.js');
+        const { unitTemplate } = await import('../platform/src/platform/contract/workstreams.js');
     const f = await fixture(true);
     const config = new ConfigManager({ surfaceRoot: 'agent', configDir: join(f.root, '.goodvibes', 'cfg'), workingDir: f.root, homeDir: f.root });
     config.set('permissions.engine', 'policy-engine'); config.set('permissions.mode', 'prompt');
     const runtime = createClientRuntimeServices({ surfaceRoot: 'agent', configManager: config, workingDir: f.root,
       homeDirectory: f.root, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
-      modelDiscovery: 'skip', providerRegistryFactory: createLaunchTolerantProviderRegistry,
-      requestApproval: async () => ({ approved: true }) });
+      modelDiscovery: 'skip',      requestApproval: async () => ({ approved: true }) });
     const previous = installJudgmentPort(fakePort((wireName, question) => {
       const name = wireName.replace(/^(effect|risk|edge)__/, '');
       if (question.type === 'choice') {

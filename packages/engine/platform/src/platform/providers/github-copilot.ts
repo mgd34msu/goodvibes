@@ -8,7 +8,6 @@ import { buildStandardProviderAuthRoutes, summarizeProviderAuth } from './runtim
 import { runLiveModelRefresh, type LiveModelDiscoveryResult } from './live-model-discovery.js';
 import { toProviderError } from '../utils/error-display.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
-import { readsAsCopilotClaudeModel } from '../routing/provider-cache-readings.js';
 
 /**
  * Dated fallback model list, used when no GitHub token is configured (so a
@@ -44,6 +43,8 @@ export interface GitHubCopilotProviderOptions {
   readonly tokenCachePath: string;
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly fetchFn?: typeof fetch | undefined;
+  /** A Copilot token the registry resolved (environment, then the secrets store). */
+  readonly token?: string | undefined;
   /**
    * Absolute path to this provider's on-disk live-model-list cache file
    * (see `getProviderModelsCachePath`). Optional: when omitted,
@@ -155,7 +156,6 @@ async function fetchCopilotModels(options: GitHubCopilotProviderOptions, session
     headers: {
       Authorization: `Bearer ${session.token}`,
       Accept: 'application/json',
-      'Copilot-Integration-Id': 'vscode-chat',
       ...copilotIdeHeaders(true),
     },
   });
@@ -205,6 +205,8 @@ export class GitHubCopilotProvider implements LLMProvider {
   private readonly sessions: CopilotSessions;
   private modelOwner: CopilotCredentialOwner | null = null;
   private modelsReadFor: CopilotCredentialOwner | null = null;
+  /** The owner used or asked about Copilot under this credential; until then no token is exchanged. */
+  private selectedFor: CopilotCredentialOwner | null = null;
 
   constructor(private readonly options: GitHubCopilotProviderOptions) {
     this.options = { ...options };
@@ -215,7 +217,7 @@ export class GitHubCopilotProvider implements LLMProvider {
     const owner = this.sessions.capture();
     if (owner !== this.modelOwner) {
       this.modelOwner = owner;
-      this.modelFacts.clear(); this.modelsReadFor = null;
+      this.modelFacts.clear(); this.modelsReadFor = null; this.selectedFor = null;
       this._models = [...COPILOT_DATED_STATIC_MODELS];
     }
     return owner;
@@ -231,8 +233,13 @@ export class GitHubCopilotProvider implements LLMProvider {
    * dated-static list, and reports the honest reason when live discovery
    * fails rather than silently keeping stale data with no explanation.
    */
-  async refreshModels(force = false): Promise<LiveModelDiscoveryResult> {
+  async refreshModels(force = false, options: { skipUnavailableLocal?: boolean } = {}): Promise<LiveModelDiscoveryResult> {
     const owner = this.observeCredentials();
+    // A sweep over every provider (the bulk refresh sets skipUnavailableLocal) is not the owner
+    // choosing Copilot: it reads the cache or the bundled list and exchanges no token. A refresh
+    // aimed at Copilot, or a chat with one of its models, is.
+    if (owner !== null && options.skipUnavailableLocal !== true) this.selectedFor = owner;
+    const selected = owner !== null && this.selectedFor === owner;
     const retired = (): LiveModelDiscoveryResult => ({ models: [...COPILOT_DATED_STATIC_MODELS], source: 'dated-static',
       added: [], removed: [], asOf: COPILOT_DATED_STATIC_MODELS_AS_OF,
       error: 'The Copilot account changed during discovery. Refresh the currently selected account.' });
@@ -243,7 +250,7 @@ export class GitHubCopilotProvider implements LLMProvider {
         cachePath: this.options.modelsCachePath,
         datedStaticModels: COPILOT_DATED_STATIC_MODELS,
         datedStaticAsOf: COPILOT_DATED_STATIC_MODELS_AS_OF,
-        isConfigured: owner !== null,
+        isConfigured: selected,
         assertCurrent: () => { if (this.observeCredentials() !== owner) throw new Error('Copilot account changed during discovery'); },
         fetchLive: async () => {
           if (!owner) throw new Error('GitHub Copilot requires a configured GitHub token');
@@ -253,7 +260,7 @@ export class GitHubCopilotProvider implements LLMProvider {
           for (const [id, facts] of live) this.modelFacts.set(id, facts);
           return [...live.keys()];
         },
-        force: force || (owner !== null && this.modelsReadFor !== owner),
+        force: force || (selected && this.modelsReadFor !== owner),
       });
     } catch (error) {
       if (this.observeCredentials() !== owner) return retired();
@@ -267,14 +274,14 @@ export class GitHubCopilotProvider implements LLMProvider {
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
     const owner = this.observeCredentials();
-    if (!owner) throw new Error('GitHub Copilot requires COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN.');
+    if (!owner) throw new Error('GitHub Copilot is not configured, the request was not sent. Set COPILOT_GITHUB_TOKEN or store a GitHub token for "github-copilot".');
+    this.selectedFor = owner;
     const callerSignal = params.signal, beforeAttempt = params.beforeAttempt, onDelta = params.onDelta;
     const signal = callerSignal ? AbortSignal.any([callerSignal, owner.signal]) : owner.signal;
     const current = () => { signal.throwIfAborted(); this.sessions.assertCurrent(owner); signal.throwIfAborted(); };
     current();
     const model = params.model ?? this.models[0]!;
-    // Outside the try so a judgment port error is not rewrapped as a provider error.
-    const anthropicTransport = await this.usesAnthropicTransport(model);
+    const anthropicTransport = this.usesAnthropicTransport(model);
     current();
     const request: ChatRequest = { ...params, model, signal,
       beforeAttempt: async () => { current(); await beforeAttempt?.(); current(); },
@@ -330,14 +337,13 @@ export class GitHubCopilotProvider implements LLMProvider {
   /**
    * Whether a model goes through Copilot's Anthropic Messages endpoint. The
    * model's /models entry decides when it carries `supported_endpoints` or
-   * `vendor`; otherwise `routing.copilot-claude-model` reads the id, and only
-   * a reading strong enough to act on picks the Anthropic path. Every other
-   * model uses the OpenAI-compatible endpoint.
+   * `vendor`; otherwise a `claude-` id does. Every other model uses the
+   * OpenAI-compatible endpoint.
    */
-  private async usesAnthropicTransport(model: string): Promise<boolean> {
+  private usesAnthropicTransport(model: string): boolean {
     const served = copilotServesAnthropicMessages(this.modelFacts.get(model));
     if (served !== undefined) return served;
-    return readsAsCopilotClaudeModel(model, 'providers.github-copilot.transport');
+    return model.startsWith('claude-');
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
@@ -351,8 +357,8 @@ export class GitHubCopilotProvider implements LLMProvider {
     const auth = summarizeProviderAuth({
       configured,
       detail: configured
-        ? 'GitHub token is available for Copilot token exchange.'
-        : 'Set COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN to use GitHub Copilot.',
+        ? 'A GitHub token set for Copilot is available; it is exchanged when a Copilot model is used.'
+        : 'Set COPILOT_GITHUB_TOKEN, or store a GitHub token for "github-copilot", to use GitHub Copilot.',
     }, authRoutes);
     return {
       auth: {

@@ -8,7 +8,7 @@ import { readAnthropicOutputCapRow } from '../platform/src/platform/routing/mode
 import { shouldUseOtherApi } from '../platform/src/platform/providers/provider-error.js';
 import { ProviderSetupReadings } from '../platform/src/platform/providers/provider-setup.js';
 import { prepareReasoningEffort } from '../platform/src/platform/providers/reasoning-effort-families.js';
-import { extractOpenAIStreamTextDelta, readStreamDeltaLabels } from '../platform/src/platform/providers/openai-stream-delta.js';
+import { extractOpenAIStreamTextDelta } from '../platform/src/platform/providers/openai-stream-delta.js';
 import { holdsCredential } from '../platform/src/platform/config/credential-key-reading.js';
 import { unknownSettingNotices } from '../platform/src/platform/config/settings-unknown-forms.js';
 import { readConfigEventCarriesValue } from '../platform/src/platform/runtime/config/emit-bridge.js';
@@ -64,7 +64,6 @@ test('Classic provider setup, ordinary streaming and error handling require no d
     await prepareReasoningEffort('high', { modelId: 'synthetic-unknown-model' }, 'test.classic.effort');
     expect(await readAnthropicOutputCapRow('synthetic-unknown-model', 'test.classic.cap')).toBeNull();
     const chunk = { choices: [{ delta: { content: [{ type: 'text', text: 'An ordinary answer.' }] } }] };
-    await readStreamDeltaLabels(chunk, 'test.classic.stream');
     expect(extractOpenAIStreamTextDelta(chunk).content).toEqual(['An ordinary answer.']);
     expect(await readStopReason('undocumented-stop', 'test.classic.stop')).toBe('unknown');
     expect(await readsAsReasoningRejection('Unclassified provider failure', 'test.classic.reasoning-error')).toBe(false);

@@ -62,6 +62,8 @@ describe('Gemini optional context cache', () => {
     const provider = new GeminiProvider('key') as unknown as {
       ensureCachedContent(systemPrompt: string, tools: undefined, model: string): Promise<string | null>;
     };
+    // The first use of an input is left to Gemini's implicit caching.
+    expect(await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).toBeNull();
     const first = provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro');
     const second = provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro');
     release();

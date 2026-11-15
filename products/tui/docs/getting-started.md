@@ -70,7 +70,7 @@ Additional built-in integrations resolve from the same env/secrets path. The clo
 | --- | --- |
 | AWS Bedrock | `AWS_BEARER_TOKEN_BEDROCK`, or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
 | Anthropic on Vertex AI | `GOOGLE_APPLICATION_CREDENTIALS`, `ANTHROPIC_VERTEX_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT` |
-| GitHub Copilot | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` |
+| GitHub Copilot | `COPILOT_GITHUB_TOKEN` |
 | Every compatible/gateway provider | Its API key variable, listed per provider in [providers-and-routing.md](providers-and-routing.md) (for example `DEEPSEEK_API_KEY`, `TOGETHER_API_KEY`, `XAI_API_KEY`) |
 | Perplexity search | `PERPLEXITY_API_KEY` |
 | Deepgram voice | `DEEPGRAM_API_KEY` |

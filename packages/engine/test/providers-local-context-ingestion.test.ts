@@ -11,6 +11,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   resolveContextWindow,
   DEFAULT_CONTEXT_WINDOW,
+  FALLBACK_CONTEXT_WINDOW,
   LocalContextIngestionService,
 } from '@goodvibes-jev/engine/platform/platform/providers';
 
@@ -58,8 +59,8 @@ describe('resolveContextWindow: provenance ladder', () => {
     expect(result.provenance).toBe('fallback');
   });
 
-  test('DEFAULT_CONTEXT_WINDOW is 8192', () => {
-    expect(DEFAULT_CONTEXT_WINDOW).toBe(8192);
+  test('an unknown local model gets the same fallback window as a remote one', () => {
+    expect(DEFAULT_CONTEXT_WINDOW).toBe(FALLBACK_CONTEXT_WINDOW);
   });
 
   test('negative apiContextLength is treated as invalid (falls through)', () => {

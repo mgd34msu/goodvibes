@@ -11,7 +11,6 @@ import {
   type ModelDefinition,
   ProviderRegistry,
 } from '@goodvibes-jev/engine/platform/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../../config/secrets.ts';
 import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
@@ -90,7 +89,7 @@ function createPickerHarness(): PickerHarness {
   );
   benchmarkStore.initBenchmarks();
 
-  const providerRegistry = createLaunchTolerantProviderRegistry({
+  const providerRegistry = new ProviderRegistry({
     configManager: new ConfigManager({ surfaceRoot: 'tui',
       configDir,
       workingDir: rootDir,

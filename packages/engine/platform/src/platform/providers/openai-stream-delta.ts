@@ -1,43 +1,24 @@
 /** Platform module maintained in the GoodVibes engine. */
 
-import { knownContentPartIsReasoning, readContentPartIsReasoning } from '../routing/provider-readings.js';
+import { knownContentPartIsReasoning } from '../routing/provider-readings.js';
 
 /**
  * The documented content-part type labels of OpenAI-compatible streams, an
  * exact wire table: these carry reasoning, these carry the answer. A label
- * outside the table is read once by routing.content-part-kind
- * (readStreamDeltaLabels) before the chunk is split; nothing is decided by a
- * substring of the label.
+ * outside the table is answer text unless a reading taken off the request path
+ * already said otherwise; nothing waits on a model mid-stream and nothing is
+ * decided by a substring of the label.
  */
 const REASONING_PART_TYPES: ReadonlySet<string> = new Set([
   'reasoning', 'reasoning_text', 'reasoning_content', 'reasoning_summary', 'thinking', 'thinking_delta', 'redacted_thinking',
 ]);
 const ANSWER_PART_TYPES: ReadonlySet<string> = new Set(['text', 'output_text', 'input_text', 'refusal']);
 
-/** Whether a typed content part carries reasoning: the wire table, else the remembered reading. */
+/** Whether a typed content part carries reasoning: the wire table, a remembered reading, else answer text. */
 function partIsReasoning(type: string): boolean {
   if (REASONING_PART_TYPES.has(type)) return true;
   if (ANSWER_PART_TYPES.has(type)) return false;
-  const read = knownContentPartIsReasoning(type);
-  if (read === undefined) throw new Error(`Content part type '${type}' has not been read; await readStreamDeltaLabels(chunk) before extracting the chunk.`);
-  return read;
-}
-
-/** The typed content-part labels a chunk carries. */
-function contentPartTypes(rawChunk: unknown): string[] {
-  const content = (rawChunk as { choices?: Array<{ delta?: Record<string, unknown> }> }).choices?.[0]?.delta?.content;
-  if (!Array.isArray(content)) return [];
-  return content
-    .map((entry) => (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).type === 'string' ? ((entry as Record<string, unknown>).type as string).toLowerCase() : ''))
-    .filter((type) => type.length > 0);
-}
-
-/** Reads every unfamiliar content-part label in a chunk (once per label per process) so the chunk can be split. */
-export async function readStreamDeltaLabels(rawChunk: unknown, site: string): Promise<void> {
-  const unread = [...new Set(contentPartTypes(rawChunk))].filter(
-    (type) => !REASONING_PART_TYPES.has(type) && !ANSWER_PART_TYPES.has(type) && knownContentPartIsReasoning(type) === undefined,
-  );
-  await Promise.all(unread.map((type) => readContentPartIsReasoning(type, site)));
+  return knownContentPartIsReasoning(type) ?? false;
 }
 
 function asString(value: unknown): string | null {
@@ -135,8 +116,7 @@ export interface OpenAIStreamTextDeltaOptions {
 
 /**
  * Normalize the wide variety of OpenAI-compatible streaming delta shapes into
- * plain content/reasoning text fragments. A chunk carrying an unfamiliar
- * content-part label must go through readStreamDeltaLabels first.
+ * plain content/reasoning text fragments.
  */
 export function extractOpenAIStreamTextDelta(
   rawChunk: unknown,

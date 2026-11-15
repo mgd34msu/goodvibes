@@ -9,7 +9,6 @@ import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/provider
 import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const CLEAN_ENV_KEYS = [
@@ -57,7 +56,7 @@ describe('provider runtime expansion', () => {
     });
     const favoritesStore = new FavoritesStore({ dir: join(tempHome, '.goodvibes', 'agent') });
     const benchmarkStore = new BenchmarkStore({ dir: join(tempHome, '.goodvibes', 'agent') });
-    providerRegistry = createLaunchTolerantProviderRegistry({
+    providerRegistry = new ProviderRegistry({
       configManager,
       subscriptionManager,
       secretsManager,
@@ -138,7 +137,7 @@ describe('provider runtime expansion', () => {
     expect(typeof copilotProvider.describeRuntime).toBe('function');
     const copilotRuntime = await providerRegistry.describeRuntime('github-copilot');
     const copilot = expectPresent(copilotRuntime, 'github-copilot runtime metadata');
-    expect(copilot.auth?.envVars).toContain('GH_TOKEN');
+    expect(copilot.auth?.envVars).toEqual(['COPILOT_GITHUB_TOKEN']);
     expect(copilot.models?.aliases).toContain('copilot');
 
     const litellmProvider = providerRegistry.getRegistered('litellm');

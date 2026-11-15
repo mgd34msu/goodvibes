@@ -298,33 +298,46 @@ export class ContextWindowOverrideStore {
    * request larger than that figure still raises it.
    */
   apply(model: ModelDefinition): ModelDefinition {
-    const state = this.load();
-    const override = state.overrides.get(model.registryKey);
-    if (override !== undefined) {
-      return { ...model, contextWindow: override, contextWindowProvenance: 'configured_cap', contextWindowOrigin: { kind: 'user_override' }, contextWindowAcceptedFloor: undefined };
-    }
-    const observed = state.observed.get(model.registryKey);
-    const accepted = state.accepted.get(model.registryKey);
-    // Keep the floor independently of the displayed number: a larger raw
-    // estimate must not let a smaller, disproven resolved ceiling reappear.
-    let resolved = accepted === undefined ? model : { ...model, contextWindowAcceptedFloor: accepted };
-    if (observed !== undefined && (accepted === undefined || observed >= accepted) && (
-      !Number.isFinite(model.contextWindow) || model.contextWindow <= 0 ||
-      model.contextWindowProvenance === 'fallback' || model.contextWindowProvenance === 'accepted_floor' ||
-      model.contextWindowOrigin?.kind === 'consensus' || observed < model.contextWindow ||
-      (accepted !== undefined && accepted > model.contextWindow)
-    )) {
-      resolved = { ...resolved, contextWindow: observed, contextWindowProvenance: 'observed_limit', contextWindowOrigin: undefined };
-    }
-    // A learned ceiling is the provider's own word and is kept; any other
-    // stated window smaller than what the provider already accepted is false.
-    if (
-      accepted !== undefined &&
-      resolved.contextWindowProvenance !== 'observed_limit' &&
-      (!Number.isFinite(resolved.contextWindow) || resolved.contextWindow <= 0 || accepted > resolved.contextWindow)
-    ) {
-      return { ...resolved, contextWindow: accepted, contextWindowProvenance: 'accepted_floor', contextWindowOrigin: undefined };
-    }
-    return resolved;
+    return this.snapshot()(model);
   }
+
+  /**
+   * One read of the file (one stat when nothing changed) and an overlay over
+   * that state: a caller overlaying a whole model list takes one snapshot
+   * instead of a stat per model.
+   */
+  snapshot(): (model: ModelDefinition) => ModelDefinition {
+    const state = this.load();
+    return (model) => applyWindowKnowledge(state, model);
+  }
+}
+
+function applyWindowKnowledge(state: LoadedContextWindowState, model: ModelDefinition): ModelDefinition {
+  const override = state.overrides.get(model.registryKey);
+  if (override !== undefined) {
+    return { ...model, contextWindow: override, contextWindowProvenance: 'configured_cap', contextWindowOrigin: { kind: 'user_override' }, contextWindowAcceptedFloor: undefined };
+  }
+  const observed = state.observed.get(model.registryKey);
+  const accepted = state.accepted.get(model.registryKey);
+  // Keep the floor independently of the displayed number: a larger raw
+  // estimate must not let a smaller, disproven resolved ceiling reappear.
+  let resolved = accepted === undefined ? model : { ...model, contextWindowAcceptedFloor: accepted };
+  if (observed !== undefined && (accepted === undefined || observed >= accepted) && (
+    !Number.isFinite(model.contextWindow) || model.contextWindow <= 0 ||
+    model.contextWindowProvenance === 'fallback' || model.contextWindowProvenance === 'accepted_floor' ||
+    model.contextWindowOrigin?.kind === 'consensus' || observed < model.contextWindow ||
+    (accepted !== undefined && accepted > model.contextWindow)
+  )) {
+    resolved = { ...resolved, contextWindow: observed, contextWindowProvenance: 'observed_limit', contextWindowOrigin: undefined };
+  }
+  // A learned ceiling is the provider's own word and is kept; any other
+  // stated window smaller than what the provider already accepted is false.
+  if (
+    accepted !== undefined &&
+    resolved.contextWindowProvenance !== 'observed_limit' &&
+    (!Number.isFinite(resolved.contextWindow) || resolved.contextWindow <= 0 || accepted > resolved.contextWindow)
+  ) {
+    return { ...resolved, contextWindow: accepted, contextWindowProvenance: 'accepted_floor', contextWindowOrigin: undefined };
+  }
+  return resolved;
 }

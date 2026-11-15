@@ -33,7 +33,7 @@ Native providers carry their own client for a vendor's first-party API, rather t
 
 ## Compatible and gateway providers
 
-The runtime also supports a broad compatible/gateway layer. Each entry below is registered with a fixed base URL and activates when its API key is present, in the environment variable shown or in `/secrets`, with one exception: `cohere`, `deepinfra`, `opencode-zen`, `perplexity`, `sambanova`, `zenmux` and `zenmux-anthropic` read the environment variable only, once at startup, so export the variable before launching; a key stored with `/secrets` does not activate them. The current built-ins:
+The runtime also supports a broad compatible/gateway layer. Each entry below is registered with a fixed base URL and activates when its API key is present, in the environment variable shown or in `/secrets`, with one exception: `cohere`, `deepinfra`, `opencode-zen`, `perplexity`, `sambanova`, `zenmux` and `zenmux-anthropic` take their key from the environment variable only, so export the variable before launching; a key stored with `/secrets` does not activate them. The current built-ins:
 
 | Provider | Display name | API key variable |
 | --- | --- | --- |
@@ -62,7 +62,7 @@ The runtime also supports a broad compatible/gateway layer. Each entry below is 
 | `xai` | xAI | `XAI_API_KEY` |
 | `xiaomi` | Xiaomi MiMo | `XIAOMI_API_KEY` |
 | `zai` | Z.ai | `ZAI_API_KEY` or `Z_AI_API_KEY` |
-| `cloudflare-ai-gateway` | Cloudflare AI Gateway | `CLOUDFLARE_AI_GATEWAY_API_KEY` |
+| `cloudflare-ai-gateway` | Cloudflare AI Gateway (OpenAI models through your gateway; set `cloudflare.accountId` or `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_AI_GATEWAY_ID`, or nothing is sent) | `CLOUDFLARE_AI_GATEWAY_API_KEY` (the OpenAI key the gateway passes on) |
 | `vercel-ai-gateway` | Vercel AI Gateway | `AI_GATEWAY_API_KEY` |
 | `litellm` | LiteLLM (local gateway, port 4000) | `LITELLM_API_KEY` |
 | `copilot-proxy` | Copilot Proxy (local gateway, port 3000) | `COPILOT_PROXY_API_KEY` |
@@ -70,7 +70,7 @@ The runtime also supports a broad compatible/gateway layer. Each entry below is 
 | `deepinfra` | DeepInfra | `DEEPINFRA_API_KEY` |
 | `perplexity` | Perplexity chat completions, distinct from the search provider of the same name below | `PERPLEXITY_API_KEY` |
 | `sambanova` | SambaNova | `SAMBANOVA_API_KEY` |
-| `opencode-zen` | OpenCode Zen | `OPENCODE_ZEN_API_KEY` or `ZEN_API_KEY` |
+| `opencode-zen` | OpenCode Zen (opencode.ai) | `OPENCODE_ZEN_API_KEY` or `OPENCODE_API_KEY` |
 | `zenmux` | ZenMux | `ZENMUX_API_KEY` |
 | `zenmux-anthropic` | ZenMux (Anthropic-compatible endpoint of the same provider) | `ZENMUX_API_KEY` |
 

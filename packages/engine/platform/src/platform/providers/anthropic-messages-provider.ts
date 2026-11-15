@@ -1,4 +1,4 @@
-import { documentedMaxOutput } from './anthropic.js';
+import { documentedMaxOutput } from './anthropic-output-caps.js';
 import { revalidateProviderAttempt } from './attempt-guard.js';
 import type { MessageStreamEvent } from '@anthropic-ai/sdk/resources/messages';
 import type {
@@ -10,7 +10,6 @@ import type {
   ProviderRuntimeMetadataDeps,
 } from './interface.js';
 import { applyAnthropicReasoning } from './anthropic-stream.js';
-import { prepareReasoningEffort } from './reasoning-effort-families.js';
 import type { AnthropicContentBlock } from './tool-formats.js';
 import { mapAnthropicStopReason } from './stop-reason-maps.js';
 import {
@@ -110,12 +109,22 @@ export class AnthropicMessagesProvider implements LLMProvider {
     this.models = [...options.models];
   }
 
+  /** The configured default when the current list has it, otherwise the list's first model. */
+  get defaultModel(): string {
+    return this.models.includes(this.options.defaultModel) ? this.options.defaultModel : (this.models[0] ?? this.options.defaultModel);
+  }
+
+  /** The id sent on the wire for a model the list shows; a provider whose ids differ maps it here. */
+  protected wireModelId(model: string): string {
+    return model;
+  }
+
   async chat(params: ChatRequest): Promise<ChatResponse> {
     const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
     return withRetry(async () => {
-      const resolvedModel = normalizeAnthropicModel(params.model ?? this.options.defaultModel);
+      const resolvedModel = normalizeAnthropicModel(params.model ?? this.defaultModel);
       const body: Record<string, unknown> = {
-        model: resolvedModel,
+        model: this.wireModelId(resolvedModel),
         max_tokens: params.maxTokens ?? documentedMaxOutput(resolvedModel),
         messages: toAnthropicMessages(params.messages),
         stream: true,
@@ -129,7 +138,6 @@ export class AnthropicMessagesProvider implements LLMProvider {
         body['tools'] = toAnthropicTools(params.tools);
       }
 
-      await prepareReasoningEffort(params.reasoningEffort, { provider: this.name, modelId: params.model, ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}) }, 'providers.anthropic-platform.reasoning-family');
       applyAnthropicReasoning(
         body,
         { provider: this.name, model: params.model, reasoningEffort: params.reasoningEffort, ...(params.reasoningEffortSpec ? { reasoningEffortSpec: params.reasoningEffortSpec } : {}) },
@@ -154,7 +162,8 @@ export class AnthropicMessagesProvider implements LLMProvider {
           body: Record<string, unknown>,
           options?: { signal?: AbortSignal; maxRetries?: number },
         ) => AnthropicMessageStream;
-        const stream = streamFactory.call(client.messages, body, (params.signal || params.beforeAttempt) ? { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { maxRetries: 0 } : {}) } : undefined);
+        // withRetry is the one retry owner; the SDK's own retries would multiply the requests it reports.
+        const stream = streamFactory.call(client.messages, body, { ...(params.signal ? { signal: params.signal } : {}), maxRetries: 0 });
         for await (const event of stream as AsyncIterable<MessageStreamEvent>) {
           if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
             const idx = event.index ?? 0;
@@ -248,7 +257,7 @@ export class AnthropicMessagesProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
-        defaultModel: this.options.defaultModel,
+        defaultModel: this.defaultModel,
         models: this.models,
       },
       usage: {

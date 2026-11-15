@@ -10,7 +10,6 @@ import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/provide
 import { OpenAIProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { getProviderRuntimeSnapshot, getProviderUsageSnapshot } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -41,7 +40,7 @@ describe('provider runtime snapshots', () => {
     const benchmarkStore = new BenchmarkStore({ dir: join(root, '.goodvibes', 'agent') });
     const configManager = new ConfigManager({ surfaceRoot: 'agent',  configDir: join(root, '.goodvibes', 'agent') });
     configManager.setDynamic('provider.model', 'openai:gpt-5-test');
-    providerRegistry = createLaunchTolerantProviderRegistry({
+    providerRegistry = new ProviderRegistry({
       configManager,
       subscriptionManager: subscriptions,
       secretsManager: secrets,

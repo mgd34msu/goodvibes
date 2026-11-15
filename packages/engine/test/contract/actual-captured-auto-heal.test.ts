@@ -14,7 +14,6 @@ import { createContractRunner } from '../../platform/src/platform/contract/runne
 import { ContractStore } from '../../platform/src/platform/contract/store.js';
 import { createAgentManagerDecompositionRunner } from '../../platform/src/platform/agents/planner-decomposition-runner.js';
 import { createOrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
-import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
 import type { ChatRequest, LLMProvider } from '../../platform/src/platform/providers/interface.js';
 import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
 import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
@@ -92,7 +91,7 @@ async function fixture(mode: Mode, outcome: Outcome) {
   const runtime = createClientRuntimeServices({
     surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
     runtimeBus: bus, runtimeStore: createRuntimeStore(), modelDiscovery: 'skip',
-    providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
+    requestApproval: async () => ({ approved: true }),
   });
   await resumeContracts(runtime.contractRunner, root);
   const acceptance: { name: string; state: Record<string, unknown> }[] = [];

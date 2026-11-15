@@ -150,11 +150,24 @@ test('source deletion invalidates the live session and discovered model metadata
   const f = fixture(); await f.provider.refreshModels(true);
   delete f.env['COPILOT_GITHUB_TOKEN']; expect(f.provider.isConfigured()).toBe(false);
   expect(f.provider.models).toEqual([...COPILOT_DATED_STATIC_MODELS]);
-  await expect(f.provider.chat({ model: 'model-account-a', messages: [{ role: 'user', content: 'Fixture' }] })).rejects.toThrow('requires');
+  await expect(f.provider.chat({ model: 'model-account-a', messages: [{ role: 'user', content: 'Fixture' }] })).rejects.toThrow('COPILOT_GITHUB_TOKEN');
   f.env['COPILOT_GITHUB_TOKEN'] = 'account-a'; await f.provider.refreshModels(true);
   expect(f.exchanges).toEqual(['account-a', 'account-a']);
 });
 
+
+test('a repository token is never presented to Copilot, and a sweep over every provider exchanges nothing', async () => {
+  const f = fixture();
+  delete f.env['COPILOT_GITHUB_TOKEN']; f.env['GITHUB_TOKEN'] = 'repo-token'; f.env['GH_TOKEN'] = 'cli-token';
+  expect(f.provider.isConfigured()).toBe(false);
+  await f.provider.refreshModels(true, { skipUnavailableLocal: true });
+  expect(f.exchanges).toEqual([]);
+  f.env['COPILOT_GITHUB_TOKEN'] = 'account-a';
+  await f.provider.refreshModels(false, { skipUnavailableLocal: true });
+  expect(f.exchanges).toEqual([]);
+  await f.provider.refreshModels(true);
+  expect(f.exchanges).toEqual(['account-a']);
+});
 
 test('sessions near expiry trigger a single shared renewal rather than reuse past their margin', async () => {
   const f = fixture(), sessions = new CopilotSessions(f.options), entered = barrier(), gate = barrier();

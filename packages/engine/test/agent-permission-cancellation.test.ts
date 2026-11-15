@@ -10,7 +10,6 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { ApprovalBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { createRuntimeStore, RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 async function waitFor(predicate: () => boolean, label: string, milliseconds = 3000) {
@@ -34,7 +33,6 @@ test.each(['active', 'pending', 'handoff', 'asking'] as const)('actual Agent per
   const runtime = createClientRuntimeServices({
     surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
     runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), modelDiscovery: 'skip',
-    providerRegistryFactory: createLaunchTolerantProviderRegistry,
     requestApproval: (input) => broker.requestApproval({ ...input, sessionId: 'fixture-session' }),
   });
   let agentId: string | undefined;

@@ -2,7 +2,7 @@ import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.ts';
-import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/launch-tolerant-registry.ts';
+import { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
 import { ProviderCapabilityRegistry } from '../platform/src/platform/providers/capabilities.ts';
 import { CacheHitTracker } from '../platform/src/platform/providers/cache-strategy.ts';
 import { FavoritesStore } from '../platform/src/platform/providers/favorites.ts';
@@ -15,7 +15,7 @@ import { makeProjectTempDir } from './_helpers/project-temp.ts';
 test('the execution graph bridges the manager cancellation signal into the orchestrator', () => {
   const root = makeProjectTempDir('execution-graph-cancel');
   const configManager = new ConfigManager({ configDir: join(root, 'config') });
-  const providerRegistry = createLaunchTolerantProviderRegistry({
+  const providerRegistry = new ProviderRegistry({
     configManager,
     subscriptionManager: new SubscriptionManager(join(root, 'subscriptions.json')),
     capabilityRegistry: new ProviderCapabilityRegistry(), cacheHitTracker: new CacheHitTracker(),

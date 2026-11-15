@@ -17,7 +17,6 @@ import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/con
 import { enrichModelEntries } from '@/runtime/index.ts';
 import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createInitialProviderHealthState } from '@/runtime/index.ts';
 import { createInitialModelState } from '@/runtime/index.ts';
 import { CacheHitTracker } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -91,7 +90,7 @@ function createEnrichmentHarness(): EnrichmentHarness {
   );
   benchmarkStore.initBenchmarks();
 
-  const providerRegistry = createLaunchTolerantProviderRegistry({
+  const providerRegistry = new ProviderRegistry({
     configManager: new ConfigManager({ surfaceRoot: 'agent',  configDir }),
     subscriptionManager,
     secretsManager,

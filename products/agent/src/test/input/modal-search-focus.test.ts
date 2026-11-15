@@ -14,7 +14,6 @@ import { ProviderCapabilityRegistry } from '@goodvibes-jev/engine/platform/platf
 import { FavoritesStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 interface PickerHarness {
@@ -48,7 +47,7 @@ function createPickerHarness(): PickerHarness {
   );
   benchmarkStore.initBenchmarks();
 
-  const providerRegistry = createLaunchTolerantProviderRegistry({
+  const providerRegistry = new ProviderRegistry({
     configManager: new ConfigManager({ surfaceRoot: 'tui',
       configDir,
       workingDir: rootDir,

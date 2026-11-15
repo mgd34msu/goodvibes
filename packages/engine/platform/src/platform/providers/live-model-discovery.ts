@@ -44,8 +44,10 @@ export interface LiveModelDiscoveryResult {
   readonly error?: string | undefined;
   /** Set when `source === 'dated-static'`: the date the packaged list was last verified. */
   readonly asOf?: string | undefined;
-  /** Listed models whose chat capability is still missing capability metadata. */
+  /** Listed models kept although neither the endpoint nor the catalog states their capabilities. */
   readonly unclassifiedModels?: readonly string[] | undefined;
+  /** What the listing does not establish, shown with the report (for example a list read from a related account). */
+  readonly note?: string | undefined;
   readonly skippedReason?: 'local-endpoint-unavailable' | undefined;
 }
 
@@ -121,14 +123,13 @@ export function formatModelDiscoveryReport(providerName: string, result: LiveMod
     const parts: string[] = [];
     if (result.added.length > 0) parts.push(`${result.added.length} new`);
     if (result.removed.length > 0) parts.push(`${result.removed.length} retired`);
-    if (pending > 0) parts.push(`${pending} awaiting capability metadata`);
-    return `${providerName}: ${parts.join(', ')}`;
+    if (pending > 0) parts.push(`${pending} unclassified`);
+    return `${providerName}: ${parts.join(', ')}${result.note ? ` (${result.note})` : ''}`;
   }
   if (result.error) {
     const fallback = result.source === 'cache' ? 'last known list' : `dated static list (as of ${result.asOf ?? 'unknown'})`;
     return `${providerName}: live model refresh failed (${result.error}), using ${fallback}`;
   }
-  if (result.unclassifiedModels?.length) return `${providerName}: ${result.unclassifiedModels.length} awaiting capability metadata, keeping the previous list`;
   if (result.source === 'cache') return `${providerName}: using cached list (${result.models.length} models)`;
   return `${providerName}: using bundled list (as of ${result.asOf ?? 'unknown'})`;
 }
@@ -184,7 +185,7 @@ export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promis
   const baseline = cache?.models ?? opts.datedStaticModels;
   assertCurrent();
 
-  if (cache && !opts.force && !cache.unclassifiedModels?.length && !isTtlCacheStale(cache)) {
+  if (cache && !opts.force && !isTtlCacheStale(cache)) {
     return { models: cache.models, source: 'cache', added: [], removed: [] };
   }
 
@@ -205,18 +206,13 @@ export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promis
     assertCurrent();
     const fetched = Array.isArray(listing) ? listing : listing.models;
     const unclassifiedModels = Array.isArray(listing) ? [] : listing.unclassifiedModels;
-    if (fetched.length === 0 && unclassifiedModels.length === 0) {
+    if (fetched.length === 0) {
       throw new Error('live model list was empty');
     }
-    if (fetched.length === 0 && unclassifiedModels.length > 0) {
-      return { models: baseline, source: cache ? 'cache' : 'dated-static', added: [], removed: [], unclassifiedModels,
-        ...(!cache ? { asOf: opts.datedStaticAsOf } : {}) };
-    }
     const { added, removed } = diffModelIds(baseline, fetched);
-    const pending = new Set(unclassifiedModels);
     if (opts.cachePath) saveModelListCache(fetched, opts.cachePath, unclassifiedModels);
     assertCurrent();
-    return { models: fetched, source: 'live', added, removed: removed.filter(id => !pending.has(id)),
+    return { models: fetched, source: 'live', added, removed,
       ...(unclassifiedModels.length ? { unclassifiedModels } : {}) };
   } catch (err) {
     assertCurrent();
@@ -264,9 +260,9 @@ function listedChatCapability(entry: ListedModelEntry): boolean | undefined {
 
 /** Endpoint facts take precedence; repository facts resolve otherwise unstated capabilities. */
 async function chatModelIds(providerName: string, entries: readonly { readonly id: string; readonly entry: ListedModelEntry }[],
-  onUnclassifiedModel?: (modelId: string) => void): Promise<string[]> {
+  onUnclassifiedModel?: (modelId: string) => void, options: { readonly keepUnclassified?: boolean } = {}): Promise<string[]> {
   const unstated = entries.filter(({ entry }) => listedChatCapability(entry) === undefined).map(({ id }) => id);
-  const readAsChat = new Set(await readChatModelIds(providerName, unstated, CHAT_MODEL_SITE, onUnclassifiedModel));
+  const readAsChat = new Set(await readChatModelIds(providerName, unstated, CHAT_MODEL_SITE, onUnclassifiedModel, options));
   return entries
     .filter(({ id, entry }) => listedChatCapability(entry) ?? readAsChat.has(id))
     .map(({ id }) => id);
@@ -413,7 +409,10 @@ export async function fetchOpenAIModelIds(apiKey: string): Promise<string[]> {
     throw new Error(`OpenAI /v1/models returned ${res.status} ${res.statusText}`);
   }
   const body = await res.json() as { data?: ListedModelEntry[] };
-  return chatModelIds('openai', (body.data ?? []).flatMap((entry) => (typeof entry.id === 'string' ? [{ id: entry.id, entry }] : [])));
+  // OpenAI's own listing mixes speech, image and moderation models with no type field, and the
+  // catalog lists every OpenAI chat model, so an id the catalog does not know is left out here.
+  return chatModelIds('openai', (body.data ?? []).flatMap((entry) => (typeof entry.id === 'string' ? [{ id: entry.id, entry }] : [])),
+    undefined, { keepUnclassified: false });
 }
 
 /** Fetch the live model list from Google's Gemini ListModels endpoint. */
@@ -450,7 +449,8 @@ export function buildProviderNativeModelDefinition(providerId: string, modelId: 
     provider: providerId,
     registryKey: `${providerId}:${modelId}`,
     displayName: modelId,
-    description: `${modelId}, sourced from live ${providerId} model discovery.`,
+    // Listed by the provider but not in the model catalog: its capabilities below are defaults, not facts.
+    description: `${modelId}, listed by ${providerId}; not in the model catalog, so its capabilities are unclassified.`,
     capabilities: {
       toolCalling: true,
       codeEditing: true,

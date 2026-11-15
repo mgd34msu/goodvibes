@@ -3,6 +3,7 @@
  * live -> cache -> dated-static fallback chain, diffing, and reporting.
  * Every scenario proves the model list is never a silent, undated snapshot.
  */
+import { readChatModelIds } from '../platform/src/platform/routing/model-limit-readings.js';
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -224,20 +225,14 @@ describe('getProviderModelsCachePath', () => {
   });
 });
 
-test('partial classification publishes confirmed models and retries pending models without retiring them', async () => {
-  await withTempDir(async (dir) => {
-    const cachePath = join(dir, 'partial.json');
-    const result = await runLiveModelRefresh({ providerName: 'test-provider', cachePath,
-      datedStaticModels: ['pending-model', 'retired-model'], datedStaticAsOf: '2026-07-12', isConfigured: true,
-      fetchLive: async () => ({ models: ['confirmed-model'], unclassifiedModels: ['pending-model'] }) });
-    expect(result.models).toEqual(['confirmed-model']);
-    expect(result.removed).toEqual(['retired-model']);
-    expect(formatModelDiscoveryReport('test-provider', result)).toContain('1 awaiting capability metadata');
-    let calls = 0;
-    const retried = await runLiveModelRefresh({ providerName: 'test-provider', cachePath,
-      datedStaticModels: [], datedStaticAsOf: '2026-07-12', isConfigured: true,
-      fetchLive: async () => { calls++; return ['confirmed-model', 'pending-model']; } });
-    expect(calls).toBe(1);
-    expect(retried.models).toEqual(['confirmed-model', 'pending-model']);
-  });
+test('a model the provider lists is kept when no catalog knows it, and reported as unclassified', async () => {
+  const unclassified: string[] = [];
+  const kept = await readChatModelIds('litellm', ['team-alias'], 'test', (id) => { unclassified.push(id); });
+  expect(kept).toEqual(['team-alias']);
+  expect(unclassified).toEqual(['team-alias']);
+  const result = await runLiveModelRefresh({ providerName: 'litellm', datedStaticModels: ['packaged-name'], datedStaticAsOf: '2026-07-12',
+    isConfigured: true, fetchLive: async () => ({ models: kept, unclassifiedModels: unclassified }) });
+  expect(result.models).toEqual(['team-alias']);
+  expect(result.source).toBe('live');
+  expect(formatModelDiscoveryReport('litellm', result)).toContain('1 unclassified');
 });

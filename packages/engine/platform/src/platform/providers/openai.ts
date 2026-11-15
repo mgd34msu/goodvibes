@@ -38,10 +38,10 @@ import { accumOpenAIToolCall, finalizeOpenAIToolCalls, applyOpenAIChunkUsage, re
 import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
 import { isOpenAiSpentQuota, openAiRetryAfterMs, parseRateLimitHeaders } from './rate-limit-headers.js';
 import type { CacheHitTracker } from './cache-strategy.js';
-import { extractOpenAIStreamTextDelta, readStreamDeltaLabels } from './openai-stream-delta.js';
+import { extractOpenAIStreamTextDelta } from './openai-stream-delta.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
 import { resolveOpenAIClientApiKey } from './openai-compat.js';
-import { prepareReasoningEffort, resolveEffortForRequest } from './reasoning-effort-families.js';
+import { resolveEffortForRequest } from './reasoning-effort-families.js';
 
 const NOOP_CACHE_HIT_TRACKER: Pick<CacheHitTracker, 'recordTurn'> = {
   recordTurn: () => {},
@@ -163,7 +163,6 @@ export class OpenAIProvider implements LLMProvider {
     // family table recognises this model, so there is no evidence it reasons at
     // all. OpenAI serves plenty of non-reasoning models on this same endpoint
     // and rejects `reasoning_effort` on them, so silence beats a guess here.
-    await prepareReasoningEffort(params.reasoningEffort, { provider: this.name, modelId: model, ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}) }, 'providers.openai.reasoning-family');
     const resolvedEffort = resolveEffortForRequest(params.reasoningEffort, {
       provider: this.name, modelId: model,
       ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}),
@@ -204,7 +203,8 @@ export class OpenAIProvider implements LLMProvider {
             stream: true,
             stream_options: { include_usage: true },
           } as Parameters<OpenAIChatCreate>[0],
-          (signal !== undefined || params.beforeAttempt) ? { ...(signal !== undefined ? { signal } : {}), ...(params.beforeAttempt ? { maxRetries: 0 } : {}) } : undefined,
+          // withRetry is the one retry owner; the SDK's own retries would multiply the requests it reports.
+          { ...(signal !== undefined ? { signal } : {}), maxRetries: 0 },
         ).withResponse() as unknown as {
           data: AsyncIterable<import('openai/resources/chat/completions.js').ChatCompletionChunk> & { controller: AbortController };
           response: Response;
@@ -217,7 +217,6 @@ export class OpenAIProvider implements LLMProvider {
 
         for await (const chunk of stream) {
           const delta = chunk.choices[0]?.delta;
-          await readStreamDeltaLabels(chunk, 'providers.openai.content-part-kind');
           const textDelta = extractOpenAIStreamTextDelta(chunk);
           for (const contentDelta of textDelta.content) {
             responseText += contentDelta;

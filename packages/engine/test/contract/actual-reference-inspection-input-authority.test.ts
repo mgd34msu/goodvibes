@@ -12,7 +12,6 @@ import { createContractRunner } from '../../platform/src/platform/contract/runne
 import { ContractStore } from '../../platform/src/platform/contract/store.js';
 import { createAgentManagerDecompositionRunner } from '../../platform/src/platform/agents/planner-decomposition-runner.js';
 import { createOrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
-import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
 import type { LLMProvider } from '../../platform/src/platform/providers/interface.js';
 import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
 import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
@@ -79,7 +78,7 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
       const services = runtime = createClientRuntimeServices({
         surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
         runtimeBus: bus, runtimeStore: createRuntimeStore(), modelDiscovery: 'skip',
-        providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
+        requestApproval: async () => ({ approved: true }),
       });
       await resumeContracts(services.contractRunner, root);
       previous = installJudgmentPort(withDecisionLog(runnerPort(context => {

@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { ConfigManager } from '../../../platform/src/platform/config/index.js';
 import { createClientRuntimeServices } from '../../../platform/src/platform/runtime/bootstrap.js';
 import { createRuntimeStore, RuntimeEventBus } from '../../../platform/src/platform/runtime/state.js';
-import { createLaunchTolerantProviderRegistry } from '../../../platform/src/platform/providers/index.js';
 import { installJudgmentPort } from '../../../errors/src/index.js';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 
@@ -31,7 +30,6 @@ const runtime = createClientRuntimeServices({
   runtimeBus: new RuntimeEventBus(),
   runtimeStore: createRuntimeStore(),
   modelDiscovery: 'skip',
-  providerRegistryFactory: createLaunchTolerantProviderRegistry,
   requestApproval: async () => ({ approved: true }),
 });
 const previous = installJudgmentPort(fakePort((wireName, question) => {

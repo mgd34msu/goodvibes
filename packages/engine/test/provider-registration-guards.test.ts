@@ -8,7 +8,6 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AUTO_REGISTER_CATALOG, autoRegisterProviders } from '../platform/src/platform/providers/auto-register.js';
 import { BUILTIN_COMPAT_PROVIDERS } from '../platform/src/platform/providers/builtin-catalog.js';
 import { createBuiltinCompatProvider, registerBuiltinProviders } from '../platform/src/platform/providers/builtin-registry.js';
 import { AnthropicVertexProvider } from '../platform/src/platform/providers/anthropic-vertex.js';
@@ -70,29 +69,58 @@ describe('Microsoft Foundry without an endpoint', () => {
   });
 });
 
-describe('auto-register table', () => {
-  test('lists no provider the builtin registry already registers', () => {
-    const registered = new Set<string>();
-    registerBuiltinProviders(
-      { register: (provider: LLMProvider) => { registered.add(provider.name); } },
-      () => false,
-      () => '',
-      {
-        resolveProvider: () => { throw new Error('not used'); },
-        getCatalogModels: () => [],
-        getBenchmarks: () => undefined,
-        githubCopilotTokenCachePath: join(tmpdir(), 'unused-copilot-token'),
-        subscriptionManager: {} as never,
-        persistenceRoot: join(tmpdir(), 'unused-persistence-root'),
-      },
-    );
-    const shadowed = AUTO_REGISTER_CATALOG.map((entry) => entry.id).filter((id) => registered.has(id));
-    expect(shadowed).toEqual([]);
+describe('one activation rule', () => {
+  test('a key the resolver hands over (stored, not in the environment) activates a provider that used to need the environment', () => {
+    clearEnv();
+    const saved = process.env['COHERE_API_KEY'];
+    delete process.env['COHERE_API_KEY'];
+    try {
+      const providers = new Map<string, LLMProvider>();
+      registerBuiltinProviders(
+        { register: (provider: LLMProvider) => { providers.set(provider.name, provider); } },
+        () => false,
+        (name) => (name === 'cohere' ? 'stored-cohere-key' : ''),
+        {
+          resolveProvider: () => { throw new Error('not used'); },
+          getCatalogModels: () => [],
+          getBenchmarks: () => undefined,
+          githubCopilotTokenCachePath: join(tmpdir(), 'unused-copilot-token'),
+          subscriptionManager: {} as never,
+          persistenceRoot: join(tmpdir(), 'unused-persistence-root'),
+        },
+      );
+      expect(providers.get('cohere')?.isConfigured?.()).toBe(true);
+      expect(providers.get('deepinfra')?.isConfigured?.()).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env['COHERE_API_KEY'];
+      else process.env['COHERE_API_KEY'] = saved;
+    }
   });
 
-  test('never treats a host URL as an API key', () => {
-    for (const entry of AUTO_REGISTER_CATALOG) {
-      expect(entry.envVars.some((name) => /HOST|URL|ENDPOINT/.test(name))).toBe(false);
+  test('an OpenCode Zen key is sent only to OpenCode, never to ZenMux', () => {
+    const zen = BUILTIN_COMPAT_PROVIDERS.find((entry) => entry.id === 'opencode-zen')!;
+    const zenmux = BUILTIN_COMPAT_PROVIDERS.find((entry) => entry.id === 'zenmux')!;
+    expect(new URL(zen.baseURL).host).not.toBe(new URL(zenmux.baseURL).host);
+    expect(zen.envVars).not.toContain('ZEN_API_KEY');
+  });
+});
+
+describe('Cloudflare AI Gateway without an account or gateway', () => {
+  const definition = BUILTIN_COMPAT_PROVIDERS.find((entry) => entry.id === 'cloudflare-ai-gateway')!;
+
+  test('refuses before any request, naming what is missing', async () => {
+    const saved = [process.env['CLOUDFLARE_ACCOUNT_ID'], process.env['CLOUDFLARE_AI_GATEWAY_ID']] as const;
+    delete process.env['CLOUDFLARE_ACCOUNT_ID'];
+    delete process.env['CLOUDFLARE_AI_GATEWAY_ID'];
+    let fetched = 0;
+    globalThis.fetch = Object.assign(async () => { fetched += 1; return new Response('{}'); }, { preconnect() {} });
+    try {
+      const provider = createBuiltinCompatProvider(definition, 'gateway-key', { settings: { get: () => 'acct' } });
+      await expect(provider.chat({ messages: [{ role: 'user', content: 'hi' }], model: 'gpt-5.6' })).rejects.toThrow('CLOUDFLARE_AI_GATEWAY_ID');
+      expect(fetched).toBe(0);
+    } finally {
+      if (saved[0] === undefined) delete process.env['CLOUDFLARE_ACCOUNT_ID']; else process.env['CLOUDFLARE_ACCOUNT_ID'] = saved[0];
+      if (saved[1] === undefined) delete process.env['CLOUDFLARE_AI_GATEWAY_ID']; else process.env['CLOUDFLARE_AI_GATEWAY_ID'] = saved[1];
     }
   });
 });
@@ -128,31 +156,6 @@ describe('model list cache wiring', () => {
       const provider = providers.get(id) as (LLMProvider & { refreshModels(): Promise<{ models: readonly string[] }> }) | undefined;
       expect(provider).toBeDefined();
       expect((await provider!.refreshModels()).models).toEqual([model]);
-    }
-  });
-});
-
-describe('autoRegisterProviders', () => {
-  test('registers a provider whose environment key is set, once, and skips one already registered', () => {
-    clearEnv();
-    const names = AUTO_REGISTER_CATALOG.flatMap((entry) => entry.envVars);
-    const before = new Map(names.map((name) => [name, process.env[name]]));
-    for (const name of names) delete process.env[name];
-    process.env['COHERE_API_KEY'] = 'cohere-key';
-    try {
-      const registered: string[] = [];
-      const registry = {
-        has: (id: string) => registered.includes(id),
-        register: (provider: LLMProvider) => { registered.push(provider.name); },
-      };
-      expect(autoRegisterProviders(registry)).toEqual(['Cohere']);
-      expect(registered).toEqual(['cohere']);
-      expect(autoRegisterProviders(registry)).toEqual([]);
-    } finally {
-      for (const [name, value] of before) {
-        if (value === undefined) delete process.env[name];
-        else process.env[name] = value;
-      }
     }
   });
 });

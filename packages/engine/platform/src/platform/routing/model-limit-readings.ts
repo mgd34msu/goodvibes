@@ -52,13 +52,19 @@ function readDecisionAnthropicOutputCapRow(modelId: string, site: string): Promi
   });
 }
 
-/** Retain only chat models established by repository metadata; report unknown entries. */
+/**
+ * Keep every listed model unless the catalog says it is not a chat model: a
+ * gateway's own aliases and a model released today are callable before any
+ * outside catalog lists them. A model the catalog does not know is kept and
+ * reported as unclassified.
+ */
 export async function readChatModelIds(provider: string, modelIds: readonly string[], _site: string,
-  onUnclassified?: (modelId: string) => void): Promise<string[]> {
+  onUnclassified?: (modelId: string) => void, options: { readonly keepUnclassified?: boolean } = {}): Promise<string[]> {
+  const keepUnclassified = options.keepUnclassified ?? true;
   return modelIds.filter(modelId => {
     const chat = knownCatalogChatCapability(provider, modelId);
     if (chat === undefined) onUnclassified?.(modelId);
-    return chat === true;
+    return chat === true || (chat === undefined && keepUnclassified);
   });
 }
 

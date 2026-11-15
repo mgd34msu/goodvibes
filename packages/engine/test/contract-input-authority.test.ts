@@ -8,7 +8,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { ConfigManager } from '../platform/src/platform/config/index.js';
 import { createClientRuntimeServices } from '../platform/src/platform/runtime/bootstrap.js';
 import { createRuntimeStore, RuntimeEventBus } from '../platform/src/platform/runtime/state.js';
-import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/index.js';
 import {
   captureContractInput,
   materializeContractInput,
@@ -126,7 +125,6 @@ for (const viewKind of ['snapshot', 'member'] as const) {
           runtimeBus: new RuntimeEventBus(),
           runtimeStore: createRuntimeStore(),
           modelDiscovery: 'skip',
-          providerRegistryFactory: createLaunchTolerantProviderRegistry,
           requestApproval: async () => ({ approved: true }),
         });
         cleanups.push(() => runtime.dispose());

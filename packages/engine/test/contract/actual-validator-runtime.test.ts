@@ -10,7 +10,6 @@ import { ConfigManager } from '../../platform/src/platform/config/index.js';
 import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
 import { RuntimeEventBus, createRuntimeStore } from '../../platform/src/platform/runtime/state.js';
 import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
-import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
 import { createContractRunner } from '../../platform/src/platform/contract/runner.js';
 import { ContractStore } from '../../platform/src/platform/contract/store.js';
 import { createAgentManagerDecompositionRunner } from '../../platform/src/platform/agents/planner-decomposition-runner.js';
@@ -95,7 +94,7 @@ async function assertActualRuntimeFlow(mode: 'direct' | 'validators'): Promise<v
   config.set('contract.isolation', 'worktree'); config.set('tools.autoHeal', false);
   const bus = new RuntimeEventBus();
   const runtime = createClientRuntimeServices({ surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
-    runtimeBus: bus, runtimeStore: createRuntimeStore(), modelDiscovery: 'skip', providerRegistryFactory: createLaunchTolerantProviderRegistry,
+    runtimeBus: bus, runtimeStore: createRuntimeStore(), modelDiscovery: 'skip',
     requestApproval: async () => ({ approved: true }),
   });
   await resumeContracts(runtime.contractRunner, root);

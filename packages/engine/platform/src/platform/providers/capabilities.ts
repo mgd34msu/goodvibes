@@ -6,6 +6,9 @@
  */
 
 import { getCacheCapability, type CacheType } from './cache-capability.js';
+import { FALLBACK_CONTEXT_WINDOW } from './context-window-fallback.js';
+import { documentedMaxOutput } from './anthropic-output-caps.js';
+import { providerAdapterKind, speaksAnthropicMessages } from './adapter-kind.js';
 import type { LLMProvider } from './interface.js';
 
 // ---------------------------------------------------------------------------
@@ -134,8 +137,7 @@ const PROVIDER_DEFAULTS: Record<string, Partial<ProviderCapability>> = {
     parallelTools: true,
     jsonMode: false,   // Anthropic uses structured output via tool schemas, not a json_mode flag
     reasoningControls: false,  // Extended thinking enabled per-model via reasoningEffort
-    maxContextTokens: 200_000,
-    maxOutputTokens: 8_192,
+    // Output caps come from the documented model table (anthropic-output-caps.ts), not a provider row.
     timeoutMs: 120_000,
   },
   openai: {
@@ -350,7 +352,8 @@ const GLOBAL_DEFAULTS: ProviderCapability = {
   parallelTools: false,
   jsonMode: false,
   reasoningControls: false,
-  maxContextTokens: 32_768,
+  // The one fallback window, the same figure the context budget uses for a model nobody measured.
+  maxContextTokens: FALLBACK_CONTEXT_WINDOW,
   maxOutputTokens: 4_096,
   timeoutMs: 120_000,
   caching: 'none',
@@ -367,7 +370,7 @@ const GLOBAL_DEFAULTS: ProviderCapability = {
  * publishes each model's context window, output cap and reasoning support
  * per model; restating those in a hand-maintained table means the table is
  * wrong for every model released after the last edit, which is what happened
- * (see MODEL_LIMIT_FALLBACKS below).
+ * (the per-model limit table this replaced).
  *
  * A field left undefined means "this source has nothing to say", and the
  * static fallbacks answer instead. It never means zero.
@@ -403,45 +406,26 @@ const MODEL_QUIRKS: Record<string, Partial<ProviderCapability>> = {
 };
 
 /**
- * Static per-model limits, used ONLY where a live source has nothing to say.
- *
- * Deliberately demoted below `ModelCapabilityFacts`. As the top-precedence
- * override map this was stale in both directions: it capped Claude Opus 4.5 at
- * 32_000 output tokens against a real 64_000, and it carried no row at all for
- * any model released after it was written, so the whole current fleet fell
- * through to GLOBAL_DEFAULTS' 4_096 output / 32_768 context, and a stale row
- * beat live truth wherever a row did exist.
- *
- * Values below were checked against each vendor's published limits on
- * 2026-07-27. Rows are for models the catalog may not cover (retired or
- * legacy ids); the fleet is expected to come from the live source.
+ * Whether a model offers reasoning controls, for models a live source may not
+ * cover (retired or legacy ids). Limits are not restated here: windows and
+ * output caps come from the live facts, the documented Anthropic table and the
+ * one fallback constant.
  */
-const MODEL_LIMIT_FALLBACKS: Record<string, Partial<ProviderCapability>> = {
-  // Anthropic reasoning models
-  'claude-opus-4-5': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 64_000 },
-  'claude-sonnet-4-5': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 64_000 },
-  'claude-3-5-sonnet-20241022': { maxContextTokens: 200_000, maxOutputTokens: 8_192 },
-  'claude-3-7-sonnet-20250219': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 64_000 },
-  // OpenAI reasoning models
-  'o1': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 32_768 },
-  'o1-mini': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 65_536 },
-  'o1-preview': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 32_768 },
-  'o3': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 100_000 },
-  'o3-mini': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 65_536 },
-  'o4-mini': { reasoningControls: true, maxContextTokens: 200_000, maxOutputTokens: 65_536 },
-  // OpenAI large-context models
-  'gpt-5': { maxContextTokens: 400_000 },
-  'gpt-4.1': { maxContextTokens: 400_000 },
-  'gpt-4.1-mini': { maxContextTokens: 400_000 },
-  // Mercury models (InceptionLabs)
-  'mercury-2': { reasoningControls: true, maxOutputTokens: 32_000 },
-  'mercury-edit': { reasoningControls: false, maxOutputTokens: 32_000 },
-  // Gemini large context
-  'gemini-2.5-pro': { maxContextTokens: 2_097_152, maxOutputTokens: 65_536, reasoningControls: true },
-  'gemini-2.5-flash': { maxContextTokens: 1_048_576, maxOutputTokens: 65_536, reasoningControls: true },
-  'gemini-2.0-flash': { maxContextTokens: 1_048_576, maxOutputTokens: 8_192 },
-  // Gemini 3 series
-  'gemini-3-flash-preview': { maxContextTokens: 1_048_576, maxOutputTokens: 65_536, reasoningControls: true },
+const MODEL_REASONING_FALLBACKS: Readonly<Record<string, boolean>> = {
+  'claude-opus-4-5': true,
+  'claude-sonnet-4-5': true,
+  'claude-3-7-sonnet-20250219': true,
+  'o1': true,
+  'o1-mini': true,
+  'o1-preview': true,
+  'o3': true,
+  'o3-mini': true,
+  'o4-mini': true,
+  'mercury-2': true,
+  'mercury-edit': false,
+  'gemini-2.5-pro': true,
+  'gemini-2.5-flash': true,
+  'gemini-3-flash-preview': true,
 };
 
 // ---------------------------------------------------------------------------
@@ -456,12 +440,12 @@ const MODEL_LIMIT_FALLBACKS: Record<string, Partial<ProviderCapability>> = {
  * 1. `GLOBAL_DEFAULTS`, conservative baseline
  * 2. `PROVIDER_DEFAULTS[providerId]`, provider-level defaults
  * 3. `LLMProvider.capabilities`, self-declared by the provider instance
- * 4. `MODEL_LIMIT_FALLBACKS`, static per-model limits
+ * 4. `MODEL_REASONING_FALLBACKS` and the documented Anthropic output caps
  * 5. live per-model facts, when a facts source is wired
  * 6. `MODEL_QUIRKS`, per-model behaviour the other layers do not carry
  *
  * Exception: the `caching` field is always sourced from `getCacheCapability(providerId)`
- * (a `MODEL_QUIRKS` or `MODEL_LIMIT_FALLBACKS` entry for the model wins if present),
+ * (a `MODEL_QUIRKS` entry for the model wins if present),
  * so self-declared caching from `LLMProvider.capabilities` is intentionally ignored.
  *
  * The cache key is `${providerId}::${modelId}`. Call `invalidate()` after dynamic
@@ -593,7 +577,11 @@ export class ProviderCapabilityRegistry {
   ): ProviderCapability {
     const providerDefaults = PROVIDER_DEFAULTS[providerId] ?? {};
     const selfDeclared: Partial<ProviderCapability> = provider?.capabilities ?? {};
-    const limitFallbacks: Partial<ProviderCapability> = MODEL_LIMIT_FALLBACKS[modelId] ?? {};
+    const limitFallbacks: Partial<ProviderCapability> = {
+      ...(MODEL_REASONING_FALLBACKS[modelId] !== undefined ? { reasoningControls: MODEL_REASONING_FALLBACKS[modelId] } : {}),
+      // A Claude model's documented output cap, where the adapter speaks the Anthropic Messages API.
+      ...(providerId === 'anthropic' || speaksAnthropicMessages(providerAdapterKind(providerId)) ? { maxOutputTokens: documentedMaxOutput(modelId) } : {}),
+    };
     const quirks: Partial<ProviderCapability> = MODEL_QUIRKS[modelId] ?? {};
 
     // Live per-model facts, when a source is wired. Undefined fields are

@@ -41,7 +41,7 @@ test('a broken base-model reference skips that model and keeps the rest of the s
   expect(Object.keys(catalog['a']!.models)).toEqual(['fine']);
 });
 
-test('repository types decide untyped live-listing entries without judgment calls', async () => {
+test('repository types remove non-chat entries, keep unknown ones as unclassified, without judgment calls', async () => {
   const { fetchModelIdsFromListing } = await import('../platform/src/platform/providers/live-model-discovery.js');
   const { installJudgmentPort } = await import('@goodvibes-jev/engine/errors');
   const models = transformModelsDevResponse({ a: { id: 'a', name: 'A', models: {
@@ -54,7 +54,7 @@ test('repository types decide untyped live-listing entries without judgment call
   globalThis.fetch = (async () => new Response(JSON.stringify({ data: [{ id: 'alias' }, { id: 'vector' }, { id: 'unknown' }] }))) as unknown as typeof fetch;
   try {
     const unknown: string[] = [];
-    expect(await fetchModelIdsFromListing('a', 'https://listing.example/models', {}, { filterNonChat: true, onUnclassifiedModel: id => unknown.push(id) })).toEqual(['alias']);
+    expect(await fetchModelIdsFromListing('a', 'https://listing.example/models', {}, { filterNonChat: true, onUnclassifiedModel: id => unknown.push(id) })).toEqual(['alias', 'unknown']);
     expect(unknown).toEqual(['unknown']); expect(calls).toBe(0);
   } finally { globalThis.fetch = originalFetch; installJudgmentPort(previousPort); installCatalogModelFacts([]); }
 });

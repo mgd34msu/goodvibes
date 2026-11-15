@@ -4,15 +4,22 @@
 import { readJsonFileOrQuarantine, writeJsonFileAtomicSafe } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { ProviderAttemptDeniedError } from './attempt-guard.js';
+import { VERSION } from '../version.js';
 
-export const COPILOT_TOKEN_ENV_VARS = ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'] as const;
-const TOKEN_URL = `https://api.github.com/${['copilot', 'internal'].join('_')}/v2/token`;
+/**
+ * Only a token the owner set for Copilot configures it. `GH_TOKEN` and
+ * `GITHUB_TOKEN` are the GitHub CLI's and CI's repository credentials and are
+ * never presented to the Copilot token endpoint.
+ */
+export const COPILOT_TOKEN_ENV_VARS = ['COPILOT_GITHUB_TOKEN'] as const;
+const TOKEN_URL = 'https://api.github.com/copilot_internal/v2/token';
 const DEFAULT_API_BASE_URL = 'https://api.individual.githubcopilot.com';
 const SESSION_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
 export const COPILOT_IO_TIMEOUT_MS = 15_000;
 
+/** The client names itself: GoodVibes, at its own version. */
 export function copilotIdeHeaders(includeApiVersion = false): Record<string, string> {
-  return { 'Editor-Version': 'vscode/1.96.2', 'User-Agent': 'GitHubCopilotChat/0.26.7',
+  return { 'Editor-Version': `GoodVibes/${VERSION}`, 'User-Agent': `GoodVibes/${VERSION}`,
     ...(includeApiVersion ? { 'X-Github-Api-Version': '2025-04-01' } : {}) };
 }
 
@@ -34,11 +41,14 @@ interface SessionOptions {
   readonly tokenCachePath: string;
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly fetchFn?: typeof fetch | undefined;
+  /** A Copilot token the registry resolved (environment, then the secrets store); read before the environment. */
+  readonly token?: string | undefined;
 }
 function changed(): ProviderAttemptDeniedError {
   return new ProviderAttemptDeniedError(new Error('The original GitHub Copilot credential changed. Retry with the currently selected account.'));
 }
-function sourceToken(env: NodeJS.ProcessEnv): string | null {
+function sourceToken(env: NodeJS.ProcessEnv, injected?: string): string | null {
+  if (injected?.trim()) return injected.trim();
   for (const key of COPILOT_TOKEN_ENV_VARS) {
     const value = env[key];
     if (typeof value === 'string' && value.trim()) return value.trim();
@@ -85,7 +95,7 @@ export class CopilotSessions {
   constructor(options: SessionOptions) { this.#options = { ...options }; }
 
   capture(): CopilotCredentialOwner | null {
-    const source = sourceToken(this.#options.env ?? process.env);
+    const source = sourceToken(this.#options.env ?? process.env, this.#options.token);
     if (source === null && this.#credential === null) return null;
     if (source !== null && this.#credential?.source === source) return this.#credential.owner;
     const previous = this.#credential;

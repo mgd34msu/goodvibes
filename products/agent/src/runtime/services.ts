@@ -85,7 +85,6 @@ import type { LocalPermissionPrompt } from '@goodvibes-jev/engine/platform/platf
 import { attachFleetEmitBridge } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import {
   computeUsageCostUsd,
-  createLaunchTolerantProviderRegistry,
   ensureConfiguredModelIsRoutable,
 } from '@goodvibes-jev/engine/platform/platform/providers';
 import { runHostedContinuation } from './continuation-spawn.ts';
@@ -318,17 +317,11 @@ export function shouldRefreshModels(mode: ModelDiscoveryMode | undefined): boole
 }
 
 /**
- * How the client floor builds this product's provider registry, the two
- * things that are true of it and of no default composition, in one named
- * place rather than two side effects in a lambda.
+ * How the client floor builds this product's provider registry: the registry
+ * itself, as the terminal app builds it (an absent key is an unconfigured
+ * provider, never a construction failure), plus the raw-literal pair.
  *
- * 1. LAUNCH TOLERANCE. The default `new ProviderRegistry(...)` throws when a
- *    configured provider credential is broken or absent. This product has to
- *    reach a first frame and then TELL the owner what is wrong, so it
- *    constructs under placeholder credentials instead: a misconfigured key is
- *    a degraded provider, never a crash before anything is on screen.
- *
- * 2. THE RAW-LITERAL PAIR on the credential store. The floor builds its own
+ * THE RAW-LITERAL PAIR on the credential store. The floor builds its own
  *    `SecretsManager` and hands this same instance to the provider stack, the
  *    service registry and the agent orchestrator; it takes no secrets-manager
  *    option, so this callback is the only point at which that instance is in
@@ -345,7 +338,7 @@ function buildAgentProviderRegistry(options: ProviderRegistryConstructionOptions
   // through, and the pair has to go on the whole thing, so the widening is
   // stated here.
   applyRawSecretLiteralHandling(options.secretsManager as SecretsManager);
-  return createLaunchTolerantProviderRegistry(options);
+  return new ProviderRegistry(options);
 }
 
 export interface RuntimeServicesOptions {

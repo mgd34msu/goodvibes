@@ -51,6 +51,32 @@ function resolveFoundryBaseUrl(): string | null {
   return normalized.endsWith('/openai/v1') ? normalized : `${normalized}/openai/v1`;
 }
 
+/** Where the Cloudflare account id comes from: the `cloudflare.accountId` setting, then the environment. */
+export interface CloudflareGatewaySettings {
+  get(key: 'cloudflare.accountId'): unknown;
+}
+
+const CLOUDFLARE_GATEWAY_UNCONFIGURED_BASE_URL = 'https://gateway-not-configured.invalid/openai';
+
+/** `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`, or null while either id is missing. */
+export function resolveCloudflareGatewayBaseUrl(settings?: CloudflareGatewaySettings): string | null {
+  const setting = settings?.get('cloudflare.accountId');
+  const accountId = (typeof setting === 'string' && setting.trim()) || firstEnvValue(['CLOUDFLARE_ACCOUNT_ID']);
+  const gatewayId = firstEnvValue(['CLOUDFLARE_AI_GATEWAY_ID']);
+  if (!accountId || !gatewayId) return null;
+  return `https://gateway.ai.cloudflare.com/v1/${encodeURIComponent(accountId)}/${encodeURIComponent(gatewayId)}/openai`;
+}
+
+/** Cloudflare AI Gateway with no account or gateway: it refuses to send, naming what is missing. */
+class CloudflareGatewayNotConfiguredProvider extends OpenAICompatProvider {
+  override async chat(params: ChatRequest): Promise<ChatResponse> {
+    throw new ProviderError(
+      `Provider "cloudflare-ai-gateway" has no account or gateway configured, the request for model "${params.model ?? 'default'}" was not sent and the API key was not used. Set cloudflare.accountId (or CLOUDFLARE_ACCOUNT_ID) and CLOUDFLARE_AI_GATEWAY_ID to your gateway's ids.`,
+      { category: 'config', guidance: 'Set cloudflare.accountId (or CLOUDFLARE_ACCOUNT_ID) and CLOUDFLARE_AI_GATEWAY_ID.' },
+    );
+  }
+}
+
 /** Microsoft Foundry with no endpoint set: it refuses to send, naming the missing setting. */
 class FoundryEndpointNotConfiguredProvider extends OpenAICompatProvider {
   override async chat(params: ChatRequest): Promise<ChatResponse> {
@@ -67,8 +93,13 @@ export function createBuiltinCompatProvider(
     readonly cacheHitTracker?: import('./cache-strategy.js').CacheHitTracker | undefined;
     /** On-disk cache path for this provider's live-discovered model list. */
     readonly modelsCachePath?: string | undefined;
+    /** Settings the Cloudflare AI Gateway reads its account id from. */
+    readonly settings?: CloudflareGatewaySettings | undefined;
   },
 ): LLMProvider {
+  // The resolver hands over a key from the environment or the secrets store; the
+  // environment is read here as well so a provider is never inactive for want of a resolver row.
+  apiKey ||= firstEnvValue(definition.envVars) ?? '';
   if (definition.kind === 'anthropic-compat') {
     return new AnthropicCompatProvider({
       name: definition.id,
@@ -95,7 +126,12 @@ export function createBuiltinCompatProvider(
   }
 
   const foundryBaseUrl = definition.id === 'microsoft-foundry' ? resolveFoundryBaseUrl() : undefined;
-  const baseURL = definition.id === 'microsoft-foundry' ? (foundryBaseUrl ?? FOUNDRY_UNCONFIGURED_BASE_URL) : definition.baseURL;
+  const cloudflareBaseUrl = definition.id === 'cloudflare-ai-gateway' ? resolveCloudflareGatewayBaseUrl(options.settings) : undefined;
+  const baseURL = definition.id === 'microsoft-foundry'
+    ? (foundryBaseUrl ?? FOUNDRY_UNCONFIGURED_BASE_URL)
+    : definition.id === 'cloudflare-ai-gateway'
+      ? (cloudflareBaseUrl ?? CLOUDFLARE_GATEWAY_UNCONFIGURED_BASE_URL)
+      : definition.baseURL;
   const effectiveApiKey = apiKey || (definition.allowAnonymous ? 'gv-local' : '');
   const compatOptions: ConstructorParameters<typeof OpenAICompatProvider>[0] = {
     name: definition.id,
@@ -130,9 +166,9 @@ export function createBuiltinCompatProvider(
     ...(definition.anonymousDetail ? { anonymousDetail: definition.anonymousDetail } : {}),
     ...(options.cacheHitTracker ? { cacheHitTracker: options.cacheHitTracker } : {}),
   };
-  return foundryBaseUrl === null
-    ? new FoundryEndpointNotConfiguredProvider(compatOptions)
-    : new OpenAICompatProvider(compatOptions);
+  if (foundryBaseUrl === null) return new FoundryEndpointNotConfiguredProvider(compatOptions);
+  if (cloudflareBaseUrl === null) return new CloudflareGatewayNotConfiguredProvider(compatOptions);
+  return new OpenAICompatProvider(compatOptions);
 }
 
 /**
@@ -160,6 +196,8 @@ export function registerBuiltinProviders(
      * itself as being for "eligible providers (Anthropic)".
      */
     readonly cachePolicy?: import('./cache-strategy.js').CachePolicyReader | undefined;
+    /** Settings a builtin reads at construction (the Cloudflare AI Gateway account id). */
+    readonly settings?: CloudflareGatewaySettings | undefined;
   },
 ): void {
   const modelsCachePath = (providerId: string) => getProviderModelsCachePath(options.persistenceRoot, providerId);
@@ -621,6 +659,7 @@ export function registerBuiltinProviders(
     registry.register(createBuiltinCompatProvider(definition, resolvedKey, {
       cacheHitTracker: options.cacheHitTracker,
       modelsCachePath: modelsCachePath(definition.id),
+      settings: options.settings,
     }));
   }
 
@@ -632,6 +671,7 @@ export function registerBuiltinProviders(
   registry.register(new AnthropicVertexProvider(modelsCachePath('anthropic-vertex')));
   registry.register(new GitHubCopilotProvider({
     tokenCachePath: options.githubCopilotTokenCachePath,
+    token: apiKey('github-copilot') || undefined,
   }));
 
   // Synthetic failover provider, must be after all backends.

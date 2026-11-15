@@ -63,7 +63,7 @@ import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform
 import { createTokenAuditBusEmitter, startPairingTokenAudit } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, createLaunchTolerantProviderRegistry, ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
+import { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry, ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
 import { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
 import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createFleetServices } from './fleet-services.js';
@@ -190,7 +190,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     // Canonical construction preserves honest unconfigured provider status.
     observeNativeStartupPhase('base-providers');
-    const providerRegistry = createLaunchTolerantProviderRegistry({
+    const providerRegistry = new ProviderRegistry({
       configManager,
       registerDispose: release => { disposalScope.registry.add('provider model configuration', release); },
       subscriptionManager,

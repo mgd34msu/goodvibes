@@ -2,20 +2,19 @@
  * provider-transport-cache-readings.test.ts
  *
  * GitHub Copilot's transport per model: the /models entry decides in code
- * when it carries `supported_endpoints` or `vendor`; only otherwise does
- * `routing.copilot-claude-model` read the id, once per id, and only an `act`
- * yes picks the Anthropic path.
+ * when it carries `supported_endpoints` or `vendor`; otherwise a `claude-` id
+ * takes the Anthropic path. No decision request either way.
  *
- * Gemini context-cache creation: a 400's wording is read by
- * `routing.cache-minimum`, once per text; only an `act` yes marks the prompt
- * uncacheable; any other status is not read at all.
+ * Gemini context caches: a resource is created only for an input seen twice,
+ * reused per exact input, deleted on eviction and dispose, and a 400 naming the
+ * minimum marks the input uncacheable. No decision request either way.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { GitHubCopilotProvider } from '../platform/src/platform/providers/github-copilot.js';
 import { GeminiProvider } from '../platform/src/platform/providers/gemini.js';
 import { forgetProviderCacheReadings } from '../platform/src/platform/routing/provider-cache-readings.js';
@@ -100,29 +99,14 @@ describe('Copilot transport', () => {
     expect(requests).toHaveLength(0);
   });
 
-  test('an entry with neither field is read once per id; a strong yes takes the Anthropic path', async () => {
-    const { port, requests } = yesNoPort('claude', 0.99);
+  test('an entry with neither field: a claude- id takes the Anthropic path, any other the OpenAI path, with no reading', async () => {
+    const { port, requests } = yesNoPort('claude', 0.5);
     installJudgmentPort(port);
-    const provider = copilotProvider([{ id: 'claude-sonnet-5' }]);
+    const provider = copilotProvider([{ id: 'claude-sonnet-5' }, { id: 'gpt-4.1' }]);
     await provider.refreshModels(true);
     expect(await chatPath(provider, 'claude-sonnet-5')).toBe('/v1/messages');
-    expect(await chatPath(provider, 'claude-sonnet-5')).toBe('/v1/messages');
-    expect(requests).toHaveLength(1);
-    expect(requests[0]!.state).toEqual({ model_id: 'claude-sonnet-5' });
-  });
-
-  test('a settled no uses the OpenAI path; an uncertain reading sends no chat', async () => {
-    const provider = copilotProvider([]);
-    installJudgmentPort(yesNoPort('claude', 0.02).port);
     expect(await chatPath(provider, 'gpt-4.1')).toBe('/v1/chat/completions');
-    installJudgmentPort(yesNoPort('claude', 0.6).port);
-    expect(await chatPath(provider, 'claude-maybe')).toBe('');
-  });
-
-  test('with no judgment port the chat throws the port error, not a provider error', async () => {
-    const provider = copilotProvider([]);
-    await expect(provider.chat({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] }))
-      .rejects.toBeInstanceOf(JudgmentPortMissingError);
+    expect(requests).toHaveLength(0);
   });
 });
 
@@ -150,53 +134,28 @@ function gemini(): CacheEnsurer {
   return new GeminiProvider('key') as unknown as CacheEnsurer;
 }
 
-describe('Gemini cache minimum', () => {
-  test('a 400 read as below the minimum marks the prompt uncacheable, so it is not tried again', async () => {
-    const { port, requests } = yesNoPort('belowMinimum', 0.97);
-    installJudgmentPort(port);
+describe('Gemini context caches', () => {
+  test('a 400 naming the minimum marks the input uncacheable, so it is not tried again', async () => {
     const cache = failCacheCreation(400, BELOW_MINIMUM);
     const provider = gemini();
-    expect(await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).toBeNull();
-    expect(await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).toBeNull();
+    for (let i = 0; i < 4; i++) expect(await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).toBeNull();
     expect(cache.posts()).toBe(1);
-    expect(requests).toHaveLength(1);
   });
 
-  test('a settled no leaves the prompt cacheable; the same text is read once', async () => {
-    const { port, requests } = yesNoPort('belowMinimum', 0.05);
-    installJudgmentPort(port);
-    const cache = failCacheCreation(400, '{"error":{"code":400,"message":"ttl must be at least the minimum of 60s."}}');
-    const provider = gemini();
-    await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro');
-    await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro');
-    expect(cache.posts()).toBe(2);
-    expect(requests).toHaveLength(1);
-  });
-
-  test('an uncertain cache reading sends the request uncached and stores no cacheability decision', async () => {
-    const { port, requests } = yesNoPort('belowMinimum', 0.55);
-    installJudgmentPort(port);
-    const cache = failCacheCreation(400, BELOW_MINIMUM);
-    const provider = gemini();
-    expect(await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).toBeNull();
-    expect(await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).toBeNull();
-    expect(cache.posts()).toBe(2);
-    expect(requests.length).toBeGreaterThan(0);
-  });
-
-  test('a status other than 400 is not read and leaves the prompt cacheable', async () => {
-    const { port, requests } = yesNoPort('belowMinimum', 0.99);
-    installJudgmentPort(port);
-    const cache = failCacheCreation(503, 'minimum capacity unavailable, too few tokens left in quota');
-    const provider = gemini();
-    await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro');
-    await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro');
-    expect(cache.posts()).toBe(2);
-    expect(requests).toHaveLength(0);
-  });
-
-  test('with no judgment port a 400 throws the port error', async () => {
-    failCacheCreation(400, BELOW_MINIMUM);
-    await expect(gemini().ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).rejects.toBeInstanceOf(JudgmentPortMissingError);
+  test('two alternating inputs over ten requests create two resources, and dispose deletes both', async () => {
+    let posts = 0;
+    const deleted: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'DELETE') { deleted.push(String(url)); return new Response('{}', { status: 200 }); }
+      posts++;
+      return new Response(JSON.stringify({ name: `cachedContents/c${posts}`, expireTime: new Date(Date.now() + 3_600_000).toISOString() }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const provider = new GeminiProvider('key') as unknown as CacheEnsurer & { dispose(): Promise<void> };
+    for (let i = 0; i < 10; i++) {
+      await provider.ensureCachedContent(i % 2 === 0 ? LONG_PROMPT : `${LONG_PROMPT}y`, undefined, 'gemini-2.5-pro');
+    }
+    expect(posts).toBe(2);
+    await provider.dispose();
+    expect(deleted.map((url) => url.slice(url.lastIndexOf('/') + 1)).sort()).toEqual(['c1', 'c2']);
   });
 });

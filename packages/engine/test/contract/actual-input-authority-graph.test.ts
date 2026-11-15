@@ -26,7 +26,6 @@ import { spawnSync } from 'node:child_process';
 import { ConfigManager } from '../../platform/src/platform/config/index.js';
 import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
 import { RuntimeEventBus, createRuntimeStore } from '../../platform/src/platform/runtime/state.js';
-import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
 import { createContractRunner } from '../../platform/src/platform/contract/runner.js';
 import { ContractStore } from '../../platform/src/platform/contract/store.js';
 import { createAgentManagerDecompositionRunner } from '../../platform/src/platform/agents/planner-decomposition-runner.js';
@@ -102,7 +101,6 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
         runtimeBus: bus,
         runtimeStore: createRuntimeStore(),
         modelDiscovery: 'skip',
-        providerRegistryFactory: createLaunchTolerantProviderRegistry,
         requestApproval: async () => ({ approved: true }),
       });
       cleanups.push(() => runtime.dispose());

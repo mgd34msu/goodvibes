@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 import { ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createLaunchTolerantProviderRegistry, ProviderCapabilityRegistry, CacheHitTracker, FavoritesStore, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
+import { ProviderRegistry, ProviderCapabilityRegistry, CacheHitTracker, FavoritesStore, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createAgentExecutionGraph } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -15,7 +15,7 @@ import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 function fixture() {
   const root = makeOwnedTempDir('agent-graph-base');
   const configManager = new ConfigManager({ configDir: join(root, 'config') });
-  const providerRegistry = createLaunchTolerantProviderRegistry({
+  const providerRegistry = new ProviderRegistry({
     configManager,
     subscriptionManager: new SubscriptionManager(join(root, 'subscriptions.json')),
     capabilityRegistry: new ProviderCapabilityRegistry(), cacheHitTracker: new CacheHitTracker(),

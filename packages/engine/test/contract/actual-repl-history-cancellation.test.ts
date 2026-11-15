@@ -10,7 +10,6 @@ import { ConfigManager } from '../../platform/src/platform/config/index.js';
 import { createContractInputAuthority, getContractInputAuthority, registerContractInputReadAssertion } from '../../platform/src/platform/contract/input-authority.js';
 import { captureContractInput, contractInputPath, materializeContractInput } from '../../platform/src/platform/contract/input-snapshot.js';
 import type { Contract } from '../../platform/src/platform/contract/types.js';
-import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
 import type { LLMProvider, ProviderMessage } from '../../platform/src/platform/providers/interface.js';
 import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
 import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
@@ -48,7 +47,7 @@ for (const policy of ['readAccessFilter', 'registeredReadAssertion'] as const) {
     const runtime = createClientRuntimeServices({
       surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
       runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), modelDiscovery: 'skip',
-      providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
+      requestApproval: async () => ({ approved: true }),
     });
     await resumeContracts(runtime.contractRunner, root);
     const previous = installJudgmentPort(withDecisionLog(runnerPort(context => {

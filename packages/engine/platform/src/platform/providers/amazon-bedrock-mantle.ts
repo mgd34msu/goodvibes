@@ -3,113 +3,34 @@
 // import. See utils/optional-dependency.ts for the failure a static import of
 // an absent optional package produces.
 import { loadBedrockLibrary } from './optional-bedrock.js';
-import { AnthropicMessagesProvider } from './anthropic-messages-provider.js';
-import { fetchBedrockModelIds, hasAwsCredentials, resolveBedrockBearerToken } from './amazon-bedrock.js';
-import type { ProviderModelSource } from './interface.js';
-import { runLiveModelRefresh, type LiveModelDiscoveryResult } from './live-model-discovery.js';
+import { BEDROCK_DATED_STATIC_MODELS, BEDROCK_DATED_STATIC_MODELS_AS_OF, BedrockFamilyProvider } from './amazon-bedrock.js';
+
+/** Mantle shows the same names as direct Bedrock until its listing is read. */
+export const BEDROCK_MANTLE_DATED_STATIC_MODELS: readonly string[] = BEDROCK_DATED_STATIC_MODELS;
+export const BEDROCK_MANTLE_DATED_STATIC_MODELS_AS_OF = BEDROCK_DATED_STATIC_MODELS_AS_OF;
 
 /**
- * Dated fallback model list, used when no AWS credentials are configured
- * (so a live ListFoundationModels call isn't possible) and as the offline
- * baseline when a live call fails with no prior cache. Re-dated 2026-07-13
- * when live discovery (below) was wired up, reusing the same
- * `bedrock.<region>.amazonaws.com` ListFoundationModels control-plane call
- * `amazon-bedrock.ts` already uses (`fetchBedrockModelIds`, exported from
- * there): Bedrock Mantle shares the same AWS account's Bedrock control plane
- * as direct Bedrock, so one live fetcher covers both. The entries below are
- * still only cross-checked against the direct Anthropic API's /v1/models
- * response, not exercised against a live Bedrock Mantle account's actual
- * ListFoundationModels output, no AWS credentials were available in this
- * environment to verify against, and Bedrock Mantle's model rollout
- * typically trails the direct Anthropic API by weeks, so even a verified
- * direct-Bedrock list is not a guarantee every entry here is already live on
- * Mantle. `refreshModels()` replaces this list with the account's real model
- * ids the first time it runs successfully against real credentials.
+ * Bedrock Mantle: the Bedrock family with the Mantle runtime client. Mantle has
+ * no listing of its own, so its list is the account's Bedrock catalogue, and
+ * each refresh says that the list is not confirmed for the Mantle host.
  */
-export const BEDROCK_MANTLE_DATED_STATIC_MODELS: readonly string[] = [
-  'claude-opus-4-8',
-  'claude-sonnet-5',
-  'claude-sonnet-4-6',
-  'claude-opus-4-6',
-  'claude-haiku-4-5',
-];
-export const BEDROCK_MANTLE_DATED_STATIC_MODELS_AS_OF = '2026-07-13';
-
-export class AmazonBedrockMantleProvider extends AnthropicMessagesProvider {
-  readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
-  private readonly modelsCachePath: string | undefined;
-  private readonly bearerToken: string | undefined;
-
-  /**
-   * @param options.bearerToken A bearer token the registry resolved (environment
-   * first, then the secrets store); without one the environment is read per call.
-   */
+export class AmazonBedrockMantleProvider extends BedrockFamilyProvider {
   constructor(modelsCachePath?: string, options: { readonly bearerToken?: string | undefined } = {}) {
-    const bearerToken = options.bearerToken;
     super({
       name: 'amazon-bedrock-mantle',
-      label: 'Amazon Bedrock Mantle',
-      defaultModel: 'claude-sonnet-4-6',
-      models: [...BEDROCK_MANTLE_DATED_STATIC_MODELS],
-      createClient: async () => {
+      buildClient: async (credentials) => {
         const { AnthropicBedrockMantle } = await loadBedrockLibrary();
         return new AnthropicBedrockMantle({
-          apiKey: resolveBedrockBearerToken(bearerToken),
-          awsAccessKey: process.env['AWS_ACCESS_KEY_ID'] ?? null,
-          awsSecretAccessKey: process.env['AWS_SECRET_ACCESS_KEY'] ?? null,
-          awsSessionToken: process.env['AWS_SESSION_TOKEN'] ?? null,
-          awsProfile: process.env['AWS_PROFILE'],
-          awsRegion: process.env['AWS_REGION'] ?? process.env['AWS_DEFAULT_REGION'] ?? 'us-east-1',
+          apiKey: credentials.bearerToken,
+          awsAccessKey: credentials.accessKey?.id ?? null,
+          awsSecretAccessKey: credentials.accessKey?.secret ?? null,
+          awsSessionToken: credentials.accessKey?.sessionToken ?? null,
+          awsProfile: credentials.profile,
+          awsRegion: credentials.region,
         });
       },
-      // Read per call: credentials set or removed after boot change the answer.
-      auth: () => {
-        const configured = hasAwsCredentials(bearerToken);
-        return {
-          mode: configured ? 'api-key' : 'anonymous',
-          configured,
-          detail: configured
-            ? 'Bedrock Mantle auth is available through bearer token or AWS credential resolution.'
-            : 'Configure AWS_BEARER_TOKEN_BEDROCK or AWS credentials/profile for Bedrock Mantle.',
-          envVars: ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'AWS_REGION'],
-          secretKeys: ['AWS_BEARER_TOKEN_BEDROCK'],
-          allowAnonymous: true,
-          anonymousConfigured: Boolean(process.env['AWS_PROFILE']),
-          anonymousDetail: 'Bedrock Mantle can also use the AWS credential provider chain.',
-        };
-      },
-      streamProtocol: 'anthropic-sdk-stream',
       notes: ['Bedrock Mantle uses the Anthropic Bedrock Mantle SDK path.'],
-    });
-    this.modelsCachePath = modelsCachePath;
-    this.bearerToken = bearerToken;
-  }
-
-  isConfigured(): boolean {
-    return hasAwsCredentials(this.bearerToken);
-  }
-
-  /**
-   * Re-check Bedrock's live foundation-model list via the same
-   * ListFoundationModels control-plane call `AmazonBedrockProvider` uses
-   * (`fetchBedrockModelIds`, imported from `amazon-bedrock.ts` rather than
-   * duplicated here). Always resolves, falls back to the on-disk cache,
-   * then to the dated-static list, and reports the honest reason when live
-   * discovery fails rather than silently keeping stale data with no
-   * explanation.
-   */
-  async refreshModels(force = false): Promise<LiveModelDiscoveryResult> {
-    const result = await runLiveModelRefresh({
-      providerName: this.name,
-      cachePath: this.modelsCachePath,
-      datedStaticModels: BEDROCK_MANTLE_DATED_STATIC_MODELS,
-      datedStaticAsOf: BEDROCK_MANTLE_DATED_STATIC_MODELS_AS_OF,
-      isConfigured: this.isConfigured(),
-      fetchLive: () => fetchBedrockModelIds({ bearerToken: this.bearerToken }),
-      force,
-    });
-    this.models.length = 0;
-    this.models.push(...result.models);
-    return result;
+      listingNote: 'listed from the account\'s Bedrock catalogue, not confirmed for the Mantle host',
+    }, modelsCachePath, options);
   }
 }

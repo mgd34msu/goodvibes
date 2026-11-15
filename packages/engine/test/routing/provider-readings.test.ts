@@ -11,7 +11,7 @@ import {
 } from '../../platform/src/platform/routing/provider-readings.js';
 import { authoredErrorReadingsPort, errorText } from '../_helpers/authored-error-readings.js';
 import { shouldUseOtherApi } from '../../platform/src/platform/providers/provider-error.js';
-import { extractOpenAIStreamTextDelta, readStreamDeltaLabels } from '../../platform/src/platform/providers/openai-stream-delta.js';
+import { extractOpenAIStreamTextDelta } from '../../platform/src/platform/providers/openai-stream-delta.js';
 import { scanHosts } from '../../platform/src/platform/discovery/scanner.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -185,7 +185,7 @@ describe('the other API', () => {
     expect(replacement.requests).toHaveLength(0);
   });
 
-  test('mutating source evidence during an alternate reading prevents retention and action', async () => {
+  test('mutating source evidence during an alternate reading fails that caller; the reading stays with the text it read', async () => {
     const fixture = alternateApiFixture();
     const started = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -204,7 +204,9 @@ describe('the other API', () => {
     error.status = 404;
     release.resolve();
     await expect(pending).rejects.toThrow();
-    expect(effects).toEqual([]);
+    const asked = effects.length;
+    expect(await readsAsAlternateApi({ status: 400, message: publicFailures[0]! }, 'test')).toBe(true);
+    expect(effects).toHaveLength(asked);
   });
 
   test('cancelling a pending memo waiter preserves its independent producer', async () => {
@@ -300,21 +302,14 @@ describe('local server identity', () => {
 describe('stream content-part labels', () => {
   const chunk = (type: string) => ({ choices: [{ delta: { content: [{ type, text: 'thinking out loud' }, { type: 'output_text', text: 'the answer' }] } }] });
 
-  test('documented labels split without a reading; an unfamiliar one is read once and then routes its text', async () => {
+  test('documented labels split from the table and an unfamiliar one is answer text, with no decision request mid-stream', () => {
     const { port, requests } = fakePort(() => noulAnswer(0.95));
     installJudgmentPort(port);
-    await readStreamDeltaLabels(chunk('reasoning'), 'test');
+    expect(extractOpenAIStreamTextDelta(chunk('reasoning')).reasoning).toEqual(['thinking out loud']);
+    const unfamiliar = extractOpenAIStreamTextDelta(chunk('unheard_of'));
+    expect(unfamiliar.content).toEqual(['thinking out loud', 'the answer']);
+    expect(unfamiliar.reasoning).toEqual([]);
     expect(requests).toHaveLength(0);
-    await readStreamDeltaLabels(chunk('thought'), 'test');
-    await readStreamDeltaLabels(chunk('thought'), 'test');
-    expect(requests).toHaveLength(1);
-    const split = extractOpenAIStreamTextDelta(chunk('thought'));
-    expect(split.reasoning).toEqual(['thinking out loud']);
-    expect(split.content).toEqual(['the answer']);
-  });
-
-  test('an unread label is never guessed', () => {
-    expect(() => extractOpenAIStreamTextDelta(chunk('unheard_of'))).toThrow('has not been read');
   });
 });
 

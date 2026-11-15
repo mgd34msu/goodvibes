@@ -18,7 +18,6 @@ import { UserPermissionRuleStore } from '../platform/src/platform/permissions/us
 import { createClientRuntimeServices } from '../platform/src/platform/runtime/bootstrap.js';
 import { RuntimeEventBus, createRuntimeStore } from '../platform/src/platform/runtime/state.js';
 import { resumeContracts } from '../platform/src/platform/runtime/contract-composition.js';
-import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/index.js';
 import { createContractRunner } from '../platform/src/platform/contract/runner.js';
 import { ContractStore } from '../platform/src/platform/contract/store.js';
 import { createAgentManagerDecompositionRunner } from '../platform/src/platform/agents/planner-decomposition-runner.js';
@@ -67,7 +66,7 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
     const runtime = createClientRuntimeServices({
       surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
       runtimeBus: bus, runtimeStore: createRuntimeStore(), modelDiscovery: 'skip',
-      providerRegistryFactory: createLaunchTolerantProviderRegistry, requestApproval: async () => ({ approved: true }),
+      requestApproval: async () => ({ approved: true }),
     });
     await resumeContracts(runtime.contractRunner, root);
     const judgments: string[] = [];

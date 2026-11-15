@@ -1,7 +1,6 @@
 import type { DiscoveredServer } from '../discovery/scanner.js';
 import type { LLMProvider } from './interface.js';
 import { getDiscoveredTraits } from './discovered-traits.js';
-import { LocalAIProvider, TGIProvider, VLLMProvider } from './discovered-compat.js';
 import { LlamaCppProvider } from './llama-cpp.js';
 import { LMStudioProvider } from './lm-studio.js';
 import { OpenAICompatProvider } from './openai-compat.js';
@@ -29,23 +28,8 @@ export function createDiscoveredProvider(server: DiscoveredServer): LLMProvider 
         ...common,
         reasoningFormat: traits.reasoningFormat,
       });
-    case 'vllm':
-      return new VLLMProvider({
-        ...common,
-        reasoningFormat: traits.reasoningFormat,
-      });
     case 'llamacpp':
       return new LlamaCppProvider({
-        ...common,
-        reasoningFormat: traits.reasoningFormat,
-      });
-    case 'tgi':
-      return new TGIProvider({
-        ...common,
-        reasoningFormat: traits.reasoningFormat,
-      });
-    case 'localai':
-      return new LocalAIProvider({
         ...common,
         reasoningFormat: traits.reasoningFormat,
       });

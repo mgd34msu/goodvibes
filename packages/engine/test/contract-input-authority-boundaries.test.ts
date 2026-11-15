@@ -374,8 +374,7 @@ test('captured content search rechecks stored-rule revocation before consulting 
     const { ConfigManager } = await import('../platform/src/platform/config/index.js');
     const { createClientRuntimeServices } = await import('../platform/src/platform/runtime/bootstrap.js');
     const { RuntimeEventBus, createRuntimeStore } = await import('../platform/src/platform/runtime/state.js');
-    const { createLaunchTolerantProviderRegistry } = await import('../platform/src/platform/providers/index.js');
-    const { fakePort, noulAnswer } = await import('@goodvibes-jev/judgment/testing');
+        const { fakePort, noulAnswer } = await import('@goodvibes-jev/judgment/testing');
     const { installJudgmentPort } = await import('../errors/src/index.js');
     const { createFindTool } = await import('../platform/src/platform/tools/find/index.js');
     const { FindRuntimeService } = await import('../platform/src/platform/tools/find/shared.js');
@@ -395,7 +394,6 @@ test('captured content search rechecks stored-rule revocation before consulting 
       runtimeBus: new RuntimeEventBus(),
       runtimeStore: createRuntimeStore(),
       modelDiscovery: 'skip',
-      providerRegistryFactory: createLaunchTolerantProviderRegistry,
       requestApproval: async () => ({ approved: true }),
     });
     const previous = installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);

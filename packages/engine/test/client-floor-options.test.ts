@@ -7,11 +7,9 @@
  * A surface product adopting `createClientRuntimeServices` was, until these
  * existed, forced to give up three things it had chosen deliberately:
  *
- *  1. LAUNCH TOLERANCE. The floor built the registry with `new
- *     ProviderRegistry`. A product that boots against broken or absent provider
- *     credentials needs `createLaunchTolerantProviderRegistry` instead, or a
- *     misconfigured key becomes a crash before the first frame rather than a
- *     degraded provider.
+ *  1. REGISTRY CONSTRUCTION. The floor builds the registry with `new
+ *     ProviderRegistry`; a product that needs to act on the registry's option
+ *     bag (the Agent marks its credential store) passes its own factory.
  *  2. DISCOVERY TIMING. The floor always ran model discovery, whose write is
  *     async and unawaited. A composition that will not outlive that write, a
  *     suite against a temp workspace, a one-shot subcommand, needs to skip it,
@@ -87,7 +85,7 @@ describe('how the registry is built', () => {
       providerRegistryFactory: (options) => { seen.push(options); return new ProviderRegistry(options); },
     });
     // The factory receives the fully-assembled option bag, which is what lets a
-    // product pass createLaunchTolerantProviderRegistry without restating any of it.
+    // product pass its own factory without restating any of it.
     expect(seen).toHaveLength(1);
     expect(seen[0]?.configManager).toBeTruthy();
     expect(seen[0]?.capabilityRegistry).toBe(stack.providerCapabilityRegistry);

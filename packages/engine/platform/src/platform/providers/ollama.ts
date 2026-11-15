@@ -8,6 +8,7 @@ import type { ProviderCapability } from './capabilities.js';
 import type {
   ChatRequest,
   ChatResponse,
+  ChatStopReason,
   ContentPart,
   LLMProvider,
   PartialToolCall,
@@ -21,9 +22,12 @@ import { OpenAICompatProvider, type OpenAICompatOptions } from './openai-compat.
 import { LOCAL_SERVER_EFFORT } from './discovered-traits.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { toOpenAITools } from './tool-formats.js';
-import { normalizeProviderError, shouldUseOtherApi } from './provider-error.js';
-import { readOllamaStopReason } from './stop-reason-maps.js';
+import { getErrorStatus, normalizeProviderError } from './provider-error.js';
+import { OLLAMA_DONE_REASON_MAP } from './stop-reason-maps.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
+
+/** Statuses that say the native endpoint is missing or refuses the method. */
+const OLLAMA_OTHER_API_STATUSES: ReadonlySet<number> = new Set([404, 405, 501]);
 
 type NativeFetch = (
   input: RequestInfo | URL,
@@ -105,7 +109,8 @@ export class OllamaProvider implements LLMProvider {
             if (err instanceof ProviderAttemptDeniedError) throw err;
             // Once the stream has produced output the other API would answer from the start again.
             if (err instanceof ProviderError && err.phase === 'stream') throw err;
-            if (!(await shouldUseOtherApi(err, 'providers.ollama.native-chat'))) {
+            // Only a missing endpoint sends the request to the other API; any other failure is the provider's own answer.
+            if (!OLLAMA_OTHER_API_STATUSES.has(getErrorStatus(err) ?? 0)) {
               throw normalizeProviderError(err, this.name, 'chat', 'request');
             }
             return null;
@@ -317,7 +322,10 @@ export class OllamaProvider implements LLMProvider {
       });
     }
 
-    const stopReason = await readOllamaStopReason(doneReason, finalToolCalls.length > 0, 'providers.ollama.stop-reason');
+    // An unfamiliar done_reason is reported as unknown, never guessed.
+    const stopReason: ChatStopReason = finalToolCalls.length > 0
+      ? 'tool_call'
+      : OLLAMA_DONE_REASON_MAP[doneReason] ?? (doneReason.trim() ? 'unknown' : 'completed');
 
     return {
       content: responseText,

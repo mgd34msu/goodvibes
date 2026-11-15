@@ -1,15 +1,10 @@
 /**
  * auto-register.ts
  *
- * Automatically registers providers when their API keys are detected in the environment.
- *
- * When a user has an API key set in their environment (e.g. COHERE_API_KEY),
- * auto-register that provider using catalog data, zero manual configuration.
- * Only the environment is read, once at startup: a key stored in the secrets
- * store does not activate these providers.
- *
- * Multi-endpoint providers (e.g. ZenMux) are handled by registering separate
- * provider instances for each endpoint, routed by the model's native API format.
+ * Registers providers from a caller-supplied list when their API keys are set
+ * in the environment. The packaged list is empty: every known provider,
+ * Cohere and ZenMux included, is a builtin activated by a stored or
+ * environment key (see AUTO_REGISTER_CATALOG).
  */
 
 import { OpenAICompatProvider } from './openai-compat.js';
@@ -57,113 +52,12 @@ export interface AutoRegisterEntry extends CatalogProvider {
 // ---------------------------------------------------------------------------
 
 /**
- * Well-known providers that can be auto-registered from environment variables.
- *
- * Each entry maps to one registered LLM provider instance. Multi-endpoint
- * providers (e.g. ZenMux) appear multiple times, once per endpoint, with
- * distinct `id` and `name` values (e.g. 'zenmux' and 'zenmux-anthropic').
- *
- * Order determines registration priority when multiple providers offer the
- * same model. Earlier entries take precedence in the auto-registration log.
+ * Providers registered from an environment key alone. Empty: every known
+ * provider is a builtin (providers/builtin-catalog.ts) and is activated by a
+ * key from the environment or the secrets store through the credential
+ * resolver, the one activation rule. A caller may still pass its own list.
  */
-export const AUTO_REGISTER_CATALOG: AutoRegisterEntry[] = [
-  // Only providers the builtin registry does not already register belong here: a
-  // second entry for a builtin id would be skipped today and silently swap
-  // that provider's settings if the call order ever changed.
-  {
-    id: 'cohere',
-    name: 'Cohere',
-    envVars: ['COHERE_API_KEY', 'CO_API_KEY'],
-    baseUrl: 'https://api.cohere.com/v2',
-    apiFormat: 'openai',
-    defaultModel: 'command-a-03-2025',
-    seedModels: [
-      'command-a-03-2025',
-      'command-r-plus-08-2024',
-    ],
-  },
-  {
-    id: 'deepinfra',
-    name: 'DeepInfra',
-    envVars: ['DEEPINFRA_API_KEY'],
-    baseUrl: 'https://api.deepinfra.com/v1/openai',
-    apiFormat: 'openai',
-    defaultModel: 'moonshotai/Kimi-K2-Instruct',
-    seedModels: [
-      'moonshotai/Kimi-K2-Instruct',
-      'meta-llama/Llama-4-Maverick-17B-128E-Instruct',
-    ],
-  },
-  {
-    id: 'perplexity',
-    name: 'Perplexity',
-    envVars: ['PERPLEXITY_API_KEY'],
-    baseUrl: 'https://api.perplexity.ai',
-    apiFormat: 'openai',
-    defaultModel: 'sonar-pro',
-    seedModels: [
-      'sonar-pro',
-      'sonar',
-      'r1-1776',
-    ],
-  },
-  {
-    id: 'sambanova',
-    name: 'SambaNova',
-    envVars: ['SAMBANOVA_API_KEY'],
-    baseUrl: 'https://fast-api.snova.ai/v1',
-    apiFormat: 'openai',
-    defaultModel: 'Llama-4-Maverick-17B-128E-Instruct',
-    seedModels: [
-      'Llama-4-Maverick-17B-128E-Instruct',
-      'Meta-Llama-3.3-70B-Instruct',
-    ],
-  },
-  {
-    id: 'opencode-zen',
-    name: 'OpenCode Zen',
-    envVars: ['OPENCODE_ZEN_API_KEY', 'ZEN_API_KEY'],
-    baseUrl: 'https://zenmux.ai/api/v1',
-    apiFormat: 'openai',
-    defaultModel: 'kimi-k2.5-free',
-    seedModels: [
-      'kimi-k2.5-free',
-      'gpt-oss-120b-free',
-    ],
-  },
-
-  // -------------------------------------------------------------------------
-  // ZenMux: multi-endpoint provider
-  // OpenAI-compatible endpoint (primary)
-  // -------------------------------------------------------------------------
-  {
-    id: 'zenmux',
-    name: 'ZenMux',
-    envVars: ['ZENMUX_API_KEY'],
-    baseUrl: 'https://zenmux.ai/api/v1',
-    apiFormat: 'openai',
-    defaultModel: 'gpt-5.4',
-    seedModels: [
-      'gpt-5.4',
-      'gpt-5-mini',
-      'kimi-k2-instruct',
-    ],
-  },
-  // ZenMux: Anthropic-compatible endpoint (secondary)
-  {
-    id: 'zenmux-anthropic',
-    name: 'ZenMux (Anthropic)',
-    envVars: ['ZENMUX_API_KEY'],
-    baseUrl: 'https://zenmux.ai/api/anthropic/v1',
-    apiFormat: 'anthropic',
-    defaultModel: 'claude-opus-4-6',
-    seedModels: [
-      'claude-opus-4-6',
-      'claude-sonnet-4-6',
-      'claude-haiku-4-5',
-    ],
-  },
-];
+export const AUTO_REGISTER_CATALOG: AutoRegisterEntry[] = [];
 
 // ---------------------------------------------------------------------------
 // Provider auto-registration helpers

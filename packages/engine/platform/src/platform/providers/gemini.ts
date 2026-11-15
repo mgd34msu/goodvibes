@@ -10,8 +10,9 @@ import type {
   ProviderRuntimeMetadata,
   ProviderRuntimeMetadataDeps,
 } from './interface.js';
-import { budgetTokensForLevel, describeReasoningRejection } from './reasoning-effort.js';
-import { prepareReasoningEffort, resolveEffortForRequest } from './reasoning-effort-families.js';
+import { budgetTokensForLevel } from './reasoning-effort.js';
+import { resolveEffortForRequest } from './reasoning-effort-families.js';
+import { reasoningRejectionHint } from './reasoning-rejection-hint.js';
 import {
   fetchGeminiModelIds,
   runLiveModelRefresh,
@@ -36,11 +37,15 @@ import type { GeminiPart } from './tool-formats.js';
 import type { CacheHitTracker } from './cache-strategy.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
 import { SseLineBuffer } from './sse-line-buffer.js';
-import { readsAsBelowCacheMinimum } from '../routing/provider-cache-readings.js';
-import { JudgmentHeldError } from '../types/judgment-held.js';
+import { createHash } from 'node:crypto';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_CACHE_TTL_SECONDS = 3600;
+/** Cache resources kept at once: enough for a main agent and a few sub-agents with their own prompts. */
+const GEMINI_CACHED_CONTENT_LIMIT = 4;
+/** Inputs remembered as seen once, waiting for a second use. */
+const GEMINI_SEEN_INPUT_LIMIT = 16;
+const GEMINI_BELOW_CACHE_MINIMUM = /min_total_token_count|too small/i;
 /** Tool call thought signatures kept per provider before the oldest go; far more than any live tool-use loops hold at once. */
 const MAX_THOUGHT_SIGNATURES = 4096;
 const NOOP_CACHE_HIT_TRACKER: Pick<CacheHitTracker, 'recordTurn'> = {
@@ -152,15 +157,19 @@ export class GeminiProvider implements LLMProvider {
   private readonly cacheHitTracker: Pick<CacheHitTracker, 'recordTurn'>;
   private readonly modelsCachePath: string | undefined;
 
-  /** Active cached content resource name (e.g., "cachedContents/abc123") */
-  private cachedContentName: string | null = null;
-  /** Exact private inputs for the one active server resource; never a log/cache ID. */
-  private cachedContentInput: Readonly<{ systemPrompt: string; toolsJson: string; model: string }> | null = null;
-  /** When the cache expires (epoch ms) */
-  private cachedContentExpiry: number = 0;
+  /**
+   * Server cache resources by the digest of their exact input (system prompt,
+   * tools and model), oldest first. A few agents with different prompts each
+   * keep theirs; the oldest is deleted on the server when a new one would
+   * exceed the bound, and every one is deleted by `dispose()`.
+   */
+  private readonly cachedContents = new Map<string, { readonly name: string; readonly expiresAt: number }>();
+  /** Inputs seen once and not cached: Gemini's implicit caching covers a single use. */
+  private readonly seenOnce = new Set<string>();
   /** One bounded rejection hint, rather than retaining a history of large prompts. */
-  private uncacheableInput: GeminiProvider['cachedContentInput'] = null;
-  private cacheCreation: { input: NonNullable<GeminiProvider['cachedContentInput']>; promise: Promise<string | null> } | null = null;
+  private uncacheableKey: string | null = null;
+  /** Creations in flight, so parallel requests with one input create one resource. */
+  private readonly cacheCreations = new Map<string, Promise<string | null>>();
 
   constructor(
     apiKey: string,
@@ -209,51 +218,79 @@ export class GeminiProvider implements LLMProvider {
     const estimatedChars = (systemPrompt?.length ?? 0) + toolsJson.length;
     if (estimatedChars / 3 < 28_000) return null;
 
-    const input = Object.freeze({ systemPrompt: systemPrompt ?? '', toolsJson, model });
-    const matches = (other: GeminiProvider['cachedContentInput']) => other !== null && other.model === input.model
-      && other.systemPrompt === input.systemPrompt && other.toolsJson === input.toolsJson;
-    if (matches(this.uncacheableInput)) return null;
+    // One digest of the exact input: the maps hold 64 characters per input, not the prompt.
+    const key = createHash('sha256').update(model).update('\0').update(systemPrompt ?? '').update('\0').update(toolsJson).digest('hex');
+    if (key === this.uncacheableKey) return null;
 
-    // Reuse only an exact input match and a live resource (with 60s buffer).
-    if (
-      this.cachedContentName &&
-      matches(this.cachedContentInput) &&
-      this.cachedContentExpiry > Date.now() + 60_000
-    ) {
-      return this.cachedContentName;
+    const cached = this.cachedContents.get(key);
+    if (cached && cached.expiresAt > Date.now() + 60_000) {
+      this.cachedContents.delete(key);
+      this.cachedContents.set(key, cached);
+      return cached.name;
     }
+    // An expiring resource is retired by its server TTL; it is only forgotten here.
+    if (cached) this.cachedContents.delete(key);
 
-    if (this.cachedContentExpiry <= Date.now() + 60_000) {
-      this.cachedContentName = null;
-      this.cachedContentInput = null;
+    // Parallel requests with the same input share one creation; a follower whose
+    // leader failed sends its request uncached.
+    const inFlight = this.cacheCreations.get(key);
+    if (inFlight) return inFlight.catch(() => null);
+
+    // The first use of an input is left to implicit caching; a billed resource is
+    // created only for an input that comes back.
+    if (!cached && !this.seenOnce.has(key)) {
+      this.seenOnce.add(key);
+      if (this.seenOnce.size > GEMINI_SEEN_INPUT_LIMIT) this.seenOnce.delete(this.seenOnce.values().next().value!);
+      return null;
     }
+    this.seenOnce.delete(key);
 
-    // Parallel requests with the same input share one creation; a second POST
-    // would create another billed cache resource. A follower whose leader failed
-    // sends its request uncached.
-    const inFlight = this.cacheCreation;
-    if (inFlight && matches(inFlight.input)) return inFlight.promise.catch(() => null);
-    const creation = this.createCachedContent(input, estimatedChars, systemPrompt, tools, model, beforeAttempt);
-    const entry = { input, promise: creation };
-    this.cacheCreation = entry;
-    void creation.then(
-      () => { if (this.cacheCreation === entry) this.cacheCreation = null; },
-      () => { if (this.cacheCreation === entry) this.cacheCreation = null; },
-    );
+    const creation = this.createCachedContent(key, estimatedChars, systemPrompt, tools, model, beforeAttempt);
+    this.cacheCreations.set(key, creation);
+    const settled = () => { if (this.cacheCreations.get(key) === creation) this.cacheCreations.delete(key); };
+    void creation.then(settled, settled);
     return creation;
   }
 
+  /** Remember a created resource; past the bound, the oldest is deleted on the server. */
+  private rememberCachedContent(key: string, name: string, expiresAt: number): void {
+    this.cachedContents.set(key, { name, expiresAt });
+    while (this.cachedContents.size > GEMINI_CACHED_CONTENT_LIMIT) {
+      const [oldestKey, oldest] = this.cachedContents.entries().next().value!;
+      this.cachedContents.delete(oldestKey);
+      void this.deleteCachedContent(oldest.name);
+    }
+  }
+
+  private async deleteCachedContent(name: string): Promise<void> {
+    try {
+      const res = await fetchWithTimeout(`${GEMINI_API_BASE}/${name}`, {
+        method: 'DELETE',
+        headers: { 'x-goog-api-key': this.apiKey },
+      });
+      await res.body?.cancel().catch(() => {});
+      if (!res.ok && res.status !== 404) logger.warn('[Gemini] Cache deletion failed', { name, status: res.status });
+    } catch (err) {
+      logger.warn('[Gemini] Cache deletion error', { name, error: summarizeError(err) });
+    }
+  }
+
+  /** Delete every cache resource this provider created; call when the provider is replaced or the process ends. */
+  async dispose(): Promise<void> {
+    const names = [...this.cachedContents.values()].map((entry) => entry.name);
+    this.cachedContents.clear();
+    this.seenOnce.clear();
+    await Promise.all(names.map((name) => this.deleteCachedContent(name)));
+  }
+
   private async createCachedContent(
-    input: NonNullable<GeminiProvider['cachedContentInput']>,
+    key: string,
     estimatedChars: number,
     systemPrompt: string | undefined,
     tools: import('./interface.js').ChatRequest['tools'],
     model: string,
     beforeAttempt?: ChatRequest['beforeAttempt'],
   ): Promise<string | null> {
-    // Other requests can still be using the previous resource. Its server TTL
-    // owns retirement; replacing this reuse hint must not delete their cache.
-
     let rejection: { status: number; text: string };
     try {
       const cacheBody: Record<string, unknown> = {
@@ -281,9 +318,7 @@ export class GeminiProvider implements LLMProvider {
 
       if (res.ok) {
         const data = await res.json() as { name: string; expireTime: string };
-        this.cachedContentName = data.name;
-        this.cachedContentInput = input;
-        this.cachedContentExpiry = new Date(data.expireTime).getTime();
+        this.rememberCachedContent(key, data.name, new Date(data.expireTime).getTime());
 
         logger.info(`[Gemini] Created cache: ${data.name} (expires ${data.expireTime})`);
         return data.name;
@@ -295,26 +330,13 @@ export class GeminiProvider implements LLMProvider {
       return null;
     }
 
-    // Only a 400 (INVALID_ARGUMENT) rejects the content itself; its wording is
-    // read by routing.cache-minimum, outside the try so a judgment port error
-    // propagates. Any other status, or a reading too weak to act on, leaves the
-    // prompt cacheable so a later request tries again. The cache is only an
-    // optimisation, so an unsettled reading sends this request uncached
-    // instead of holding the whole turn.
+    // Only a 400 (INVALID_ARGUMENT) rejects the content itself; Gemini names the
+    // minimum (`min_total_token_count`, "too small") when the prompt is under it.
+    // Any other status leaves the prompt cacheable so a later request tries again.
     const { status, text } = rejection;
-    let belowMinimum = false;
-    if (status === 400) {
-      try {
-        belowMinimum = await readsAsBelowCacheMinimum(text, 'providers.gemini.cache-minimum');
-      } catch (err) {
-        if (!(err instanceof JudgmentHeldError)) throw err;
-        logger.debug('[Gemini] Cache rejection reading unsettled; sending uncached');
-        return null;
-      }
-    }
+    const belowMinimum = status === 400 && GEMINI_BELOW_CACHE_MINIMUM.test(text);
     if (belowMinimum) {
-      // Oversized rejected inputs do not become another long-lived prompt copy.
-      this.uncacheableInput = estimatedChars <= 1024 * 1024 ? input : null;
+      this.uncacheableKey = estimatedChars <= 1024 * 1024 ? key : null;
       logger.debug('[Gemini] Content below cache minimum', { status, error: text.slice(0, 200) });
     } else {
       logger.warn('[Gemini] Cache creation failed', { status, error: text.slice(0, 200) });
@@ -357,7 +379,6 @@ export class GeminiProvider implements LLMProvider {
       // take a numeric `thinking_budget`. Google's thinking docs are explicit
       // that a request specifying both is rejected, so the resolved spec picks
       // exactly one and the other is never sent.
-      await prepareReasoningEffort(params.reasoningEffort, { provider: this.name, modelId: model, ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}) }, 'providers.gemini.reasoning-family');
       const thinking = buildGeminiThinkingConfig(model, params);
       if (thinking.config) {
         body['generationConfig'] = {
@@ -391,7 +412,7 @@ export class GeminiProvider implements LLMProvider {
 
       if (!res.ok) {
         const text = await res.text().catch(() => 'unknown error');
-        const effortHint = (await describeReasoningRejection(res.status, text, thinking.level, 'providers.gemini.reasoning-rejection')) ?? '';
+        const effortHint = reasoningRejectionHint(res.status, text, thinking.level);
         const retryAfterMs = parseRateLimitHeaders(res.headers)?.retryAfterMs;
         throw new ProviderError(`Gemini API error ${res.status}: ${text}${effortHint}`, {
           statusCode: res.status,

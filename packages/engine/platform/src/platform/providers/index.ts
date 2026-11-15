@@ -91,7 +91,6 @@ export type { AutoRegisterEntry } from './auto-register.js';
 export {
   createDiscoveredProvider,
 } from './discovered-factory.js';
-export { LocalAIProvider, TGIProvider, VLLMProvider } from './discovered-compat.js';
 export { getDiscoveredTraits } from './discovered-traits.js';
 export {
   SERVER_LEVEL_MODEL_ID,
@@ -127,12 +126,6 @@ export {
   buildFallbackModelDefinition,
   ensureConfiguredModelIsRoutable,
 } from './fallback-model.js';
-// The launch-tolerant provider registry: a ProviderRegistry construction that
-// never dies at boot on a missing provider API key by planting a placeholder
-// value for construction only, then reverting env and un-configuring the
-// constructed with that sentinel. Hosts can start with unconfigured providers
-// without leaving a construction sentinel in their runtime credentials.
-export { createLaunchTolerantProviderRegistry } from './launch-tolerant-registry.js';
 export {
   createModelCatalog,
   getCatalogModelDefinitionsFrom,
@@ -161,7 +154,7 @@ export { OpenAICodexProvider } from './openai-codex.js';
 export { OpenAICompatProvider } from './openai-compat.js';
 export { OpenAIProvider } from './openai.js';
 export { OllamaProvider } from './ollama.js';
-export { extractOpenAIStreamTextDelta, readStreamDeltaLabels } from './openai-stream-delta.js';
+export { extractOpenAIStreamTextDelta } from './openai-stream-delta.js';
 export type { ProviderApiCatalogRefreshResult } from './provider-api.js';
 export { SyntheticProvider } from './synthetic.js';
 export type { CanonicalModel } from './synthetic.js';

@@ -16,7 +16,6 @@ import { ConfigManager } from '../platform/src/platform/config/index.js';
 import { MemoryEmbeddingProviderRegistry, type MemoryEmbeddingRequest } from '../platform/src/platform/state/memory-embeddings.js';
 import { createClientRuntimeServices } from '../platform/src/platform/runtime/bootstrap.js';
 import { createRuntimeStore, RuntimeEventBus } from '../platform/src/platform/runtime/state.js';
-import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/index.js';
 
 const PRIVATE = 'PRIVATE_CAPTURED_UNIT_MARKER';
 const ORIGINAL = 'CAPTURED_UNIT_ORIGINAL';
@@ -51,7 +50,7 @@ async function fixture(run: (context: {
     const config = new ConfigManager({ surfaceRoot: 'agent', configDir: join(root, '.goodvibes', 'cfg'), workingDir: root, homeDir: root });
     config.set('permissions.engine', 'policy-engine'); config.set('permissions.mode', 'prompt'); config.set('behavior.autoApprove', false);
     const runtime = createClientRuntimeServices({ surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
-      requestApproval: async () => ({ approved: false }), runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), modelDiscovery: 'skip', providerRegistryFactory: createLaunchTolerantProviderRegistry });
+      requestApproval: async () => ({ approved: false }), runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), modelDiscovery: 'skip' });
     disposeRuntime = () => runtime.close();
     const previous = installJudgmentPort(fakePort((name, question) => {
       if (question.type === 'choice') {

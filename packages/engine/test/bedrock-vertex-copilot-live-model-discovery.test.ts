@@ -186,13 +186,15 @@ describe('AmazonBedrockProvider.refreshModels', () => {
               const result = await provider.refreshModels();
               expect(result.source).toBe('live');
               expect(provider.models).toEqual([
-                'anthropic.claude-sonnet-4-6-20260501-v1:0',
-                'anthropic.claude-brand-new-20260601-v1:0',
+                'claude-sonnet-4-6',
+                'claude-brand-new',
               ]);
-              expect(result.added).toContain('anthropic.claude-brand-new-20260601-v1:0');
-              expect(provider.models).not.toContain('anthropic.claude-legacy-v1');
+              expect(result.added).toContain('claude-brand-new');
+              // One id space: the default the provider answers with is a model it lists.
+              expect(provider.models).toContain(provider.defaultModel);
+              expect(provider.models).not.toContain('claude-legacy');
               expect(provider.models).not.toContain('amazon.titan-text-v1');
-              expect(provider.models).not.toContain('anthropic.claude-embed-v1');
+              expect(provider.models).not.toContain('claude-embed');
             },
           );
           expect(seenAuth.value).toContain('AWS4-HMAC-SHA256');
@@ -341,13 +343,13 @@ describe('AmazonBedrockMantleProvider.refreshModels', () => {
               const result = await provider.refreshModels();
               expect(result.source).toBe('live');
               expect(provider.models).toEqual([
-                'anthropic.claude-sonnet-4-6-20260501-v1:0',
-                'anthropic.claude-brand-new-20260601-v1:0',
+                'claude-sonnet-4-6',
+                'claude-brand-new',
               ]);
-              expect(result.added).toContain('anthropic.claude-brand-new-20260601-v1:0');
-              expect(provider.models).not.toContain('anthropic.claude-legacy-v1');
+              expect(result.added).toContain('claude-brand-new');
+              expect(provider.models).not.toContain('claude-legacy');
               expect(provider.models).not.toContain('amazon.titan-text-v1');
-              expect(provider.models).not.toContain('anthropic.claude-embed-v1');
+              expect(provider.models).not.toContain('claude-embed');
             },
           );
           // Confirms auth came from the provider's existing configured-credential

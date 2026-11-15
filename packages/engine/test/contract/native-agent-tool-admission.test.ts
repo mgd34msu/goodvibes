@@ -19,7 +19,6 @@ import { PolicyRuntimeState } from '../../platform/src/platform/runtime/permissi
 import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
 import { RuntimeEventBus, createRuntimeStore } from '../../platform/src/platform/runtime/state.js';
 import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
-import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
 import type { LLMProvider } from '../../platform/src/platform/providers/interface.js';
 import { ReadTool } from '../../platform/src/platform/tools/read/index.js';
 import { hasCapturedToolInvocation } from '../../platform/src/platform/tools/shared/captured-input-tools.js';
@@ -57,7 +56,6 @@ for (const scenario of ['act', 'planner-act', 'review-drafts'] as const) {
     const runtime = createClientRuntimeServices({
       surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
       runtimeBus: bus, runtimeStore: createRuntimeStore(), modelDiscovery: 'skip',
-      providerRegistryFactory: createLaunchTolerantProviderRegistry,
       requestApproval: async () => { humanPrompts++; return { approved: false }; },
     });
     await resumeContracts(runtime.contractRunner, root);

@@ -10,7 +10,6 @@ import { createContractRunner } from '../../platform/src/platform/contract/runne
 import { ContractStore } from '../../platform/src/platform/contract/store.js';
 import { createAgentManagerDecompositionRunner } from '../../platform/src/platform/agents/planner-decomposition-runner.js';
 import { createOrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
-import { createLaunchTolerantProviderRegistry } from '../../platform/src/platform/providers/index.js';
 import type { LLMProvider, ProviderMessage } from '../../platform/src/platform/providers/interface.js';
 import { createClientRuntimeServices } from '../../platform/src/platform/runtime/bootstrap.js';
 import { resolveProcessCapturedBunRuntimeExecutable } from '../../platform/src/platform/runtime/captured-bun-runtime.js';
@@ -93,7 +92,6 @@ test('direct compiled-parent build uses captured config and authorized bytes', a
   const runtime = createClientRuntimeServices({
     surfaceRoot: 'agent', configManager: config, workingDir: root, homeDirectory: root,
     runtimeBus: bus, runtimeStore: createRuntimeStore(), modelDiscovery: 'skip',
-    providerRegistryFactory: createLaunchTolerantProviderRegistry,
     requestApproval: async () => { approvalCalls++; return { approved: false }; },
   });
   await resumeContracts(runtime.contractRunner, root);

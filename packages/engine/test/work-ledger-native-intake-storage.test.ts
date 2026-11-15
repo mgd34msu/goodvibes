@@ -188,7 +188,7 @@ test('DB5 upgrade preserves source1 exactly and old readers/writers fail closed 
   const explicit = { type: 'submit_native', requestId: 'explicit', expectedRevision: 0, title: 'Explicit', goal: ' Exact goal ', criteria: [' same ', ' same '], source: { version: 1, sourceId: 'old-source', sourceRevision: 'old-revision', inputId: 'explicit-input', sessionId: 'session' } };
   expect(await ledger.service.execute(explicit, actor)).toMatchObject({ kind: 'accepted' }); const original = await storage.read(); await f.store.close();
   await mutate(f.file, db => { db.run('DROP TABLE native_conversation_captures'); db.run('PRAGMA user_version = 5'); });
-  const old = new SQLiteStore(f.file, { coordinated: true }); await old.init(() => {}, { schemaVersion: 5 });
+  const old = new SQLiteStore(f.file); await old.init(() => {}, { schemaVersion: 5 });
   const upgraded = await open(f.file); expect(await (await upgraded.store.openWorkLedgerStorage('project')).read()).toEqual(original);
   old.run('UPDATE work_ledgers SET revision=999'); await expect(old.save()).rejects.toThrow('persisted state changed'); old.close();
   const oldReader = new SQLiteStore(f.file); await expect(oldReader.init(() => {}, { schemaVersion: 5 })).rejects.toThrow('newer version'); oldReader.close();

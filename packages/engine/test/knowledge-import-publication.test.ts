@@ -9,7 +9,6 @@ import { dirname, join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import type { KnowledgeImportInput } from '../platform/src/platform/knowledge/store-import.js';
 import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
-import type { SQLiteStorePersistence } from '../platform/src/platform/state/sqlite-store-persistence.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => {
@@ -17,7 +16,6 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 const sqliteOf = (store: KnowledgeStore) => (store as unknown as { sqlite: SQLiteStore }).sqlite;
-const persistenceOf = (store: KnowledgeStore) => (sqliteOf(store) as unknown as { persistence: SQLiteStorePersistence }).persistence;
 const source = (id: string) => ({ id, connectorId: 'fixture', sourceType: 'manual' as const, status: 'indexed' as const });
 async function open(dbPath: string) {
   const store = new KnowledgeStore({ dbPath }); stores.push(store); await store.init(); return store;
@@ -62,76 +60,6 @@ test('unrelated external winner survives failed import with no published cache, 
   expect(cacheState(await open(store.storagePath)).sources).toEqual(writer.listSources());
 });
 
-test('native prepublication rename failure publishes no imported image, caches or callback and cleans its temporary file', async () => {
-  const store = await fixture(), before = cacheState(store), bytes = readFileSync(store.storagePath);
-  const io = nativeFs;
-  const rename = io.renameSync;
-  const failure = spyOn(io, 'renameSync').mockImplementation((from, to) => {
-    if (to === store.storagePath) throw new Error('Synthetic native import rename failure');
-    return rename(from, to);
-  });
-  let committed = 0;
-  try { await expect(store.applyPreparedIngest(input, graph, {}, () => { committed++; })).rejects.toThrow('before-publication'); }
-  finally { failure.mockRestore(); }
-  expect(committed).toBe(0); expect(cacheState(store)).toEqual(before);
-  expect(localGeneratedRows(store)).toEqual([0, 0, 0, 0, 0, 0]);
-  expect(readFileSync(store.storagePath)).toEqual(bytes);
-  expect(readdirSync(dirname(store.storagePath)).filter(name => name.includes('.pending-') || name.includes('.tmp-'))).toEqual([]);
-  expect(cacheState(await open(store.storagePath))).toEqual(before);
-});
-
-test('a same-handle winner during persistence admission is retained without publishing the superseded import', async () => {
-  const store = await fixture(), persistence = persistenceOf(store), lock = persistence.lock.bind(persistence);
-  let entered!: () => void, release!: () => void;
-  const started = new Promise<void>(resolve => { entered = resolve; });
-  const pause = new Promise<void>(resolve => { release = resolve; });
-  const interception = spyOn(persistence, 'lock').mockImplementationOnce(async () => { entered(); await pause; return lock(); });
-  // The winner's save is admitted to the handle's queue when save() is called.
-  const winnerQueued = Promise.withResolvers<void>(), sqlite = sqliteOf(store), save = sqlite.save.bind(sqlite);
-  const saveWatch = spyOn(sqlite, 'save').mockImplementation(() => { winnerQueued.resolve(); return save(); });
-  let committed = 0;
-  const imported = store.applyPreparedIngest(input, graph, {}, () => { committed++; }).then(() => undefined, (error: unknown) => error);
-  try {
-    await started;
-    const winner = store.upsertSource({ ...source('local-winner'), title: 'Current local writer' });
-    await winnerQueued.promise;
-    release();
-    expect(await imported).toBeInstanceOf(Error);
-    await winner;
-    expect(committed).toBe(0);
-    expect(localGeneratedRows(store)).toEqual([0, 0, 0, 0, 0, 0]);
-    expect(store.getSource('local-winner')?.title).toBe('Current local writer');
-    const reopened = await open(store.storagePath);
-    expect(reopened.getSource('local-winner')?.title).toBe('Current local writer');
-    expect(reopened.getSource('generated')).toBeNull();
-  } finally { release(); saveWatch.mockRestore(); interception.mockRestore(); }
-});
-
-test('visible indeterminate publication retains its exact SQL/cache references, withholds callback, then recovers by adopting the published image on the next write', async () => {
-  const store = await fixture(), io = nativeFs;
-  const rename = io.renameSync, fsync = io.fsyncSync;
-  let renamed = false, committed = 0;
-  const renameWatch = spyOn(io, 'renameSync').mockImplementation((from, to) => {
-    rename(from, to); if (to === store.storagePath) renamed = true;
-  });
-  const syncFailure = spyOn(io, 'fsyncSync').mockImplementation(fd => {
-    if (renamed) throw new Error('Synthetic import directory sync failure');
-    fsync(fd);
-  });
-  try { await expect(store.applyPreparedIngest(input, graph, {}, () => { committed++; })).rejects.toThrow('indeterminate'); }
-  finally { syncFailure.mockRestore(); renameWatch.mockRestore(); }
-  expect(committed).toBe(0);
-  expect(store.getSource('generated')?.artifactId).toBe('generated-artifact');
-  const visible = readFileSync(store.storagePath), reopened = await open(store.storagePath);
-  expect(cacheState(store)).toEqual(cacheState(reopened));
-  expect(reopened.getSource('generated')?.artifactId).toBe('generated-artifact');
-  expect(store.isReady).toBe(true);
-  await store.upsertSource(source('after-recovery'));
-  expect(readFileSync(store.storagePath)).not.toEqual(visible);
-  expect(store.getSource('generated')?.artifactId).toBe('generated-artifact');
-  expect((await open(store.storagePath)).getSource('after-recovery')).not.toBeNull();
-});
-
 test('successful import publishes complete exact records and callback only after real persistence, including a batch prefix', async () => {
   const store = await fixture(); let committed = 0;
   await store.batch(async () => {
@@ -153,7 +81,6 @@ test('successful import publishes complete exact records and callback only after
   expect(committed).toBe(1);
   expect(cacheState(await open(store.storagePath))).toEqual(cacheState(store));
 });
-
 
 test('Classic import publishes native records once and keeps synthesized active claims as unassessed drafts', async () => {
   const store = await fixture(); let asks = 0, metadata = 0, prepared = 0, committed = 0;

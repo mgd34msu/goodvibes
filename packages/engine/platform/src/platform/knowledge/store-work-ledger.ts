@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { unlinkSync } from 'node:fs';
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readKnowledgeSourceSnapshot } from './store-source-generation.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
-import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { createEmptyWorkLedgerState, readWorkLedgerState, migrateLegacyWorkLedgerState } from '../workflow/work-ledger/service.js';
@@ -28,40 +27,8 @@ export function validateWorkLedgerTable(db: Pick<SqlDatabase, 'exec'>): void {
   })) throw new Error('KnowledgeStore: current work ledger schema is missing or corrupt; refusing repair');
 }
 
-/**
- * The database image is one file, so a database that was deleted or replaced by
- * an older copy while the daemon was down is indistinguishable, from inside the
- * file, from a first start: it would open as an empty, authoritative ledger. A
- * small sibling file records the highest revision each project's ledger has
- * durably reached, so an owner that opens a database holding less than that
- * refuses to treat it as the ledger instead of silently starting over.
- */
-const MARKS_FILE_SUFFIX = '.work-ledger-revisions.json';
-
-function readRevisionMark(marksPath: string, projectId: string): number {
-  let text: string;
-  try { text = readFileSync(marksPath, 'utf-8'); } catch { return 0; }
-  try {
-    const marks: unknown = JSON.parse(text);
-    const value = marks !== null && typeof marks === 'object' && !Array.isArray(marks) ? (marks as Record<string, unknown>)[projectId] : undefined;
-    return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 0;
-  } catch {
-    // The marker is advisory and rewritten by the next commit; an unreadable one must not lock the ledger.
-    logger.warn('[knowledge-store] work ledger revision marker is unreadable and was ignored', { marksPath });
-    return 0;
-  }
-}
-
-function writeRevisionMark(marksPath: string, projectId: string, revision: number): void {
-  let marks: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(marksPath, 'utf-8'));
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) marks = parsed as Record<string, unknown>;
-  } catch { /* Absent or unreadable: start a new marker. */ }
-  const known = marks[projectId];
-  if (typeof known === 'number' && known >= revision) return;
-  writeJsonFileAtomic(marksPath, { ...marks, [projectId]: revision }, { durable: false });
-}
+/** Sidecar an earlier build kept beside the database; removed when a ledger opens. */
+const RETIRED_MARKS_FILE_SUFFIX = '.work-ledger-revisions.json';
 
 /** Runs inside the existing schema transaction; no legacy authority is invented. */
 export function migrateWorkLedgerTableToVersion2(db: Pick<SqlDatabase, 'exec' | 'run'>): void {
@@ -94,21 +61,21 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
   let closed = false;
   let closePromise: Promise<void> | undefined;
   const databasePath = sqlite.databasePath;
-  const marksPath = databasePath ? `${databasePath}${MARKS_FILE_SUFFIX}` : null;
-  // Checked until it passes once; after that the open owner's own disappearance checks apply.
-  let establishedChecked = false;
-  let refusalLogged = false;
-  function assertEstablished(state: WorkLedgerState): void {
-    if (establishedChecked || !marksPath) return;
-    const recorded = readRevisionMark(marksPath, projectId);
-    if (recorded > state.revision) {
-      const message = `Work ledger database holds revision ${state.revision}, but ${marksPath} records that this project's ledger reached revision ${recorded}. The database file was deleted, replaced by an older copy or restored from a backup, so it is not treated as the ledger. Restore the database file that held revision ${recorded}, or delete ${marksPath} to accept the ledger as it stands now.`;
-      // The service reports storage failures generically, so the operator's only sight of the reason is the log.
-      if (!refusalLogged) { refusalLogged = true; logger.error(`[knowledge-store] ${message}`, { projectId }); }
-      throw new Error(message);
-    }
-    establishedChecked = true;
+  if (databasePath) {
+    try { unlinkSync(`${databasePath}${RETIRED_MARKS_FILE_SUFFIX}`); } catch { /* absent, or not ours to remove */ }
   }
+  // The ledger as last read, at its stored revision. A read whose row still
+  // has that revision costs one indexed lookup instead of a parse of the ledger.
+  let cached: WorkLedgerState | undefined;
+  function currentState(db: Pick<SqlDatabase, 'exec'>): WorkLedgerState {
+    const stored = db.exec('SELECT revision FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0]?.[0] ?? 0;
+    if (cached && cached.revision === stored) return cached;
+    cached = readKnowledgeWorkLedger(db, projectId);
+    return cached;
+  }
+  // The store's revision when the subscribers were last brought up to date:
+  // an idle poll compares it and reads nothing else.
+  let observedRevision: number | undefined;
   const pending = new Set<Promise<unknown>>();
   const listeners = new Map<(state: WorkLedgerState) => void, number>();
   let poll: ReturnType<typeof setInterval> | undefined;
@@ -121,8 +88,12 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
     if (closed || listeners.size === 0) return;
     let state: WorkLedgerState;
     try {
-      state = sqlite.readPersisted(db => readKnowledgeWorkLedger(db, projectId));
+      const revision = sqlite.contentRevision();
+      if (revision === observedRevision && [...listeners.values()].every(seen => seen >= 0)) return;
+      state = sqlite.readPersisted(currentState);
+      observedRevision = revision;
     } catch (error) {
+      observedRevision = undefined;
       const reason = summarizeError(error);
       if (reason !== unavailable) {
         unavailable = reason;
@@ -154,19 +125,13 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
   return {
     read() {
       if (closed) return Promise.reject(new Error('Work ledger storage is closed'));
-      return track(Promise.resolve().then(() => sqlite.readPersisted(db => {
-        const state = readKnowledgeWorkLedger(db, projectId);
-        assertEstablished(state);
-        return state;
-      })));
+      return track(Promise.resolve().then(() => sqlite.readPersisted(currentState)));
     },
     transaction<T>(decide: (current: unknown, context?: WorkLedgerTransactionContext) => WorkLedgerDecision<T>): Promise<T> {
       if (closed) return Promise.reject(new Error('Work ledger storage is closed'));
-      let committedRevision = 0;
       return track(sqlite.transactPersisted(db => {
         hooks?.beforeDecision(db);
-        const current = readKnowledgeWorkLedger(db, projectId);
-        assertEstablished(current);
+        const current = currentState(db);
         // Parsing copies mutable ledger records while retaining only genuinely
         // validated immutable manifest originals. A blanket structuredClone
         // destroys that private provenance and rehashes every historical import.
@@ -200,18 +165,12 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
             const declared: unknown = beforeHistoricalImportWrite?.(version);
             if (declared !== undefined) { drainOwned(declared); throw new Error('Historical import publication requires a synchronous native owner'); }
           }
-          committedRevision = next.revision;
+          cached = undefined;
           db.run('INSERT INTO work_ledgers(project_id, format_version, revision, state_json) VALUES (?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version, revision=excluded.revision, state_json=excluded.state_json', [projectId, next.version, next.revision, JSON.stringify(next)]);
         }
         return { changed: decision.next !== null, value: decision.value };
       }, refresh).then(result => {
         if (result.kind === 'local-changes') throw new Error('Work ledger admission blocked by pending local changes or active batch; decision was not called');
-        if (marksPath && committedRevision > 0) {
-          try { writeRevisionMark(marksPath, projectId, committedRevision); } catch (error) {
-            // The commit is already durable; a missing mark only weakens later deletion detection.
-            logger.warn('[knowledge-store] work ledger revision marker could not be written', { marksPath, error: summarizeError(error) });
-          }
-        }
         // No observer runs between decision and durable publication acceptance.
         queueMicrotask(observe);
         return result.value;

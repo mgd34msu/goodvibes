@@ -8,8 +8,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadSqlJsEngine, SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
-import { SQLitePublicationError } from '../platform/src/platform/state/sqlite-store-persistence.js';
+import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { restoreStoreSnapshot, snapshotStoreFile, snapshotStoreFileAsync, StoreSnapshotScheduler } from '../platform/src/platform/state/store-snapshots.js';
 import { openVersionedBunSqliteStore } from '../platform/src/platform/state/store-versioning.js';
 import { selectVibeRecords, VIBE_PERSONA_TAG } from '../platform/src/platform/state/vibe-projection.js';
@@ -34,7 +33,7 @@ function sqliteFile(path: string, value: string): void {
 }
 
 describe('store snapshots', () => {
-  test('two restores park two different live files, so the first parked copy survives', () => {
+  test('a restore parks the live file it replaces; one parked copy is kept per store', () => {
     const dir = tempDir();
     const db = join(dir, 'store.sqlite');
     sqliteFile(db, 'snapshotted');
@@ -43,9 +42,9 @@ describe('store snapshots', () => {
     const first = restoreStoreSnapshot(db, snapshot);
     sqliteFile(db, 'third state');
     const second = restoreStoreSnapshot(db, snapshot);
-    expect(first.keptCurrentAt).not.toBe(second.keptCurrentAt);
-    const parked = new Database(first.keptCurrentAt!, { readonly: true });
-    expect((parked.query('SELECT v FROM t').get() as { v: string }).v).toBe('second state');
+    expect(second.keptCurrentAt).toBe(first.keptCurrentAt);
+    const parked = new Database(second.keptCurrentAt!, { readonly: true });
+    expect((parked.query('SELECT v FROM t').get() as { v: string }).v).toBe('third state');
     parked.close();
   });
 
@@ -123,58 +122,6 @@ describe('schema versioning', () => {
 });
 
 describe('SQLiteStore', () => {
-  test('a migration that fails closes every database handle the store opened', async () => {
-    const dir = tempDir();
-    const path = join(dir, 'db.sqlite');
-    const first = new SQLiteStore(path);
-    await first.init((db) => db.run('CREATE TABLE IF NOT EXISTS t (v TEXT)'));
-    await first.save();
-    first.close();
-
-    // The raw handles are reached through the engine's prototype: the store's own facade is frozen.
-    const prototype = (await loadSqlJsEngine()).Database.prototype as unknown as Record<'run' | 'exec' | 'close', (...args: never[]) => unknown>;
-    const used = new Set<object>();
-    const closed = new Set<object>();
-    const originals = { run: prototype.run, exec: prototype.exec, close: prototype.close };
-    prototype.run = function (this: object, ...args: never[]) { used.add(this); return originals.run.apply(this, args); };
-    prototype.exec = function (this: object, ...args: never[]) { used.add(this); return originals.exec.apply(this, args); };
-    prototype.close = function (this: object, ...args: never[]) { closed.add(this); return originals.close.apply(this, args); };
-    try {
-      const second = new SQLiteStore(path);
-      await expect(second.init((db) => db.run('CREATE TABLE IF NOT EXISTS t (v TEXT)'), {
-        schemaVersion: 2,
-        migrations: [{ toVersion: 2, migrate: () => { throw new Error('migration failed'); } }],
-      })).rejects.toThrow();
-      expect(second.isReady).toBe(false);
-      // The handle of the failed migration and the one restored from the snapshot are both closed.
-      expect([...used].filter((handle) => !closed.has(handle))).toEqual([]);
-      expect(closed.size).toBe(2);
-    } finally {
-      Object.assign(prototype, originals);
-    }
-  });
-
-  test('rows of a batch whose save failed are saved by the next batch', async () => {
-    const dir = tempDir();
-    const parent = join(dir, 'data');
-    mkdirSync(parent);
-    const store = new SQLiteStore(join(parent, 'db.sqlite'));
-    await store.init((db) => db.run('CREATE TABLE IF NOT EXISTS t (v TEXT)'));
-    await expect(store.batch(async () => {
-      store.run("INSERT INTO t VALUES ('pending')");
-      await store.save();
-      // The data directory becomes a file, so the save at the end of the batch cannot write.
-      rmSync(parent, { recursive: true, force: true });
-      writeFileSync(parent, 'not a directory');
-    })).rejects.toThrow();
-    rmSync(parent, { force: true });
-    mkdirSync(parent);
-    await store.batch(async () => {});
-    const reopened = new SQLiteStore(join(parent, 'db.sqlite'));
-    await reopened.init((db) => db.run('CREATE TABLE IF NOT EXISTS t (v TEXT)'));
-    expect(reopened.exec('SELECT v FROM t')[0]?.values).toEqual([['pending']]);
-  });
-
   test('a database file the store creates is private to its owner', async () => {
     const dir = tempDir();
     const file = join(dir, 'db.sqlite');
@@ -184,35 +131,15 @@ describe('SQLiteStore', () => {
     expect(statSync(file).mode & 0o077).toBe(0);
   });
 
-  test('a publication whose directory sync failed is adopted by the retry, so reads and the next save see what is on disk', async () => {
-    const dir = tempDir();
-    const store = new SQLiteStore(join(dir, 'db.sqlite'), { coordinated: true });
-    await store.init((db) => db.run('CREATE TABLE IF NOT EXISTS t (v TEXT)'));
-    await store.save();
-    const persistence = (store as unknown as { persistence: { write(data: Uint8Array): void } }).persistence;
-    const realWrite = persistence.write.bind(persistence);
-    persistence.write = (data) => { realWrite(data); throw new SQLitePublicationError('indeterminate', new Error('directory sync failed')); };
-    const insert = (db: { run(sql: string): void }) => { db.run("INSERT INTO t VALUES ('x')"); return { changed: true, value: 1 }; };
-    await expect(store.transactPersisted(insert, () => {})).rejects.toBeInstanceOf(SQLitePublicationError);
-    // The change is on disk but not in this cache yet.
-    expect(store.exec('SELECT v FROM t')[0]?.values ?? []).toEqual([]);
-    let adopted = 0;
-    const retry = await store.transactPersisted((db) => ({ changed: db.exec('SELECT v FROM t').length === 0, value: 2 }), () => { adopted += 1; });
-    expect(retry).toEqual({ kind: 'completed', value: 2 });
-    expect(adopted).toBe(1);
-    expect(store.exec('SELECT v FROM t')[0]?.values).toEqual([['x']]);
-    // The next save publishes the adopted image instead of failing on a changed baseline.
-    await expect(store.save()).resolves.toBe(true);
-  });
-
   test('a commit callback that fails after a durable write is reported on the completed result', async () => {
     const dir = tempDir();
-    const store = new SQLiteStore(join(dir, 'db.sqlite'), { coordinated: true });
+    const store = new SQLiteStore(join(dir, 'db.sqlite'));
     await store.init((db) => db.run('CREATE TABLE IF NOT EXISTS t (v TEXT)'));
     await store.save();
     const result = await store.transactPersisted((db) => { db.run("INSERT INTO t VALUES ('x')"); return { changed: true, value: 'v' }; }, () => { throw new Error('mirror refresh failed'); });
     expect(result).toEqual({ kind: 'completed', value: 'v', fenced: true });
-    expect(store.isReady).toBe(false);
+    // The row is committed whatever the callback did.
+    expect(store.exec('SELECT v FROM t')[0]?.values).toEqual([['x']]);
   });
 });
 

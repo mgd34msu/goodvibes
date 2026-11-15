@@ -3,19 +3,24 @@
  * writes, kept beside each store under `snapshots/<db-file-name>/`.
  *
  * Three jobs:
- * - `snapshotStoreFile`, one copy (plus -wal/-shm sidecars when present),
- *   checked for a complete SQLite header and size, used automatically before
- *   schema migrations and by the daily scheduler;
+ * - `snapshotStoreFile`, one consistent copy taken by SQLite itself
+ *   (`VACUUM INTO`, so a store in WAL mode is copied with every committed
+ *   change and needs no sidecar), checked for the SQLite header; used by the
+ *   daily scheduler and before schema migrations;
  * - `restoreStoreSnapshot`, ONE command back to a snapshot: parks the
- *   current file (and its sidecars) under a name no earlier restore used,
- *   then replaces it with the snapshot (latest when none is named);
+ *   current file at `<db>.pre-restore` (replacing what an earlier restore
+ *   parked there), then replaces it with the snapshot (latest when none is
+ *   named);
  * - `StoreSnapshotScheduler`, a daily snapshot of every registered store
  *   with bounded retention through the existing retention engine
- *   (RetentionPolicy + SnapshotPruner deleting real files).
+ *   (RetentionPolicy + SnapshotPruner deleting real files). A snapshot and
+ *   its `-wal`/`-shm` sidecars (written by a file copy) are removed together.
  */
 import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
+import type { Database } from 'bun:sqlite';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { RetentionPolicy } from '../runtime/retention/policy.js';
@@ -45,18 +50,68 @@ export function storeSnapshotDir(dbPath: string): string {
 
 const SQLITE_HEADER = 'SQLite format 3\0';
 
-/** A copy is kept only when it is as large as its source and still opens with the SQLite header. */
+function hasSqliteHeader(path: string): boolean {
+  if (statSync(path).size < SQLITE_HEADER.length) return false;
+  const fd = openSync(path, 'r');
+  try {
+    const header = Buffer.alloc(SQLITE_HEADER.length);
+    readSync(fd, header, 0, header.length, 0);
+    return header.toString('latin1') === SQLITE_HEADER;
+  } finally { closeSync(fd); }
+}
+
+/** A file copy is kept only when it is as large as its source and still opens with the SQLite header. */
 function assertCopyComplete(source: string, copy: string): void {
   const expected = statSync(source).size;
   const copied = statSync(copy);
   if (copied.size !== expected) throw new Error(`store snapshot copy is incomplete: ${copy} has ${copied.size} of ${expected} bytes`);
   if (expected < SQLITE_HEADER.length) return;
-  const fd = openSync(copy, 'r');
+  if (!hasSqliteHeader(copy)) throw new Error(`store snapshot copy is not a SQLite database: ${copy}`);
+}
+
+// bun:sqlite is a Bun-only builtin; resolved on first use so Node can load this module.
+let databaseCtor: typeof Database | null = null;
+function bunDatabase(): typeof Database | null {
+  if (databaseCtor) return databaseCtor;
+  try { databaseCtor = (createRequire(import.meta.url)('bun:sqlite') as typeof import('bun:sqlite')).Database; }
+  catch { return null; }
+  return databaseCtor;
+}
+
+/**
+ * One consistent copy through SQLite: committed WAL content included, no
+ * sidecars. False when it cannot be taken this way (no bun:sqlite, or a
+ * schema this connection cannot rebuild, such as a virtual table whose
+ * module is not loaded); the caller then copies the files.
+ */
+function vacuumInto(dbPath: string, snapshotPath: string): boolean {
+  const Ctor = bunDatabase();
+  if (!Ctor) return false;
+  let db: Database | undefined;
   try {
-    const header = Buffer.alloc(SQLITE_HEADER.length);
-    readSync(fd, header, 0, header.length, 0);
-    if (header.toString('latin1') !== SQLITE_HEADER) throw new Error(`store snapshot copy is not a SQLite database: ${copy}`);
-  } finally { closeSync(fd); }
+    // The copy keeps the source's mode (stores are private to their owner);
+    // VACUUM INTO accepts an existing empty file.
+    closeSync(openSync(snapshotPath, 'wx', statSync(dbPath).mode & 0o777));
+    db = new Ctor(dbPath, { create: false });
+    db.run('PRAGMA busy_timeout = 5000');
+    db.run('VACUUM INTO ?', [snapshotPath]);
+    return true;
+  } catch (error) {
+    try { unlinkSync(snapshotPath); } catch { /* nothing was written */ }
+    logger.debug('store snapshot falls back to a file copy', { store: basename(dbPath), error: summarizeError(error) });
+    return false;
+  } finally { db?.close(); }
+}
+
+/** The `-wal`/`-shm` files a file-copied snapshot carries, as they exist now. */
+function snapshotSidecars(snapshotPath: string): string[] {
+  return SIDECARS.map(sidecar => `${snapshotPath}${sidecar}`).filter(path => existsSync(path));
+}
+
+function removeSidecars(snapshotPath: string): void {
+  for (const sidecar of SIDECARS) {
+    try { unlinkSync(`${snapshotPath}${sidecar}`); } catch { /* absent */ }
+  }
 }
 
 function timestampSlug(at: number): string {
@@ -64,9 +119,10 @@ function timestampSlug(at: number): string {
 }
 
 /**
- * Copy the store file (and any -wal/-shm sidecars) into the snapshot dir.
- * Returns the snapshot path, or null when there is nothing to snapshot
- * (in-memory store, missing file, or empty file).
+ * Snapshot the store into the snapshot dir: one consistent SQLite copy, or,
+ * when SQLite cannot take one, a copy of the file and its WAL. Returns the
+ * snapshot path, or null when there is nothing to snapshot (in-memory store,
+ * missing file, or empty file).
  */
 export function snapshotStoreFile(
   dbPath: string,
@@ -85,13 +141,12 @@ export function snapshotStoreFile(
   for (let counter = 1; existsSync(snapshotPath); counter += 1) {
     snapshotPath = join(dir, `${timestampSlug(at)}-${counter}.${reason}${SNAPSHOT_SUFFIX}`);
   }
-  copyFileSync(dbPath, snapshotPath);
-  try { assertCopyComplete(dbPath, snapshotPath); }
-  catch (error) { try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ } throw error; }
-  for (const sidecar of ['-wal', '-shm']) {
-    if (existsSync(`${dbPath}${sidecar}`)) {
-      copyFileSync(`${dbPath}${sidecar}`, `${snapshotPath}${sidecar}`);
-    }
+  if (!hasSqliteHeader(dbPath)) throw new Error(`store snapshot source is not a SQLite database: ${dbPath}`);
+  if (!vacuumInto(dbPath, snapshotPath)) {
+    copyFileSync(dbPath, snapshotPath);
+    try { assertCopyComplete(dbPath, snapshotPath); }
+    catch (error) { try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ } throw error; }
+    if (existsSync(`${dbPath}-wal`)) copyFileSync(`${dbPath}-wal`, `${snapshotPath}-wal`);
   }
   // Stamp the snapshot's mtime with its LOGICAL creation time: listStoreSnapshots
   // reads createdAt from the filesystem mtime while the scheduler dedups on the
@@ -112,26 +167,38 @@ export function snapshotStoreFile(
 export interface StoreSnapshotInfo {
   readonly path: string;
   readonly createdAt: number;
+  /** The snapshot file and its sidecars together. */
   readonly sizeBytes: number;
   readonly reason: string;
+  /** `-wal`/`-shm` files that belong to this snapshot; removed with it. */
+  readonly sidecars: readonly string[];
 }
 
-/** All snapshots for a store, newest first. */
+/** All snapshots for a store, newest first. Sidecars whose snapshot is gone are removed. */
 export function listStoreSnapshots(dbPath: string): StoreSnapshotInfo[] {
   if (!isRealDbPath(dbPath)) return [];
   const dir = storeSnapshotDir(dbPath);
   if (!existsSync(dir)) return [];
   const entries: StoreSnapshotInfo[] = [];
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith(SNAPSHOT_SUFFIX)) continue;
+  const names = readdirSync(dir);
+  const snapshots = new Set(names.filter(name => name.endsWith(SNAPSHOT_SUFFIX)));
+  for (const name of names) {
+    const sidecar = SIDECARS.find(suffix => name.endsWith(`${SNAPSHOT_SUFFIX}${suffix}`));
+    if (sidecar && !snapshots.has(name.slice(0, -sidecar.length))) {
+      try { unlinkSync(join(dir, name)); } catch { /* removed by another sweep */ }
+    }
+  }
+  for (const name of snapshots) {
     const path = join(dir, name);
     const stat = statSync(path);
     const reasonMatch = name.match(/\.([^.]+)\.snapshot$/);
+    const sidecars = snapshotSidecars(path);
     entries.push({
       path,
       createdAt: stat.mtimeMs,
-      sizeBytes: stat.size,
+      sizeBytes: stat.size + sidecars.reduce((total, sidecar) => total + statSync(sidecar).size, 0),
       reason: reasonMatch?.[1] ?? 'unknown',
+      sidecars,
     });
   }
   return entries.sort((a, b) => b.createdAt - a.createdAt);
@@ -146,7 +213,8 @@ export interface RestoreStoreSnapshotResult {
 /**
  * ONE command back to a snapshot. The store must be closed by the caller.
  * With no snapshot named, the latest one is used; the replaced live file is
- * parked at `<path>.pre-restore` (`-1`, `-2`, ... for later restores) so even a wrong restore loses nothing.
+ * parked at `<path>.pre-restore`, so a wrong restore can be undone. One
+ * parked copy is kept per store: a later restore replaces it.
  */
 export function restoreStoreSnapshot(dbPath: string, snapshotPath?: string): RestoreStoreSnapshotResult {
   if (!isRealDbPath(dbPath)) {
@@ -161,9 +229,8 @@ export function restoreStoreSnapshot(dbPath: string, snapshotPath?: string): Res
   }
   let keptCurrentAt: string | null = null;
   if (existsSync(dbPath)) {
-    // Each restore parks what it replaces under its own name, so a second restore cannot overwrite the first parked copy.
     keptCurrentAt = `${dbPath}.pre-restore`;
-    for (let counter = 1; existsSync(keptCurrentAt); counter += 1) keptCurrentAt = `${dbPath}.pre-restore-${counter}`;
+    removeSidecars(keptCurrentAt);
     copyFileSync(dbPath, keptCurrentAt);
     for (const sidecar of SIDECARS) {
       if (existsSync(`${dbPath}${sidecar}`)) copyFileSync(`${dbPath}${sidecar}`, `${keptCurrentAt}${sidecar}`);
@@ -246,14 +313,13 @@ export async function snapshotStoreFileAsync(
   for (let counter = 1; existsSync(snapshotPath); counter += 1) {
     snapshotPath = join(dir, `${timestampSlug(at)}-${counter}.${reason}${SNAPSHOT_SUFFIX}`);
   }
+  // Threadpool copies keep the event loop free on a stalled disk; the WAL
+  // goes with the file so committed changes are not lost. The shared-memory
+  // index is rebuilt on open and is not copied.
   await copyFile(dbPath, snapshotPath);
   try { assertCopyComplete(dbPath, snapshotPath); }
   catch (error) { try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ } throw error; }
-  for (const sidecar of ['-wal', '-shm']) {
-    if (existsSync(`${dbPath}${sidecar}`)) {
-      await copyFile(`${dbPath}${sidecar}`, `${snapshotPath}${sidecar}`);
-    }
-  }
+  if (existsSync(`${dbPath}-wal`)) await copyFile(`${dbPath}-wal`, `${snapshotPath}-wal`);
   try {
     const atSeconds = at / 1000;
     utimesSync(snapshotPath, atSeconds, atSeconds);
@@ -356,7 +422,8 @@ export class StoreSnapshotScheduler {
     try {
       const result = await this.retention.prune();
       if (result.deletedIds.length > 0) {
-        for (const id of result.deletedIds) this.retention.unregister(id);
+        // Ids are snapshot paths; a pruned snapshot takes its sidecars with it.
+        for (const id of result.deletedIds) { removeSidecars(id); this.retention.unregister(id); }
         logger.info('store snapshot retention pruned', { deleted: result.deletedIds.length, reclaimedBytes: result.reclaimedBytes });
       }
     } catch (error) {

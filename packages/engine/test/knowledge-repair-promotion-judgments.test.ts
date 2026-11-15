@@ -78,7 +78,7 @@ async function persistedRelinkFixture(protectedTail: boolean) {
   const raw = item.store.getRecordSnapshot('node', fact.id).raw;
   if (!raw || typeof raw.metadata !== 'string') throw new Error('Missing original persisted fact fixture');
   const path = item.store.storagePath; await item.store.close();
-  const sqlite = new SQLiteStore(path, { coordinated: true });
+  const sqlite = new SQLiteStore(path);
   try {
     await sqlite.init(createSchema, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
     sqlite.run('UPDATE knowledge_nodes SET metadata = ? WHERE id = ?', [JSON.stringify({ ...JSON.parse(raw.metadata),

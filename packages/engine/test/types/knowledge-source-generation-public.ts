@@ -8,6 +8,6 @@ const result: Promise<KnowledgeSourceWriteResult> = store.upsertSourceIfCurrent(
 const held: Extract<KnowledgeSourceWriteResult, { kind: 'held' }>['reason'] = 'pending-local-changes';
 // @ts-expect-error The conditional API requires an explicit generation or absence condition.
 store.upsertSourceIfCurrent({ id: 'source', connectorId: 'fixture', sourceType: 'manual', status: 'indexed' });
-const coordinated = new SQLiteStore(':memory:', { coordinated: true });
+const coordinated = new SQLiteStore(':memory:');
 const transaction: Promise<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: number }> = coordinated.transactPersisted(db => ({ changed: false, value: db.exec('SELECT 1').length }), () => {});
 export { snapshot, generation, result, held, transaction };

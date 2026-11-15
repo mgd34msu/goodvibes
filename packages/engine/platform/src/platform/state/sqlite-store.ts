@@ -1,67 +1,71 @@
+/**
+ * A SQLite store on a real database file (bun:sqlite), opened once per store.
+ *
+ * The file is the truth. It runs in WAL mode (sqlite-file.ts), so a reader
+ * never waits for a writer and a commit is one append to the WAL; another
+ * process's commit is visible to the next statement and is noticed through
+ * `PRAGMA data_version`. Nothing is rendered, copied or compared whole: a row
+ * read is one indexed statement, a write is one transaction, and the cost of
+ * either does not depend on how much the store holds.
+ *
+ * Writes made with `run()` (or a writing `exec()`) open a transaction that
+ * commits when the current synchronous turn ends, or earlier at `save()`.
+ * Statements a store method runs back to back therefore land together or not
+ * at all, and no lock is held across an `await`. A guarded write
+ * (`transactPersisted`, `publishPrepared`) is one immediate transaction: its
+ * compare and its write see the same committed rows, whoever wrote them.
+ *
+ * Existing stores need no conversion: the earlier whole-image files are
+ * ordinary SQLite files, and the first open switches them to WAL.
+ */
+import { createRequire } from 'node:module';
+import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { dirname } from 'node:path';
+import type { Database, SQLQueryBindings, Statement } from 'bun:sqlite';
 import { homeGraphSourceCandidateQuery, type HomeGraphSourceSelector } from '../knowledge/store-homegraph-source-selector.js';
 import { homeGraphNodeCandidateQuery, type HomeGraphNodeSelector } from '../knowledge/store-homegraph-node-selector.js';
 import { semanticNodeCandidateSql, semanticNodeCandidateParams, semanticIssueCandidateSql, semanticIssueCandidateParams, semanticRefinementTaskCandidateSql, semanticRefinementTaskCandidateParams, type SemanticNodeSelector, type SemanticIssueSelector } from '../knowledge/store-semantic-node-selector.js';
 import { semanticFactCandidateSql, semanticFactCandidateParams, type SemanticFactSelector } from '../knowledge/store-semantic-fact-selector.js';
-import { acquireArtifactReferenceLock } from './artifact-reference-lock.js';
 import { inspectPersistedArtifactReferences } from '../knowledge/store-artifact-references.js';
 import { generatedProjectionIdentitySql, projectionIdentityParams, type GeneratedProjectionIdentity } from '../knowledge/store-generated-projection-selector.js';
-import { sameNativeKnowledgeTableSql } from '../knowledge/store-table-definition.js';
 import { activationCacheRowSql, readKnowledgeActivationDependencies, parseKnowledgeActivationCacheRow, type KnowledgeActivationDependencies, type KnowledgeActivationCacheRow } from '../knowledge/store-node-activation-cache.js';
 import { queryPersistedPlanningProjects } from '../knowledge/project-planning/persisted-project-query.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { createSqlJsDatabase } from './sqljs-database.js';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { planningSourceIdentityParams, planningSourceIdentitySql, type PlanningSourceIdentity } from '../knowledge/store-planning-source-selector.js';
 import { knowledgeRowGenerationFromRows } from '../knowledge/store-row-revisions.js';
-import { types as nativeNodeTypes } from 'node:util';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { acquireArtifactReferenceLock } from './artifact-reference-lock.js';
+import { adoptSqliteDatabase, type SqliteFile, type SqliteMigration } from './sqlite-file.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { openVersionedSchema, sqlJsVersionHandle } from './store-versioning.js';
-import { restoreStoreSnapshot, snapshotStoreFile } from './store-snapshots.js';
-import { readSQLitePersistedImage, SQLitePersistedStateChangedError, SQLitePublicationError, SQLiteStorePersistence, type SQLiteImageObservation, type SQLiteBaselineObservation } from './sqlite-store-persistence.js';
-import { sqliteLocalObservation } from './sqlite-local-observation.js';
-import { nativeKnowledgeSchemaReadPlanMatches, validateNativeKnowledgeReadSchema, type NativeKnowledgeSchemaReadPlan } from './knowledge-schema-read-plan.js';
-import { knowledgeRecordTableSql } from '../knowledge/store-schema-validation-data.js';
-import { planningSourceIdentityParams, planningSourceIdentitySql, type PlanningSourceIdentity } from '../knowledge/store-planning-source-selector.js';
 
-// The sql.js engine loads exactly once per process, however many stores open.
-// Its WASM loader is not re-entrant: two concurrent initSqlJs() calls race the
-// module's internal resolver and one of them dies with "resolveModule is not a
-// function". A failed load clears the memo so the next open can retry.
+// bun:sqlite is a Bun-only builtin; a static import would make every importer
+// of this module unloadable under Node. The constructor is resolved on first open.
+let databaseCtor: typeof Database | null = null;
+function bunDatabase(): typeof Database {
+  return (databaseCtor ??= (createRequire(import.meta.url)('bun:sqlite') as typeof import('bun:sqlite')).Database);
+}
+
+// The sql.js engine is still used by the inbox retention sweep, which reads
+// inactive inbox images without opening them as stores. It loads once per
+// process; a failed load clears the memo so the next caller can retry.
 let sqlJsEnginePromise: Promise<SqlJsStatic> | null = null;
-
-// Internal shared loader for the distinct daemon handler store; deliberately
-// omitted from the public state barrel.
+interface SqlJsStatic { Database: { new (data?: Uint8Array): SqlDatabase; readonly prototype: SqlDatabase } }
 export function loadSqlJsEngine(): Promise<SqlJsStatic> {
-  if (!sqlJsEnginePromise) {
-    sqlJsEnginePromise = import('sql.js')
-      .then((mod) => mod.default() as Promise<SqlJsStatic>)
-      .then(engine => {
-        const constructor = engine.Database, prototype = constructor.prototype;
-        const scalar = captureNativeScalarRuntime(engine);
-        privateMapSet(nativeEngineIdentities, engine, nativeFreeze({ constructor, prototype,
-          methods: nativeFreeze({ run: prototype.run, exec: prototype.exec,
-            export: prototype.export, close: prototype.close,
-            prepare: prototype.prepare, create_function: prototype.create_function }),
-          statement: captureNativeStatementIdentity(constructor),
-          scalar,
-        }));
-        return engine;
-      })
-      .catch((err: unknown) => {
-        sqlJsEnginePromise = null;
-        throw err;
-      });
-  }
+  sqlJsEnginePromise ??= import('sql.js')
+    .then((mod) => mod.default() as Promise<SqlJsStatic>)
+    .catch((err: unknown) => { sqlJsEnginePromise = null; throw err; });
   return sqlJsEnginePromise;
 }
 
+/** The statement surface every store schema, migration and reader is written against. */
 export interface SqlDatabase {
   run(sql: string, params?: (string | number | Uint8Array | null)[]): void;
-  exec(sql: string, params?: (string | number)[], config?: { useBigInt: boolean }): Array<{ columns: string[]; values: unknown[][] }>;
+  /** Runs every statement in `sql`; one entry per statement that returned rows. */
+  exec(sql: string, params?: (string | number)[]): Array<{ columns: string[]; values: unknown[][] }>;
   export(): Uint8Array;
   close(): void;
 }
+type SqlRows = ReturnType<SqlDatabase['exec']>;
 
 export interface PersistedKnowledgeRecordSelector {
   readonly kind: 'source' | 'node' | 'extraction';
@@ -74,1149 +78,68 @@ export interface ExpectedKnowledgeRecordReadsetInput {
   readonly expected: ExpectedKnowledgeRecordReadset;
   readonly selectors: readonly PersistedKnowledgeRecordSelector[];
 }
-
-function captureExpectedReadsets(value: readonly ExpectedKnowledgeRecordReadsetInput[]) {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new TypeError('SQLiteStore: invalid expected readsets');
-  const array: object = value;
-  const descriptors = Object.getOwnPropertyDescriptors(array);
-  const length: unknown = descriptors.length?.value;
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0
-    || Reflect.ownKeys(descriptors).length !== length + 1) throw new TypeError('SQLiteStore: invalid expected readsets');
-  const captured: { expected: ExpectedKnowledgeRecordReadset; selectors: PersistedKnowledgeRecordSelector[] }[] = [];
-  for (let index = 0; index < length; index++) {
-    const entry = descriptors[String(index)];
-    if (!entry || !('value' in entry)) throw new TypeError('SQLiteStore: invalid expected readset');
-    const input: unknown = entry.value;
-    if (!input || typeof input !== 'object' || (Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null)) {
-      throw new TypeError('SQLiteStore: invalid expected readset');
-    }
-    const fields = Object.getOwnPropertyDescriptors(input);
-    if (Reflect.ownKeys(fields).length !== 2 || !fields.expected || !fields.selectors
-      || !('value' in fields.expected) || !('value' in fields.selectors)) throw new TypeError('SQLiteStore: invalid expected readset');
-    const expected: unknown = fields.expected.value;
-    if (!expected || typeof expected !== 'object' || !privateMapHas(expectedRecordReadsets, expected)) throw new TypeError('SQLiteStore: unknown expected readset');
-    const retained = privateMapGet(expectedRecordReadsets, expected);
-    if (!retained) throw new TypeError('SQLiteStore: unknown expected readset');
-    captured.push({ expected: retained.token, selectors: captureRecordSelectors(fields.selectors.value) });
-  }
-  return captured;
-}
-
-function captureRecordSelectors(value: unknown): PersistedKnowledgeRecordSelector[] {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new TypeError('SQLiteStore: invalid record generation selectors');
-  const array: object = value;
-  const descriptors = Object.getOwnPropertyDescriptors(array);
-  const length: unknown = descriptors.length?.value;
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0
-    || Reflect.ownKeys(descriptors).length !== length + 1) throw new TypeError('SQLiteStore: invalid record generation selectors');
-  const captured: PersistedKnowledgeRecordSelector[] = [];
-  for (let index = 0; index < length; index++) {
-    const descriptor = descriptors[String(index)];
-    if (!descriptor || !('value' in descriptor)) throw new TypeError('SQLiteStore: invalid record generation selector');
-    const selector: unknown = descriptor.value;
-    if (!selector || typeof selector !== 'object' || (Object.getPrototypeOf(selector) !== Object.prototype && Object.getPrototypeOf(selector) !== null)) {
-      throw new TypeError('SQLiteStore: invalid record generation selector');
-    }
-    const fields = Object.getOwnPropertyDescriptors(selector);
-    if (Reflect.ownKeys(fields).length !== 2 || !fields.kind || !fields.id || !('value' in fields.kind) || !('value' in fields.id)) {
-      throw new TypeError('SQLiteStore: invalid record generation selector');
-    }
-    const kind: unknown = fields.kind.value, id: unknown = fields.id.value;
-    if ((kind !== 'source' && kind !== 'node' && kind !== 'extraction') || typeof id !== 'string') throw new TypeError('SQLiteStore: invalid record generation selector');
-    captured.push({ kind, id });
-  }
-  return captured;
-}
-
-function captureEdgeGenerationIds(value: unknown): string[] {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new TypeError('SQLiteStore: invalid edge generation IDs');
-  const array: object = value, descriptors = Object.getOwnPropertyDescriptors(array);
-  const length: unknown = descriptors.length?.value;
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0
-    || Reflect.ownKeys(descriptors).length !== length + 1) throw new TypeError('SQLiteStore: invalid edge generation IDs');
-  const captured: string[] = [];
-  for (let index = 0; index < length; index++) {
-    const descriptor = descriptors[String(index)];
-    if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'string') throw new TypeError('SQLiteStore: invalid edge generation ID');
-    captured.push(descriptor.value);
-  }
-  return captured;
-}
-
-function captureRecordSelectorGroups(value: readonly (readonly PersistedKnowledgeRecordSelector[])[]): PersistedKnowledgeRecordSelector[][] {
-  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new TypeError('SQLiteStore: invalid record generation groups');
-  const array: object = value;
-  const descriptors = Object.getOwnPropertyDescriptors(array), length: unknown = descriptors.length?.value;
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0
-    || Reflect.ownKeys(descriptors).length !== length + 1) throw new TypeError('SQLiteStore: invalid record generation groups');
-  const captured: PersistedKnowledgeRecordSelector[][] = [];
-  for (let index = 0; index < length; index++) {
-    const entry = descriptors[String(index)];
-    if (!entry || !('value' in entry)) throw new TypeError('SQLiteStore: invalid record generation group');
-    captured.push(captureRecordSelectors(entry.value));
-  }
-  return captured;
-}
-
-interface NativeSqlStatement {
-  step(): boolean;
-  get(params?: (string | number)[] | null, config?: { useBigInt: boolean }): unknown[];
-  getColumnNames(): string[];
-  reset(): boolean;
-  free(): boolean;
-}
-
-interface NativeSqlDatabase extends SqlDatabase {
-  prepare(sql: string): NativeSqlStatement;
-  create_function(name: string, callback: (...args: unknown[]) => unknown): void;
-}
-
-interface SqlJsStatic {
-  Database: { new (data?: Uint8Array | Buffer): NativeSqlDatabase; readonly prototype: NativeSqlDatabase };
-  readonly _sqlite3_prepare_v2?: ((...args: number[]) => number) | undefined;
-  readonly _sqlite3_step?: ((statement: number) => number) | undefined;
-  readonly _sqlite3_reset?: ((statement: number) => number) | undefined;
-  readonly _sqlite3_clear_bindings?: ((statement: number) => number) | undefined;
-  readonly _sqlite3_finalize?: ((statement: number) => number) | undefined;
-  readonly _sqlite3_column_count?: ((statement: number) => number) | undefined;
-  readonly _sqlite3_data_count?: ((statement: number) => number) | undefined;
-  readonly _sqlite3_column_type?: ((statement: number, column: number) => number) | undefined;
-  readonly _sqlite3_column_double?: ((statement: number, column: number) => number) | undefined;
-  readonly _sqlite3_column_name?: ((statement: number, column: number) => number) | undefined;
-  readonly _sqlite3_bind_text?: ((statement: number, index: number, pointer: number, length: number, destructor: number) => number) | undefined;
-  readonly UTF8ToString?: ((pointer: number) => string) | undefined;
-}
-
-type NativeEngineMethods = Pick<NativeSqlDatabase, 'run' | 'exec' | 'export' | 'close' | 'prepare' | 'create_function'>;
-type NativeStatementMethods = Pick<NativeSqlStatement, 'reset' | 'step' | 'get' | 'getColumnNames' | 'free'>;
-const nativeOwnKeys = Reflect.ownKeys, nativeApply = Reflect.apply;
-const nativeGetPrototypeOf = Object.getPrototypeOf, nativeGetDescriptor = Object.getOwnPropertyDescriptor, nativeHasOwn = Object.hasOwn;
-const nativeDefineProperty = Object.defineProperty, nativeDeleteProperty = Reflect.deleteProperty, nativeIsExtensible = Object.isExtensible;
-const nativeEntries = Object.entries, nativeIsProxy = nativeNodeTypes.isProxy;
-const nativeString = String, nativeSafeInteger = Number.isSafeInteger, nativeIsArray = Array.isArray, nativeFreeze = Object.freeze;
-const nativeFiniteNumber = Number.isFinite, nativeSameValue = Object.is;
-const nativeGlobalReceiver = globalThis;
-const nativeGlobalReceiverSelf = !nativeIsProxy(nativeGlobalReceiver)
-  ? nativeGetDescriptor(nativeGlobalReceiver, 'globalThis') : undefined;
-function nativeGlobalReceiverMatches(): boolean {
-  return !!nativeGlobalReceiverSelf && 'value' in nativeGlobalReceiverSelf
-    && nativeGlobalReceiverSelf.value === nativeGlobalReceiver
-    && nativeDescriptorMatches(nativeGetDescriptor(nativeGlobalReceiver, 'globalThis'), nativeGlobalReceiverSelf)
-    && globalThis === nativeGlobalReceiver;
-}
-const nativeWeakMapGet = WeakMap.prototype.get, nativeWeakMapSet = WeakMap.prototype.set,
-  nativeWeakMapHas = WeakMap.prototype.has, nativeWeakMapDelete = WeakMap.prototype.delete;
-function privateMapGet<K extends object, V>(map: WeakMap<K, V>, key: K): V | undefined {
-  return nativeApply(nativeWeakMapGet, map, [key]);
-}
-function privateMapSet<K extends object, V>(map: WeakMap<K, V>, key: K, value: V): void {
-  nativeApply(nativeWeakMapSet, map, [key, value]);
-}
-function privateMapHas<K extends object, V>(map: WeakMap<K, V>, key: K): boolean {
-  return nativeApply(nativeWeakMapHas, map, [key]);
-}
-function privateMapDelete<K extends object, V>(map: WeakMap<K, V>, key: K): void {
-  nativeApply(nativeWeakMapDelete, map, [key]);
-}
-function nativeEvery<T>(values: readonly T[], predicate: (value: T) => boolean): boolean {
-  for (let index = 0; index < values.length; index++) {
-    const value = values[index];
-    if (value === undefined || !predicate(value)) return false;
-  }
-  return true;
-}
-interface NativeObjectFacts {
-  readonly object: object;
-  readonly prototype: object | null;
-  readonly slots: readonly { readonly key: PropertyKey; readonly descriptor: Readonly<PropertyDescriptor> }[];
-}
-function captureNativeObjectFacts(object: object): NativeObjectFacts {
-  return nativeFreeze({ object, prototype: nativeGetPrototypeOf(object),
-    slots: nativeFreeze(nativeOwnKeys(object).map(key => {
-      const descriptor = nativeGetDescriptor(object, key);
-      if (!descriptor) throw new SQLiteObservationRetiredError();
-      return nativeFreeze({ key, descriptor: nativeFreeze(descriptor) });
-    })) });
-}
-function nativeDescriptorMatches(current: PropertyDescriptor | undefined, original: Readonly<PropertyDescriptor>): boolean {
-  if (!current || !nativeHasOwn(current, 'configurable') || !nativeHasOwn(original, 'configurable')
-    || !nativeHasOwn(current, 'enumerable') || !nativeHasOwn(original, 'enumerable')) return false;
-  const data = nativeHasOwn(original, 'value');
-  if (nativeHasOwn(current, 'value') !== data) return false;
-  // Missing descriptor fields are not dependencies on Object.prototype. Check
-  // the complete own kind before reading values, including borrowed mixed shapes.
-  if (data) {
-    if (!nativeHasOwn(current, 'writable') || !nativeHasOwn(original, 'writable')
-      || nativeHasOwn(current, 'get') || nativeHasOwn(original, 'get')
-      || nativeHasOwn(current, 'set') || nativeHasOwn(original, 'set')) return false;
-    return current.configurable === original.configurable && current.enumerable === original.enumerable
-      && current.value === original.value && current.writable === original.writable;
-  }
-  if (nativeHasOwn(current, 'writable') || nativeHasOwn(original, 'writable')
-    || !nativeHasOwn(current, 'get') || !nativeHasOwn(original, 'get')
-    || !nativeHasOwn(current, 'set') || !nativeHasOwn(original, 'set')) return false;
-  return current.configurable === original.configurable && current.enumerable === original.enumerable
-    && current.get === original.get && current.set === original.set;
-}
-function nativeObjectFactsMatch(facts: NativeObjectFacts): boolean {
-  if (nativeGetPrototypeOf(facts.object) !== facts.prototype || nativeOwnKeys(facts.object).length !== facts.slots.length) return false;
-  const slots = facts.slots;
-  for (let index = 0; index < slots.length; index++) {
-    const slot = slots[index];
-    if (slot === undefined) return false;
-    const { key, descriptor } = slot;
-    if (!nativeDescriptorMatches(nativeGetDescriptor(facts.object, key), descriptor)) return false;
-  }
-  return true;
-}
-function nativeFactGroupMatches(facts: readonly NativeObjectFacts[]): boolean {
-  return nativeEvery(facts, nativeObjectFactsMatch);
-}
-function captureNativePrototypeFacts(prototype: object | null): readonly NativeObjectFacts[] {
-  const facts: NativeObjectFacts[] = [], seen = new Set<object>();
-  for (let current = prototype; current; current = nativeGetPrototypeOf(current)) {
-    if (seen.has(current)) throw new SQLiteObservationRetiredError();
-    seen.add(current); facts.push(captureNativeObjectFacts(current));
-  }
-  return nativeFreeze(facts);
-}
-interface NativeStatementIdentity {
-  readonly constructor: object;
-  readonly constructorPrototype: Readonly<PropertyDescriptor>;
-  readonly prototype: object;
-  readonly methods: Readonly<NativeStatementMethods>;
-  readonly prototypes: readonly NativeObjectFacts[];
-  readonly ownerPrototypes: readonly NativeObjectFacts[];
-  readonly arrayPrototypes: readonly (readonly NativeObjectFacts[])[];
-  readonly uniqueExecutionFacts: readonly NativeObjectFacts[] | undefined;
-  readonly bigint: Readonly<PropertyDescriptor>;
-}
-function captureNativeStatementIdentity(Database: SqlJsStatic['Database']): NativeStatementIdentity | undefined {
-  const raw = createSqlJsDatabase(Database);
-  let statement: NativeSqlStatement | undefined, original: NativeStatementIdentity | undefined;
-  try {
-    statement = raw.prepare('SELECT 1');
-    const prototype: unknown = Object.getPrototypeOf(statement);
-    if (prototype && typeof prototype === 'object') {
-      const constructor: unknown = nativeGetDescriptor(prototype, 'constructor')?.value;
-      const constructorPrototype = typeof constructor === 'function' ? nativeGetDescriptor(constructor, 'prototype') : undefined;
-      if (typeof constructor !== 'function' || !constructorPrototype || constructorPrototype.value !== prototype) return undefined;
-      const methods = nativeFreeze({ reset: statement.reset, step: statement.step, get: statement.get,
-        getColumnNames: statement.getColumnNames, free: statement.free });
-      const bigint = Object.getOwnPropertyDescriptor(globalThis, 'BigInt');
-      if (!bigint || typeof bigint.value !== 'function') return undefined;
-      const constructorPrototypeSnapshot = nativeFreeze(constructorPrototype);
-      const prototypes = captureNativePrototypeFacts(prototype);
-      const ownerPrototypes = captureNativePrototypeFacts(Object.getPrototypeOf(raw));
-      const bigintSnapshot = nativeFreeze(bigint);
-      const arrayPrototypes = nativeFreeze(Object.values(Object.getOwnPropertyDescriptors(statement)).flatMap(descriptor => Array.isArray(descriptor.value)
-        ? [captureNativePrototypeFacts(Object.getPrototypeOf(descriptor.value))] : []));
-      const groups: { readonly facts: readonly NativeObjectFacts[] }[] = [{ facts: prototypes }];
-      for (let index = 0; index < arrayPrototypes.length; index++) {
-        const facts = arrayPrototypes[index];
-        if (!facts) return undefined;
-        nativeDefineProperty(groups, groups.length, { value: { facts }, configurable: true, enumerable: true, writable: true });
-      }
-      const candidate = nativeFreeze({ constructor, constructorPrototype: constructorPrototypeSnapshot,
-        prototype, methods, prototypes, ownerPrototypes, bigint: bigintSnapshot, arrayPrototypes,
-        uniqueExecutionFacts: uniqueNativeFacts(groups) });
-      if (nativeStatementMethodsMatch(candidate, statement)) original = candidate;
-    }
-  } catch { /* Unsupported native statement identities keep the original full path. */ }
-  finally {
-    try { if (statement && !statement.free()) original = undefined; }
-    catch { original = undefined; }
-    finally { raw.close(); }
-  }
-  return original;
-}
-function nativeStatementMethodsMatch(original: NativeStatementIdentity, statement: NativeSqlStatement): boolean {
-  return nativeDescriptorMatches(nativeGetDescriptor(original.constructor, 'prototype'), original.constructorPrototype)
-    && Object.getPrototypeOf(statement) === original.prototype
-    && original.prototypes.every(nativeObjectFactsMatch)
-    && original.arrayPrototypes.every(facts => facts.every(nativeObjectFactsMatch))
-    && nativeDescriptorMatches(Object.getOwnPropertyDescriptor(globalThis, 'BigInt'), original.bigint)
-    && original.prototypes.every(fact => fact.slots.every(({ key }) => !Object.hasOwn(statement, key)))
-    && Object.values(original.methods).every(method => typeof method === 'function');
-}
-/** The public native execution path creates and frees its JavaScript statement
- * before returning; the private executable has a separate owned lifetime. */
-function nativeOwnerPrototypeFactsMatch(original: NativeStatementIdentity): boolean {
-  const facts = original.ownerPrototypes;
-  for (let index = 0; index < facts.length; index++) {
-    const fact = facts[index];
-    if (fact === undefined || nativeGetPrototypeOf(fact.object) !== fact.prototype
-      || nativeOwnKeys(fact.object).length !== fact.slots.length) return false;
-    const slots = fact.slots;
-    for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
-      const slot = slots[slotIndex];
-      if (slot === undefined) return false;
-      const { key, descriptor } = slot;
-      if (key !== 'exec' && !nativeDescriptorMatches(nativeGetDescriptor(fact.object, key), descriptor)) return false;
-    }
-  }
-  return true;
-}
-function nativeOwnerDependenciesMatch(original: NativeStatementIdentity, raw: NativeSqlDatabase): boolean {
-  // Only the loader-pinned implementation executes; public exec observers may
-  // observe complete probes but cannot supply the scalar implementation.
-  if (!nativeOwnerPrototypeFactsMatch(original)) return false;
-  const facts = original.ownerPrototypes;
-  for (let index = 0; index < facts.length; index++) {
-    const fact = facts[index];
-    if (fact === undefined) return false;
-    const slots = fact.slots;
-    for (let slotIndex = 0; slotIndex < slots.length; slotIndex++) {
-      const slot = slots[slotIndex];
-      if (slot === undefined) return false;
-      const { key } = slot;
-      if (key !== 'exec' && nativeHasOwn(raw, key)) return false;
-    }
-  }
-  return true;
-}
-function nativeExecutionDependenciesMatch(original: NativeStatementIdentity, raw: NativeSqlDatabase): boolean {
-  return nativeDescriptorMatches(nativeGetDescriptor(original.constructor, 'prototype'), original.constructorPrototype)
-    && (original.uniqueExecutionFacts ? nativeEvery(original.uniqueExecutionFacts, nativeObjectFactsMatch)
-      : nativeEvery(original.prototypes, nativeObjectFactsMatch)
-        && nativeEvery(original.arrayPrototypes, nativeFactGroupMatches))
-    && nativeDescriptorMatches(nativeGetDescriptor(globalThis, 'BigInt'), original.bigint)
-    && nativeOwnerDependenciesMatch(original, raw);
-}
-interface NativeScalarRuntime {
-  readonly module: SqlJsStatic;
-  readonly exports: readonly { readonly key: keyof SqlJsStatic; readonly descriptor: Readonly<PropertyDescriptor> }[];
-  readonly globals: readonly { readonly key: string; readonly descriptor: Readonly<PropertyDescriptor>; readonly facts: readonly NativeObjectFacts[] }[];
-  readonly uniqueGlobalFacts: readonly NativeObjectFacts[] | undefined;
-  readonly functionPrototype: NativeObjectFacts;
-  readonly step: (statement: number) => number;
-  readonly reset: (statement: number) => number;
-  readonly clear: (statement: number) => number;
-  readonly finalize: (statement: number) => number;
-  readonly count: (statement: number) => number;
-  readonly dataCount: (statement: number) => number;
-  readonly type: (statement: number, column: number) => number;
-  readonly value: (statement: number, column: number) => number;
-  readonly name: (statement: number, column: number) => number;
-  readonly decode: (pointer: number) => string;
-}
-const scalarFunctionPrototype = Function.prototype;
-/** SQL.js's UTF-8 decoder invokes the retained TextDecoder and typed-array
- * operations. It never inspects a function's source spelling. PDF.js's supported
- * lazy core-js import replaces that inspector, so it is not a decoder dependency.
- * Every other original Function slot and the prototype link remain guarded. */
-function captureScalarFunctionPrototype(): NativeObjectFacts {
-  const facts = captureNativeObjectFacts(scalarFunctionPrototype);
-  const slots: NativeObjectFacts['slots'][number][] = [];
-  for (let index = 0; index < facts.slots.length; index++) {
-    const slot = facts.slots[index];
-    if (slot && slot.key !== 'toString') nativeDefineProperty(slots, slots.length, { value: slot, enumerable: true, configurable: true, writable: true });
-  }
-  return nativeFreeze({ ...facts, slots: nativeFreeze(slots) });
-}
-function scalarFunctionPrototypeMatches(facts: NativeObjectFacts): boolean {
-  if (facts.object !== scalarFunctionPrototype || nativeGetPrototypeOf(facts.object) !== facts.prototype) return false;
-  const keys = nativeOwnKeys(facts.object); let count = 0;
-  for (let index = 0; index < keys.length; index++) if (keys[index] !== 'toString') count++;
-  return count === facts.slots.length && nativeEvery(facts.slots,
-    slot => nativeDescriptorMatches(nativeGetDescriptor(facts.object, slot.key), slot.descriptor));
-}
-function captureScalarPrototypeFacts(prototype: object | null): readonly NativeObjectFacts[] {
-  // This exception belongs only to scalar constructor-ancestor observations;
-  // statement, driver and all other native object comparisons stay complete.
-  const captured = captureNativePrototypeFacts(prototype), facts: NativeObjectFacts[] = [];
-  for (let index = 0; index < captured.length; index++) {
-    const entry = captured[index];
-    if (entry && entry.object !== scalarFunctionPrototype) nativeDefineProperty(facts, facts.length, { value: entry, enumerable: true, configurable: true, writable: true });
-  }
-  return nativeFreeze(facts);
-}
-interface NativeScalarTextBinding {
-  readonly module: SqlJsStatic;
-  readonly bind: NonNullable<SqlJsStatic['_sqlite3_bind_text']>;
-  readonly descriptor: Readonly<PropertyDescriptor>;
-}
-// This loader-owned capture never passes its binding or expected descriptor to
-// a freeze hook, public statement, or mutable bookkeeping callback.
-let nativeScalarTextBinding: NativeScalarTextBinding | undefined;
-function captureNativeScalarTextBinding(module: SqlJsStatic, bind: SqlJsStatic['_sqlite3_bind_text']): void {
-  nativeScalarTextBinding = undefined;
-  if (typeof bind !== 'function' || nativeIsProxy(module)) return;
-  const descriptor = nativeGetDescriptor(module, '_sqlite3_bind_text');
-  if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'function'
-    || typeof descriptor.writable !== 'boolean' || typeof descriptor.configurable !== 'boolean'
-    || typeof descriptor.enumerable !== 'boolean') return;
-  if (bind !== descriptor.value) return;
-  nativeScalarTextBinding = { module, bind, descriptor: { value: bind, writable: descriptor.writable,
-    configurable: descriptor.configurable, enumerable: descriptor.enumerable } };
-}
-function nativeScalarTextBindingMatches(binding: NativeScalarTextBinding, runtime: NativeScalarRuntime): boolean {
-  return binding.module === runtime.module
-    && nativeDescriptorMatches(nativeGetDescriptor(runtime.module, '_sqlite3_bind_text'), binding.descriptor);
-}
-function nativeScalarExportsMatch(runtime: NativeScalarRuntime): boolean {
-  return nativeEvery(runtime.exports, ({ key, descriptor }) => nativeDescriptorMatches(nativeGetDescriptor(runtime.module, key), descriptor));
-}
-/** Only repeated ordinary original objects can share one complete descriptor
- * traversal. Unsupported or conflicting captures keep the original checks. */
-function uniqueNativeFacts(groups: readonly { readonly facts: readonly NativeObjectFacts[] }[]): readonly NativeObjectFacts[] | undefined {
-  const unique: NativeObjectFacts[] = [];
-  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
-    const group = groups[groupIndex];
-    if (!group) return undefined;
-    for (let factIndex = 0; factIndex < group.facts.length; factIndex++) {
-      const facts = group.facts[factIndex];
-      if (!facts || nativeIsProxy(facts.object)) return undefined;
-      let duplicate = false;
-      for (let uniqueIndex = 0; uniqueIndex < unique.length; uniqueIndex++) {
-        const original = unique[uniqueIndex];
-        if (!original || original.object !== facts.object) continue;
-        if (original.prototype !== facts.prototype || original.slots.length !== facts.slots.length) return undefined;
-        for (let slotIndex = 0; slotIndex < original.slots.length; slotIndex++) {
-          const left = original.slots[slotIndex], right = facts.slots[slotIndex];
-          if (!left || !right || left.key !== right.key || !nativeDescriptorMatches(right.descriptor, left.descriptor)) return undefined;
-        }
-        duplicate = true;
-        break;
-      }
-      if (!duplicate) nativeDefineProperty(unique, unique.length, { value: facts, configurable: true, enumerable: true, writable: true });
-    }
-  }
-  return nativeFreeze(unique);
-}
-function captureNativeScalarRuntime(module: SqlJsStatic): NativeScalarRuntime | undefined {
-  // Pin the loader's export before a reflection callback can replace it.
-  const bind = module._sqlite3_bind_text;
-  const step = module._sqlite3_step, reset = module._sqlite3_reset, clear = module._sqlite3_clear_bindings,
-    finalize = module._sqlite3_finalize, count = module._sqlite3_column_count, dataCount = module._sqlite3_data_count,
-    type = module._sqlite3_column_type, value = module._sqlite3_column_double, name = module._sqlite3_column_name,
-    decode = module.UTF8ToString;
-  if (typeof module._sqlite3_prepare_v2 !== 'function' || typeof step !== 'function' || typeof reset !== 'function'
-    || typeof clear !== 'function' || typeof finalize !== 'function' || typeof count !== 'function'
-    || typeof dataCount !== 'function' || typeof type !== 'function' || typeof value !== 'function'
-    || typeof name !== 'function' || typeof decode !== 'function') return undefined;
-  const keys: readonly (keyof SqlJsStatic)[] = ['_sqlite3_prepare_v2', '_sqlite3_step', '_sqlite3_reset',
-    '_sqlite3_clear_bindings', '_sqlite3_finalize', '_sqlite3_column_count', '_sqlite3_data_count',
-    '_sqlite3_column_type', '_sqlite3_column_double', '_sqlite3_column_name', 'UTF8ToString'];
-  const exports: NativeScalarRuntime['exports'][number][] = [];
-  for (const key of keys) {
-    const descriptor = nativeGetDescriptor(module, key);
-    if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'function') return undefined;
-    exports.push(nativeFreeze({ key, descriptor: nativeFreeze(descriptor) }));
-  }
-  const globals: NativeScalarRuntime['globals'][number][] = [];
-  for (const key of ['String', 'Uint8Array', 'TextDecoder']) {
-    const descriptor = nativeGetDescriptor(globalThis, key), constructor: unknown = descriptor?.value;
-    if (!descriptor || !('value' in descriptor) || typeof constructor !== 'function') return undefined;
-    const prototype: unknown = nativeGetDescriptor(constructor, 'prototype')?.value;
-    if (!prototype || typeof prototype !== 'object') return undefined;
-    globals.push(nativeFreeze({ key, descriptor: nativeFreeze(descriptor), facts: nativeFreeze([
-      ...captureScalarPrototypeFacts(constructor), ...captureScalarPrototypeFacts(prototype),
-    ]) }));
-  }
-  captureNativeScalarTextBinding(module, bind);
-  return nativeFreeze({ module, exports: nativeFreeze(exports), globals: nativeFreeze(globals),
-    uniqueGlobalFacts: uniqueNativeFacts(globals),
-    functionPrototype: captureScalarFunctionPrototype(),
-    step, reset, clear, finalize, count, dataCount, type, value, name, decode });
-}
-function nativeScalarGlobalFactsMatch({ key, descriptor, facts }: NativeScalarRuntime['globals'][number], functionPrototype: NativeObjectFacts): boolean {
-  return nativeDescriptorMatches(nativeGetDescriptor(globalThis, key), descriptor)
-    && scalarFunctionPrototypeMatches(functionPrototype)
-    && nativeEvery(facts, nativeObjectFactsMatch);
-}
-function nativeScalarGlobalDescriptorMatch({ key, descriptor }: NativeScalarRuntime['globals'][number]): boolean {
-  return nativeDescriptorMatches(nativeGetDescriptor(nativeGlobalReceiver, key), descriptor);
-}
-function nativeScalarRuntimeMatches(runtime: NativeScalarRuntime): boolean {
-  if (!nativeScalarExportsMatch(runtime) || !scalarFunctionPrototypeMatches(runtime.functionPrototype)) return false;
-  if (!runtime.uniqueGlobalFacts || !nativeGlobalReceiverMatches()) {
-    return nativeEvery(runtime.globals, facts => nativeScalarGlobalFactsMatch(facts, runtime.functionPrototype));
-  }
-  return nativeEvery(runtime.globals, nativeScalarGlobalDescriptorMatch)
-    && nativeEvery(runtime.uniqueGlobalFacts, nativeObjectFactsMatch);
-}
-const nativeEngineIdentities = new WeakMap<SqlJsStatic, {
-  readonly constructor: SqlJsStatic['Database'];
-  readonly prototype: NativeSqlDatabase;
-  readonly methods: Readonly<NativeEngineMethods>;
-  readonly statement: NativeStatementIdentity | undefined;
-  readonly scalar: NativeScalarRuntime | undefined;
+/** What a readset token stands for: the row revisions read when it was issued. */
+const expectedReadsets = new WeakMap<ExpectedKnowledgeRecordReadset, {
+  readonly store: SQLiteStore;
+  readonly selectors: readonly PersistedKnowledgeRecordSelector[];
+  readonly generations: readonly (string | null)[];
 }>();
-function assertNativeEngineIdentity(engine: SqlJsStatic | null): void {
-  const original = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
-  if (original && (Object.getOwnPropertyDescriptor(engine, 'Database')?.value !== original.constructor
-    || Object.getOwnPropertyDescriptor(original.constructor, 'prototype')?.value !== original.prototype)) {
-    throw new SQLiteObservationRetiredError();
-  }
-}
-function currentDatabaseConstructor(engine: SqlJsStatic): SqlJsStatic['Database'] {
-  assertNativeEngineIdentity(engine);
-  return privateMapGet(nativeEngineIdentities, engine)?.constructor ?? engine.Database;
-}
-function nativeMethodsMatch(engine: SqlJsStatic | null, raw: NativeSqlDatabase | undefined): boolean {
-  const original = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
-  if (!original || !raw || !engine || Object.getPrototypeOf(raw) !== original.prototype) return false;
-  assertNativeEngineIdentity(engine);
-  return Object.entries(original.methods).every(([name, method]) => !Object.hasOwn(raw, name)
-    && Object.getOwnPropertyDescriptor(original.prototype, name)?.value === method);
-}
-function nativePrepareMatch(engine: SqlJsStatic | null, raw: NativeSqlDatabase): boolean {
-  const original = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
-  if (!original || !engine || Object.getPrototypeOf(raw) !== original.prototype) return false;
-  assertNativeEngineIdentity(engine);
-  return !Object.hasOwn(raw, 'prepare')
-    && Object.getOwnPropertyDescriptor(original.prototype, 'prepare')?.value === original.methods.prepare;
-}
 
-interface NativeProbePlanLifetime {
-  readonly raw: NativeSqlDatabase;
-  readonly identities: string;
-  readonly dispose: () => void;
-  readonly retired: boolean;
-}
-type NativeProbePlans = NativeProbePlanLifetime & (
-  | { readonly kind: 'scalar' }
-  | { readonly kind: 'columns'; readonly statement: NativeSqlStatement }
-);
+/** Why a read or guarded step stopped. Set where it is thrown. */
+export type SQLiteObservationRetiredReason =
+  /** This process wrote to the store after the step read it. */
+  | 'superseded-by-local-write'
+  /** Another writer committed, or the rows the step read changed. */
+  | 'superseded'
+  /** The database could not be read; the cause is attached. */
+  | 'read-failed'
+  /** A stored row or argument had a shape this build does not read. */
+  | 'unsupported-shape'
+  /** The store was closed or used outside its contract. */
+  | 'invariant';
 
-const nativeProbeSql = `SELECT r.read_uncommitted,d.seq,d.name,d.file,v.data_version,s.schema_version,
- EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name COLLATE NOCASE IN
- ('pragma_read_uncommitted','pragma_database_list','pragma_data_version','pragma_schema_version')) AS shadowed
- FROM main.pragma_read_uncommitted() AS r CROSS JOIN main.pragma_database_list() AS d
- CROSS JOIN main.pragma_data_version() AS v CROSS JOIN main.pragma_schema_version() AS s ORDER BY d.seq`;
-const nativeProbeColumns = ['read_uncommitted', 'seq', 'name', 'file', 'data_version', 'schema_version', 'shadowed'];
-interface NativeMainProbeValues {
-  readonly file: string;
-  readonly dataVersion: bigint;
-  readonly schemaVersion: bigint;
-}
-interface NativeFrameComparison {
-  readonly engine: SqlJsStatic;
-  readonly raw: NativeSqlDatabase;
-  readonly signature: string;
-  readonly sql: string;
-  readonly execution: { readonly kind: 'exec'; readonly execute: NativeSqlDatabase['exec'] }
-    | { readonly kind: 'native'; readonly executable: NativeScalarExecutable };
-  readonly origin: NativeStatementIdentity;
-  readonly owner: NativeObjectFacts;
-}
-interface NativeScalarExecutable {
-  readonly read: (assertDependencies: () => void) => boolean | undefined;
-  readonly dispose: () => void;
-}
-// Executable plans only. Every invocation still steps fresh native values.
-const nativeFrameComparisons = new WeakMap<NativeProbePlans, NativeFrameComparison>();
-// The scalar equality owns the complete original values, including bigint
-// precision. Its six unconsumed native fields supply original SQLite storage
-// types without calling an overloadable SQL function or decoding row bodies.
-const nativeFrameComparisonTypes = nativeFreeze([1, 1, 1, 3, 3, 1, 1]);
-const nativeFrameComparisonColumns = nativeFreeze(['frame_matches', 'read_uncommitted', 'seq', 'name', 'file', 'data_version', 'schema_version']);
-function nativeFrameComparisonSql(probe: DatabaseProbe): string | undefined {
-  if (!probe.main || !probe.signature) return undefined;
-  const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
-  // Native column_type checks the actual witness types. No replaceable SQL
-  // typeof call or function-registry enumeration is part of this comparison.
-  return `SELECT CASE
- WHEN EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name COLLATE NOCASE IN
- ('pragma_read_uncommitted','pragma_database_list','pragma_data_version','pragma_schema_version')) THEN 2
- WHEN r.read_uncommitted = 0 AND d.seq = 0
- AND d.name COLLATE BINARY = 'main'
- AND d.file COLLATE BINARY = ${literal(probe.main.file)}
- AND v.data_version = ${probe.main.dataVersion}
- AND s.schema_version = ${probe.main.schemaVersion}
- THEN 1 ELSE 0 END AS frame_matches,
- r.read_uncommitted,d.seq,d.name,d.file,v.data_version,s.schema_version
- FROM main.pragma_read_uncommitted() AS r CROSS JOIN main.pragma_database_list() AS d
- CROSS JOIN main.pragma_data_version() AS v CROSS JOIN main.pragma_schema_version() AS s ORDER BY d.seq`;
-}
-function matchesNativeFrameProbe(raw: NativeSqlDatabase, plans: NativeProbePlans | undefined, signature: string | undefined): boolean | undefined {
-  if (!plans || plans.retired || !signature) return undefined;
-  const comparison = privateMapGet(nativeFrameComparisons, plans);
-  if (!comparison || comparison.raw !== raw || comparison.signature !== signature) return undefined;
-  const assertDependencies = () => {
-    if (!nativePrepareMatch(comparison.engine, raw) || !nativeExecutionDependenciesMatch(comparison.origin, raw)
-      || !nativeObjectFactsMatch(comparison.owner)) throw new SQLiteObservationRetiredError();
-  };
-  let recognized = false;
-  try {
-    if (comparison.execution.kind === 'native') {
-      // Both private executables check these same dependencies at entry and
-      // after their final reset before returning a boolean. Do not repeat a
-      // complete descriptor walk with no intervening callback or native call.
-      const value = comparison.execution.executable.read(assertDependencies);
-      // Early clear/reset refusals can bypass that final inner fence.
-      if (value === undefined) assertDependencies();
-      recognized = value !== undefined;
-      return value;
-    }
-    // Unknown birth/registry/decoder shapes retain the genuine lexical native
-    // implementation, which creates and frees its statement before returning.
-    assertDependencies();
-    const result: ReturnType<NativeSqlDatabase['exec']> = nativeApply(comparison.execution.execute, raw, [comparison.sql, undefined, { useBigInt: true }]);
-    assertDependencies();
-    const packet = result[0], row = packet?.values[0];
-    if (result.length !== 1 || !packet || packet.columns.length !== nativeFrameComparisonTypes.length
-      || packet.values.length !== 1 || !row || row.length !== nativeFrameComparisonTypes.length) return undefined;
-    for (let index = 0; index < nativeFrameComparisonTypes.length; index++) {
-      if (packet.columns[index] !== nativeFrameComparisonColumns[index]
-        || typeof row[index] !== (nativeFrameComparisonTypes[index] === 1 ? 'bigint' : 'string')) return undefined;
-    }
-    const value = row[0];
-    if (value !== 1n && value !== 0n) return undefined;
-    recognized = true;
-    return value === 1n;
-  } catch (error) { if (error instanceof SQLiteObservationRetiredError) throw error; return undefined; }
-  finally { if (!recognized) plans.dispose(); }
-}
+const RETIRED_MESSAGES: Readonly<Record<SQLiteObservationRetiredReason, string>> = {
+  'superseded-by-local-write': 'the store was written by this process after the step read it; read again and retry the step',
+  superseded: 'the rows the step read have changed since; read again and retry the step',
+  'read-failed': 'the store could not be read; retrying can succeed once the cause is fixed',
+  'unsupported-shape': 'a stored row or a selector has a shape this build does not read; retrying will not help',
+  invariant: 'the store was closed or used outside its contract; retrying will not help',
+};
 
-/** Only an original constructor birth can supply the private registry proof.
- * Unknown/custom births retain their ordinary facade and fresh-exec fallback. */
-function constructOwnedDatabase(engine: SqlJsStatic, data?: Uint8Array | Buffer,
-  Constructor: SqlJsStatic['Database'] = engine.Database): SqlDatabase {
-  const original = privateMapGet(nativeEngineIdentities, engine), origin = original?.statement, runtime = original?.scalar,
-    originalPrototype = original?.prototype;
-  const genuine = !!original && Constructor === original.constructor
-    && nativeGetDescriptor(engine, 'Database')?.value === Constructor
-    && nativeGetDescriptor(Constructor, 'prototype')?.value === originalPrototype
-    && !!origin && nativeOwnerPrototypeFactsMatch(origin) && !!runtime && nativeScalarRuntimeMatches(runtime);
-  const raw = createSqlJsDatabase(Constructor, data), facade = ownDatabase(raw), state = privateMapGet(ownedDatabases, facade);
-  if (genuine && original && origin && runtime && state && !nativeIsProxy(raw) && nativePrepareMatch(engine, raw)
-    && nativeExecutionDependenciesMatch(origin, raw) && nativeScalarRuntimeMatches(runtime)) {
-    const descriptor = nativeGetDescriptor(raw, 'gb'), registry: unknown = descriptor?.value;
-    if (descriptor && 'value' in descriptor && registry && typeof registry === 'object' && !nativeIsProxy(registry)
-      && nativeGetPrototypeOf(registry) === Object.prototype && nativeOwnKeys(registry).length === 0
-      && nativeIsExtensible(registry)) privateMapSet(nativeBirthRegistries, state, captureNativeObjectFacts(registry));
-  }
-  return facade;
-}
-
-/** Genuine prepare mints the native pointer; no live JavaScript statement is
- * exposed through the registry across an assertion callback. Finalization uses
- * its independent original WASM function, even after owner/helper retirement. */
-function withPrivateNativeScalarPointer<T>(state: OwnedSqlDatabase, engine: SqlJsStatic, sql: string,
-  adopt: (pointer: number, dispose: () => void, current: (assertDependencies: () => void) => void,
-    currentNative: (assertDependencies: () => void) => void, runtime: NativeScalarRuntime, birth: NativeObjectFacts,
-    isReleased: () => boolean) => T | undefined, reservedPointer?: number): T | undefined {
-  const original = privateMapGet(nativeEngineIdentities, engine), origin = original?.statement, runtime = original?.scalar;
-  const birth = privateMapGet(nativeBirthRegistries, state), registryDescriptor = nativeGetDescriptor(state.raw, 'gb');
-  if (!original || !origin || !runtime || !birth || registryDescriptor?.value !== birth.object
-    || !nativeObjectFactsMatch(birth) || birth.slots.length !== 0 || !nativeIsExtensible(birth.object)
-    || !nativePrepareMatch(engine, state.raw) || !nativeExecutionDependenciesMatch(origin, state.raw)
-    || !nativeScalarRuntimeMatches(runtime)) return undefined;
-  let statement: NativeSqlStatement;
-  try { statement = nativeApply(original.methods.prepare, state.raw, [sql]); }
-  catch (error) {
-    // The genuine native API returns a null statement on preparation failure.
-    // It cannot authorize a borrowed resource or a changed registry transition.
-    if (!nativeObjectFactsMatch(birth) || !nativePrepareMatch(engine, state.raw)
-      || !nativeExecutionDependenciesMatch(origin, state.raw) || !nativeScalarRuntimeMatches(runtime)) throw new SQLiteObservationRetiredError();
-    return undefined;
-  }
-  // The actual original producer returns its own data pointer. Record release
-  // ownership immediately, before any subsequent validation or detach can fail.
-  const pointerDescriptor = nativeGetDescriptor(statement, 'Qa'), pointer: unknown = pointerDescriptor?.value;
-  if (!pointerDescriptor || !('value' in pointerDescriptor) || typeof pointer !== 'number'
-    || !nativeSafeInteger(pointer) || pointer <= 0) throw new SQLiteObservationRetiredError();
-  let released = false;
-  const dispose = () => {
-    if (released) return;
-    released = true;
-    // Finalize destroys the allocation even if its status reports a prior SQL
-    // error. It must never be retried or depend on the current JS registry.
-    if (pointer !== reservedPointer) runtime.finalize(pointer);
-  };
-  try {
-    if (pointer === reservedPointer) throw new SQLiteObservationRetiredError();
-    const ownerDescriptor = nativeGetDescriptor(statement, 'db'), cursor = nativeGetDescriptor(statement, 'Oa'),
-      buffersDescriptor = nativeGetDescriptor(statement, 'mb'), buffers: unknown = buffersDescriptor?.value;
-    const entries = nativeOwnKeys(birth.object), entry = entries.length === 1 ? nativeGetDescriptor(birth.object, nativeString(pointer)) : undefined;
-    if (nativeOwnKeys(statement).length !== 4 || !pointerDescriptor.writable || !pointerDescriptor.configurable
-      || !ownerDescriptor || !('value' in ownerDescriptor) || ownerDescriptor.value !== state.raw
-      || !cursor || !('value' in cursor) || cursor.value !== 1
-      || !buffersDescriptor || !('value' in buffersDescriptor) || !nativeIsArray(buffers)
-      || nativeGetPrototypeOf(buffers) !== Array.prototype || buffers.length !== 0 || nativeOwnKeys(buffers).length !== 1
-      || entries[0] !== nativeString(pointer) || !entry || !('value' in entry) || entry.value !== statement || !entry.configurable) {
-      throw new SQLiteObservationRetiredError();
-    }
-    // No borrowed operation runs between detachment and neutralization. The
-    // detached pointer is now owned only by this private synchronous closure.
-    nativeDefineProperty(statement, 'Qa', { ...pointerDescriptor, value: 0 });
-    if (!nativeDeleteProperty(birth.object, nativeString(pointer))) throw new SQLiteObservationRetiredError();
-    if (!nativeObjectFactsMatch(birth) || nativeGetDescriptor(statement, 'Qa')?.value !== 0
-      || !nativePrepareMatch(engine, state.raw) || !nativeExecutionDependenciesMatch(origin, state.raw)
-      || !nativeScalarRuntimeMatches(runtime) || !nativeStatementMethodsMatch(origin, statement)) throw new SQLiteObservationRetiredError();
-  } catch (error) {
-    // Partial mint cleanup closes the original JavaScript handle before native
-    // release, so later raw export/close cannot finalize the same pointer twice.
-    try {
-      nativeDefineProperty(statement, 'Qa', { ...pointerDescriptor, value: 0 });
-      const entry = nativeGetDescriptor(birth.object, nativeString(pointer));
-      if (entry && 'value' in entry && entry.value === statement && entry.configurable) nativeDeleteProperty(birth.object, nativeString(pointer));
-    } finally { dispose(); }
-    throw error;
-  }
-  const current = (assertDependencies: () => void) => {
-    assertDependencies();
-    if (released || !nativeObjectFactsMatch(birth) || !nativeScalarRuntimeMatches(runtime)) throw new SQLiteObservationRetiredError();
-  };
-  const currentNative = (assertDependencies: () => void) => {
-    assertDependencies();
-    if (released || !nativeObjectFactsMatch(birth) || !nativeScalarExportsMatch(runtime)) throw new SQLiteObservationRetiredError();
-  };
-  try {
-    const adopted = adopt(pointer, dispose, current, currentNative, runtime, birth, () => released);
-    if (adopted === undefined) dispose();
-    return adopted;
-  } catch (error) { dispose(); throw error; }
-}
-
-function nativeFrameWitnessTypesMatch(runtime: NativeScalarRuntime, pointer: number): boolean {
-  for (let index = 0; index < nativeFrameComparisonTypes.length; index++) {
-    if (runtime.type(pointer, index) !== nativeFrameComparisonTypes[index]) return false;
-  }
-  return true;
-}
-function preparePrivateNativeScalar(state: OwnedSqlDatabase, engine: SqlJsStatic, sql: string): NativeScalarExecutable | undefined {
-  return withPrivateNativeScalarPointer(state, engine, sql, (pointer, dispose, current, currentNative, runtime, birth) => {
-    const binding = nativeScalarTextBinding;
-    const bindingMatches = binding && nativeScalarTextBindingMatches(binding, runtime);
-    // A binding observation can retire the original decoder before helper
-    // preparation. A changed captured runtime cannot select the full fallback.
-    if (!nativeScalarRuntimeMatches(runtime)) throw new SQLiteObservationRetiredError();
-    const alias = binding && bindingMatches
-      ? withPrivateNativeScalarPointer(state, engine, "SELECT CAST(?1 AS BLOB) = X'6672616d655f6d617463686573'",
-        (aliasPointer, disposeAlias, _currentAlias, _currentNativeAlias, aliasRuntime, aliasBirth, isReleased) => {
-          if (aliasRuntime !== runtime || aliasBirth !== birth) return undefined;
-          return { dispose: disposeAlias, isReleased, matches(namePointer: number): boolean | undefined {
-            // sqlite3_bind_text with negative length reads through the genuine
-            // NUL terminator. SQLITE_TRANSIENT copies bytes and NUL before the
-            // helper can reprepare; no fixed-size read can overrun a short name.
-            if (!nativeSafeInteger(namePointer) || namePointer <= 0
-              || runtime.clear(aliasPointer) !== 0 || runtime.reset(aliasPointer) !== 0) return undefined;
-            let result: boolean | undefined;
-            try {
-              if (binding.bind(aliasPointer, 1, namePointer, -1, -1) === 0
-                && runtime.step(aliasPointer) === 100 && runtime.count(aliasPointer) === 1
-                && runtime.dataCount(aliasPointer) === 1 && runtime.type(aliasPointer, 0) === 1) {
-                const value = runtime.value(aliasPointer, 0);
-                if ((value === 0 || value === 1) && runtime.step(aliasPointer) === 101) result = value === 1;
-              }
-            } finally {
-              try { if (runtime.reset(aliasPointer) !== 0) result = undefined; }
-              finally { if (runtime.clear(aliasPointer) !== 0) result = undefined; }
-            }
-            return result;
-          } };
-        }, pointer) : undefined;
-    if (!binding || !alias) {
-      return nativeFreeze({ dispose, read(assertDependencies: () => void): boolean | undefined {
-        current(assertDependencies);
-        if (runtime.clear(pointer) !== 0 || runtime.reset(pointer) !== 0) return undefined;
-        let result: boolean | undefined;
-        try {
-          const first = runtime.step(pointer);
-          current(assertDependencies);
-          if (first === 100 && runtime.count(pointer) === nativeFrameComparisonTypes.length
-            && runtime.dataCount(pointer) === nativeFrameComparisonTypes.length
-            && nativeFrameWitnessTypesMatch(runtime, pointer) && runtime.decode(runtime.name(pointer, 0)) === 'frame_matches') {
-            const value = runtime.value(pointer, 0);
-            current(assertDependencies);
-            if ((value === 0 || value === 1) && runtime.step(pointer) === 101) result = value === 1;
-          }
-        } finally {
-          if (runtime.reset(pointer) !== 0) result = undefined;
-        }
-        current(assertDependencies);
-        return result;
-      } });
-    }
-    const disposePair = () => { try { alias.dispose(); } finally { dispose(); } };
-    try {
-      return nativeFreeze({ dispose: disposePair, read(assertDependencies: () => void): boolean | undefined {
-        const assertPairDependencies = () => {
-          assertDependencies();
-          if (alias.isReleased() || !nativeScalarTextBindingMatches(binding, runtime)) throw new SQLiteObservationRetiredError();
-        };
-        // These original entry/exit fences still guard general Unicode row
-        // reads and reentrant caller boundaries. Only the two inner numeric
-        // sites use the decoder-free ABI, with every native dependency fresh.
-        current(assertPairDependencies);
-        if (runtime.clear(pointer) !== 0 || runtime.reset(pointer) !== 0) return undefined;
-        let result: boolean | undefined;
-        try {
-          const first = runtime.step(pointer);
-          currentNative(assertPairDependencies);
-          if (first === 100 && runtime.count(pointer) === nativeFrameComparisonTypes.length
-            && runtime.dataCount(pointer) === nativeFrameComparisonTypes.length
-            && nativeFrameWitnessTypesMatch(runtime, pointer) && alias.matches(runtime.name(pointer, 0)) === true) {
-            const value = runtime.value(pointer, 0);
-            currentNative(assertPairDependencies);
-            if ((value === 0 || value === 1) && runtime.step(pointer) === 101) result = value === 1;
-          }
-        } finally {
-          if (runtime.reset(pointer) !== 0) result = undefined;
-        }
-        current(assertPairDependencies);
-        return result;
-      } });
-    } catch (error) { disposePair(); throw error; }
-  });
-}
-
-interface OwnedSqlDatabase {
-  readonly raw: NativeSqlDatabase;
-  readonly identity: bigint;
-  revision: bigint;
-  inFlight: number;
-  probePlans?: NativeProbePlans | undefined;
-  memo?: { readonly revision: bigint; readonly probe: string; readonly snapshot: string } | undefined;
-  cleanMemo?: { readonly revision: bigint; readonly probe: string; readonly snapshot: string } | undefined;
-}
-let nextDatabaseIdentity = 0n;
-const ownedDatabases = new WeakMap<SqlDatabase, OwnedSqlDatabase>();
-const nativeBirthRegistries = new WeakMap<OwnedSqlDatabase, NativeObjectFacts>();
-const nativeOwnedProbePlans = new WeakMap<OwnedSqlDatabase, NativeProbePlans>();
-const nativeFrameReleases = new WeakMap<object, () => void>();
-const unownedIdentities = new WeakMap<SqlDatabase, bigint>();
-
-/** Never return sql.js's chainable run result or a native property/statement.
- * Every supported callback receives the same immutable four-method facade. */
-function ownedProbePlans(state: OwnedSqlDatabase): NativeProbePlans | undefined {
-  const original = privateMapGet(nativeOwnedProbePlans, state), descriptor = nativeGetDescriptor(state, 'probePlans');
-  if (descriptor && (!('value' in descriptor) || descriptor.value !== original)) throw new SQLiteObservationRetiredError();
-  if (original && (!descriptor || nativeGetDescriptor(state, 'raw')?.value !== original.raw)) throw new SQLiteObservationRetiredError();
-  return original;
-}
-function retireDatabaseProbe(state: OwnedSqlDatabase): void {
-  const original = privateMapGet(nativeOwnedProbePlans, state);
-  privateMapDelete(nativeOwnedProbePlans, state);
-  try {
-    const descriptor = nativeGetDescriptor(state, 'probePlans');
-    // A replaced slot cannot select cleanup or receive a setter invocation.
-    if (descriptor && 'value' in descriptor && descriptor.value === original
-      && (descriptor.writable || descriptor.configurable)) nativeDefineProperty(state, 'probePlans', { ...descriptor, value: undefined });
-  } finally { original?.dispose(); }
-}
-
-function ownDatabase(raw: NativeSqlDatabase): SqlDatabase {
-  const state: OwnedSqlDatabase = { raw, identity: ++nextDatabaseIdentity, revision: 0n, inFlight: 0 };
-  const operation = <T>(run: () => T): T => {
-    state.revision++; state.inFlight++; state.memo = undefined; state.cleanMemo = undefined;
-    try { retireDatabaseProbe(state); return run(); }
-    finally { state.revision++; state.inFlight--; state.memo = undefined; state.cleanMemo = undefined; }
-  };
-  const facade: SqlDatabase = nativeFreeze({
-    run(sql: string, params?: (string | number | Uint8Array | null)[]) {
-      operation(() => { raw.run(sql, params); });
-    },
-    exec(sql: string, params?: (string | number)[], config?: { useBigInt: boolean }) {
-      return operation(() => raw.exec(sql, params, config));
-    },
-    export() { return operation(() => raw.export()); },
-    close() { operation(() => { raw.close(); }); },
-  });
-  privateMapSet(ownedDatabases, facade, state);
-  return facade;
-}
-
-/** This path is only for fixed internal SQL, never caller SQL or callbacks. */
-function readDatabaseRow(db: SqlDatabase, sql: string, params: (string | number)[], config?: { useBigInt: boolean }) {
-  const state = privateMapGet(ownedDatabases, db);
-  if (state?.inFlight) throw new SQLiteObservationRetiredError();
-  return (state?.raw ?? db).exec(sql, params, config);
-}
-
-type ActualKnowledgeRecordValues = readonly (readonly [string, string | number | null])[] | null;
-
-/** Initial and fallback equality reads never consume mutable guard memos.
- * Values live only with the caller's native readset token, never in public IDs
- * or a global content-keyed cache. Every persisted cell is compared exactly.
- */
-function readActualRecordValues(db: SqlDatabase, selectors: readonly PersistedKnowledgeRecordSelector[]): readonly ActualKnowledgeRecordValues[] {
-  const records: ActualKnowledgeRecordValues[] = [];
-  for (const selector of selectors) {
-    const table = selector.kind === 'source' ? 'knowledge_sources' : selector.kind === 'node' ? 'knowledge_nodes' : 'knowledge_extractions';
-    const row = readDatabaseRow(db, `SELECT * FROM ${table} WHERE id = ? LIMIT 1`, [selector.id])[0], cells = row?.values[0];
-    if (row && (row.values.length > 1 || !row.columns.every(column => typeof column === 'string')
-      || new Set(row.columns).size !== row.columns.length
-      || row.values.some(values => values.length !== row.columns.length))) throw new SQLiteObservationRetiredError();
-    if (!row || !cells) { records.push(null); continue; }
-    const entries: (readonly [string, string | number | null])[] = [];
-    for (const [index, column] of row.columns.entries()) {
-      const cell = cells[index];
-      if (cell !== null && typeof cell !== 'string' && (typeof cell !== 'number' || !nativeFiniteNumber(cell))) throw new SQLiteObservationRetiredError();
-      entries.push(Object.freeze([column, cell] as const));
-    }
-    entries.sort(([left], [right]) => selector.kind === 'source' ? left < right ? -1 : left > right ? 1 : 0 : left.localeCompare(right));
-    records.push(Object.freeze(entries));
-  }
-  return Object.freeze(records);
-}
-
-/** The public generation format still has separate consumers. Capture it once;
- * subsequent expected-readset comparisons use the owned complete values above.
- */
-function readActualRecordReadset(db: SqlDatabase, selectors: readonly PersistedKnowledgeRecordSelector[]) {
-  const records = readActualRecordValues(db, selectors);
-  const generations = Object.freeze(records.map(entries => entries === null ? null : knowledgeRowGenerationFromRows([{ columns: entries.map(([column]) => column), values: [entries.map(([, value]) => value)] }])));
-  return Object.freeze({ records, generations });
-}
-
-function sameActualRecordValues(left: readonly ActualKnowledgeRecordValues[], right: readonly ActualKnowledgeRecordValues[]): boolean {
-  return left.length === right.length && left.every((record, index) => {
-    const other = right[index];
-    return record === null ? other === null : other !== null && other !== undefined && record.length === other.length
-      && record.every(([column, value], position) => other[position]?.[0] === column && nativeSameValue(other[position]?.[1], value));
-  });
-}
-
-interface DatabaseProbe {
-  readonly signature: string | null;
-  readonly cacheable: boolean;
-  readonly isolated: boolean;
-  readonly guarded: boolean;
-  readonly identities: readonly (readonly string[])[];
-  readonly main?: NativeMainProbeValues | undefined;
-}
-
-function executeProbePlans(statements: readonly NativeSqlStatement[]): ReturnType<SqlDatabase['exec']> {
-  const results: ReturnType<SqlDatabase['exec']> = [];
-  for (const statement of statements) {
-    if (!statement.reset()) throw new SQLiteObservationRetiredError();
-    try {
-      const values: unknown[][] = [];
-      while (statement.step()) values.push(statement.get(null, { useBigInt: true }));
-      if (values.length) results.push({ columns: statement.getColumnNames(), values });
-    } finally {
-      if (!statement.reset()) throw new SQLiteObservationRetiredError();
-    }
-  }
-  return results;
-}
-
-/** Only executable plans survive within the private synchronous frame. Every
- * probe steps fresh values, including native alias data_version changes. */
-function installDatabaseProbe(state: OwnedSqlDatabase, probe: DatabaseProbe, engine: SqlJsStatic | null, frame: object): void {
-  retireDatabaseProbe(state);
-  const identities = probe.identities;
-  // This sql.js build's table-valued version PRAGMAs report main only.
-  // Other database sets retain the complete schema-qualified PRAGMA path.
-  if (identities.length !== 1 || identities[0]?.[0] !== '0' || identities[0]?.[1] !== 'main') return;
-  const identity = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
-  const origin = identity?.statement;
-  const owner = origin ? captureNativeObjectFacts(state.raw) : undefined;
-  const comparisonSql = origin && owner && nativeEvery(owner.slots, ({ descriptor }) => 'value' in descriptor)
-    && nativeExecutionDependenciesMatch(origin, state.raw)
-    && nativePrepareMatch(engine, state.raw) ? nativeFrameComparisonSql(probe) : undefined;
-  let executable: NativeScalarExecutable | undefined, statement: NativeSqlStatement | undefined;
-  let installed = false;
-  try {
-    executable = comparisonSql && engine ? preparePrivateNativeScalar(state, engine, comparisonSql) : undefined;
-    if (!comparisonSql) { try { statement = state.raw.prepare(nativeProbeSql); } catch { return; } }
-    let retired = false;
-    const dispose = () => {
-      if (retired) return;
-      retired = true;
-      try { privateMapDelete(nativeFrameComparisons, plans); }
-      finally {
-        try { executable?.dispose(); }
-        finally { if (statement && !statement.free()) throw new SQLiteObservationRetiredError(); }
-      }
-    };
-    const candidate: NativeProbePlans = statement
-      ? { raw: state.raw, identities: JSON.stringify(identities), kind: 'columns', statement, get retired() { return retired; }, dispose }
-      : { raw: state.raw, identities: JSON.stringify(identities), kind: 'scalar', get retired() { return retired; }, dispose };
-    const plans = nativeFreeze(candidate);
-    if (comparisonSql && probe.signature && engine && identity && origin && owner) {
-      const execution: NativeFrameComparison['execution'] = executable
-        ? { kind: 'native', executable } : { kind: 'exec', execute: identity.methods.exec };
-      privateMapSet(nativeFrameComparisons, plans, nativeFreeze({ engine, raw: state.raw, signature: probe.signature,
-        sql: comparisonSql, execution, origin, owner }));
-    }
-    nativeDefineProperty(state, 'probePlans', { value: plans, writable: true, configurable: true, enumerable: true });
-    privateMapSet(nativeOwnedProbePlans, state, plans);
-    privateMapSet(nativeFrameReleases, frame, () => retireDatabaseProbe(state));
-    installed = true;
-  } finally {
-    // Minted ownership transfers only after the actual plan is installed. No
-    // formatting/registration exception may strand a detached native pointer.
-    if (!installed) {
-      try { executable?.dispose(); }
-      finally { if (statement && !statement.free()) throw new SQLiteObservationRetiredError(); }
-    }
+export class SQLiteObservationRetiredError extends Error {
+  readonly reason: SQLiteObservationRetiredReason;
+  /** True when reading again and retrying can succeed. */
+  readonly retryable: boolean;
+  constructor(reason: SQLiteObservationRetiredReason = 'superseded', options?: { readonly cause?: unknown }) {
+    super(`SQLiteStore: ${RETIRED_MESSAGES[reason]}`, options?.cause === undefined ? undefined : { cause: options.cause });
+    this.name = 'SQLiteObservationRetiredError';
+    this.reason = reason;
+    this.retryable = reason === 'superseded' || reason === 'superseded-by-local-write' || reason === 'read-failed';
   }
 }
 
-function databaseProbe(raw: SqlDatabase, plans?: NativeProbePlans): DatabaseProbe {
-  const unsupported: DatabaseProbe = { signature: null, cacheable: false, isolated: false, guarded: false, identities: [] };
-  if (plans?.retired) plans = undefined;
-  // Full observations keep all original native fields. The scalar plan is
-  // used only for equality fences and is never an observed signature.
-  if (plans && privateMapHas(nativeFrameComparisons, plans)) { plans.dispose(); plans = undefined; }
-  if (plans) {
-    let result: ReturnType<SqlDatabase['exec']> | undefined;
-    if (raw === plans.raw && plans.kind === 'columns') {
-      try { result = executeProbePlans([plans.statement]); } catch { /* Use the original full probe below. */ }
-    }
-    const columns = result?.[0]?.columns, rows = result?.[0]?.values;
-    const row = rows?.[0];
-    if (result?.length === 1 && columns?.length === nativeProbeColumns.length
-      && nativeProbeColumns.every((name, index) => columns[index] === name)
-      && rows?.length === 1 && row?.length === 7) {
-      const [mode, sequence, name, file, version, schemaVersion, shadowed] = row;
-      if (mode === 0n && sequence === 0n && name === 'main' && typeof file === 'string'
-        && !file.includes('\0') && !file.includes('\ufffd') && Buffer.from(file).toString('utf8') === file
-        && typeof version === 'bigint' && typeof schemaVersion === 'bigint' && shadowed === 0n) {
-        const identities = [[String(sequence), name, file]];
-        if (JSON.stringify(identities) === plans.identities) {
-          return { signature: JSON.stringify([String(mode), [[...identities[0]!, String(version), String(schemaVersion)]]]),
-            cacheable: true, isolated: file === '', guarded: true, identities,
-            main: { file, dataVersion: version, schemaVersion } };
-        }
-      }
-    }
-    plans.dispose();
-    return databaseProbe(raw);
-  }
-  let initial: ReturnType<SqlDatabase['exec']>;
-  initial = raw.exec('PRAGMA read_uncommitted;PRAGMA database_list', undefined, { useBigInt: true });
-  const mode = initial[0]?.values[0]?.[0];
-  const databases = initial[1]?.values;
-  if ((mode !== 0n && mode !== 1n) || !databases?.length) {
-    return unsupported;
-  }
-  const identities: Array<readonly string[]> = [];
-  const schemas: string[] = [];
-  for (const row of databases) {
-    const [sequence, name, file] = row;
-    if (typeof sequence !== 'bigint' || typeof name !== 'string' || typeof file !== 'string'
-      || [name, file].some(value => value.includes('\0') || value.includes('\ufffd') || Buffer.from(value).toString('utf8') !== value)) {
-      return unsupported;
-    }
-    const schema = `"${name.replaceAll('"', '""')}"`;
-    schemas.push(`PRAGMA ${schema}.data_version;PRAGMA ${schema}.schema_version`);
-    identities.push([String(sequence), name, file]);
-  }
-  let versions: ReturnType<SqlDatabase['exec']>;
-  versions = raw.exec(schemas.join(';'), undefined, { useBigInt: true });
-  if (versions.length !== identities.length * 2) {
-    return unsupported;
-  }
-  const observed = identities.map((identity, index) => {
-    const version = versions[index * 2]?.values[0]?.[0], schemaVersion = versions[index * 2 + 1]?.values[0]?.[0];
-    return typeof version === 'bigint' && typeof schemaVersion === 'bigint' ? [...identity, String(version), String(schemaVersion)] : null;
-  });
-  if (observed.some(identity => identity === null)) {
-    return unsupported;
-  }
-  const guarded = mode === 0n && identities.filter(row => row[1] === 'main').length === 1
-    && identities.every(row => row[1] === 'main' || row[1] === 'temp');
-  const main = identities[0], file = main?.[2];
-  const dataVersion = versions[0]?.values[0]?.[0], schemaVersion = versions[1]?.values[0]?.[0];
-  return { signature: JSON.stringify([String(mode), observed]), cacheable: mode === 0n,
-    isolated: guarded && identities.every(row => row[2] === ''), guarded, identities,
-    main: guarded && identities.length === 1 && main?.[0] === '0' && main[1] === 'main'
-      && typeof file === 'string' && typeof dataVersion === 'bigint' && typeof schemaVersion === 'bigint'
-      ? { file, dataVersion, schemaVersion } : undefined };
-}
-
-/** Reuse only a complete observation owned by an uninterrupted connection.
- * Native data_version fences other SQL connections; facade revisions fence all
- * owner operations, including failed writes, rollback and export/reopen ABA. */
-function observeDatabase(db: SqlDatabase, mode: 'observation' | 'clean-content' = 'observation'): string {
-  const state = privateMapGet(ownedDatabases, db);
-  if (!state) {
-    let identity = privateMapGet(unownedIdentities, db);
-    if (identity === undefined) { identity = ++nextDatabaseIdentity; privateMapSet(unownedIdentities, db, identity); }
-    return JSON.stringify([String(identity), mode === 'observation' ? '0' : 'clean-content', null, sqliteLocalObservation(db, mode)]);
-  }
-  try {
-    if (state.inFlight) throw new SQLiteObservationRetiredError();
-    const revision = state.revision, before = databaseProbe(state.raw, ownedProbePlans(state));
-    if (mode === 'observation' && before.cacheable && before.signature !== null) {
-      // An owned connection's publication lifetime is its actual writer epoch,
-      // fenced by native schema/data versions and method ownership. A complete
-      // table digest cannot add anything to that identity. Clean-content mode
-      // is different: it must recognize an unchanged state after rollback.
-      const after = databaseProbe(state.raw, ownedProbePlans(state));
-      if (state.inFlight || state.revision !== revision || !after.cacheable || before.signature !== after.signature) {
-        throw new SQLiteObservationRetiredError();
-      }
-      return JSON.stringify([String(state.identity), String(revision), after.signature]);
-    }
-    const memo = mode === 'observation' ? state.memo : state.cleanMemo;
-    const snapshot = before.cacheable && memo?.revision === revision && memo.probe === before.signature
-      ? memo.snapshot : sqliteLocalObservation(state.raw, mode);
-    const after = databaseProbe(state.raw, ownedProbePlans(state));
-    if (state.inFlight || state.revision !== revision || before.signature !== after.signature) throw new SQLiteObservationRetiredError();
-    const next = before.cacheable && after.cacheable && after.signature !== null
-      ? { revision, probe: after.signature, snapshot } : undefined;
-    if (mode === 'observation') state.memo = next; else state.cleanMemo = next;
-    return JSON.stringify([String(state.identity), mode === 'observation' ? String(revision) : 'clean-content', after.signature, snapshot]);
-  } catch (error) {
-    state.memo = undefined; state.cleanMemo = undefined; state.revision++;
-    throw error;
-  }
-}
-
-function isEphemeralDbPath(path: string | null | undefined): boolean {
-  if (!path) return true;
-  if (path === ':memory:') return true;
-  return /^file:.*(?:^|[?&])mode=memory(?:&|$)/.test(path);
-}
-
-/** Internal closed readonly selector. Never supplies a custom constructor or
- * public observer with private persisted bytes, and never opens a disk writer.
- */
-async function inspectNativeReadonlyImage<T>(data: Uint8Array, assertCurrent: () => void, inspect: (database: Pick<SqlDatabase, 'exec'>) => T): Promise<T> {
-  const current = () => { const result: unknown = assertCurrent(); if (result !== undefined) { drainOwned(result); throw new SQLiteObservationRetiredError(); } };
-  current(); assertSqliteImage(data); const engine = await loadSqlJsEngine(); current();
-  const original = privateMapGet(nativeEngineIdentities, engine), origin = original?.statement, scalar = original?.scalar;
-  if (!original || !origin || !scalar) throw new SQLiteObservationRetiredError();
-  const before = () => { current(); assertNativeEngineIdentity(engine); if (!nativeOwnerPrototypeFactsMatch(origin) || !nativeScalarRuntimeMatches(scalar)
-    || !Object.entries(original.methods).every(([key, method]) => nativeGetDescriptor(original.prototype, key)?.value === method)) throw new SQLiteObservationRetiredError(); };
-  before(); const raw = createSqlJsDatabase(original.constructor, data);
-  const check = () => { before(); if (!nativeMethodsMatch(engine, raw) || !nativeExecutionDependenciesMatch(origin, raw)) throw new SQLiteObservationRetiredError(); };
-  try {
-    check();
-    const result = inspect({ exec(sql, params) { check(); const rows = nativeApply(original.methods.exec, raw, [sql, params]); check(); return rows; } });
-    check(); return result;
-  } finally { nativeApply(original.methods.close, raw, []); }
-}
-
-/** Fixed metadata selector. Private images never reach a supplied constructor,
- * SQL callback, schema repair or migration. */
-export function inspectNativePlanningProjectImage(data: Uint8Array, assertCurrent: () => void): Promise<readonly string[]> {
-  return inspectNativeReadonlyImage(data, assertCurrent, queryPersistedPlanningProjects);
-}
-/** Internal closed artifact selector for an unopened configured family. */
-export function inspectNativeArtifactReferenceImage(data: Uint8Array, ids: readonly string[], assertCurrent: () => void): Promise<readonly string[]> {
-  return inspectNativeReadonlyImage(data, assertCurrent, db => inspectPersistedArtifactReferences(db, ids));
-}
-
-function assertSqliteImage(data: Uint8Array): void {
-  if (data.byteLength < 100 || Buffer.from(data.subarray(0, 16)).toString('binary') !== 'SQLite format 3\0') {
-    throw new Error('SQLiteStore: existing database image is corrupt; refusing initialization');
+/** A guarded write committed, but the caller's follow-up (mirroring the rows) failed. Retrying would repeat the write. */
+export class SQLitePublishedButFencedError extends Error {
+  constructor(cause: unknown) {
+    super('SQLiteStore: the change was committed, but updating this process\'s view of it failed; reopen the store to see it', { cause });
+    this.name = 'SQLitePublishedButFencedError';
   }
 }
 
 export interface SqliteStoreInitOptions {
-  /** Opt in only when schema creates the complete target version. Applies to
-   * a physically absent, newly owned image; every existing file still migrates. */
+  /** Opt in only when `schema` creates the complete target version. Applies to a store with no tables yet. */
   readonly initializeFreshSchema?: boolean | undefined;
-  /** Validate an already-current persisted schema before idempotent base-schema repair. */
+  /** Validate an already-current schema before the idempotent base-schema pass, and again after it. */
   readonly validateCurrentSchema?: ((db: SqlDatabase) => void) | undefined;
-  /** Authentic source-defined plan; arbitrary validation callbacks retain their clone boundary. */
-  readonly nativeSchemaReadPlan?: NativeKnowledgeSchemaReadPlan | undefined;
-  /** Human store name for honest versioning messages. */
+  /** Human store name for versioning messages. */
   readonly storeName?: string | undefined;
   /** Target `PRAGMA user_version` for this store (default 1). */
   readonly schemaVersion?: number | undefined;
   /**
-   * Ordered migrations to the target version. When omitted, the base schema
-   * function doubles as the single migration to the target version (safe
-   * because every base schema here is IF NOT EXISTS-idempotent).
+   * Ordered migrations to the target version, run in one transaction after a
+   * consistent copy of the file is taken. When omitted, the base schema
+   * function doubles as the single migration (every base schema here is
+   * IF NOT EXISTS-idempotent).
    */
   readonly migrations?: ReadonlyArray<{
     readonly toVersion: number;
@@ -1224,297 +147,229 @@ export interface SqliteStoreInitOptions {
   }> | undefined;
 }
 
-const frameImageStampBrand: unique symbol = Symbol('native-frame-image');
-interface NativeFrameImageStamp { readonly [frameImageStampBrand]: true }
-const frameImageStamps = new WeakMap<NativeFrameImageStamp, {
-  readonly store: SQLiteStore;
-  readonly frame: object;
-  readonly data: Uint8Array;
-  readonly persistence: SQLiteStorePersistence;
-  readonly plan: NativeKnowledgeSchemaReadPlan;
-  readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
-  readonly schemaVersion: number;
-  readonly imageEpoch: number;
-  readonly observationEpoch: number;
-  readonly evidence: SQLiteImageObservation;
-  readonly baseline: SQLiteBaselineObservation | undefined;
-}>();
-interface NativeReadFrameObservation {
-  readonly identity: string | undefined;
-  readonly local: string;
-  readonly persisted: SQLiteImageObservation | undefined;
-  readonly localState: OwnedSqlDatabase | undefined;
-  readonly localRevision: bigint | undefined;
-  readonly localProbe: string | undefined;
-  readonly localIsolated: boolean;
+export interface SQLiteStoreOptions {
+  /** Runs synchronously before each write transaction of a file-backed store; a throw refuses the write. */
+  readonly beforePersist?: (() => void) | undefined;
+  /** Runs synchronously once, before the store first reads its file. */
+  readonly beforeInitialRead?: (() => void) | undefined;
 }
-function readFrameImage(persistence: SQLiteStorePersistence) {
-  try { return readSQLitePersistedImage(persistence); }
-  catch { throw new SQLiteObservationRetiredError(); }
-}
-const nativeReadFrameIdentities = new WeakMap<object, {
-  readonly store: SQLiteStore;
-  readonly identity: object;
-  readonly persistence: SQLiteStorePersistence | null;
-  readonly assertCurrent: (verifyNative?: boolean) => void;
-  /** Deterministic complete-row equality only, never an authority outcome.
-   * Private to this exact synchronous native image; public frame memos are
-   * deliberately excluded and all currentness checks still run on every use. */
-  readonly expectedMatches: WeakMap<ExpectedKnowledgeRecordReadset, boolean>;
-  readonly observation?: NativeReadFrameObservation;
-  readonly bytes?: Buffer;
-}>();
-function assertReadFrameOrigin(store: SQLiteStore, frame: object) {
-  const original = privateMapGet(nativeReadFrameIdentities, frame);
-  if (original?.store !== store || nativeGetDescriptor(frame, 'assertCurrent')?.value !== original.assertCurrent
-    || nativeGetDescriptor(store, 'persistence')?.value !== original.persistence) {
-    throw new SQLiteObservationRetiredError();
-  }
-  if (original.observation) {
-    for (const key of nativeOwnKeys(original.observation)) {
-      const expected = nativeGetDescriptor(original.observation, key), actual = nativeGetDescriptor(frame, key);
-      if (!expected || !('value' in expected) || !actual || !('value' in actual) || actual.value !== expected.value) {
-        throw new SQLiteObservationRetiredError();
-      }
-    }
-  }
-  return original;
-}
-const nativeReadImages = new WeakMap<object, {
-  readonly db: SqlDatabase;
-  readonly store: SQLiteStore;
-  readonly origin: object;
-  readonly evidence: SQLiteImageObservation;
-  readonly baseline: SQLiteBaselineObservation | undefined;
-  readonly state: OwnedSqlDatabase;
-  readonly revision: bigint;
-}>();
-function currentNativeReadImage(store: SQLiteStore, frame: object | null, db: SqlDatabase | null | undefined, engine: SqlJsStatic | null) {
-  assertNativeEngineIdentity(engine);
-  if (frame) {
-    const original = assertReadFrameOrigin(store, frame);
-    if (original.observation && nativeEntries(original.observation).some(([name, value]) => {
-      const field = Object.getOwnPropertyDescriptor(frame, name);
-      return !field || !('value' in field) || field.value !== value;
-    })) throw new SQLiteObservationRetiredError();
-  }
-  const image = frame ? privateMapGet(nativeReadImages, frame) : undefined;
-  if (image && (image.store !== store || image.db !== db || privateMapGet(ownedDatabases, image.db) !== image.state
-    || image.state.inFlight || image.state.revision !== image.revision)) throw new SQLiteObservationRetiredError();
-  return image;
-}
-const expectedRecordReadsets = new WeakMap<object, {
-  readonly token: ExpectedKnowledgeRecordReadset;
-  readonly store: SQLiteStore;
-  readonly origin: object | undefined;
-  readonly persistence: SQLiteStorePersistence | null;
-  readonly engine: SqlJsStatic | null;
-  readonly plan: NativeKnowledgeSchemaReadPlan | undefined;
-  readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
-  readonly schemaVersion: number;
-  readonly evidence: SQLiteImageObservation | undefined;
-  readonly canonical: boolean;
-  readonly selectors: readonly PersistedKnowledgeRecordSelector[];
-  readonly records: readonly ActualKnowledgeRecordValues[];
-}>();
-/** Complete persisted-row equality only. Each actual token retains at most its
- * last accepted physical baseline's result. Every use still opens a fresh
- * original-byte image and executes the current native/source boundary fences. */
-const expectedBaselineMatches = new WeakMap<ExpectedKnowledgeRecordReadset, {
-  readonly baseline: SQLiteBaselineObservation;
-  readonly matches: boolean;
-}>();
 
-const artifactReferenceObservation = SQLiteStorePersistence.prototype.observationIdentity;
-let captureActivationPublication: (store: SQLiteStore, nodeId: string, generation: string) => () => 'pending' | 'published';
-/** Internal activation bookkeeping only. Pending local writes never become
- * persisted semantic evidence or an exemption from original source checks. */
-export function captureSQLiteActivationPublication(store: SQLiteStore, nodeId: string, generation: string): () => 'pending' | 'published' {
-  return captureActivationPublication(store, nodeId, generation);
+type BunStatement = Statement<unknown, SQLQueryBindings[]>;
+const STATEMENT_CACHE_LIMIT = 256;
+const SPLIT_CACHE_LIMIT = 256;
+const splitCache = new Map<string, readonly string[]>();
+
+function isEphemeralDbPath(path: string | null | undefined): boolean {
+  if (!path) return true;
+  if (path === ':memory:') return true;
+  return /^file:.*(?:^|[?&])mode=memory(?:&|$)/.test(path);
 }
-type NativeSchemaValidationAcknowledgment = {
-  readonly persistence: SQLiteStorePersistence;
-  readonly baseline: SQLiteBaselineObservation;
-  readonly engine: SqlJsStatic;
-  readonly plan: NativeKnowledgeSchemaReadPlan;
-  readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
-  readonly schemaVersion: number;
-};
-let atomicWriteCounter = 0;
 
 /**
- * Replaces `target` with `data` so a crash or a full disk mid-write leaves
- * either the old file or the new one, never a truncated database: write a
- * sibling temp file, fsync it, then rename over the target.
+ * Split SQL into its statements the way SQLite reads them: a `;` inside a
+ * quoted string, an identifier, a comment or a trigger body does not end one.
  */
-export function writeFileAtomically(target: string, data: Uint8Array): void {
-  let destination = target;
-  let mode: number | undefined;
-  try {
-    // Replace what a symlink points at, not the link itself.
-    destination = realpathSync(target);
-    mode = statSync(destination).mode & 0o777;
-  } catch { /* no existing file yet */ }
-  atomicWriteCounter += 1;
-  const temporary = `${destination}.${process.pid}.${atomicWriteCounter}.tmp`;
-  let fd: number | undefined;
-  try {
-    // A new database holds tool results and user content, so it is private to the owner; an existing file keeps its mode.
-    fd = openSync(temporary, 'wx', mode ?? 0o600);
-    writeFileSync(fd, data);
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    renameSync(temporary, destination);
-  } catch (error) {
-    if (fd !== undefined) { try { closeSync(fd); } catch { /* already failing */ } }
-    try { unlinkSync(temporary); } catch { /* temp may not exist */ }
-    throw error;
+export function splitSqlStatements(sql: string): readonly string[] {
+  const cached = splitCache.get(sql);
+  if (cached) return cached;
+  const statements: string[] = [];
+  let start = 0, words = 0, trigger = false, depth = 0, opened = false, content = false;
+  const leading: string[] = [];
+  const flush = (end: number) => {
+    if (content) statements.push(sql.slice(start, end).trim());
+    start = end + 1; words = 0; trigger = false; depth = 0; opened = false; content = false; leading.length = 0;
+  };
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]!;
+    if (ch === '-' && sql[i + 1] === '-') { const end = sql.indexOf('\n', i); i = end < 0 ? sql.length : end; continue; }
+    if (ch === '/' && sql[i + 1] === '*') { const end = sql.indexOf('*/', i + 2); i = end < 0 ? sql.length : end + 1; continue; }
+    if (ch === '\'' || ch === '"' || ch === '`' || ch === '[') {
+      const close = ch === '[' ? ']' : ch;
+      content = true;
+      for (i++; i < sql.length; i++) {
+        if (sql[i] === close) { if (close !== ']' && sql[i + 1] === close) { i++; continue; } break; }
+      }
+      continue;
+    }
+    if (ch === ';') {
+      if (!trigger || (opened && depth === 0)) flush(i);
+      continue;
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      let end = i + 1;
+      while (end < sql.length && /[A-Za-z0-9_$]/.test(sql[end]!)) end++;
+      const word = sql.slice(i, end).toUpperCase();
+      content = true;
+      if (words < 3) {
+        leading.push(word); words++;
+        if (leading[0] === 'CREATE' && (leading[1] === 'TRIGGER' || ((leading[1] === 'TEMP' || leading[1] === 'TEMPORARY') && leading[2] === 'TRIGGER'))) trigger = true;
+      }
+      if (trigger) {
+        if (word === 'BEGIN') { depth++; opened = true; }
+        else if (word === 'CASE') depth++;
+        else if (word === 'END') depth--;
+      }
+      i = end - 1;
+      continue;
+    }
+    if (!/\s/.test(ch)) content = true;
   }
-  // The rename is only durable once its directory entry is; not every platform lets a directory be synced, and the file itself is already safe.
-  let directory: number | undefined;
-  try { directory = openSync(dirname(destination), 'r'); fsyncSync(directory); }
-  catch { /* directory sync unsupported here */ }
-  finally { if (directory !== undefined) { try { closeSync(directory); } catch { /* nothing left to release */ } } }
+  flush(sql.length);
+  const result = Object.freeze(statements);
+  if (splitCache.size >= SPLIT_CACHE_LIMIT) splitCache.delete(splitCache.keys().next().value!);
+  splitCache.set(sql, result);
+  return result;
 }
 
-/** A prepared image reached disk, but this cache could not adopt it: the effect landed, and the cache is fenced until it is reopened. Retrying the effect would repeat it. */
-export class SQLitePublishedButFencedError extends Error {
-  constructor(cause: unknown) {
-    super('SQLiteStore: the prepared image was published but this cache could not adopt it; it is fenced until reopened', { cause });
-    this.name = 'SQLitePublishedButFencedError';
-  }
+/** A statement that cannot change the database: it needs no write transaction. */
+function isReadOnlySql(sql: string): boolean {
+  const head = sql.trimStart().slice(0, 16).toUpperCase();
+  if (head.startsWith('SELECT') || head.startsWith('EXPLAIN')) return true;
+  if (head.startsWith('PRAGMA')) return !sql.includes('=');
+  if (head.startsWith('WITH')) return !/\b(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql);
+  return false;
 }
 
-/** One SELECT statement, optionally ending in a semicolon: nothing it runs can write. */
-const READ_ONLY_STATEMENT = /^\s*select\b[^;]*;?\s*$/i;
+function bindings(params: readonly unknown[] | undefined): SQLQueryBindings[] {
+  if (!params?.length) return [];
+  return params.map((value) => (value === undefined ? null : value)) as SQLQueryBindings[];
+}
+
+function assertSynchronous(result: unknown, message: string): void {
+  if (result === undefined) return;
+  drainOwned(result);
+  throw new TypeError(message);
+}
+
+const KNOWLEDGE_ROW_TABLES = Object.freeze(['knowledge_sources', 'knowledge_nodes', 'knowledge_extractions', 'knowledge_edges'] as const);
+type KnowledgeRowTable = typeof KNOWLEDGE_ROW_TABLES[number];
+
+function recordTable(kind: PersistedKnowledgeRecordSelector['kind']): KnowledgeRowTable {
+  return kind === 'source' ? 'knowledge_sources' : kind === 'node' ? 'knowledge_nodes' : 'knowledge_extractions';
+}
+
+function captureSelectors(selectors: readonly PersistedKnowledgeRecordSelector[]): readonly PersistedKnowledgeRecordSelector[] {
+  if (!Array.isArray(selectors)) throw new SQLiteObservationRetiredError('unsupported-shape');
+  return Object.freeze(selectors.map((selector) => {
+    if (!selector || (selector.kind !== 'source' && selector.kind !== 'node' && selector.kind !== 'extraction') || typeof selector.id !== 'string') {
+      throw new SQLiteObservationRetiredError('unsupported-shape');
+    }
+    return Object.freeze({ kind: selector.kind, id: selector.id });
+  }));
+}
+
+/**
+ * Activation bookkeeping: a check that the node row this process wrote is
+ * still the one stored. Every read sees this process's own writes, so a row
+ * that is still stored is never "pending" to a reader.
+ */
+export function captureSQLiteActivationPublication(store: SQLiteStore, nodeId: string, generation: string): () => 'pending' | 'published' {
+  const check = (): 'published' => {
+    if (store.readPersistedRowGeneration('knowledge_nodes', 'id', nodeId) !== generation) throw new SQLiteObservationRetiredError('superseded');
+    return 'published';
+  };
+  check();
+  return check;
+}
+
+/** Project ids recorded in a knowledge database image (a byte copy of the file). */
+export function inspectNativePlanningProjectImage(data: Uint8Array, assertCurrent: () => void): Promise<readonly string[]> {
+  assertSynchronous(assertCurrent(), 'SQLiteStore: the owner check must be synchronous');
+  const image = bunDatabase().deserialize(data, true);
+  try {
+    const ids = queryPersistedPlanningProjects(statementDatabase(image));
+    assertSynchronous(assertCurrent(), 'SQLiteStore: the owner check must be synchronous');
+    return Promise.resolve(ids);
+  } catch (error) { return Promise.reject(error); }
+  finally { image.close(); }
+}
+
+/**
+ * Artifact references in a byte copy of a knowledge file. A byte copy cannot
+ * include commits still in the file's WAL, so it cannot prove an artifact is
+ * unreferenced: every requested id is reported referenced, which keeps the
+ * artifact. Read through the file (`inspectArtifactReferencesFile`) instead.
+ */
+export function inspectNativeArtifactReferenceImage(_data: Uint8Array, ids: readonly string[], assertCurrent: () => void): Promise<readonly string[]> {
+  assertSynchronous(assertCurrent(), 'SQLiteStore: the owner check must be synchronous');
+  return Promise.resolve(Object.freeze([...ids]));
+}
+
+/** Open a knowledge file that no store in this process holds, read from it, close it. Never creates the file. */
+function withFileDatabase<T>(path: string, read: (db: SqlDatabase) => T): T {
+  const db = new (bunDatabase())(path, { create: false });
+  try {
+    db.run('PRAGMA busy_timeout = 5000');
+    db.run('PRAGMA query_only = 1');
+    return read(statementDatabase(db));
+  } finally { db.close(); }
+}
+
+/** Project ids recorded in the knowledge file at `path`, committed WAL content included. */
+export function inspectPlanningProjectsFile(path: string): readonly string[] {
+  return withFileDatabase(path, queryPersistedPlanningProjects);
+}
+
+/** Which of `ids` the knowledge file at `path` references, committed WAL content included. */
+export function inspectArtifactReferencesFile(path: string, ids: readonly string[]): readonly string[] {
+  return withFileDatabase(path, (db) => inspectPersistedArtifactReferences(db, ids));
+}
+
+/** A plain statement surface over a handle: each write commits on its own. */
+function statementDatabase(db: Database): SqlDatabase {
+  return {
+    run(sql, params) {
+      if (!params?.length) { db.run(sql); return; }
+      const statement = db.prepare(sql) as unknown as BunStatement;
+      try { statement.run(...bindings(params)); } finally { statement.finalize(); }
+    },
+    exec(sql, params) {
+      const results: SqlRows = [];
+      for (const text of splitSqlStatements(sql)) {
+        const statement = db.prepare(text) as unknown as BunStatement;
+        try {
+          const values = (statement.values(...bindings(params)) ?? []) as unknown[][];
+          if (values.length) results.push({ columns: [...statement.columnNames], values });
+        } finally { statement.finalize(); }
+      }
+      return results;
+    },
+    export() { return db.serialize(); },
+    close() { db.close(); },
+  };
+}
 
 export class SQLiteStore {
-  #activationPublication: Readonly<{ physical: string | undefined }> = nativeFreeze({ physical: undefined });
-  #activationPublicationFailures = 0;
-  /** A publication reached disk but its directory sync failed, so this cache has not adopted what is on disk. */
-  #indeterminatePublication = false;
-  static { captureActivationPublication = (store, nodeId, generation) => store.#captureActivationPublication(nodeId, generation); }
-  readonly #artifactReferencePath: string | null;
-  #validatedNativeSchema: NativeSchemaValidationAcknowledgment | undefined;
-  // Closed native read validation is a distinct acknowledgment. It cannot
-  // certify borrowed callback databases or bypass the full schema validator.
-  #validatedNativeReadSchema: NativeSchemaValidationAcknowledgment | undefined;
-  #artifactReferenceOrigin: { readonly persistence: SQLiteStorePersistence; readonly engine: SqlJsStatic; readonly schemaVersion: number; readonly path: string } | undefined;
-  private db: SqlDatabase | null = null;
+  #file: SqliteFile | null = null;
+  #db: Database | null = null;
+  readonly #statements = new Map<string, BunStatement>();
+  #dataVersion: BunStatement | null = null;
+  #implicit = false;
+  #commitFailure: unknown;
+  #closedMessage: string | undefined;
+  readonly #adapter: SqlDatabase;
   private readonly dbPath: string | null;
   private initPromise: Promise<void> | null = null;
   private saveBatchDepth = 0;
-  private saveDirty = false;
-  private readonly coordinated: boolean;
-  private persistence: SQLiteStorePersistence | null = null;
-  private cleanContent: string | null = null;
-  // Only coordinated ephemeral storage needs retained last-clean image bytes.
-  private cleanBytes: Uint8Array | null = null;
-  private sqlEngine: SqlJsStatic | null = null;
-  private schema: ((db: SqlDatabase) => void) | null = null;
-  private schemaVersion = 1;
-  private validateCurrentSchema: ((db: SqlDatabase) => void) | undefined;
-  private nativeSchemaReadPlan: NativeKnowledgeSchemaReadPlan | undefined;
-  private readonly privateSchemaImages = new WeakSet<SqlDatabase>();
-  /**
-   * The private native read image the last read frame ended with, kept so the
-   * next frame over the same unchanged database does not rebuild it. Reuse
-   * requires the same persisted bytes and identity, the same epochs and an
-   * untouched image; any save, reload or close drops it.
-   */
-  #idleReadImage: {
-    readonly db: SqlDatabase;
-    readonly state: OwnedSqlDatabase;
-    readonly revision: bigint;
-    readonly imageEpoch: number;
-    readonly observationEpoch: number;
-    readonly identity: string;
-    readonly baseline: SQLiteBaselineObservation | undefined;
-    readonly bytes: Buffer;
-    readonly persistence: SQLiteStorePersistence;
-    readonly plan: NativeKnowledgeSchemaReadPlan;
-    readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
-    readonly schemaVersion: number;
-  } | null = null;
-
-  private dropIdleReadImage(): void {
-    const idle = this.#idleReadImage;
-    this.#idleReadImage = null;
-    if (idle) { try { this.closeReadImage(idle.db); } catch { /* The image is unreferenced either way. */ } }
-  }
-  private imageEpoch = 0;
-  private observationEpoch = 0;
-  /** Local statements and saves; with the image epoch it moves on every change of the content. */
-  #localWrites = 0;
-  private persistedReadFrame: { db: SqlDatabase | null; owned: boolean; identity: string | undefined; local: string | undefined; persisted: SQLiteImageObservation | undefined; poisoned: boolean; localState: OwnedSqlDatabase | undefined; localRevision: bigint | undefined; localProbe: string | undefined; localIsolated: boolean; rows: Map<string, ReturnType<SqlDatabase['exec']>>; generations: Map<string, string | null>; assertCurrent: (verifyNative?: boolean) => void } | null = null;
-  private admission: Promise<void> = Promise.resolve();
   private readonly activeBatches = new Set<Promise<void>>();
-  /** Prepared publications captured but not yet settled; their staged image
-   * was built from the current local one, so it must not be replaced under them. */
-  private stagedPublications = 0;
-  private fenced = false;
-
   private readonly beforePersist: (() => void) | undefined;
   private readonly beforeInitialRead: (() => void) | undefined;
+  private readonly artifactReferenceCleanListeners = new Set<() => void>();
 
-  constructor(dbPath?: string, options: { readonly coordinated?: boolean; readonly beforePersist?: (() => void) | undefined; readonly beforeInitialRead?: (() => void) | undefined } = {}) {
+  constructor(dbPath?: string, options: SQLiteStoreOptions = {}) {
     this.beforePersist = options.beforePersist?.bind(options);
     this.beforeInitialRead = options.beforeInitialRead?.bind(options);
     this.dbPath = dbPath ?? null;
-    this.#artifactReferencePath = this.dbPath;
-    this.coordinated = options.coordinated === true;
-    // Full local equality frames contain private SQLite values. Keep them out
-    // of ordinary object serialization; they are never public revision fields.
-    for (const field of ['cleanContent', 'persistedReadFrame'] as const) {
-      const descriptor = nativeGetDescriptor(this, field);
-      if (descriptor) nativeDefineProperty(this, field, { ...descriptor, enumerable: false });
-    }
-  }
-
-  #captureActivationPublication(nodeId: string, generation: string): () => 'pending' | 'published' {
-    const db = this.getDb(), persistence = this.persistence, engine = this.sqlEngine, epoch = this.imageEpoch;
-    const publication = this.#activationPublication, failures = this.#activationPublicationFailures;
-    const pending = this.saveBatchDepth > 0, physical = persistence?.observationIdentity();
-    const assertLocal = () => {
-      if (this.db !== db || this.persistence !== persistence || this.sqlEngine !== engine || this.imageEpoch !== epoch
-        || this.fenced || this.#activationPublicationFailures !== failures) throw new SQLiteObservationRetiredError();
-      const original = engine && privateMapGet(nativeEngineIdentities, engine), state = privateMapGet(ownedDatabases, db);
-      if (!engine || !original?.statement || !state || state.inFlight || !nativeMethodsMatch(engine, state.raw)
-        || !nativeExecutionDependenciesMatch(original.statement, state.raw)) throw new SQLiteObservationRetiredError();
-      assertNativeEngineIdentity(engine);
-      const rows = nativeApply(original.methods.exec, state.raw, ['SELECT gv_revision FROM knowledge_nodes WHERE id = ? LIMIT 1', [nodeId]]);
-      if (knowledgeRowGenerationFromRows(rows) !== generation) throw new SQLiteObservationRetiredError();
-    };
-    assertLocal();
-    return () => {
-      assertLocal();
-      // An ephemeral owner reads its genuine local image; no disk durability is
-      // claimed. Persistent owners must observe an actual acknowledged save.
-      if (!persistence) return 'published';
-      const current = persistence.observationIdentity();
-      if (pending && this.saveBatchDepth > 0 && this.#activationPublication === publication && current === physical) return 'pending';
-      if (this.#activationPublication !== publication && current === this.#activationPublication.physical) return 'published';
-      throw new SQLiteObservationRetiredError();
+    this.#adapter = {
+      run: (sql, params) => this.run(sql, params),
+      exec: (sql, params) => this.exec(sql, params),
+      export: () => this.getDb().serialize(),
+      close: () => { throw new TypeError('SQLiteStore: close the store, not the statement surface'); },
     };
   }
 
-  private assertInitialReadCurrent(): void {
-    const result: unknown = this.beforeInitialRead?.();
-    if (result !== undefined) { drainOwned(result); throw new TypeError('SQLiteStore: initial read owner must complete synchronously'); }
-  }
-
-  private beforePersistentWrite(): void {
-    const result: unknown = this.beforePersist?.();
-    if (result !== undefined) {
-      if (nativeNodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
-      throw new TypeError('SQLiteStore: persistence owner must complete synchronously');
-    }
-  }
-
-  /** False while fenced: ordinary writes are refused until the store is reloaded from disk. */
   get isReady(): boolean {
-    return this.db !== null && !this.fenced;
+    return this.#db !== null;
   }
 
   /** The on-disk database path, or null for an ephemeral/in-memory store. */
@@ -1523,15 +378,9 @@ export class SQLiteStore {
   }
 
   async init(schema: (db: SqlDatabase) => void, options: SqliteStoreInitOptions = {}): Promise<void> {
-    if (this.db && this.fenced) {
-      // Reopening a fenced owner means adopting the published image.
-      if (!await this.reloadFromDisk()) this.getDb();
-      return;
-    }
-    if (this.db) return;
+    if (this.#db) return;
     if (this.initPromise) return this.initPromise;
-
-    this.initPromise = this.initialize(schema, options);
+    this.initPromise = Promise.resolve().then(() => this.initialize(schema, options));
     try {
       await this.initPromise;
     } finally {
@@ -1540,1261 +389,555 @@ export class SQLiteStore {
   }
 
   run(sql: string, params?: (string | number | Uint8Array | null)[]): void {
-    this.observationEpoch += 1;
-    this.#localWrites += 1;
-    this.getDb().run(sql, params);
+    const db = this.getDb();
+    this.#beginWrite();
+    if (params?.length) this.#statement(sql).run(...bindings(params));
+    else db.run(sql);
+  }
+
+  exec(sql: string, params?: (string | number)[]): SqlRows {
+    this.getDb();
+    const statements = splitSqlStatements(sql);
+    if (statements.some((text) => !isReadOnlySql(text))) this.#beginWrite();
+    const results: SqlRows = [];
+    for (const text of statements) {
+      const statement = this.#statement(text);
+      const values = (statement.values(...bindings(params)) ?? []) as unknown[][];
+      if (values.length) results.push({ columns: [...statement.columnNames], values });
+    }
+    return results;
   }
 
   /**
-   * Moves on every statement run through run(), every save (which covers
-   * statements a caller ran on the database handle directly) and every image
-   * this store adopts: its own guarded publication, a reload after another
-   * process saved, close and reopen. It only moves up.
+   * Moves on every change of the stored content: each row this process
+   * changes, and each commit by another process (seen through
+   * `data_version`). It only moves up.
    */
   contentRevision(): number {
-    return this.imageEpoch + this.#localWrites;
+    return this.#file?.revision() ?? 0;
   }
 
-  exec(sql: string, params?: (string | number)[]): Array<{ columns: string[]; values: unknown[][] }> {
-    // A single SELECT changes nothing, so it does not retire an observation.
-    if (!READ_ONLY_STATEMENT.test(sql)) this.observationEpoch += 1;
-    return this.getDb().exec(sql, params);
+  /** SQLite's count of commits by other connections, as this connection last saw it. */
+  dataVersion(): number {
+    if (!this.#db) return 0;
+    this.#dataVersion ??= this.#db.prepare('PRAGMA data_version') as unknown as BunStatement;
+    const value = (this.#dataVersion.values() ?? [])[0]?.[0];
+    return typeof value === 'number' ? value : 0;
   }
 
   /**
-   * Restricts a reading to this coordinated image lifetime. Our persistence
-   * protocol atomically replaces the canonical file on every publication;
-   * metadata also fences in-place external writes. No value-only ABA adoption.
-   * This is conservative: unrelated database writes also retire the reading.
+   * A check that throws once anything in the store changed: a row this process
+   * wrote, or another process's commit. Conservative: an unrelated change also
+   * retires it.
    */
   captureObservation(): () => void {
-    const epoch = this.observationEpoch, imageEpoch = this.imageEpoch;
-    const identity = this.persistence?.observationIdentity();
-    const local = observeDatabase(this.getDb());
+    const db = this.getDb();
+    const changes = this.#totalChanges(), version = this.dataVersion();
     return () => {
-      if (this.observationEpoch !== epoch || this.imageEpoch !== imageEpoch
-        || this.persistence?.observationIdentity() !== identity
-        || observeDatabase(this.getDb()) !== local) {
-        throw new SQLiteObservationRetiredError();
-      }
+      if (this.#db !== db) throw new SQLiteObservationRetiredError('invariant');
+      if (this.#totalChanges() !== changes) throw new SQLiteObservationRetiredError('superseded-by-local-write');
+      if (this.dataVersion() !== version) throw new SQLiteObservationRetiredError('superseded');
     };
   }
 
-  /** Read one current persisted image without replacing pending local state.
-   * Mutable callbacks always receive an isolated image, never a guard's image. */
+  /** Read the stored rows through the statement surface. */
   readPersisted<T>(read: (db: SqlDatabase) => T): T {
-    if (!this.coordinated) throw new Error('SQLiteStore: persisted reads require coordinated storage');
-    // Legacy callbacks may mutate the live ephemeral image without touching our
-    // write epochs, including transaction rollback ABA. They retain their old
-    // behavior, but can never participate in a successful framed assertion.
-    if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true;
-    if (!this.persistence) return read(this.getDb());
-    const current = this.openCurrentImage();
-    try { return read(current); } finally { this.closeReadImage(current); }
+    this.getDb();
+    return read(this.#adapter);
   }
 
-  /** Internal knowledge raw-row read. A closed descriptor, never caller SQL or
-   * a callback, selects one detached result from the private guard image. */
-  readPersistedRow(table: 'knowledge_sources' | 'knowledge_nodes' | 'knowledge_extractions' | 'knowledge_edges',
-    column: 'id' | 'canonical_uri', value: string): Array<{ columns: string[]; values: unknown[][] }> {
-    try {
-      if (!['knowledge_sources', 'knowledge_nodes', 'knowledge_extractions', 'knowledge_edges'].includes(table)
-        || (column !== 'id' && !(table === 'knowledge_sources' && column === 'canonical_uri'))
-        || typeof value !== 'string') {
-        throw new TypeError('SQLiteStore: invalid raw record selector');
-      }
-      return this.readPrivatePersistedRows(`SELECT * FROM ${table} WHERE ${column} = ? LIMIT 1`, [value]);
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  readPersistedRow(table: KnowledgeRowTable, column: 'id' | 'canonical_uri', value: string): SqlRows {
+    this.#assertRowSelector(table, column, value);
+    return this.#read(`SELECT * FROM ${table} WHERE ${column} = ? LIMIT 1`, [value]);
   }
 
-  /** Closed planning tuple selector; never a caller callback or mutable cache. */
-  readPersistedPlanningSource(identity: PlanningSourceIdentity): ReturnType<SqlDatabase['exec']> {
-    try { return this.readPrivatePersistedRows(planningSourceIdentitySql, planningSourceIdentityParams(identity)); }
-    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  readPersistedPlanningSource(identity: PlanningSourceIdentity): SqlRows {
+    return this.#read(planningSourceIdentitySql, planningSourceIdentityParams(identity));
   }
 
-  /** Identity bookkeeping over the actual owned prefix, including genuine
-   * same-batch writes. This is not persisted semantic/execution evidence. */
-  readHomeGraphNodeCandidates(selector: HomeGraphNodeSelector): ReturnType<SqlDatabase['exec']> {
-    const query = homeGraphNodeCandidateQuery(selector), db = this.getDb(), engine = this.sqlEngine;
-    const state = privateMapGet(ownedDatabases, db), origin = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
-    if (!state || !origin?.statement) throw new SQLiteObservationRetiredError();
-    const revision = state.revision, epoch = this.imageEpoch;
-    const check = () => {
-      assertNativeEngineIdentity(engine);
-      if (this.db !== db || this.sqlEngine !== engine || this.imageEpoch !== epoch || state.inFlight || state.revision !== revision
-        || !nativeMethodsMatch(engine, state.raw) || !nativeExecutionDependenciesMatch(origin.statement!, state.raw)) throw new SQLiteObservationRetiredError();
-    };
-    check(); const rows = nativeApply(origin.methods.exec, state.raw, [query.sql, query.params]); check(); return rows;
+  readHomeGraphNodeCandidates(selector: HomeGraphNodeSelector): SqlRows {
+    const query = homeGraphNodeCandidateQuery(selector);
+    return this.#read(query.sql, query.params);
   }
 
-  /** Closed current-image source identity lookup, not semantic evidence. */
-  readHomeGraphSourceCandidates(selector: HomeGraphSourceSelector): ReturnType<SqlDatabase['exec']> {
-    const query = homeGraphSourceCandidateQuery(selector), db = this.getDb(), engine = this.sqlEngine;
-    const state = privateMapGet(ownedDatabases, db), origin = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
-    if (!state || !origin?.statement) throw new SQLiteObservationRetiredError();
-    const revision = state.revision, epoch = this.imageEpoch;
-    const check = () => {
-      assertNativeEngineIdentity(engine);
-      if (this.db !== db || this.sqlEngine !== engine || this.imageEpoch !== epoch || state.inFlight || state.revision !== revision
-        || !nativeMethodsMatch(engine, state.raw) || !nativeExecutionDependenciesMatch(origin.statement!, state.raw)) throw new SQLiteObservationRetiredError();
-    };
-    check(); const rows = nativeApply(origin.methods.exec, state.raw, [query.sql, query.params]); check(); return rows;
+  readHomeGraphSourceCandidates(selector: HomeGraphSourceSelector): SqlRows {
+    const query = homeGraphSourceCandidateQuery(selector);
+    return this.#read(query.sql, query.params);
   }
 
-  readPersistedSemanticNodeCandidates(selector: SemanticNodeSelector): ReturnType<SqlDatabase['exec']> {
-    try { return this.readPrivatePersistedRows(semanticNodeCandidateSql, semanticNodeCandidateParams(selector)); }
-    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  readPersistedSemanticNodeCandidates(selector: SemanticNodeSelector): SqlRows {
+    return this.#read(semanticNodeCandidateSql, semanticNodeCandidateParams(selector));
   }
 
-  readPersistedSemanticIssueCandidates(selector: SemanticIssueSelector): ReturnType<SqlDatabase['exec']> {
-    try { return this.readPrivatePersistedRows(semanticIssueCandidateSql, semanticIssueCandidateParams(selector)); }
-    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  readPersistedSemanticIssueCandidates(selector: SemanticIssueSelector): SqlRows {
+    return this.#read(semanticIssueCandidateSql, semanticIssueCandidateParams(selector));
   }
 
-  readPersistedSemanticRefinementTaskCandidates(spaceId: string, gapId: string): ReturnType<SqlDatabase['exec']> {
-    try { return this.readPrivatePersistedRows(semanticRefinementTaskCandidateSql, semanticRefinementTaskCandidateParams(spaceId, gapId)); }
-    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  readPersistedSemanticRefinementTaskCandidates(spaceId: string, gapId: string): SqlRows {
+    return this.#read(semanticRefinementTaskCandidateSql, semanticRefinementTaskCandidateParams(spaceId, gapId));
   }
 
-  readPersistedSemanticEnrichmentState(sourceId: string): ReturnType<SqlDatabase['exec']> {
-    try {
-      if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('SQLiteStore: invalid semantic state selector');
-      return this.readPrivatePersistedRows('SELECT * FROM knowledge_semantic_enrichment_state WHERE source_id = ? LIMIT 1', [sourceId]);
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  readPersistedSemanticEnrichmentState(sourceId: string): SqlRows {
+    if (typeof sourceId !== 'string' || !sourceId) throw new SQLiteObservationRetiredError('unsupported-shape');
+    return this.#read('SELECT * FROM knowledge_semantic_enrichment_state WHERE source_id = ? LIMIT 1', [sourceId]);
   }
 
-  readPersistedSemanticFactCandidates(selector: SemanticFactSelector): ReturnType<SqlDatabase['exec']> {
-    try { return this.readPrivatePersistedRows(semanticFactCandidateSql, semanticFactCandidateParams(selector)); }
-    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  readPersistedSemanticFactCandidates(selector: SemanticFactSelector): SqlRows {
+    return this.#read(semanticFactCandidateSql, semanticFactCandidateParams(selector));
   }
 
-  /** Stable identity bookkeeping over this original writer's current image,
-   * including its pending batch rows. Never persisted semantic evidence. */
-  readSemanticFactIdentityCandidates(selector: SemanticFactSelector): ReturnType<SqlDatabase['exec']> {
-    const params = semanticFactCandidateParams(selector), db = this.getDb(), engine = this.sqlEngine;
-    const state = privateMapGet(ownedDatabases, db), origin = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
-    if (!state || !origin?.statement) throw new SQLiteObservationRetiredError();
-    const revision = state.revision, epoch = this.imageEpoch;
-    const check = () => {
-      assertNativeEngineIdentity(engine);
-      if (this.db !== db || this.sqlEngine !== engine || this.imageEpoch !== epoch || state.inFlight || state.revision !== revision
-        || !nativeMethodsMatch(engine, state.raw) || !nativeExecutionDependenciesMatch(origin.statement!, state.raw)) throw new SQLiteObservationRetiredError();
-    };
-    check(); const rows = nativeApply(origin.methods.exec, state.raw, [semanticFactCandidateSql, params]); check(); return rows;
+  readSemanticFactIdentityCandidates(selector: SemanticFactSelector): SqlRows {
+    return this.#read(semanticFactCandidateSql, semanticFactCandidateParams(selector));
   }
 
-  readPersistedGeneratedProjectionSource(identity: GeneratedProjectionIdentity): ReturnType<SqlDatabase['exec']> {
-    try { return this.readPrivatePersistedRows(generatedProjectionIdentitySql, projectionIdentityParams(identity)); }
-    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  readPersistedGeneratedProjectionSource(identity: GeneratedProjectionIdentity): SqlRows {
+    return this.#read(generatedProjectionIdentitySql, projectionIdentityParams(identity));
   }
 
-  /** SQLite write revision only; complete evidence stays in separate raw-row reads. */
-  readPersistedRowGeneration(table: 'knowledge_sources' | 'knowledge_nodes' | 'knowledge_extractions' | 'knowledge_edges',
-    column: 'id' | 'canonical_uri', value: string): string | null {
-    const frame = this.persistedReadFrame;
-    try {
-      if (!['knowledge_sources', 'knowledge_nodes', 'knowledge_extractions', 'knowledge_edges'].includes(table)
-        || (column !== 'id' && !(table === 'knowledge_sources' && column === 'canonical_uri'))
-        || typeof value !== 'string') throw new TypeError('SQLiteStore: invalid raw record selector');
-      const key = JSON.stringify([table, column, value]);
-      if (frame?.localState && frame.generations.has(key)) {
-        frame.assertCurrent();
-        return frame.generations.get(key)!;
-      }
-      const generation = knowledgeRowGenerationFromRows(this.readPrivatePersistedRows(`SELECT gv_revision FROM ${table} WHERE ${column} = ? LIMIT 1`, [value]));
-      frame?.assertCurrent();
-      if (frame?.localState) frame.generations.set(key, generation);
-      return generation;
-    } catch (error) { if (frame) frame.poisoned = true; throw error; }
+  /** The row's revision (`gv_revision`), or null when the row does not exist. */
+  readPersistedRowGeneration(table: KnowledgeRowTable, column: 'id' | 'canonical_uri', value: string): string | null {
+    this.#assertRowSelector(table, column, value);
+    return knowledgeRowGenerationFromRows(this.#read(`SELECT gv_revision FROM ${table} WHERE ${column} = ? LIMIT 1`, [value]));
   }
 
-  /** Actual existing history only: indexed first/current/selected rows, never a
-   * retained duplicate of a deleted subject's source text. */
   readPersistedNodeHistorySelection(nodeId: string, revisionId: string | null): {
-    readonly first: ReturnType<SqlDatabase['exec']>;
-    readonly latest: ReturnType<SqlDatabase['exec']>;
-    readonly selected: ReturnType<SqlDatabase['exec']>;
+    readonly first: SqlRows;
+    readonly latest: SqlRows;
+    readonly selected: SqlRows;
   } {
-    try {
-      if (typeof nodeId !== 'string' || (revisionId !== null && typeof revisionId !== 'string')) throw new TypeError('SQLiteStore: invalid node history selector');
-      let result: { first: ReturnType<SqlDatabase['exec']>; latest: ReturnType<SqlDatabase['exec']>; selected: ReturnType<SqlDatabase['exec']> } | undefined;
-      this.assertPersistedReadFrame(() => {
-        result = {
-          first: this.readPrivatePersistedRows('SELECT id FROM knowledge_node_revisions WHERE node_id = ? ORDER BY revision ASC LIMIT 1', [nodeId]),
-          latest: this.readPrivatePersistedRows('SELECT id FROM knowledge_node_revisions WHERE node_id = ? ORDER BY revision DESC LIMIT 1', [nodeId]),
-          selected: revisionId === null ? [] : this.readPrivatePersistedRows('SELECT * FROM knowledge_node_revisions WHERE id = ? AND node_id = ? LIMIT 1', [revisionId, nodeId]),
-        };
-        return undefined;
-      });
-      if (!result) throw new SQLiteObservationRetiredError();
-      return result;
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+    if (typeof nodeId !== 'string' || (revisionId !== null && typeof revisionId !== 'string')) throw new SQLiteObservationRetiredError('unsupported-shape');
+    let result: { first: SqlRows; latest: SqlRows; selected: SqlRows } | undefined;
+    this.assertPersistedReadFrame(() => {
+      result = {
+        first: this.#read('SELECT id FROM knowledge_node_revisions WHERE node_id = ? ORDER BY revision ASC LIMIT 1', [nodeId]),
+        latest: this.#read('SELECT id FROM knowledge_node_revisions WHERE node_id = ? ORDER BY revision DESC LIMIT 1', [nodeId]),
+        selected: revisionId === null ? [] : this.#read('SELECT * FROM knowledge_node_revisions WHERE id = ? AND node_id = ? LIMIT 1', [revisionId, nodeId]),
+      };
+      return undefined;
+    });
+    return result!;
   }
 
   readPersistedNodeActivationCache(nodeId: string): KnowledgeActivationCacheRow | null {
-    try {
-      if (typeof nodeId !== 'string') throw new TypeError('SQLiteStore: invalid activation selector');
-      return parseKnowledgeActivationCacheRow(this.readPrivatePersistedRows(activationCacheRowSql, [nodeId]));
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+    if (typeof nodeId !== 'string') throw new SQLiteObservationRetiredError('unsupported-shape');
+    return parseKnowledgeActivationCacheRow(this.#read(activationCacheRowSql, [nodeId]));
   }
 
-  /** Closed native dependency/cache read: source selectors also select the
-   * actual current source-unique extraction, including its absence. */
+  /** A node's stored activation dependencies and cache row, read in one snapshot. */
   readPersistedNodeActivationState(nodeId: string, selectors: readonly PersistedKnowledgeRecordSelector[], observation: string | null): {
     readonly dependencies: KnowledgeActivationDependencies; readonly cache: KnowledgeActivationCacheRow | null;
   } {
-    try {
-      if (typeof nodeId !== 'string' || (observation !== null && typeof observation !== 'string')) throw new TypeError('SQLiteStore: invalid activation selector');
-      const captured = captureRecordSelectors(selectors);
-      if (captured.some(selector => selector.kind === 'extraction')) throw new TypeError('SQLiteStore: invalid activation selector');
-      let state: { dependencies: KnowledgeActivationDependencies; cache: KnowledgeActivationCacheRow | null } | undefined;
-      this.assertPersistedReadFrame(() => {
-        // This adapter is created here, never supplied by a consumer. The
-        // imported native reader owns every fixed SELECT and bind parameter.
-        const native = { exec: (sql: string, parameters: (string | number)[] = []) => {
-          if (parameters.some(value => typeof value !== 'string')) throw new TypeError('SQLiteStore: invalid activation parameters');
-          return this.readPrivatePersistedRows(sql, parameters as string[], this.persistedReadFrame?.localState !== undefined);
-        } };
-        state = { dependencies: readKnowledgeActivationDependencies(native, nodeId,
-          captured.filter(selector => selector.kind === 'source').map(selector => selector.id),
-          captured.filter(selector => selector.kind === 'node').map(selector => selector.id), observation),
-          cache: parseKnowledgeActivationCacheRow(this.readPrivatePersistedRows(activationCacheRowSql, [nodeId], this.persistedReadFrame?.localState !== undefined)) };
-        return undefined;
-      });
-      if (!state) throw new SQLiteObservationRetiredError();
-      return state;
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+    if (typeof nodeId !== 'string' || (observation !== null && typeof observation !== 'string')) throw new SQLiteObservationRetiredError('unsupported-shape');
+    const captured = captureSelectors(selectors);
+    if (captured.some((selector) => selector.kind === 'extraction')) throw new SQLiteObservationRetiredError('unsupported-shape');
+    let state: { dependencies: KnowledgeActivationDependencies; cache: KnowledgeActivationCacheRow | null } | undefined;
+    this.assertPersistedReadFrame(() => {
+      const reader = { exec: (sql: string, parameters: (string | number)[] = []) => this.#read(sql, parameters) };
+      state = {
+        dependencies: readKnowledgeActivationDependencies(reader, nodeId,
+          captured.filter((selector) => selector.kind === 'source').map((selector) => selector.id),
+          captured.filter((selector) => selector.kind === 'node').map((selector) => selector.id), observation),
+        cache: parseKnowledgeActivationCacheRow(this.#read(activationCacheRowSql, [nodeId])),
+      };
+      return undefined;
+    });
+    return state!;
   }
 
-  /** A closed primitive readset has no caller code between its physical fences. */
+  /** Row revisions for each selector, in selector order, read in one snapshot. */
   readPersistedRecordGenerations(selectors: readonly PersistedKnowledgeRecordSelector[]): readonly (string | null)[] {
+    const captured = captureSelectors(selectors);
     let generations: readonly (string | null)[] = [];
-    try {
-      const captured = captureRecordSelectors(selectors);
-      const read = (): undefined => {
-        const frame = this.persistedReadFrame;
-        frame?.assertCurrent();
-        const values: (string | null)[] = [];
-        for (const selector of captured) {
-          const table = selector.kind === 'source' ? 'knowledge_sources' : selector.kind === 'node' ? 'knowledge_nodes' : 'knowledge_extractions';
-          const key = JSON.stringify([table, 'id', selector.id]);
-          if (frame?.localState && frame.generations.has(key)) {
-            values.push(frame.generations.get(key)!);
-            continue;
-          }
-          const rows = this.readPrivatePersistedRows(`SELECT gv_revision FROM ${table} WHERE id = ? LIMIT 1`, [selector.id], frame?.localState !== undefined);
-          const row = rows[0];
-          if (row && (!row.columns.every(column => typeof column === 'string')
-            || row.values.some(cells => cells.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')))) {
-            throw new SQLiteObservationRetiredError();
-          }
-          const generation = knowledgeRowGenerationFromRows(rows);
-          if (frame?.localState) frame.generations.set(key, generation);
-          values.push(generation);
-        }
-        frame?.assertCurrent();
-        generations = Object.freeze(values);
-      };
-      if (this.persistedReadFrame?.localState) read(); else this.assertPersistedReadFrame(read);
-      return generations;
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+    this.assertPersistedReadFrame(() => {
+      generations = Object.freeze(captured.map((selector) => this.readPersistedRowGeneration(recordTable(selector.kind), 'id', selector.id)));
+      return undefined;
+    });
+    return generations;
   }
 
-  /** Exact ordered edge revisions under one closed native pre/post read fence. */
+  /** Edge row revisions, in id order, read in one snapshot. */
   readPersistedEdgeGenerations(ids: readonly string[]): readonly (string | null)[] {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) throw new SQLiteObservationRetiredError('unsupported-shape');
     let generations: readonly (string | null)[] = [];
-    try {
-      const captured = captureEdgeGenerationIds(ids);
-      const read = (): undefined => {
-        const frame = this.persistedReadFrame;
-        frame?.assertCurrent();
-        const values: (string | null)[] = [];
-        for (const id of captured) {
-          const key = JSON.stringify(['knowledge_edges', 'id', id]);
-          if (frame?.localState && frame.generations.has(key)) {
-            values.push(frame.generations.get(key)!);
-            continue;
-          }
-          const rows = this.readPrivatePersistedRows('SELECT gv_revision FROM knowledge_edges WHERE id = ? LIMIT 1', [id], frame?.localState !== undefined);
-          const row = rows[0];
-          if (row && (!row.columns.every(column => typeof column === 'string')
-            || row.values.some(cells => cells.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')))) {
-            throw new SQLiteObservationRetiredError();
-          }
-          const generation = knowledgeRowGenerationFromRows(rows);
-          if (frame?.localState) frame.generations.set(key, generation);
-          values.push(generation);
-        }
-        frame?.assertCurrent();
-        generations = Object.freeze(values);
-      };
-      if (this.persistedReadFrame?.localState) read(); else this.assertPersistedReadFrame(read);
-      return generations;
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+    this.assertPersistedReadFrame(() => {
+      generations = Object.freeze(ids.map((id) => this.readPersistedRowGeneration('knowledge_edges', 'id', id)));
+      return undefined;
+    });
+    return generations;
   }
 
-  /** Compile only actual original rows, never a caller's claimed fingerprints. */
+  /** Issue a token for the current revisions of these rows; `matchesExpectedRecordReadsets` compares against it later. */
   captureExpectedRecordReadset(selectors: readonly PersistedKnowledgeRecordSelector[]): {
     readonly expected: ExpectedKnowledgeRecordReadset;
     readonly originalGenerations: readonly (string | null)[];
   } {
-    const captured = captureRecordSelectors(selectors);
-    let result: { readonly expected: ExpectedKnowledgeRecordReadset; readonly originalGenerations: readonly (string | null)[] } | undefined;
-    this.assertPersistedReadFrame(() => {
-      currentNativeReadImage(this, this.persistedReadFrame, this.persistedReadFrame?.db, this.sqlEngine);
-      this.readPrivatePersistedRows('SELECT 1', [], true);
-      const frame = this.persistedReadFrame;
-      const image = currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
-      const db = frame?.db ?? this.getDb();
-      frame?.assertCurrent();
-      const original = readActualRecordReadset(db, captured);
-      const originalGenerations = original.generations;
-      const native = frame?.db ? privateMapGet(ownedDatabases, frame.db) : undefined;
-      let canonical = Boolean(frame && image?.store === this && image.origin === privateMapGet(nativeReadFrameIdentities, frame)?.identity
-        && image.evidence === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
-        && frame.localState && frame.persisted
-        && nativeMethodsMatch(this.sqlEngine, native?.raw) && nativeMethodsMatch(this.sqlEngine, frame.localState.raw)
-        && nativeKnowledgeSchemaReadPlanMatches(this.nativeSchemaReadPlan, this.validateCurrentSchema, this.schemaVersion));
-      if (canonical) {
-        const rows = readDatabaseRow(db, "SELECT type,name,sql FROM main.sqlite_schema WHERE name IN ('knowledge_sources','knowledge_nodes','knowledge_extractions')", [])[0]?.values;
-        canonical = Boolean(rows && rows.length === 3 && Object.entries(knowledgeRecordTableSql).every(([name, sql]) =>
-          rows.some(row => row[0] === 'table' && row[1] === name && sameNativeKnowledgeTableSql(row[2], sql))));
-      }
-      currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
-      frame?.assertCurrent();
-      const expected = Object.freeze<ExpectedKnowledgeRecordReadset>({ [expectedReadsetBrand]: true });
-      privateMapSet(expectedRecordReadsets, expected, nativeFreeze({ token: expected, store: this,
-        origin: frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined, persistence: this.persistence,
-        engine: this.sqlEngine,
-        plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
-        evidence: frame?.persisted, canonical, selectors: Object.freeze(captured.map(selector => Object.freeze(selector))),
-        records: original.records }));
-      if (canonical && image?.baseline) privateMapSet(expectedBaselineMatches, expected, nativeFreeze({ baseline: image.baseline, matches: true }));
-      result = Object.freeze({ expected, originalGenerations });
-    });
-    if (!result) throw new SQLiteObservationRetiredError();
-    return result;
+    return this.captureExpectedRecordReadsets([selectors])[0]!;
   }
 
-  /** Mint one synchronous group's original readsets. Every requested row is
-   * read in selector order, bypassing guard memos; the complete schema is
-   * observed once for the group. No token is returned before the exit fence. */
   captureExpectedRecordReadsets(groups: readonly (readonly PersistedKnowledgeRecordSelector[])[]): readonly ReturnType<SQLiteStore['captureExpectedRecordReadset']>[] {
-    const captured = captureRecordSelectorGroups(groups);
-    let result: readonly ReturnType<SQLiteStore['captureExpectedRecordReadset']>[] | undefined;
+    if (!Array.isArray(groups)) throw new SQLiteObservationRetiredError('unsupported-shape');
+    const captured = groups.map(captureSelectors);
+    let result: readonly ReturnType<SQLiteStore['captureExpectedRecordReadset']>[] = [];
     this.assertPersistedReadFrame(() => {
-      currentNativeReadImage(this, this.persistedReadFrame, this.persistedReadFrame?.db, this.sqlEngine);
-      this.readPrivatePersistedRows('SELECT 1', [], true);
-      const frame = this.persistedReadFrame;
-      const image = currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
-      const db = frame?.db ?? this.getDb();
-      const originals: ReturnType<typeof readActualRecordReadset>[] = [];
-      for (const selectors of captured) {
-        frame?.assertCurrent();
-        originals.push(readActualRecordReadset(db, selectors));
-        currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
-        frame?.assertCurrent();
-      }
-      const native = frame?.db ? privateMapGet(ownedDatabases, frame.db) : undefined;
-      let canonical = Boolean(frame && image?.store === this && image.origin === privateMapGet(nativeReadFrameIdentities, frame)?.identity
-        && image.evidence === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
-        && frame.localState && frame.persisted
-        && nativeMethodsMatch(this.sqlEngine, native?.raw) && nativeMethodsMatch(this.sqlEngine, frame.localState.raw)
-        && nativeKnowledgeSchemaReadPlanMatches(this.nativeSchemaReadPlan, this.validateCurrentSchema, this.schemaVersion));
-      if (canonical) {
-        const rows = readDatabaseRow(db, "SELECT type,name,sql FROM main.sqlite_schema WHERE name IN ('knowledge_sources','knowledge_nodes','knowledge_extractions')", [])[0]?.values;
-        canonical = Boolean(rows && rows.length === 3 && Object.entries(knowledgeRecordTableSql).every(([name, sql]) =>
-          rows.some(row => row[0] === 'table' && row[1] === name && sameNativeKnowledgeTableSql(row[2], sql))));
-      }
-      currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
-      frame?.assertCurrent();
-      const values: ReturnType<SQLiteStore['captureExpectedRecordReadset']>[] = [];
-      for (let index = 0; index < captured.length; index++) {
-        const selectors = captured[index], original = originals[index];
-        if (!selectors || !original) throw new SQLiteObservationRetiredError();
-        const originalGenerations = original.generations;
+      result = Object.freeze(captured.map((selectors) => {
+        const generations = this.readPersistedRecordGenerations(selectors);
         const expected = Object.freeze<ExpectedKnowledgeRecordReadset>({ [expectedReadsetBrand]: true });
-        privateMapSet(expectedRecordReadsets, expected, nativeFreeze({ token: expected, store: this,
-          origin: frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined, persistence: this.persistence,
-          engine: this.sqlEngine,
-          plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
-          evidence: frame?.persisted, canonical, selectors: Object.freeze(selectors.map(selector => Object.freeze(selector))),
-          records: original.records }));
-        if (canonical && image?.baseline) privateMapSet(expectedBaselineMatches, expected, nativeFreeze({ baseline: image.baseline, matches: true }));
-        values.push(Object.freeze({ expected, originalGenerations }));
-      }
-      result = Object.freeze(values);
+        expectedReadsets.set(expected, Object.freeze({ store: this, selectors, generations }));
+        return Object.freeze({ expected, originalGenerations: generations });
+      }));
+      return undefined;
     });
-    if (!result) throw new SQLiteObservationRetiredError();
     return result;
   }
 
-  /** Equality only. Each invocation observes a fresh guarded physical image;
-   * no retained row or fingerprint is returned as a current observation. */
+  /** For each input, whether every row still has the revision it had when the token was issued. */
   matchesExpectedRecordReadsets(inputs: readonly ExpectedKnowledgeRecordReadsetInput[]): readonly boolean[] {
-    try {
-      const captured = captureExpectedReadsets(inputs);
-      for (const input of captured) {
-        const retained = privateMapGet(expectedRecordReadsets, input.expected);
-        if (!retained || retained.store !== this || retained.selectors.length !== input.selectors.length
-          || retained.selectors.some((selector, index) => selector.kind !== input.selectors[index]?.kind || selector.id !== input.selectors[index]?.id)) {
-          throw new TypeError('SQLiteStore: expected readset does not belong to this selection');
-        }
+    if (!Array.isArray(inputs)) throw new SQLiteObservationRetiredError('unsupported-shape');
+    const retained = inputs.map((input) => {
+      const entry = input && expectedReadsets.get(input.expected);
+      const selectors = input ? captureSelectors(input.selectors) : [];
+      if (!entry || entry.store !== this || entry.selectors.length !== selectors.length
+        || entry.selectors.some((selector, index) => selector.kind !== selectors[index]?.kind || selector.id !== selectors[index]?.id)) {
+        throw new TypeError('SQLiteStore: expected readset does not belong to this selection');
       }
-      let matches: readonly boolean[] = [];
-      const compare = (): undefined => {
-        // Acquire this frame's private image and original native image evidence even
-        // when every original raw row can be proved equal without selecting it.
-        currentNativeReadImage(this, this.persistedReadFrame, this.persistedReadFrame?.db, this.sqlEngine);
-        this.readPrivatePersistedRows('SELECT 1', [], true);
-        const frame = this.persistedReadFrame;
-        frame?.assertCurrent();
-        const native = frame?.db ? privateMapGet(ownedDatabases, frame.db) : undefined;
-        const image = currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
-        const closed = Boolean(frame && image?.store === this && image.origin === privateMapGet(nativeReadFrameIdentities, frame)?.identity
-          && image.evidence === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
-          && frame.localState
-          && nativeMethodsMatch(this.sqlEngine, native?.raw) && nativeMethodsMatch(this.sqlEngine, frame.localState.raw)
-          && nativeKnowledgeSchemaReadPlanMatches(this.nativeSchemaReadPlan, this.validateCurrentSchema, this.schemaVersion));
-        const values: boolean[] = [];
-        for (const input of captured) {
-          const retained = privateMapGet(expectedRecordReadsets, input.expected);
-          if (!retained) throw new TypeError('SQLiteStore: unknown expected readset');
-          const originalOwner = closed && retained.canonical && retained.origin && retained.persistence === this.persistence
-            && retained.engine === this.sqlEngine
-            && retained.plan === this.nativeSchemaReadPlan && retained.validator === this.validateCurrentSchema
-            && retained.schemaVersion === this.schemaVersion;
-          const previousBaseline = originalOwner && image?.baseline ? privateMapGet(expectedBaselineMatches, input.expected) : undefined;
-          const knownMatches = originalOwner && retained.evidence === frame?.persisted ? true
-            : previousBaseline && previousBaseline.baseline === image?.baseline ? previousBaseline.matches : undefined;
-          if (knownMatches !== undefined) {
-            values.push(knownMatches);
-          } else {
-            frame?.assertCurrent();
-            const equality = closed && frame ? assertReadFrameOrigin(this, frame).expectedMatches : undefined;
-            const previous = equality ? privateMapGet(equality, input.expected) : undefined;
-            const current = previous === undefined ? readActualRecordValues(frame?.db ?? this.getDb(), input.selectors) : undefined;
-            currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
-            frame?.assertCurrent();
-            const matches = previous ?? sameActualRecordValues(current!, retained.records);
-            if (equality && previous === undefined) privateMapSet(equality, input.expected, matches);
-            if (originalOwner && image?.baseline) privateMapSet(expectedBaselineMatches, input.expected, nativeFreeze({ baseline: image.baseline, matches }));
-            values.push(matches);
-          }
-        }
-        currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
-        frame?.assertCurrent();
-        matches = Object.freeze(values);
-      };
-      if (this.persistedReadFrame?.localState) compare(); else this.assertPersistedReadFrame(compare);
-      return matches;
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+      return entry;
+    });
+    let matches: readonly boolean[] = [];
+    this.assertPersistedReadFrame(() => {
+      matches = Object.freeze(retained.map((entry) => {
+        const current = this.readPersistedRecordGenerations(entry.selectors);
+        return current.every((generation, index) => generation === entry.generations[index]);
+      }));
+      return undefined;
+    });
+    return matches;
   }
 
-  /** Closed edge-table read; endpoint bounds remain local knowledge identities. */
-  readPersistedEdgeRows(): ReturnType<SqlDatabase['exec']> {
-    return this.readPrivatePersistedRows('SELECT * FROM knowledge_edges', []);
+  readPersistedEdgeRows(): SqlRows {
+    return this.#read('SELECT * FROM knowledge_edges', []);
   }
 
-  readPersistedEdgeWindowGeneration(keys: readonly string[], incidentKeys?: readonly string[], includeUnselectedEndpoints = false): ReturnType<SqlDatabase['exec']> {
-    try {
-      if ([...keys, ...(incidentKeys ?? [])].some(key => typeof key !== 'string' || (!key.startsWith('source:') && !key.startsWith('node:')))) {
-        throw new TypeError('SQLiteStore: invalid edge change window');
-      }
-      if (typeof includeUnselectedEndpoints !== 'boolean' || (includeUnselectedEndpoints && !incidentKeys?.length)) throw new TypeError('SQLiteStore: missing incident edge window');
-      const slots = (values: readonly string[]) => values.map(() => '?').join(',');
-      const from = "(from_kind || ':' || from_id)", to = "(to_kind || ':' || to_id)";
-      const endpoints = includeUnselectedEndpoints ? '1' : keys.length ? `${from} IN (${slots(keys)}) AND ${to} IN (${slots(keys)})` : '0';
-      const incident = incidentKeys ? incidentKeys.length
-        ? ` AND (${from} IN (${slots(incidentKeys)}) OR ${to} IN (${slots(incidentKeys)}))` : ' AND 0' : '';
-      return this.readPrivatePersistedRows(`SELECT CAST(COALESCE(MAX(sequence),0) AS TEXT) FROM knowledge_edge_changes WHERE ${endpoints}${incident}`,
-        [...(includeUnselectedEndpoints ? [] : [...keys, ...keys]), ...(incidentKeys ?? []), ...(incidentKeys ?? [])]);
-    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
-  }
-
-  private readPrivatePersistedRows(sql: string, params: string[], closedReadSet = false): ReturnType<SqlDatabase['exec']> {
-    if (!this.coordinated) throw new Error('SQLiteStore: persisted reads require coordinated storage');
-    const frame = this.persistedReadFrame;
-    try {
-      if (!frame) {
-        // Closed internal selectors must not self-retire live ephemeral receipts.
-        // Arbitrary legacy callbacks still use the revision-tracked facade.
-        if (!this.persistence) return readDatabaseRow(this.getDb(), sql, params);
-        const current = this.openCurrentImage();
-        try { return readDatabaseRow(current, sql, params); } finally { this.closeReadImage(current); }
-      }
-      frame.assertCurrent(!closedReadSet);
-      if (!frame.db) {
-        const persistedImage = this.persistence ? readFrameImage(this.persistence) : undefined;
-        frame.identity = persistedImage?.identity;
-        frame.local = observeDatabase(this.getDb());
-        const localState = privateMapGet(ownedDatabases, this.getDb()), revision = localState?.revision;
-        const probe = localState ? databaseProbe(localState.raw) : undefined;
-        if (localState && probe?.guarded && probe.signature !== null) {
-          if (localState.inFlight || localState.revision !== revision) throw new SQLiteObservationRetiredError();
-          frame.localState = localState; frame.localRevision = revision;
-          frame.localProbe = probe.signature; frame.localIsolated = probe.isolated;
-          installDatabaseProbe(localState, probe, this.sqlEngine, frame);
-        }
-        const persisted = persistedImage?.data;
-        frame.persisted = persisted ? persistedImage?.evidence : undefined;
-        const origin = assertReadFrameOrigin(this, frame);
-        if (origin.observation) throw new SQLiteObservationRetiredError();
-        privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ ...origin, ...(persisted ? { bytes: Buffer.from(persisted) } : {}), observation: nativeFreeze({
-          identity: frame.identity, local: frame.local, persisted: frame.persisted, localState: frame.localState,
-          localRevision: frame.localRevision, localProbe: frame.localProbe, localIsolated: frame.localIsolated,
-        }) }));
-        const plan = this.nativeSchemaReadPlan;
-        const stamp = persisted && this.persistence && plan && frame.localState
-          && nativeKnowledgeSchemaReadPlanMatches(plan, this.validateCurrentSchema, this.schemaVersion)
-          ? Object.freeze<NativeFrameImageStamp>({ [frameImageStampBrand]: true }) : undefined;
-        if (stamp && persisted && this.persistence && plan && frame.persisted) {
-          privateMapSet(frameImageStamps, stamp, { store: this, frame, data: persisted, persistence: this.persistence,
-            plan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
-            imageEpoch: this.imageEpoch, observationEpoch: this.observationEpoch, evidence: frame.persisted, baseline: persistedImage?.baseline });
-        }
-        const idle = this.#idleReadImage;
-        this.#idleReadImage = null;
-        const reusable = idle && stamp && persisted && this.persistence && plan && frame.persisted && frame.identity !== undefined
-          && idle.identity === frame.identity && idle.baseline === persistedImage?.baseline && idle.baseline !== undefined
-          && idle.imageEpoch === this.imageEpoch && idle.observationEpoch === this.observationEpoch
-          && idle.persistence === this.persistence && idle.plan === plan && idle.validator === this.validateCurrentSchema
-          && idle.schemaVersion === this.schemaVersion && persisted.equals(idle.bytes)
-          && privateMapGet(ownedDatabases, idle.db) === idle.state && !idle.state.inFlight && idle.state.revision === idle.revision;
-        if (idle && !reusable) this.closeReadImage(idle.db);
-        if (reusable) {
-          if (stamp) privateMapDelete(frameImageStamps, stamp);
-          frame.db = idle.db;
-          const origin = privateMapGet(nativeReadFrameIdentities, frame)?.identity;
-          if (origin && frame.persisted) privateMapSet(nativeReadImages, frame, nativeFreeze({ db: idle.db, store: this, origin,
-            evidence: frame.persisted, baseline: idle.baseline, state: idle.state, revision: idle.revision }));
-        } else {
-          try { frame.db = this.openPrivateReadImage(stamp); }
-          finally { if (stamp) privateMapDelete(frameImageStamps, stamp); }
-        }
-        frame.owned = true;
-        frame.assertCurrent();
-      }
-      const key = JSON.stringify([sql, params]);
-      const copyRows = (rows: ReturnType<SqlDatabase['exec']>) => rows.map(row => ({ columns: [...row.columns], values: row.values.map(values => [...values]) }));
-      const previous = frame.rows.get(key);
-      if (previous) return copyRows(previous);
-      const result = readDatabaseRow(frame.db, sql, params);
-      if (result.every(row => row.values.every(values => values.every(value => value === null || typeof value === 'string' || typeof value === 'number')))) frame.rows.set(key, copyRows(result));
-      frame.assertCurrent(!closedReadSet);
-      return result;
-    } catch (error) { if (frame) frame.poisoned = true; throw error; }
-  }
-
-  /** Internal synchronous guard boundary. Nested guards share only this call's
-   * fresh image. Callbacks must perform assertions, not publish or schedule work.
-   * Rejecting an async return cannot undo effects its callback already scheduled. */
-  assertPersistedReadFrame(assertion: () => undefined): void {
-    const invoke = () => {
-      const result: unknown = assertion();
-      if (result !== undefined) {
-        if (result instanceof Promise) void result.catch(() => {});
-        throw new TypeError('SQLiteStore: persisted read assertions must be synchronous and return no value');
-      }
-    };
-    // Ephemeral reads already use the current live image without opening SQL
-    // databases. Preserve those semantics, including previously exposed handles.
-    if (!this.persistence) { invoke(); return; }
-    const active = this.persistedReadFrame;
-    if (active) {
-      const assertNestedCurrent = () => {
-        active.assertCurrent();
-        if (active.db) {
-          const localState = active.localState;
-          if (localState) {
-            const state = privateMapGet(ownedDatabases, this.getDb());
-            if (state !== localState || state.inFlight || state.revision !== active.localRevision) throw new SQLiteObservationRetiredError();
-          } else if (observeDatabase(this.getDb()) !== active.local) throw new SQLiteObservationRetiredError();
-        }
-      };
-      try { assertNestedCurrent(); invoke(); assertNestedCurrent(); }
-      catch (error) { active.poisoned = true; throw error; }
-      return;
+  readPersistedEdgeWindowGeneration(keys: readonly string[], incidentKeys?: readonly string[], includeUnselectedEndpoints = false): SqlRows {
+    if ([...keys, ...(incidentKeys ?? [])].some((key) => typeof key !== 'string' || (!key.startsWith('source:') && !key.startsWith('node:')))) {
+      throw new SQLiteObservationRetiredError('unsupported-shape');
     }
-    const observationEpoch = this.observationEpoch, imageEpoch = this.imageEpoch;
-    const frame = {
-      db: null as SqlDatabase | null, owned: false, identity: undefined as string | undefined,
-      local: undefined as string | undefined, persisted: undefined as SQLiteImageObservation | undefined, poisoned: false,
-      localState: undefined as OwnedSqlDatabase | undefined, localRevision: undefined as bigint | undefined,
-      localProbe: undefined as string | undefined, localIsolated: false,
-      rows: new Map<string, ReturnType<SqlDatabase['exec']>>(),
-      generations: new Map<string, string | null>(),
-      assertCurrent: (verifyNative = true) => {
-        const original = assertReadFrameOrigin(this, frame).observation;
-        if (frame.poisoned || this.observationEpoch !== observationEpoch || this.imageEpoch !== imageEpoch) {
-          throw new SQLiteObservationRetiredError();
-        }
-        if (original?.localState) {
-          const state = privateMapGet(ownedDatabases, this.getDb());
-          if (state !== original.localState || state.inFlight || state.revision !== original.localRevision) throw new SQLiteObservationRetiredError();
-          if (verifyNative && !original.localIsolated) {
-            const matches = matchesNativeFrameProbe(state.raw, ownedProbePlans(state), original.localProbe);
-            if (matches === false || (matches === undefined
-              && databaseProbe(state.raw, ownedProbePlans(state)).signature !== original.localProbe)) throw new SQLiteObservationRetiredError();
-          }
-        }
-        // Check retained native dependencies before a physical-owner walk can
-        // use a replaced collection method (including Array.prototype.push).
-        if (original && this.persistence?.observationIdentity() !== original.identity) throw new SQLiteObservationRetiredError();
-      },
-    };
-    const assertCurrent = frame.assertCurrent;
-    privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ store: this, identity: nativeFreeze({}), persistence: this.persistence, assertCurrent,
-      expectedMatches: new WeakMap<ExpectedKnowledgeRecordReadset, boolean>() }));
-    this.persistedReadFrame = frame;
-    let completed = false;
-    try {
-      invoke();
-      assertCurrent();
-      if (frame.db) {
-        // Full-state fences run once per outer assertion, not once per row. No
-        // data from this frame can authorize the next await or publication.
-        const current = this.persistence ? readFrameImage(this.persistence) : undefined;
-        const retained = assertReadFrameOrigin(this, frame), original = retained.observation;
-        const persisted = current?.data;
-        if (!original || observeDatabase(this.getDb()) !== original.local || current?.identity !== original.identity
-          || (persisted ? retained.bytes === undefined || !persisted.equals(retained.bytes) : retained.bytes !== undefined)) {
-          throw new SQLiteObservationRetiredError();
-        }
-        assertCurrent();
-      }
-      completed = true;
-    } finally {
-      this.persistedReadFrame = null;
-      const release = privateMapGet(nativeFrameReleases, frame);
-      privateMapDelete(nativeFrameReleases, frame);
-      const image = privateMapGet(nativeReadImages, frame), retained = privateMapGet(nativeReadFrameIdentities, frame);
-      const keep = completed && !frame.poisoned && frame.owned && frame.db !== null && image !== undefined && image.db === frame.db
-        && image.baseline !== undefined && retained?.bytes !== undefined && frame.identity !== undefined && this.persistence !== null
-        && this.nativeSchemaReadPlan !== undefined && this.imageEpoch === imageEpoch && this.observationEpoch === observationEpoch
-        && privateMapGet(ownedDatabases, image.db) === image.state && !image.state.inFlight && image.state.revision === image.revision;
-      if (keep && image && retained?.bytes && this.persistence && this.nativeSchemaReadPlan && frame.identity !== undefined) {
-        this.dropIdleReadImage();
-        this.#idleReadImage = { db: image.db, state: image.state, revision: image.revision, imageEpoch, observationEpoch,
-          identity: frame.identity, baseline: image.baseline, bytes: retained.bytes, persistence: this.persistence,
-          plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion };
-        frame.owned = false;
-      }
-      // Retired reflected frame objects must not retain the private database
-      // byte snapshot or become another source of native image evidence.
-      privateMapDelete(nativeReadFrameIdentities, frame);
-      privateMapDelete(nativeReadImages, frame);
-      try { release?.(); }
-      finally { if (frame.owned && frame.db) this.closeReadImage(frame.db); }
-    }
+    if (typeof includeUnselectedEndpoints !== 'boolean' || (includeUnselectedEndpoints && !incidentKeys?.length)) throw new SQLiteObservationRetiredError('unsupported-shape');
+    const slots = (values: readonly string[]) => values.map(() => '?').join(',');
+    const from = "(from_kind || ':' || from_id)", to = "(to_kind || ':' || to_id)";
+    const endpoints = includeUnselectedEndpoints ? '1' : keys.length ? `${from} IN (${slots(keys)}) AND ${to} IN (${slots(keys)})` : '0';
+    const incident = incidentKeys ? incidentKeys.length
+      ? ` AND (${from} IN (${slots(incidentKeys)}) OR ${to} IN (${slots(incidentKeys)}))` : ' AND 0' : '';
+    return this.#read(`SELECT CAST(COALESCE(MAX(sequence),0) AS TEXT) FROM knowledge_edge_changes WHERE ${endpoints}${incident}`,
+      [...(includeUnselectedEndpoints ? [] : [...keys, ...keys]), ...(incidentKeys ?? []), ...(incidentKeys ?? [])]);
   }
 
   /**
-   * Compare and mutate one fresh image synchronously under file ownership.
-   * Local/batched changes are never discarded to make a guarded write fit.
-   * The commit callback refreshes mirrors before another operation can enter.
+   * Run synchronous reads against one consistent snapshot of the committed
+   * rows. Nested frames, and frames inside a write, share the enclosing one.
+   */
+  assertPersistedReadFrame(assertion: () => undefined): void {
+    const db = this.getDb();
+    const invoke = () => assertSynchronous(assertion(), 'SQLiteStore: persisted read assertions must be synchronous and return no value');
+    if (db.inTransaction) { invoke(); return; }
+    db.run('BEGIN');
+    try { invoke(); }
+    finally { if (db.inTransaction) db.run('COMMIT'); }
+  }
+
+  /**
+   * Compare and write in one immediate transaction: `operation` reads the
+   * committed rows (another process cannot commit in between) and writes.
+   * `onCommit` mirrors the change after it committed; `afterDurable` runs
+   * after that, in the same turn.
    */
   transactPersisted<T>(
     operation: (db: SqlDatabase) => { readonly changed: boolean; readonly value: T },
     onCommit: () => void,
     afterDurable?: ((value: T, db: SqlDatabase) => void) | undefined,
   ): Promise<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T; readonly fenced?: true }> {
-    if (!this.coordinated) return Promise.reject(new Error('SQLiteStore: guarded persistence requires coordinated storage'));
-    // Batch callers must not wait for their own save boundary.
-    if (this.saveBatchDepth > 0) return Promise.resolve({ kind: 'local-changes' });
-    return this.enqueue<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T; readonly fenced?: true }>(async () => {
-      const release = this.persistence ? await this.persistence.lock() : () => {};
-      let current: SqlDatabase | null = null;
-      let commitFenced = false;
-      try {
-        if (this.saveBatchDepth > 0 || (this.cleanContent === null || observeDatabase(this.getDb(true), 'clean-content') !== this.cleanContent)) {
-          return { kind: 'local-changes' };
-        }
-        current = this.openCurrentImage();
-        const result = operation(current);
-        if (result && typeof (result as unknown as { then?: unknown }).then === 'function') {
-          // A foreign thenable is not a decision. Attach rejection handling to
-          // native promises only; never run a hostile then getter/callback.
+    let decision: { readonly changed: boolean; readonly value: T } | undefined;
+    try {
+      this.#writeTransaction(() => {
+        const result: unknown = operation(this.#adapter);
+        if (result && typeof (result as { then?: unknown }).then === 'function') {
           if (result instanceof Promise) void result.catch(() => {});
           throw new TypeError('SQLiteStore: decision must be synchronous');
         }
-        if (!result || typeof result.changed !== 'boolean') throw new TypeError('SQLiteStore: invalid decision');
-        if ((this.cleanContent === null || observeDatabase(this.getDb(true), 'clean-content') !== this.cleanContent)) {
-          throw new Error('SQLiteStore: reentrant local changes prevented publication');
-        }
-        if (result.changed) {
-          const data = current.export();
-          const cleanContent = this.readCleanContent(current);
-          if (this.persistence) {
-            this.beforePersistentWrite();
-            try { this.persistence.write(data); } catch (error) {
-              // A visible rename whose directory sync failed leaves disk ahead of this cache. The retry finds the change already present and adopts it (below) instead of confirming a change the cache never took in.
-              if (error instanceof SQLitePublicationError && error.phase === 'indeterminate') this.#indeterminatePublication = true;
-              throw error;
-            }
-            this.#indeterminatePublication = false;
-          }
-          const previous = this.db;
-          this.db = current;
-          current = null;
-          this.imageEpoch += 1;
-          this.cleanContent = cleanContent;
-          this.cleanBytes = this.persistence ? null : data;
-          // Publication already succeeded. Cleanup/observation may fence the
-          // cache but cannot change the acknowledged durable outcome.
-          this.fenced = false;
-          try { previous?.close(); } catch { /* The replaced image cannot affect the current cache. */ }
-          try { onCommit(); } catch { this.fenced = true; commitFenced = true; }
-        } else {
-          this.persistence?.confirmDurable();
-          if (this.#indeterminatePublication && current !== null) {
-            // The earlier publication reached disk but this cache never adopted it, so reads and the next save would
-            // still see the old image. Take in the image on disk now, as a successful publication would have.
-            const cleanContent = this.readCleanContent(current);
-            if (cleanContent !== this.cleanContent) {
-              const data = current.export();
-              const previous = this.db;
-              this.db = current;
-              current = null;
-              this.imageEpoch += 1;
-              this.cleanContent = cleanContent;
-              this.cleanBytes = this.persistence ? null : data;
-              this.fenced = false;
-              try { previous?.close(); } catch { /* The replaced image cannot affect the current cache. */ }
-              try { onCommit(); } catch { this.fenced = true; commitFenced = true; }
-            }
-            this.#indeterminatePublication = false;
-          }
-        }
-        // Trusted owners may invoke a synchronous execution boundary only after
-        // durable publication/replay confirmation, while file ownership remains held.
-        if (afterDurable) {
-          if (this.fenced) throw new Error('SQLiteStore: publication mirror is fenced');
-          const outcome: unknown = afterDurable(result.value, current ?? this.getDb(true));
-          if (outcome && typeof (outcome as { then?: unknown }).then === 'function') {
-            if (outcome instanceof Promise) void outcome.catch(() => {});
-            throw new TypeError('SQLiteStore: durable boundary must be synchronous');
-          }
-        }
-        // The change is durable; `fenced` tells the caller the cache could not adopt it and must be reopened.
-        return commitFenced ? { kind: 'completed', value: result.value, fenced: true } : { kind: 'completed', value: result.value };
-      } finally {
-        try { current?.close(); } catch { /* Detached image cleanup. */ }
-        try { release(); } catch { this.fenced = true; }
+        if (!result || typeof (result as { changed?: unknown }).changed !== 'boolean') throw new TypeError('SQLiteStore: invalid decision');
+        decision = result as { readonly changed: boolean; readonly value: T };
+      });
+    } catch (error) { return Promise.reject(error); }
+    const settled = decision!;
+    let fenced = false;
+    if (settled.changed) {
+      try { onCommit(); } catch (error) {
+        fenced = true;
+        logger.warn('SQLiteStore: a committed change could not be mirrored', { path: this.dbPath, error: summarizeError(error) });
       }
-    }).then(result => { if (result.kind === 'completed') this.notifyArtifactReferenceClean(); return result; });
+    }
+    if (afterDurable) {
+      try { assertSynchronous(afterDurable(settled.value, this.#adapter), 'SQLiteStore: durable boundary must be synchronous'); }
+      catch (error) { return Promise.reject(error); }
+    }
+    this.notifyArtifactReferenceClean();
+    return Promise.resolve(fenced ? { kind: 'completed' as const, value: settled.value, fenced: true as const } : { kind: 'completed' as const, value: settled.value });
   }
 
-  private readonly artifactReferenceCleanListeners = new Set<() => void>();
-  /** Host lifecycle notification only: listeners receive no SQL, data or
-   * authority, and run after the acknowledged writer promise releases its lock. */
+  /** Host lifecycle notification only: listeners run after a change committed outside a batch. */
   subscribeArtifactReferenceClean(listener: () => void): () => void {
     this.artifactReferenceCleanListeners.add(listener);
     return () => { this.artifactReferenceCleanListeners.delete(listener); };
   }
+
   private notifyArtifactReferenceClean(): void {
+    if (this.saveBatchDepth > 0) return;
     for (const listener of this.artifactReferenceCleanListeners) {
-      try { const value: unknown = listener(); if (value !== undefined) { drainOwned(value); throw new Error('Artifact cleanup listener must be synchronous.'); } }
+      try { assertSynchronous(listener(), 'Artifact cleanup listener must be synchronous.'); }
       catch { logger.warn('Artifact cleanup notification was not accepted.'); }
     }
   }
 
-  /** Hold the actual publication queue and file lock for a closed reference
-   * observation. Nested family owners can be acquired while this lock remains
-   * held. No persisted bytes, writable database or SQL callback escapes. Local
-   * changes/batches cannot be discarded or silently refreshed for cleanup.
+  /**
+   * Read which of `ids` this store references and run `operation` while the
+   * artifact reference lock is held (it excludes other cleaners, in this
+   * process and others). `assertCurrent` throws once anything in the store
+   * changed since the references were read; call it before the step that
+   * cannot be undone.
    */
   withArtifactReferenceReads<T>(ids: readonly string[], operation: (referenced: readonly string[], assertCurrent: () => void) => Promise<T>): Promise<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T }> {
-    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 64 || ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) throw new TypeError('SQLiteStore: invalid artifact reference batch');
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 64 || ids.some((id) => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) {
+      throw new TypeError('SQLiteStore: invalid artifact reference batch');
+    }
     const selected = Object.freeze([...ids]);
-    const origin = this.#artifactReferenceOrigin;
-    const assertOrigin = () => {
-      if (!origin || nativeGetDescriptor(this, 'coordinated')?.value !== true
-        || nativeGetDescriptor(this, 'dbPath')?.value !== this.#artifactReferencePath
-        || nativeGetDescriptor(this, 'persistence')?.value !== origin.persistence
-        || nativeGetDescriptor(this, 'sqlEngine')?.value !== origin.engine
-        || nativeGetDescriptor(this, 'schemaVersion')?.value !== origin.schemaVersion) throw new SQLiteObservationRetiredError();
-      assertNativeEngineIdentity(origin.engine);
-    };
-    assertOrigin();
-    if (this.saveBatchDepth > 0) return Promise.resolve({ kind: 'local-changes' });
-    return this.enqueue<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T }>(async () => {
-      assertOrigin();
-      if (!origin) throw new SQLiteObservationRetiredError();
-      const original = this.db, persistence = origin.persistence, epoch = this.imageEpoch;
-      if (!original || !privateMapHas(ownedDatabases, original)) throw new SQLiteObservationRetiredError();
-      const observePhysical = () => nativeApply(artifactReferenceObservation, persistence, []) as string;
-      const lock = await acquireArtifactReferenceLock(origin.path, () => { assertOrigin(); observePhysical(); });
-      if (!lock) return { kind: 'local-changes' };
+    if (this.saveBatchDepth > 0) return Promise.resolve({ kind: 'local-changes' as const });
+    return (async () => {
+      const path = isEphemeralDbPath(this.dbPath) ? null : this.dbPath;
+      const lock = path ? await acquireArtifactReferenceLock(path, () => {}) : { assertCurrent() {}, release() {} };
+      if (!lock) return { kind: 'local-changes' as const };
       try {
-        const clean = this.cleanContent;
-        if (this.saveBatchDepth > 0 || clean === null || observeDatabase(original, 'clean-content') !== clean) return { kind: 'local-changes' };
-        const physical = observePhysical(), local = observeDatabase(original);
+        this.#commitPending();
+        const observation = this.captureObservation();
         const assertCurrent = () => {
-          assertOrigin(); lock.assertCurrent();
-          if (this.db !== original || this.imageEpoch !== epoch || this.fenced || this.saveBatchDepth > 0
-            || this.cleanContent !== clean || observeDatabase(original) !== local || observePhysical() !== physical) throw new SQLiteObservationRetiredError();
+          lock.assertCurrent();
+          if (this.saveBatchDepth > 0) throw new SQLiteObservationRetiredError('superseded-by-local-write');
+          observation();
         };
-        assertCurrent(); const source = readSQLitePersistedImage(persistence); assertCurrent();
-        // A fresh coordinated store deliberately has no file until its first
-        // save. Its original clean native image still participates in the
-        // reference ensemble. Persistence refuses absence after any published
-        // image was established; local pending writes already fail above.
-        const referenced = source.data
-          ? await inspectNativeArtifactReferenceImage(source.data, selected, assertCurrent)
-          : inspectPersistedArtifactReferences({ exec(sql, params) {
-            assertCurrent(); const rows = readDatabaseRow(original, sql, params ?? []); assertCurrent(); return rows;
-          } }, selected);
+        const referenced = inspectPersistedArtifactReferences(this.#adapter, selected);
         assertCurrent();
-        const value = await operation(referenced, assertCurrent); assertCurrent();
-        return { kind: 'completed', value };
-      } finally { try { lock.release(); } catch (error) { this.fenced = true; throw error; } }
-    });
-  }
-
-  /** Prepared imports have their own durable boundary, including inside a
-   * deferred-save batch. Stage the captured prefix privately; ordinary failed
-   * saves still retain their live pending rows under their existing contract. */
-  publishPrepared(operation: (db: SqlDatabase) => void, assertCurrent: () => void, onCommit: () => void): Promise<void> {
-    if (!this.coordinated) return Promise.reject(new Error('SQLiteStore: prepared publication requires coordinated storage'));
-    assertCurrent();
-    const original = this.getDb(), persistence = this.persistence, epoch = this.imageEpoch;
-    const prefix = original.export();
-    const local = observeDatabase(original);
-    const staged = constructOwnedDatabase(this.sqlEngine!, prefix);
-    this.stagedPublications += 1;
-    let staging = true;
-    const unstage = () => { if (staging) { staging = false; this.stagedPublications -= 1; } };
-    let data: Uint8Array, cleanContent: string | null, stagedLocal: string;
-    try {
-      const result: unknown = operation(staged);
-      if (result !== undefined) {
-        if (result instanceof Promise) void result.catch(() => {});
-        throw new TypeError('SQLiteStore: prepared operation must be synchronous and return no value');
-      }
-      assertCurrent();
-      data = staged.export();
-      cleanContent = this.readCleanContent(staged);
-      stagedLocal = observeDatabase(staged);
-    } catch (error) { staged.close(); unstage(); return Promise.reject(error); }
-    const assertOwnedImage = () => {
-      if (this.getDb() !== original || this.persistence !== persistence || this.imageEpoch !== epoch
-        || observeDatabase(original) !== local || observeDatabase(staged) !== stagedLocal) {
-        throw new Error('SQLiteStore: prepared image was superseded by local changes');
-      }
-    };
-    const adopt = () => {
-      this.db = staged;
-      this.imageEpoch += 1;
-      this.observationEpoch += 1;
-      this.cleanContent = cleanContent;
-      this.cleanBytes = persistence ? null : data;
-      try { original.close(); } catch { /* The replaced image has no current authority. */ }
-      onCommit();
-    };
-    return this.enqueue(async () => {
-      let release: (() => void) | undefined, adopted = false;
-      try {
-        release = persistence ? await persistence.lock() : () => {};
-        assertOwnedImage();
+        const value = await operation(referenced, assertCurrent);
         assertCurrent();
-        assertOwnedImage();
-        try { if (persistence) { this.beforePersistentWrite(); persistence.writeIfCurrent(data); } }
-        catch (error) {
-          if (error instanceof SQLitePublicationError && error.phase === 'indeterminate') {
-            // A failed directory sync cannot undo a visible rename. Mirror only
-            // our exact current image; never restore bytes or adopt another winner.
-            try {
-              assertOwnedImage();
-              const published = persistence?.read();
-              if (published && published.equals(data)) {
-                adopted = true;
-                adopt();
-              }
-            } catch { /* An unresolved publication stays fenced until reopen. */ }
-            this.fenced = true;
-          }
-          throw error;
-        }
-        adopted = true;
-        try { adopt(); } catch (error) { this.fenced = true; throw new SQLitePublishedButFencedError(error); }
-      } finally {
-        unstage();
-        if (!adopted) try { staged.close(); } catch { /* Detached image cleanup. */ }
-        try { release?.(); } catch { this.fenced = true; }
-      }
-    }).then(() => { this.notifyArtifactReferenceClean(); });
+        return { kind: 'completed' as const, value };
+      } finally { lock.release(); }
+    })();
   }
 
   /**
-   * Adopt the current published image in place of this owner's local one. It is
-   * the recovery after another writer won a save race (SQLitePersistedStateChangedError)
-   * or after a publication fenced this cache. Unpublished local rows are
-   * discarded, so it refuses (resolves false) while a batch or a staged prepared
-   * publication still counts on them. `onReload` runs under the file lock,
-   * before any later queued operation, so mirrors are rebuilt from the new image.
+   * Write `operation` in one immediate transaction, after `assertCurrent`
+   * passed inside it; then `onCommit` mirrors the change. A throw anywhere
+   * before the commit leaves the store as it was.
+   */
+  publishPrepared(operation: (db: SqlDatabase) => void, assertCurrent: () => void, onCommit: () => void): Promise<void> {
+    try {
+      assertSynchronous(assertCurrent(), 'SQLiteStore: the currency check must be synchronous');
+      this.#writeTransaction(() => {
+        assertSynchronous(assertCurrent(), 'SQLiteStore: the currency check must be synchronous');
+        assertSynchronous(operation(this.#adapter), 'SQLiteStore: prepared operation must be synchronous and return no value');
+        assertSynchronous(assertCurrent(), 'SQLiteStore: the currency check must be synchronous');
+      });
+    } catch (error) { return Promise.reject(error); }
+    try { onCommit(); } catch (error) { return Promise.reject(new SQLitePublishedButFencedError(error)); }
+    this.notifyArtifactReferenceClean();
+    return Promise.resolve();
+  }
+
+  /**
+   * The rows are always read from the file, so there is nothing to reload in
+   * SQL; `onReload` rebuilds whatever the caller keeps beside it.
    */
   reloadFromDisk(onReload: () => void = () => {}): Promise<boolean> {
-    const persistence = this.persistence;
-    if (!this.coordinated || !persistence || !this.db) return Promise.resolve(false);
-    const held = () => this.saveBatchDepth > 0 || this.stagedPublications > 0 || !this.db || this.persistence !== persistence;
-    if (held()) return Promise.resolve(false);
-    return this.enqueue(async () => {
-      if (held()) return false;
-      const release = await persistence.lock();
-      let current: SqlDatabase | null = null;
-      try {
-        if (held()) return false;
-        const identity = persistence.observationIdentity();
-        current = this.openCurrentImage();
-        const bytes = persistence.read();
-        if (persistence.observationIdentity() !== identity) throw new SQLitePersistedStateChangedError('SQLiteStore: persisted state changed while reloading');
-        persistence.acceptBaseline(bytes);
-        const previous = this.db;
-        this.db = current;
-        current = null;
-        this.imageEpoch += 1;
-        this.observationEpoch += 1;
-        this.cleanContent = this.readCleanContent(this.db);
-        this.cleanBytes = null;
-        this.saveDirty = false;
-        this.fenced = false;
-        try { previous?.close(); } catch { /* The replaced image has no current authority. */ }
-        try { onReload(); } catch (error) { this.fenced = true; throw error; }
-        return true;
-      } finally {
-        try { current?.close(); } catch { /* Detached image cleanup. */ }
-        try { release(); } catch { this.fenced = true; }
-      }
-    });
+    if (!this.#db) return Promise.resolve(false);
+    try { this.#commitPending(); onReload(); } catch (error) { return Promise.reject(error); }
+    return Promise.resolve(true);
   }
 
-  /** Drain admitted persistence operations before owner teardown. */
+  /** Drain running batches before owner teardown. */
   async settled(): Promise<void> {
     while (this.activeBatches.size > 0) await Promise.all([...this.activeBatches]);
-    await this.admission;
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.admission.then(operation);
-    this.admission = result.then(() => {}, () => {});
-    return result;
-  }
-
+  /**
+   * Run `operation`; artifact cleanup waits until it ends. Every write inside
+   * commits as it is made (see the module comment); a batch adds no lock.
+   */
   async batch<T>(operation: () => Promise<T>): Promise<T> {
     let release!: () => void;
-    const owned = new Promise<void>(resolve => { release = resolve; });
+    const owned = new Promise<void>((resolve) => { release = resolve; });
     this.activeBatches.add(owned);
     this.saveBatchDepth += 1;
     try {
       return await operation();
     } finally {
-      let cleanBoundary = false;
-      try {
-        this.saveBatchDepth -= 1;
-        if (this.saveBatchDepth === 0 && this.saveDirty) {
-          this.saveDirty = false;
-          // A failed save leaves the rows in memory; keep them marked unsaved so the next boundary saves them.
-          try { await this.save(); } catch (error) { this.saveDirty = true; throw error; }
-        }
-        cleanBoundary = true;
-      } finally {
-        this.activeBatches.delete(owned);
-        release();
-        if (cleanBoundary && this.saveBatchDepth === 0) this.notifyArtifactReferenceClean();
+      this.saveBatchDepth -= 1;
+      this.activeBatches.delete(owned);
+      release();
+      if (this.saveBatchDepth === 0) {
+        try { this.#commitPending(); } catch (error) { logger.warn('SQLiteStore: a write could not be committed', { path: this.dbPath, error: summarizeError(error) }); }
+        this.notifyArtifactReferenceClean();
       }
     }
   }
 
+  /**
+   * Commit what this turn wrote. Resolves true for a file-backed store; throws
+   * when the commit (here or at the end of an earlier turn) failed, so the
+   * write that was lost is reported by the call that saves it.
+   */
   async save(): Promise<boolean> {
-    const dbPath = this.dbPath;
-    if (!this.db) return false;
-    this.#localWrites += 1;
-    if (!this.coordinated && (isEphemeralDbPath(dbPath) || !dbPath)) return false;
-    if (this.saveBatchDepth > 0) {
-      this.saveDirty = true;
-      return false;
+    if (!this.#db) return false;
+    this.#commitPending();
+    const failure = this.#commitFailure;
+    if (failure !== undefined) {
+      this.#commitFailure = undefined;
+      throw failure;
     }
-    if (isEphemeralDbPath(dbPath) || !dbPath) {
-      if (this.coordinated) {
-        const data = this.db.export();
-        this.cleanContent = this.readCleanContent(this.db);
-        this.cleanBytes = data;
-      }
-      return false;
-    }
-
-    if (this.persistence) {
-      // Capture at admission. Later same-handle writes may already be queued;
-      // they must not change which image this particular save publishes.
-      let data: Uint8Array, cleanContent: string | null;
-      try { data = this.db.export(); cleanContent = this.readCleanContent(this.db); }
-      catch (error) { this.#activationPublicationFailures += 1; throw error; }
-      const epoch = this.imageEpoch;
-      return this.enqueue(async () => {
-        let release: (() => void) | undefined;
-        try {
-          release = await this.persistence!.lock();
-          this.getDb();
-          if (this.imageEpoch !== epoch) {
-            throw new SQLitePersistedStateChangedError('SQLiteStore: persisted state changed; captured image was superseded');
-          }
-          this.beforePersistentWrite();
-          this.persistence!.writeIfCurrent(data);
-          this.#activationPublication = nativeFreeze({ physical: this.persistence!.observationIdentity() });
-          this.cleanContent = cleanContent;
-          this.cleanBytes = this.persistence ? null : data;
-          return true;
-        } catch (error) {
-          this.#activationPublicationFailures += 1;
-          throw error;
-        } finally { try { release?.(); } catch { this.fenced = true; } }
-      }).then(saved => { if (saved) this.notifyArtifactReferenceClean(); return saved; });
-    }
-
-    try {
-      this.beforePersistentWrite();
-      mkdirSync(dirname(dbPath), { recursive: true });
-      const data = this.db.export();
-      writeFileAtomically(dbPath, Buffer.from(data));
-      logger.debug('SQLiteStore: saved to disk', { path: dbPath });
-      return true;
-    } catch (err) {
-      logger.error('SQLiteStore: failed to save', {
-        error: summarizeError(err),
-      });
-      throw err;
-    }
+    this.notifyArtifactReferenceClean();
+    return !isEphemeralDbPath(this.dbPath);
   }
 
-  close(): void {
-    this.dropIdleReadImage();
-    if (!this.db) return;
-    this.imageEpoch += 1;
-    this.db.close();
-    this.db = null;
+  close(reason?: string): void {
+    if (!this.#db) { if (reason) this.#closedMessage = reason; return; }
+    try { this.#commitPending(); } catch (error) { logger.warn('SQLiteStore: the last write could not be committed at close', { path: this.dbPath, error: summarizeError(error) }); }
+    for (const statement of this.#statements.values()) { try { statement.finalize(); } catch { /* the handle closes below */ } }
+    this.#statements.clear();
+    try { this.#dataVersion?.finalize(); } catch { /* the handle closes below */ }
+    this.#dataVersion = null;
+    const file = this.#file;
+    this.#file = null;
+    this.#db = null;
+    this.#closedMessage = reason;
+    file?.close();
   }
 
   private async initialize(schema: (db: SqlDatabase) => void, options: SqliteStoreInitOptions): Promise<void> {
-    let release: (() => void) | undefined;
+    const path = this.dbPath;
+    const persistent = !isEphemeralDbPath(path);
+    const target = options.schemaVersion ?? 1;
+    const storeName = options.storeName ?? 'sqlite store';
+    assertSynchronous(this.beforeInitialRead?.(), 'SQLiteStore: initial read owner must complete synchronously');
+    if (persistent) mkdirSync(dirname(path!), { recursive: true });
+    const existed = persistent && existsSync(path!);
+    // The store holds user content: a new file is private to its owner, and
+    // SQLite gives its WAL and shared-memory files the same mode.
+    if (persistent && !existed) closeSync(openSync(path!, 'a', 0o600));
+    const db = new (bunDatabase())(persistent ? path! : ':memory:', { create: true });
     try {
-      const SQL = await loadSqlJsEngine();
-      this.imageEpoch += 1;
-      this.sqlEngine = SQL;
-      this.schema = schema;
-      this.schemaVersion = options.schemaVersion ?? 1;
-      this.validateCurrentSchema = options.validateCurrentSchema;
-      this.nativeSchemaReadPlan = options.nativeSchemaReadPlan;
-      this.assertInitialReadCurrent();
-      if (this.coordinated && this.dbPath && !isEphemeralDbPath(this.dbPath)) {
-        const persistence = new SQLiteStorePersistence(this.dbPath);
-        this.persistence = persistence;
-        this.#artifactReferenceOrigin = Object.freeze({ persistence, engine: SQL, schemaVersion: this.schemaVersion, path: persistence.path });
-        release = await this.persistence.lock();
-      }
-      const dbPath = this.persistence?.path ?? this.dbPath;
-      const persistent = Boolean(dbPath && !isEphemeralDbPath(dbPath));
-      const existedOnDisk = persistent && existsSync(dbPath!);
-      this.assertInitialReadCurrent();
-      const original = this.persistence?.read() ?? (existedOnDisk ? readFileSync(dbPath!) : null);
-      if (this.coordinated && original !== null) assertSqliteImage(original);
-      this.persistence?.acceptBaseline(original);
-      this.assertInitialReadCurrent();
-
-      // A fresh load is the reopen a fenced cache asks for.
-      this.fenced = false;
-      if (existedOnDisk) {
-        this.db = constructOwnedDatabase(SQL, original!);
-        logger.info('SQLiteStore: loaded from disk', { path: dbPath });
-      } else {
-        this.db = constructOwnedDatabase(SQL);
-        logger.info('SQLiteStore: initialized in-memory');
-      }
-
-      if (existedOnDisk && sqlJsVersionHandle(this.getDb()).getUserVersion() === this.schemaVersion) {
-        this.validateCurrentSchema?.(this.getDb());
-      }
-
-      // Schema versioning: PRAGMA user_version + ordered migrations, with an
-      // automatic pre-migration snapshot, auto-restore on failure, and a
-      // downgrade guard (an older binary refuses a newer schema honestly).
-      const initializeFreshSchema = options.initializeFreshSchema === true && original === null && !existedOnDisk;
-      if (initializeFreshSchema && (!Number.isSafeInteger(this.schemaVersion) || this.schemaVersion < 0 || this.schemaVersion > 2_147_483_647)) {
-        throw new RangeError('SQLiteStore: fresh schema version is outside the native user_version range');
-      }
-      const result = initializeFreshSchema ? { applied: [] } : openVersionedSchema({
-        storeName: options.storeName ?? 'sqlite store',
-        dbPath: persistent ? dbPath! : ':memory:',
-        handle: sqlJsVersionHandle(this.db),
-        targetVersion: options.schemaVersion ?? 1,
-        migrations: options.migrations?.map((migration) => ({
-          toVersion: migration.toVersion,
-          migrate: () => migration.migrate(this.getDb()),
-        })) ?? [{ toVersion: options.schemaVersion ?? 1, migrate: () => schema(this.getDb()) }],
-        snapshot: persistent ? (reason) => snapshotStoreFile(dbPath!, reason) : undefined,
-        restore: persistent
-          ? (snapshotPath) => {
-              if (!this.coordinated) restoreStoreSnapshot(dbPath!, snapshotPath);
-              // The handle of the failed migration is replaced in both modes; leaving it open leaks its WASM database.
-              try { this.db?.close(); } catch { /* the failed handle is being discarded */ }
-              this.db = constructOwnedDatabase(SQL, readFileSync(dbPath!));
-            }
-          : undefined,
-      });
-      // The base schema always runs (it is IF NOT EXISTS-idempotent) so a
-      // store already at the target version still gets any session tables.
-      schema(this.getDb());
-      if (initializeFreshSchema) sqlJsVersionHandle(this.getDb()).setUserVersion(this.schemaVersion);
-      this.validateCurrentSchema?.(this.getDb());
-      // Persist a freshly-stamped version so the next open skips migration,
-      // but only for a store that already lived on disk: a brand-new store
-      // keeps the long-standing contract of touching disk on first save().
-      if (result.applied.length > 0 && existedOnDisk) {
-        if (this.persistence) { this.beforePersistentWrite(); this.persistence.writeIfCurrent(this.getDb().export()); }
-        else await this.save();
-      }
-      if (this.coordinated) {
-        const data = this.getDb().export();
-        this.cleanContent = this.readCleanContent(this.getDb());
-        this.cleanBytes = this.persistence ? null : data;
-      }
-    } catch (err) {
-      // The handle is dropped in both modes: a failed migration leaves the restored (or failed) database open, and its WASM memory is not collected.
-      try { this.db?.close(); } catch { /* already closed */ }
-      this.db = null;
-      logger.error('SQLiteStore: failed to initialize', {
-        error: summarizeError(err),
-      });
-      throw err;
-    } finally {
-      try { release?.(); } catch { this.fenced = true; }
+      const plain = statementDatabase(db);
+      const scalar = (sql: string) => Number(plain.exec(sql)[0]?.values[0]?.[0] ?? 0);
+      let tables: number;
+      try { tables = scalar('SELECT count(*) FROM sqlite_master'); }
+      catch (error) { throw new Error(`${storeName}: ${path} is not a readable SQLite database (${summarizeError(error)}). Move it aside to start an empty store.`, { cause: error }); }
+      const version = scalar('PRAGMA user_version');
+      const steps: SqliteMigration[] = tables === 0 && options.initializeFreshSchema === true
+        ? [{ toVersion: target, up: () => schema(plain) }]
+        : options.migrations?.length
+          ? options.migrations.map((step) => ({ toVersion: step.toVersion, up: () => step.migrate(plain) }))
+          : [{ toVersion: target, up: () => schema(plain) }];
+      if (!steps.some((step) => step.toVersion === target)) steps.push({ toVersion: target, up: () => {} });
+      // An already-current file is checked as it is, before the base schema
+      // pass could recreate something that should have been there.
+      if (tables > 0 && version === target) options.validateCurrentSchema?.(plain);
+      const file = adoptSqliteDatabase(db, persistent ? path! : ':memory:', { migrations: steps, name: storeName, foreignKeys: false });
+      schema(plain);
+      options.validateCurrentSchema?.(plain);
+      this.#file = file;
+      this.#db = db;
+      this.#closedMessage = undefined;
+      logger.info(existed ? 'SQLiteStore: opened' : 'SQLiteStore: created', { path: persistent ? path : ':memory:' });
+    } catch (error) {
+      try { db.close(); } catch { /* already failing */ }
+      logger.error('SQLiteStore: failed to initialize', { path, error: summarizeError(error) });
+      throw error;
     }
   }
 
-  /** Unsupported observation shapes must not break ordinary init/save. They
-   * remain usable there, but cannot authorize a guarded clean-image write. */
-  private readCleanContent(db: SqlDatabase): string | null {
-    try { return observeDatabase(db, 'clean-content'); }
-    catch { return null; }
+  private getDb(): Database {
+    if (!this.#db) throw new Error(this.#closedMessage ?? 'SQLiteStore: not initialized, call init() first');
+    return this.#db;
   }
 
-  private closeReadImage(db: SqlDatabase): void { db.close(); }
+  #statement(sql: string): BunStatement {
+    let statement = this.#statements.get(sql);
+    if (statement) {
+      this.#statements.delete(sql);
+      this.#statements.set(sql, statement);
+      return statement;
+    }
+    statement = this.getDb().prepare(sql) as unknown as BunStatement;
+    if (this.#statements.size >= STATEMENT_CACHE_LIMIT) {
+      const [oldest, evicted] = this.#statements.entries().next().value!;
+      this.#statements.delete(oldest);
+      try { evicted.finalize(); } catch { /* finalized with the handle */ }
+    }
+    this.#statements.set(sql, statement);
+    return statement;
+  }
 
-  /** Callback-exposed images require a private clone. The closed native schema
-   * plan can keep its unloaned image when every linked authority table is empty. */
-  private openPrivateReadImage(stamp?: NativeFrameImageStamp): SqlDatabase {
-    const exposed = this.openCurrentImage(this.nativeSchemaReadPlan, stamp);
-    if (this.privateSchemaImages.delete(exposed)) return exposed;
+  #read(sql: string, params: readonly (string | number)[]): SqlRows {
     try {
-      const bytes = exposed.export(), Database = currentDatabaseConstructor(this.sqlEngine!);
-      return constructOwnedDatabase(this.sqlEngine!, bytes, Database);
+      const statement = this.#statement(sql);
+      const values = (statement.values(...bindings(params)) ?? []) as unknown[][];
+      return values.length ? [{ columns: [...statement.columnNames], values }] : [];
+    } catch (error) {
+      if (!this.#db) throw new SQLiteObservationRetiredError('invariant', { cause: error });
+      throw new SQLiteObservationRetiredError('read-failed', { cause: error });
     }
-    finally { this.closeReadImage(exposed); }
   }
 
-  private openCurrentImage(privateReadPlan?: NativeKnowledgeSchemaReadPlan, stamp?: NativeFrameImageStamp): SqlDatabase {
-    assertNativeEngineIdentity(this.sqlEngine);
-    const local = this.getDb(true), epoch = this.imageEpoch;
-    if (!this.persistence && (this.cleanContent === null || this.cleanBytes === null
-      || observeDatabase(this.getDb(), 'clean-content') !== this.cleanContent)) {
-      throw new Error('SQLiteStore: no proven clean ephemeral image is available');
-    }
-    let entryBytes: Uint8Array | undefined;
-    let entryEvidence: SQLiteImageObservation | undefined;
-    let entryBaseline: SQLiteBaselineObservation | undefined;
-    let entryIdentity: string | undefined;
-    const persistence = this.persistence, engine = this.sqlEngine, plan = this.nativeSchemaReadPlan;
-    const validator = this.validateCurrentSchema, schemaVersion = this.schemaVersion;
-    if (stamp) {
-      const captured = privateMapGet(frameImageStamps, stamp), frame = this.persistedReadFrame;
-      if (captured?.store === this) privateMapDelete(frameImageStamps, stamp);
-      if (captured?.store === this && captured.frame === frame && frame && frame.db === null
-        && captured.persistence === this.persistence && captured.plan === privateReadPlan && privateReadPlan === this.nativeSchemaReadPlan
-        && captured.validator === this.validateCurrentSchema && captured.schemaVersion === this.schemaVersion
-        && captured.imageEpoch === this.imageEpoch && captured.observationEpoch === this.observationEpoch
-        && captured.evidence === frame.persisted
-        && nativeKnowledgeSchemaReadPlanMatches(privateReadPlan, this.validateCurrentSchema, this.schemaVersion)) {
-        frame.assertCurrent();
-        if (captured.persistence.observationIdentity() !== frame.identity) throw new SQLiteObservationRetiredError();
-        entryBytes = captured.data;
-        entryEvidence = captured.evidence;
-        entryBaseline = captured.baseline;
-        entryIdentity = frame.identity;
-      }
-    }
-    const persistedImage = entryBytes === undefined && persistence ? readSQLitePersistedImage(persistence) : undefined;
-    const data = entryBytes ?? (persistedImage ? persistedImage.data : this.cleanBytes);
-    const baseline = entryBaseline ?? persistedImage?.baseline, identity = entryIdentity ?? persistedImage?.identity;
-    const nativePlan = nativeKnowledgeSchemaReadPlanMatches(plan, validator, schemaVersion);
-    const known = this.#validatedNativeSchema;
-    const previouslyValidated = Boolean(baseline && nativePlan && known?.baseline === baseline && known.persistence === persistence
-      && known.engine === engine && known.plan === plan && known.validator === validator && known.schemaVersion === schemaVersion);
-    const knownRead = this.#validatedNativeReadSchema;
-    const closedNativeRead = privateReadPlan === plan && nativeKnowledgeSchemaReadPlanMatches(privateReadPlan, validator, schemaVersion);
-    const previouslyValidatedRead = Boolean(closedNativeRead && baseline && knownRead?.baseline === baseline
-      && knownRead.persistence === persistence && knownRead.engine === engine && knownRead.plan === privateReadPlan
-      && knownRead.validator === validator && knownRead.schemaVersion === schemaVersion);
-    const assertNativeSchemaSource = () => {
-      assertNativeEngineIdentity(engine);
-      if (this.db !== local || this.imageEpoch !== epoch || this.persistence !== persistence || this.sqlEngine !== engine || this.nativeSchemaReadPlan !== plan
-        || this.validateCurrentSchema !== validator || this.schemaVersion !== schemaVersion
-        || (persistence && identity !== nativeApply(artifactReferenceObservation, persistence, []))) throw new SQLiteObservationRetiredError();
-    };
-    if (data !== null) assertSqliteImage(data);
-    const Database = currentDatabaseConstructor(this.sqlEngine!);
-    const current = constructOwnedDatabase(this.sqlEngine!, data ?? undefined, Database);
-    try {
-      if (entryEvidence) {
-        const retained = this.persistedReadFrame ? assertReadFrameOrigin(this, this.persistedReadFrame).bytes : undefined;
-        if (!retained || !data || !Buffer.from(data.buffer, data.byteOffset, data.byteLength).equals(retained)) throw new SQLiteObservationRetiredError();
-      }
-      if (data === null) {
-        this.schema!(current);
-        sqlJsVersionHandle(current).setUserVersion(this.schemaVersion);
-      } else if (sqlJsVersionHandle(current).getUserVersion() !== this.schemaVersion) {
-        throw new Error('SQLiteStore: persisted schema changed; reopen the store before writing');
-      }
-      let fullyValidated = false;
-      if (data !== null && closedNativeRead && (previouslyValidatedRead
-        || validateNativeKnowledgeReadSchema({ exec: (sql, params, config) => readDatabaseRow(current, sql, params ?? [], config) }))) {
-        assertNativeSchemaSource();
-        if (!previouslyValidatedRead && baseline && persistence && engine && plan) {
-          this.#validatedNativeReadSchema = { persistence, baseline, engine, plan, validator, schemaVersion };
-        }
-        this.privateSchemaImages.add(current);
-        const frame = this.persistedReadFrame, state = privateMapGet(ownedDatabases, current), origin = frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined;
-        if (entryEvidence && origin && state && frame) privateMapSet(nativeReadImages, frame, nativeFreeze({ db: current, store: this, origin,
-          evidence: entryEvidence, baseline, state, revision: state.revision }));
-      } else if (previouslyValidated) {
-        // The original native reader compared fresh bytes against the existing
-        // accepted baseline. Borrowed callback images and physical replacements
-        // cannot manufacture this private full-validation acknowledgment.
-      } else {
-        this.validateCurrentSchema?.(current);
-        fullyValidated = validator !== undefined;
-      }
-      if (nativePlan) {
-        assertNativeSchemaSource();
-        // Never bless a successful write or structural empty-table fast path.
-        // A changed accepted publication must pass the full validator first.
-        if (fullyValidated && baseline && persistence && engine && plan) {
-          this.#validatedNativeSchema = { persistence, baseline, engine, plan, validator, schemaVersion };
-        }
-      }
-      return current;
-    } catch (error) { current.close(); throw error; }
+  #assertRowSelector(table: string, column: string, value: unknown): void {
+    if (!KNOWLEDGE_ROW_TABLES.includes(table as KnowledgeRowTable)
+      || (column !== 'id' && !(table === 'knowledge_sources' && column === 'canonical_uri'))
+      || typeof value !== 'string') throw new SQLiteObservationRetiredError('unsupported-shape');
   }
 
-  private getDb(allowFenced = false): SqlDatabase {
-    if (this.fenced && !allowFenced) throw new Error('SQLiteStore: cache fenced; reload it from disk (init() or reloadFromDisk()) before ordinary writes');
-    if (!this.db) {
-      throw new Error('SQLiteStore: not initialized, call init() first');
-    }
-    return this.db;
+  #totalChanges(): number {
+    const value = (this.#statement('SELECT total_changes()').values() ?? [])[0]?.[0];
+    return typeof value === 'number' ? value : 0;
   }
-}
 
-export class SQLiteObservationRetiredError extends Error {
-  constructor() { super('SQLiteStore: observed publication is no longer current'); }
+  /** Open this turn's write transaction unless one is open; it commits when the turn ends. */
+  #beginWrite(): void {
+    const db = this.getDb();
+    if (db.inTransaction) return;
+    if (!isEphemeralDbPath(this.dbPath)) assertSynchronous(this.beforePersist?.(), 'SQLiteStore: persistence owner must complete synchronously');
+    db.run('BEGIN IMMEDIATE');
+    this.#implicit = true;
+    queueMicrotask(() => {
+      try { this.#commitPending(); }
+      catch (error) {
+        this.#commitFailure = error;
+        logger.error('SQLiteStore: a write could not be committed', { path: this.dbPath, error: summarizeError(error) });
+      }
+    });
+  }
+
+  #commitPending(): void {
+    if (!this.#implicit) return;
+    this.#implicit = false;
+    const db = this.#db;
+    if (!db?.inTransaction) return;
+    try { db.run('COMMIT'); }
+    catch (error) {
+      try { if (db.inTransaction) db.run('ROLLBACK'); } catch { /* the failure below is what matters */ }
+      throw error;
+    }
+  }
+
+  /** One immediate transaction for a guarded write; this turn's pending writes commit first. */
+  #writeTransaction(body: () => void): void {
+    this.#commitPending();
+    const db = this.getDb();
+    if (!isEphemeralDbPath(this.dbPath)) assertSynchronous(this.beforePersist?.(), 'SQLiteStore: persistence owner must complete synchronously');
+    if (db.inTransaction) { body(); return; }
+    db.transaction(body).immediate();
+  }
 }

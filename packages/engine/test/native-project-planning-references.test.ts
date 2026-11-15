@@ -34,7 +34,7 @@ async function fixture(Manager: typeof ConfigManager = ConfigManager, configured
   const seeded = new KnowledgeStore({ configManager: config });
   await seeded.upsertSource({ id: 'saved-project-selector', connectorId: 'goodvibes-project-planning', sourceType: 'dataset', title: 'Saved project selector', status: 'indexed', metadata: { projectId: 'old-placeholder' } });
   await seeded.close();
-  const raw = new SQLiteStore(seeded.storagePath, { coordinated: true }); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
+  const raw = new SQLiteStore(seeded.storagePath); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   const projectId = savedDefaultId(workingDirectory);
   raw.run('UPDATE knowledge_sources SET metadata=? WHERE id=?', [JSON.stringify({ projectId }), 'saved-project-selector']); await raw.save(); raw.close();
   if (configured) await prepareConfiguredProjectContext(config, workingDirectory, undefined, { activate: true });

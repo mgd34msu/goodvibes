@@ -82,7 +82,7 @@ test('an existing version-zero database with real source content retains every h
 });
 
 test('SQLiteStore callers without fresh opt-in retain their migration seed effects', async () => {
-  const sqlite = new SQLiteStore(filename(), { coordinated: true }); databases.push(sqlite);
+  const sqlite = new SQLiteStore(filename()); databases.push(sqlite);
   let schemaCalls = 0;
   const schema = (db: SqlDatabase) => { schemaCalls++; db.run('CREATE TABLE IF NOT EXISTS fixture(seed TEXT)'); };
   await sqlite.init(schema, { schemaVersion: 2, migrations: [
@@ -95,7 +95,7 @@ test('SQLiteStore callers without fresh opt-in retain their migration seed effec
 
 test('fresh initialization retains original read ownership and native first-save declaration', async () => {
   const file = filename(); let readChecks = 0, writes = 0, schemaCalls = 0, validationCalls = 0;
-  const sqlite = new SQLiteStore(file, { coordinated: true, beforeInitialRead() { readChecks++; }, beforePersist() { writes++; } }); databases.push(sqlite);
+  const sqlite = new SQLiteStore(file, { beforeInitialRead() { readChecks++; }, beforePersist() { writes++; } }); databases.push(sqlite);
   await sqlite.init(db => { schemaCalls++; db.run('CREATE TABLE fixture(value TEXT)'); }, {
     initializeFreshSchema: true, schemaVersion: 2, validateCurrentSchema(db) {
       validationCalls++; expect(db.exec("SELECT name FROM sqlite_schema WHERE name='fixture'")[0]?.values).toEqual([['fixture']]);
@@ -108,14 +108,14 @@ test('fresh initialization retains original read ownership and native first-save
 
 test('a retired original image owner refuses fresh initialization before schema work', async () => {
   const file = filename(); let checks = 0, schemaCalls = 0;
-  const sqlite = new SQLiteStore(file, { coordinated: true, beforeInitialRead() { if (++checks === 3) throw new Error('Original image owner retired'); } }); databases.push(sqlite);
+  const sqlite = new SQLiteStore(file, { beforeInitialRead() { if (++checks === 3) throw new Error('Original image owner retired'); } }); databases.push(sqlite);
   await expect(sqlite.init(() => { schemaCalls++; }, { initializeFreshSchema: true, schemaVersion: 1 })).rejects.toThrow('Original image owner retired');
   expect(schemaCalls).toBe(0); expect(existsSync(file)).toBe(false);
 });
 
 for (const failure of ['schema', 'validator'] as const) {
 test(`a throwing fresh ${failure} closes its partial image without writing a database`, async () => {
-  const file = filename(), sqlite = new SQLiteStore(file, { coordinated: true }); databases.push(sqlite);
+  const file = filename(), sqlite = new SQLiteStore(file); databases.push(sqlite);
   await expect(sqlite.init(db => { db.run('CREATE TABLE fixture(value TEXT)'); if (failure === 'schema') throw new Error('Fresh callback refused'); }, {
     initializeFreshSchema: true, schemaVersion: 1, validateCurrentSchema() { if (failure === 'validator') throw new Error('Fresh callback refused'); },
   })).rejects.toThrow('Fresh callback refused');
@@ -126,7 +126,7 @@ test(`a throwing fresh ${failure} closes its partial image without writing a dat
 
 for (const version of [-1, 1.5, NaN, Infinity, 2_147_483_648]) {
 test(`fresh opt-in rejects an invalid native target version ${version} before schema creation`, async () => {
-  const file = filename(), sqlite = new SQLiteStore(file, { coordinated: true }); databases.push(sqlite);
+  const file = filename(), sqlite = new SQLiteStore(file); databases.push(sqlite);
   let called = false;
   await expect(sqlite.init(() => { called = true; }, { initializeFreshSchema: true, schemaVersion: version })).rejects.toThrow('native user_version range');
   expect(called).toBe(false); expect(existsSync(file)).toBe(false);
@@ -135,7 +135,7 @@ test(`fresh opt-in rejects an invalid native target version ${version} before sc
 
 test('an existing malformed file is never reclassified as a fresh image', async () => {
   const file = filename(), bytes = Buffer.from('existing malformed image'); writeFileSync(file, bytes);
-  const sqlite = new SQLiteStore(file, { coordinated: true }); databases.push(sqlite);
+  const sqlite = new SQLiteStore(file); databases.push(sqlite);
   let called = false;
   await expect(sqlite.init(() => { called = true; }, { initializeFreshSchema: true, schemaVersion: 1 })).rejects.toThrow();
   expect(called).toBe(false); expect(readFileSync(file)).toEqual(bytes);

@@ -14,7 +14,7 @@ async function saved() {
   const f = fixture(), store = new KnowledgeStore({ dbPath: f.path });
   await store.upsertSource({ id: 'actual-old-source', connectorId: 'goodvibes-project-planning', sourceType: 'dataset', title: 'Saved project source', status: 'indexed',
     metadata: { projectId: 'existing-project', knowledgeSpaceId: 'project:existing-project', planningArtifactKind: 'state', planningArtifactId: 'current' } }); await store.close();
-  const raw = new SQLiteStore(f.path, { coordinated: true }); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
+  const raw = new SQLiteStore(f.path); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   raw.run('INSERT INTO work_ledgers(project_id,format_version,revision,state_json) VALUES(?,?,?,?)', ['ledger-only-project', 2, 0, JSON.stringify(createEmptyWorkLedgerState('ledger-only-project'))]); await raw.save(); raw.close(); return f;
 }
 test('missing storage remains absent with no created parent or metadata registration', async () => {
@@ -26,7 +26,7 @@ test('actual planning-only and ledger-only selectors are preserved while file by
   const view = await inspectPersistedPlanningProjects(f.path, () => {}); expect(view.projectIds).toEqual(['existing-project', 'ledger-only-project']); expect(readFileSync(f.path)).toEqual(before); expect(readdirSync(f.root).sort()).toEqual(members); view.assertCurrent();
 });
 test('future database version is refused without migration, quarantine or reset', async () => {
-  const f = await saved(), raw = new SQLiteStore(f.path, { coordinated: true }); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION }); raw.run('PRAGMA user_version = 99'); await raw.save(); raw.close(); const before = readFileSync(f.path), members = readdirSync(f.root).sort();
+  const f = await saved(), raw = new SQLiteStore(f.path); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION }); raw.run('PRAGMA user_version = 99'); await raw.save(); raw.close(); const before = readFileSync(f.path), members = readdirSync(f.root).sort();
   await expect(inspectPersistedPlanningProjects(f.path, () => {})).rejects.toBeInstanceOf(PlanningProjectInspectionError); expect(readFileSync(f.path)).toEqual(before); expect(readdirSync(f.root).sort()).toEqual(members);
 });
 test('same-byte original replacement retires inspection without rereading or hashing private bodies', async () => {
@@ -51,19 +51,19 @@ test('a substituted shared driver is refused before it can receive private datab
 });
 test('initial native source restriction rejects replacement before any migration or schema callback', async () => {
   const f = await saved(), view = await inspectPersistedPlanningProjects(f.path, () => {}), before = readFileSync(f.path); let schema = 0;
-  const store = new SQLiteStore(f.path, { coordinated: true, beforeInitialRead: view.assertInitialImage });
+  const store = new SQLiteStore(f.path, { beforeInitialRead: view.assertInitialImage });
   const pending = store.init(() => { schema++; }, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION }); renameSync(f.path, `${f.path}.original`); writeFileSync(f.path, before);
   try { await expect(pending).rejects.toThrow(); expect(schema).toBe(0); expect(readFileSync(f.path)).toEqual(before); }
   finally { store.close(); }
 });
 test('actual native initialization can create its own missing intermediate directories without inventing an original database', async () => {
   const f = fixture(), path = join(f.root, 'new', 'nested', 'knowledge.sqlite'), view = await inspectPersistedPlanningProjects(path, () => {});
-  const store = new SQLiteStore(path, { coordinated: true, beforeInitialRead: view.assertInitialImage });
+  const store = new SQLiteStore(path, { beforeInitialRead: view.assertInitialImage });
   try { await store.init(() => {}, { schemaVersion: 1 }); view.assertInitialImage(); expect(existsSync(path)).toBe(false); expect(() => view.assertCurrent()).toThrow(); }
   finally { store.close(); }
 });
 test('async/nonvoid source restrictions are rejected and drained before schema effects', async () => {
-  const f = await saved(); let schema = 0; const store = new SQLiteStore(f.path, { coordinated: true, beforeInitialRead: async () => { throw Error('synthetic async restriction'); } });
+  const f = await saved(); let schema = 0; const store = new SQLiteStore(f.path, { beforeInitialRead: async () => { throw Error('synthetic async restriction'); } });
   try { await expect(store.init(() => { schema++; }, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION })).rejects.toThrow('initial read owner must complete synchronously'); expect(schema).toBe(0); }
   finally { store.close(); }
 });

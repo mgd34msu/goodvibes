@@ -1,4 +1,3 @@
-import { observeKnowledgeValue } from './local-value-observation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso, knowledgeClockNumber, knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from './store-record-representation.js';
 import { KnowledgeSourceQualityHeldError } from './source-quality.js';
@@ -14,7 +13,6 @@ import type {
   KnowledgeNodeRecord,
 } from './types.js';
 import { logger } from '../utils/logger.js';
-import { SQLitePublicationError } from '../state/sqlite-store-persistence.js';
 
 export type GeneratedKnowledgeProjectionTargetKind = 'source' | 'node' | 'artifact';
 
@@ -85,12 +83,11 @@ async function materializeProjection(
   catch (error) {
     failed = true;
     // A failed candidate must leave its own publication lock before cleanup
-    // tries the same lock. An uncertain DB publication keeps the artifact.
+    // tries the same lock. A SQLite commit is atomic, so a failed write never
+    // left the database pointing at the candidate.
     try { releaseProjectionPublication(publication); }
     catch { logger.warn('Generated knowledge artifact publication release could not be confirmed.'); }
-    if (publication.candidate && !(error instanceof SQLitePublicationError && error.phase === 'indeterminate')) {
-      await cleanOriginalGeneratedArtifact(store, publication.candidate);
-    }
+    if (publication.candidate) await cleanOriginalGeneratedArtifact(store, publication.candidate);
     throw error;
   } finally {
     try { releaseProjectionPublication(publication); }
@@ -114,65 +111,30 @@ async function materializeProjectionOwned(
   const oldOriginal = oldArtifact ? observePreviousGeneratedArtifact(artifactStore, oldArtifact.id) : undefined;
   const supersededOriginal = oldArtifact && readRecord(oldArtifact.metadata).generatedKnowledgePage === true ? oldOriginal : undefined;
   let artifactAssertion: (() => void) | undefined;
-  const originalSource = observeKnowledgeValue(existing);
   const target = input.target;
   const readTarget = () => !target ? null : target.kind === 'node' ? input.store.getNode(target.id)
     : target.kind === 'source' ? input.store.getSource(target.id) : input.artifactStore.getRecord(target.id);
-  const originalTarget = readTarget(), targetObservation = observeKnowledgeValue(originalTarget);
+  const originalTarget = readTarget();
   const readLinked = () => !target ? undefined : input.store.edgesFor('source', input.sourceId).find((edge) =>
     edge.toKind === target.kind && edge.toId === target.id && edge.relation === (target.relation ?? 'source_for'));
-  const originalLinked = readLinked(), linkedObservation = observeKnowledgeValue(originalLinked);
-  const outputState = () => ({ sourceId: input.sourceId, sourceType: input.sourceType, connectorId: input.connectorId,
-    canonicalUri: input.canonicalUri, title: input.title, summary: input.summary, tags: input.tags, filename: input.filename,
-    markdown: input.markdown, projectionKind: input.projectionKind, metadata: input.metadata, sourceMetadata: input.sourceMetadata,
-    artifactMetadata: input.artifactMetadata, edgeMetadata: input.edgeMetadata, target: input.target });
-  const outputObservation = observeKnowledgeValue(outputState());
+  const originalLinked = readLinked();
   const stale = () => { throw new KnowledgeSourceQualityHeldError('stale'); };
-  const checkInputCurrent = () => {
-    throwIfAborted(signal);
-    if (authority && (input.store !== store || input.artifactStore !== artifactStore || input.assertCurrent !== authority || input.signal !== signal || !outputObservation.matches(outputState()))) stale();
-  };
-  const checkOwner = () => {
-    throwIfAborted(signal);
-    assertSynchronousProjectionGuard(authority);
-    if (graph?.assertCurrent !== graphAssertion) stale();
-    assertSynchronousProjectionGuard(graphAssertion, graph);
-    assertSynchronousProjectionGuard(artifactAssertion);
-    if (graph?.assertCurrent !== graphAssertion) stale();
-    checkInputCurrent();
-    if (authority && (readTarget() !== originalTarget || !targetObservation.matches(readTarget()))) stale();
-  };
+  // Records are replaced, never mutated, on every write, so an identity
+  // compare of the cached record answers "did this row change".
   const check = () => {
-    // Authority, graph and source-identity guards often consume the same rows.
-    // Keep every original assertion, sharing one fresh native read image only
-    // for this synchronous boundary. The next await or write gets a new frame.
-    let accepting = true, invoked = false, completed = false, repeated = false, failed = false;
-    let originalFailure: unknown, framed: unknown;
-    const rethrow = (error: unknown): never => {
-      drainOwned(error);
+    throwIfAborted(signal);
+    try {
+      assertSynchronousProjectionGuard(authority);
+      assertSynchronousProjectionGuard(graphAssertion, graph);
+    } catch (error) {
       if (error instanceof KnowledgeRecordAdmissionHeldError) stale();
       throw error;
-    };
-    try { framed = store.assertRecordSnapshotFrame(() => {
-      // A borrowed frame cannot defer the original assertions beyond this
-      // synchronous boundary, suppress their failure, or invoke them twice.
-      if (!accepting) return;
-      if (invoked) { repeated = true; stale(); }
-      invoked = true;
-      try {
-        checkOwner();
-        if (authority && (input.store.getSource(input.sourceId) !== existing || !originalSource.matches(input.store.getSource(input.sourceId))
-          || readLinked() !== originalLinked || !linkedObservation.matches(readLinked()))) stale();
-        completed = true;
-      } catch (error) { failed = true; originalFailure = error; throw error; }
-    }); } catch (error) {
-      if (failed && error !== originalFailure) drainOwned(error);
-      rethrow(failed ? originalFailure : error);
-    } finally { accepting = false; }
-    if (framed !== undefined) drainOwned(framed);
-    if (failed) rethrow(originalFailure);
-    if (!completed || repeated || framed !== undefined) stale();
+    }
+    assertSynchronousProjectionGuard(artifactAssertion);
+    if (authority && (readTarget() !== originalTarget || input.store.getSource(input.sourceId) !== existing || readLinked() !== originalLinked)) stale();
   };
+  // Once at entry; again only where a step cannot be undone: before the
+  // artifact is created and inside the commit of the rows.
   check();
   const stagedTarget = target?.kind === 'node' && graph?.nodes.some(node => node.id === target.id);
   if (input.target && !stagedTarget) {
@@ -181,12 +143,10 @@ async function materializeProjectionOwned(
       toId: input.target.id,
     });
   }
-  check();
   const reused = await findReusableGeneratedArtifact(artifactStore, existing, input.markdown, input.filename, oldOriginal, signal, check);
   publication.lease = reused?.lease;
   artifactAssertion = reused?.assertCurrent;
   const reusedArtifact = reused?.artifact;
-  check();
   const existingMetadata = readRecord(existing?.metadata);
   const existingGeneratedAt = knowledgeRawRepresentation(existingMetadata).generatedAt;
   // Artifact reuse already compares the actual complete bytes. A second hash
@@ -277,13 +237,12 @@ async function materializeProjectionOwned(
   let linked: KnowledgeEdgeRecord | undefined;
   let nodes: readonly KnowledgeNodeRecord[] | undefined;
   try {
-    check();
     if (authority || graph) {
       const receipt = await input.store.applyPreparedIngest({ sources: [sourceInput], extractions: [], nodes: [], edges: [], issues: [] }, async () => ({
         nodes: graph?.nodes ?? [], edges: [...(graph?.edges ?? []), ...(edgeInput ? [edgeInput] : [])],
         issues: graph?.issues ?? [], assertCurrent: check,
       }), { signal, ...(graph ? { requireAccepted: true } : {}) });
-      checkInputCurrent();
+      throwIfAborted(signal);
       if (authority && target) {
         const committedTarget = target.kind === 'node' ? receipt.nodes.find(record => record.id === target.id)
           : target.kind === 'source' ? receipt.sources.find(record => record.id === target.id) : undefined;
@@ -291,7 +250,7 @@ async function materializeProjectionOwned(
           const persistedTarget = target.kind === 'node' ? store.getRecordSnapshot('node', target.id).record
             : store.getSourceSnapshot({ id: target.id }).source;
           if (readTarget() !== committedTarget || !persistedTarget || !sameKnowledgeRecord(committedTarget, persistedTarget)) stale();
-        } else if (readTarget() !== originalTarget || !targetObservation.matches(readTarget())) stale();
+        } else if (readTarget() !== originalTarget) stale();
       }
       // The graph owner was checked synchronously before the complete commit.
       // Its original read set intentionally changes when those rows publish.
@@ -302,14 +261,11 @@ async function materializeProjectionOwned(
       if (!source || input.store.getSource(input.sourceId) !== source || source.artifactId !== artifact.id
         || (edgeInput && (!linked || readLinked() !== linked))) stale();
     } else {
+      check();
       source = await input.store.upsertSource(sourceInput);
-      check();
       linked = edgeInput ? await input.store.upsertEdge(edgeInput) : undefined;
-      check();
     }
   } catch (error) {
-    // An uncertain rename may already expose this artifact through the database.
-    if (error instanceof SQLitePublicationError && error.phase === 'indeterminate') throw error;
     if (authority || graph) {
       // The guarded ingest either committed atomically under the original owner,
       // or made no mutation. Never overwrite a concurrent writer or compensate
@@ -341,14 +297,10 @@ async function materializeProjectionOwned(
   if (!source) throw new Error(`Generated projection '${input.sourceId}' did not persist a source record.`);
   if (!reusedArtifact && supersededOriginal && supersededOriginal.id !== artifact.id) {
     const publishedTarget = readTarget();
-    const publishedValues = observeKnowledgeValue({ source, linked, nodes, target: publishedTarget });
-    const published = store.captureSourcePublication();
     await cleanOriginalGeneratedArtifact(store, supersededOriginal);
-    checkInputCurrent();
+    throwIfAborted(signal);
     assertSynchronousProjectionGuard(artifactAssertion);
-    published();
-    if (store.getSource(source.id) !== source || (edgeInput && readLinked() !== linked) || readTarget() !== publishedTarget
-      || !publishedValues.matches({ source, linked, nodes, target: readTarget() })) stale();
+    if (store.getSource(source.id) !== source || (edgeInput && readLinked() !== linked) || readTarget() !== publishedTarget) stale();
   }
   return {
     artifact,

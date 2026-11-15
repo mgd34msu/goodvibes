@@ -504,7 +504,7 @@ for (const target of ['createdAt', 'updatedAt'] as const) for (const malformed o
 test('knowledge v8 upgrade snapshots original bytes and stamps v9 without rewriting legacy rows', async () => {
   const root = mkdtempSync(join(tmpdir(), 'planning-version-')); roots.push(root);
   const path = join(root, 'knowledge.sqlite');
-  const legacy = new SQLiteStore(path, { coordinated: true });
+  const legacy = new SQLiteStore(path);
   // Historical v8 setup intentionally stays v8. The base table definitions are
   // unchanged by the marker-only v9 format barrier.
   await legacy.init(createSchema, { storeName: 'knowledge store', schemaVersion: 8 });
@@ -545,7 +545,7 @@ test('first canonical planning publication is v9 and an old-target v8 open refus
   try { expect(persisted.exec('PRAGMA user_version')[0]?.values).toEqual([[KNOWLEDGE_SCHEMA_VERSION]]); }
   finally { persisted.close(); }
   const before = readFileSync(f.path), snapshots = listStoreSnapshots(f.path);
-  const oldTarget = new SQLiteStore(f.path, { coordinated: true });
+  const oldTarget = new SQLiteStore(f.path);
   let oldSchemaCalls = 0;
   await expect(oldTarget.init(() => { oldSchemaCalls++; }, {
     storeName: 'knowledge store', schemaVersion: 8,
@@ -559,7 +559,7 @@ test('first canonical planning publication is v9 and an old-target v8 open refus
 test('historical v8 missing a durable table refuses v9 upgrade without silent recreation', async () => {
   const root = mkdtempSync(join(tmpdir(), 'planning-corrupt-v8-')); roots.push(root);
   const path = join(root, 'knowledge.sqlite');
-  const legacy = new SQLiteStore(path, { coordinated: true });
+  const legacy = new SQLiteStore(path);
   await legacy.init(createSchema, { storeName: 'knowledge store', schemaVersion: 8 });
   legacy.run('DROP TABLE work_ledgers');
   await legacy.save(); legacy.close();

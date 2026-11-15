@@ -54,7 +54,7 @@ test('historical hashed source without canonical URI is found from durable metad
   const seeded = await f.service.upsertState({ projectId: 'alpha', state });
   // Fixed independently recorded deployed-format fixture, not a live derivation.
   const oldId = 'project-planning-state-4b7a24906e974844';
-  const raw = new SQLiteStore(f.path, { coordinated: true });
+  const raw = new SQLiteStore(f.path);
   await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   raw.run('UPDATE knowledge_sources SET id = ?, canonical_uri = NULL WHERE id = ?', [oldId, seeded.source!.id]);
   await raw.save(); raw.close();
@@ -113,17 +113,17 @@ test('schema twelve migrates source identities and revisions unchanged and refus
   // Actual old saved source identity, retained without a runtime hash formatter.
   const historicalId = 'project-planning-state-4b7a24906e974844';
   await f.store.close();
-  const raw = new SQLiteStore(f.path, { coordinated: true });
+  const raw = new SQLiteStore(f.path);
   await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   raw.run('UPDATE knowledge_sources SET id = ?, canonical_uri = NULL WHERE id = ?', [historicalId, seeded.source!.id]);
   const before = raw.exec('SELECT * FROM knowledge_sources ORDER BY id');
   raw.run('PRAGMA user_version = 11'); await raw.save(); raw.close();
-  const alreadyOpenOldWriter = new SQLiteStore(f.path, { coordinated: true });
+  const alreadyOpenOldWriter = new SQLiteStore(f.path);
   await alreadyOpenOldWriter.init(() => {}, { schemaVersion: 11 });
   cleanup.push(() => alreadyOpenOldWriter.close());
   const migrated = new KnowledgeStore({ dbPath: f.path }); cleanup.push(() => migrated.close());
   await migrated.init();
-  const check = new SQLiteStore(f.path, { coordinated: true });
+  const check = new SQLiteStore(f.path);
   await check.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   expect(check.exec('SELECT * FROM knowledge_sources ORDER BY id')).toEqual(before);
   check.close();
@@ -133,7 +133,7 @@ test('schema twelve migrates source identities and revisions unchanged and refus
   await expect(alreadyOpenOldWriter.save()).rejects.toThrow();
   expect(readFileSync(f.path)).toEqual(bytes);
   let oldSchemaCalls = 0;
-  const olderWriter = new SQLiteStore(f.path, { coordinated: true });
+  const olderWriter = new SQLiteStore(f.path);
   try {
     await expect(olderWriter.init(() => { oldSchemaCalls++; }, { schemaVersion: 11 }))
       .rejects.toBeInstanceOf(StoreSchemaDowngradeError);

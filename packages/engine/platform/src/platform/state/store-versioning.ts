@@ -5,13 +5,14 @@
  * - opening a store at the current version is a no-op;
  * - an older store runs ordered migrations up to the target, with an
  *   automatic snapshot of the store file taken BEFORE any migration runs;
- * - a failed migration auto-restores the store from that pre-migration
- *   snapshot and reports honestly what happened and where the snapshot is;
+ * - a migration runs in a transaction with its version stamp, so a failed
+ *   one rolls back and the file stays consistent at the last version reached;
+ *   only a handle without transactions is restored from the snapshot;
  * - an older binary refuses a newer schema with an honest message instead
  *   of corrupting data it does not understand (the downgrade guard).
  *
- * Engine-agnostic: bun:sqlite and sql.js handles both adapt to the same
- * two-method interface.
+ * New stores open through sqlite-file.ts, which applies the same contract in
+ * one transaction; this module serves the stores that still open here.
  */
 
 import { restoreStoreSnapshot, snapshotStoreFile } from './store-snapshots.js';
@@ -53,23 +54,6 @@ export function bunSqliteVersionHandle(db: {
   };
 }
 
-/** Adapt a sql.js Database to the version handle. */
-export function sqlJsVersionHandle(db: {
-  exec(sql: string): Array<{ columns: string[]; values: unknown[][] }>;
-  run(sql: string): unknown;
-}): VersionedSqliteHandle {
-  return {
-    getUserVersion: () => {
-      const result = db.exec('PRAGMA user_version');
-      const value = result[0]?.values[0]?.[0];
-      return typeof value === 'number' ? value : 0;
-    },
-    setUserVersion: (version) => {
-      db.run(`PRAGMA user_version = ${Math.trunc(version)}`);
-    },
-  };
-}
-
 export interface StoreMigration {
   /** The schema version this migration produces. */
   readonly toVersion: number;
@@ -100,7 +84,7 @@ export class StoreSchemaDowngradeError extends Error {
   }
 }
 
-/** A migration failed; the store was restored from its pre-migration snapshot. */
+/** A migration failed; it rolled back, or the store was restored from its pre-migration snapshot. */
 export class StoreMigrationError extends Error {
   constructor(
     readonly storeName: string,
@@ -109,10 +93,15 @@ export class StoreMigrationError extends Error {
     readonly snapshotPath: string | null,
     readonly restored: boolean,
     cause: unknown,
+    /** The step ran in a transaction and rolled back: the file is consistent at `fromVersion`. */
+    readonly rolledBack = false,
   ) {
     super(
       `${storeName} migration v${fromVersion} -> v${toVersion} failed: ${cause instanceof Error ? cause.message : String(cause)}. `
-      + (restored && snapshotPath
+      + (rolledBack
+        ? `The step rolled back; the store is unchanged at schema v${fromVersion}`
+          + (snapshotPath ? ` and the copy taken before the migration is at ${snapshotPath}.` : '.')
+        : restored && snapshotPath
         ? `The store was restored from its pre-migration snapshot (${snapshotPath}); no data was lost.`
         : snapshotPath
           ? `A pre-migration snapshot exists at ${snapshotPath} but automatic restore also failed, restore it manually.`
@@ -218,6 +207,10 @@ export function openVersionedSchema(options: OpenVersionedSchemaOptions): OpenVe
       reached = migration.toVersion;
       applied.push(migration.toVersion);
     } catch (cause) {
+      // A step run in a transaction rolled back with its stamp: the file is
+      // consistent at `reached`, and restoring the snapshot would only undo the
+      // steps that succeeded.
+      if (options.handle.transaction) throw new StoreMigrationError(options.storeName, reached, migration.toVersion, snapshotPath, false, cause, true);
       let restored = false;
       if (snapshotPath && options.restore) {
         try {

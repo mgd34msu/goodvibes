@@ -27,7 +27,7 @@ service.applyStateAction({ projectId: 'fixture', action: { kind: 'approve' } });
 revision.generation = 'different';
 
 const legacyStore = new SQLiteStore(':memory:');
-const coordinatedStore = new SQLiteStore(':memory:', { coordinated: true });
+const coordinatedStore = new SQLiteStore(':memory:');
 const transaction = coordinatedStore.transactPersisted(db => {
   const values = db.exec('SELECT 1');
   return { changed: false, value: values.length };

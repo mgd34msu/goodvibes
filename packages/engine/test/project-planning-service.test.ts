@@ -209,7 +209,7 @@ describe('stored work plans written before the contract rename', () => {
     const original = store.getSourceSnapshot({ id: source.id }).raw!;
     // Inject only the historical field-name shape. A generic source upsert would
     // rewrite canonical source clocks through its numeric compatibility view.
-    const raw = new SQLiteStore(store.storagePath, { coordinated: true });
+    const raw = new SQLiteStore(store.storagePath);
     await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
     raw.run('UPDATE knowledge_sources SET metadata = ? WHERE id = ?',
       [JSON.stringify({ ...source.metadata, value: { ...value, tasks: legacyTasks } }), source.id]);

@@ -411,7 +411,7 @@ test('removing both native journals cannot authorize a replacement for the survi
   const f = await fixture({ harness: { scripts: { u1: () => [{ text: 'waiting', stop: { kind: 'hang' } }] } } });
   const original = await f.host.start(f.target, f.authority);
   await waitFor(() => f.harness.agentsOf('u1').length === 1, 'native effect boundary');
-  const raw = new SQLiteStore(join(f.root, '.goodvibes', 'knowledge.sqlite'), { coordinated: true });
+  const raw = new SQLiteStore(join(f.root, '.goodvibes', 'knowledge.sqlite'));
   await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   raw.run('DELETE FROM native_work_executions'); raw.run('DELETE FROM native_work_execution_intents');
   await raw.save(); raw.close();

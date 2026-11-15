@@ -71,9 +71,7 @@ history machinery twice, and duplicated machinery is a drift class that has cost
 this platform repeatedly. It was still rejected, for three reasons in descending
 weight.
 
-1. **The speed ruling in §1.** The knowledge store is sql.js
-   (WASM): every open loads the whole database into memory and every `save()`
-   rewrites the entire file. A profile lookup would pass through space-scope
+1. **The speed ruling in §1.** A knowledge lookup passes through space-scope
    resolution (`scope-records.ts`), node status gates and confidence clamping
    (`store-node-history.ts`) to return a string. Wrong order of magnitude for a
    hot-path value.

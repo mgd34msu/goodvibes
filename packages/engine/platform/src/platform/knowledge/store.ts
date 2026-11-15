@@ -1,4 +1,3 @@
-import { statSync } from 'node:fs';
 import { createHomeGraphSourceIdentityIndexes, type HomeGraphSourceSelector } from './store-homegraph-source-selector.js';
 import { createHomeGraphNodeIdentityIndexes, HomeGraphIdentityHeldError, type HomeGraphNodeSelector } from './store-homegraph-node-selector.js';
 import { createSemanticNodeIdentityIndex, type SemanticNodeSelector, type SemanticIssueSelector } from './store-semantic-node-selector.js';
@@ -15,7 +14,6 @@ import { createKnowledgeNodeContentRevisions } from './store-node-content-revisi
 import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
 import { createGeneratedProjectionIdentityIndex } from './store-generated-projection-selector.js';
 import { createArtifactReferenceIndexes } from './store-artifact-references.js';
-import { prepareNativeKnowledgeSchemaReadPlan } from '../state/knowledge-schema-read-plan.js';
 import { createNativeCiContinuationTable, validateNativeCiContinuationTable } from './store-native-ci-continuation.js';
 import { pruneSettledNativeWork, validateNativeWorkRows } from './store-native-work-tables.js';
 import { createNativeConversationStorage, validateNativeConversationCaptureTable, migrateNativeConversationCaptureTable } from './store-native-intake.js';
@@ -47,9 +45,7 @@ import { knowledgeNodeRestorationGuard, prepareNodeActivationPass, assertPrepare
 export type { KnowledgePreparedNodeWrites } from './store-node-activation.js';
 import { commitGuardedKnowledgeIssueReplacement, operatorReviewed } from './store-issue-replacement.js';
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow, commitKnowledgeNodeIssueWrites, type KnowledgeGuardedNodeIssueWrites } from './store-node-issue-writes.js';
-import { SQLitePersistedStateChangedError } from '../state/sqlite-store-persistence.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
-import { KnowledgeStoreConflictError } from './store-conflict.js';
 import { SQLiteStore, SQLiteObservationRetiredError, captureSQLiteActivationPublication, type PersistedKnowledgeRecordSelector, type ExpectedKnowledgeRecordReadsetInput } from '../state/sqlite-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -195,17 +191,6 @@ export const MAX_RETAINED_JOB_RUNS = 500;
 const MAX_RETAINED_USAGE_RECORDS = 10_000;
 const USAGE_RETENTION_SLACK = MAX_RETAINED_USAGE_RECORDS / 10;
 
-/** Identity of the saved image file. Any other process's save replaces the file, so it changes. */
-function savedImageIdentity(path: string): string {
-  try {
-    const info = statSync(path, { bigint: true });
-    return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
-    throw error;
-  }
-}
-
 function assertKnowledgeWriteCurrent(assertCurrent: (() => void) | undefined): void {
   const result: unknown = assertCurrent?.();
   if (result !== undefined) {
@@ -302,9 +287,8 @@ export class KnowledgeStore {
   private readonly declareSemanticSourceFormat: (() => void) | undefined;
   private readonly ledgerStorage = new Map<string, KnowledgeWorkLedgerStorage>();
   private initPromise: Promise<void> | null = null;
-  /** Identity of the saved file as this store last loaded or wrote it; see refreshIfChanged(). */
-  private imageIdentity: string | undefined;
-  private refreshing: Promise<boolean> | null = null;
+  /** SQLite's count of other connections' commits when the maps were last loaded; see refreshIfChanged(). */
+  private loadedDataVersion = -1;
   // Indexed by the keys ingest and scope selection look records up by, so
   // those lookups do not walk the whole collection (store-indexed-map.ts).
   private readonly sources = new IndexedRecordMap<KnowledgeSourceRecord>((record) => record.canonicalUri ? sourceUriKey(record.canonicalUri) : undefined);
@@ -359,7 +343,7 @@ export class KnowledgeStore {
       if (record.metadata.homeGraphIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('homegraph-object-identities-v1'));
     };
     this.declareSemanticSourceFormat = declareNativeData ? () => declareNativeData('knowledge-semantic-source-revisions-v2') : undefined;
-    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v17'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
+    this.sqlite = new SQLiteStore(this.dbPath, { beforePersist: () => declareNativeData?.('knowledge-schema-v17'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
     nativePublicationApply(nativePublicationSet, nativeArtifactReferenceStores, [this, Object.freeze({
       sqlite: this.sqlite, path: this.dbPath, nodes: this.nodes,
       sqliteSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'sqlite')!),
@@ -392,11 +376,9 @@ export class KnowledgeStore {
   async init(): Promise<void> {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     if (this.ready) {
-      // A publication whose outcome could not be confirmed fences the SQL
-      // cache. The published image is the truth, so adopt it and carry on;
-      // while a batch still holds unsaved rows the reload declines and the
-      // ordinary write refusal names the fence.
-      if (!this.sqlite.isReady) await this.sqlite.reloadFromDisk(() => this.refreshSnapshot());
+      // Another process's commit since the maps were loaded: load them again
+      // before this operation reads them. One statement when nothing changed.
+      this.adoptForeignCommits();
       return;
     }
     if (this.initPromise) return this.initPromise;
@@ -416,7 +398,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.nativeExecutionStorage.get(projectId);
     if (!storage) {
-      storage = createNativeWorkExecutionStorage(this.sqlite, projectId, () => this.refreshSnapshot(), this.declareNativeExecutionFormat, this.declareNativeCiFormat, this.declareNativeSettlementFormat);
+      storage = createNativeWorkExecutionStorage(this.sqlite, projectId, () => {}, this.declareNativeExecutionFormat, this.declareNativeCiFormat, this.declareNativeSettlementFormat);
       this.nativeExecutionStorage.set(projectId, storage);
     }
     return storage;
@@ -428,7 +410,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.nativeConversationStorage.get(projectId);
     if (!storage) {
-      storage = createNativeConversationStorage(this.sqlite, projectId, () => this.refreshSnapshot(), this.declareNativeConversationFormat, this.declareNativeSettledFormat);
+      storage = createNativeConversationStorage(this.sqlite, projectId, () => {}, this.declareNativeConversationFormat, this.declareNativeSettledFormat);
       this.nativeConversationStorage.set(projectId, storage);
     }
     return storage;
@@ -440,7 +422,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.ledgerStorage.get(projectId);
     if (!storage) {
-      storage = createKnowledgeWorkLedgerStorage(this.sqlite, projectId, () => this.refreshSnapshot(), undefined, this.declareNativeExplicitSourceFormat, this.declareHistoricalImportFormat);
+      storage = createKnowledgeWorkLedgerStorage(this.sqlite, projectId, () => {}, undefined, this.declareNativeExplicitSourceFormat, this.declareHistoricalImportFormat);
       this.ledgerStorage.set(projectId, storage);
     }
     return storage;
@@ -456,12 +438,10 @@ export class KnowledgeStore {
       await Promise.all(drains);
       await this.sqlite.settled();
       await artifactCleanup;
-      this.sqlite.close();
-      this.ready = false;
       // Work that passed init() before the close and touches SQL afterwards
-      // would otherwise report the cache as "not initialized"; say what
-      // actually happened. getDb is the cache's only door to the database.
-      Object.defineProperty(this.sqlite, 'getDb', { configurable: true, value: () => { throw new Error('KnowledgeStore is closed'); } });
+      // is told what actually happened, not "not initialized".
+      this.sqlite.close('KnowledgeStore is closed');
+      this.ready = false;
     })();
     return this.closePromise;
   }
@@ -550,30 +530,32 @@ export class KnowledgeStore {
   }
 
   /**
-   * Reads are served from maps loaded at start or at the last reload, so a
-   * record another process saved since then (the daemon next to a terminal) would
-   * stay invisible. This adopts the saved image when the file is no longer the one
-   * this store holds and no batch or staged publication has unsaved rows. It
-   * resolves true when it reloaded. Call it at the start of a read the person asked
-   * for, never from inside a multi-step operation: a reload retires what that
-   * operation already observed. Writes deliberately do not call it: a write built on
-   * an older read must still be refused as a conflict, not applied on top.
+   * Reads are served from maps loaded at start, so a record another process
+   * committed since (the daemon next to a terminal) would stay invisible.
+   * This loads the maps again when SQLite reports another connection's commit
+   * (`data_version`, one statement), and resolves true when it did. Every
+   * operation that passes init() does the same, so a write is never built on
+   * maps older than the file.
    */
   refreshIfChanged(): Promise<boolean> {
-    if (this.refreshing) return this.refreshing;
-    if (!this.ready || this.closed || this.imageIdentity === undefined || savedImageIdentity(this.dbPath) === this.imageIdentity) return Promise.resolve(false);
-    const reload: Promise<boolean> = this.sqlite.reloadFromDisk(() => this.refreshSnapshot()).catch((error: unknown) => {
-      logger.warn('[knowledge-store] could not adopt the changed knowledge file', { path: this.dbPath, error: summarizeError(error) });
-      return false;
-    }).finally(() => { if (this.refreshing === reload) this.refreshing = null; });
-    this.refreshing = reload;
-    return reload;
+    if (!this.ready || this.closed) return Promise.resolve(false);
+    try {
+      return Promise.resolve(this.adoptForeignCommits());
+    } catch (error) {
+      logger.warn('[knowledge-store] could not load the changed knowledge file', { path: this.dbPath, error: summarizeError(error) });
+      return Promise.resolve(false);
+    }
+  }
+
+  private adoptForeignCommits(): boolean {
+    if (this.closed || this.sqlite.dataVersion() === this.loadedDataVersion) return false;
+    this.refreshSnapshot();
+    return true;
   }
 
   /**
-   * Every write to the knowledge content as a revision source, whole store.
-   * Another process's save shows here once this store adopts it
-   * (refreshIfChanged at the start of a read, or a refused save that reloads).
+   * Every change of the knowledge content as a revision source, whole store:
+   * each row this process writes and each commit by another process.
    */
   get revisionSource(): RevisionSource { return this.#revisionSource; }
 
@@ -591,44 +573,14 @@ export class KnowledgeStore {
 
   async batch<T>(operation: () => Promise<T>): Promise<T> {
     await this.init();
-    return this.keepingImageIdentity(() => this.persisting(() => this.sqlite.batch(operation)));
+    return this.sqlite.batch(operation);
   }
 
-  /** Our own save changes the file; adopt its identity unless another process had already changed it first. */
-  private async keepingImageIdentity<T>(write: () => Promise<T>): Promise<T> {
-    const current = this.imageIdentity !== undefined && savedImageIdentity(this.dbPath) === this.imageIdentity;
-    const result = await write();
-    if (current && this.imageIdentity !== undefined && !this.closed) this.imageIdentity = savedImageIdentity(this.dbPath);
-    return result;
-  }
-
-  /** Every ordinary (unguarded) save goes through here; see persisting(). */
+  /** Commits what the calling operation wrote (it is committed at the end of the turn in any case). */
   private async save(): Promise<void> {
-    await this.keepingImageIdentity(() => this.persisting(() => this.sqlite.save()));
+    await this.sqlite.save();
   }
 
-  /**
-   * An ordinary write mutates SQL and the maps, then saves. If another owner
-   * published first the save is refused; without this, the unsaved rows would
-   * stay in memory and every later save would be refused until restart. Adopt
-   * the winner's image (reloadFromDisk refuses while a batch or a prepared
-   * publication still holds pending rows) and report a typed, retryable conflict.
-   */
-  private async persisting<T>(write: () => Promise<T>): Promise<T> {
-    try {
-      return await write();
-    } catch (error) {
-      if (!(error instanceof SQLitePersistedStateChangedError)) throw error;
-      let reloaded: boolean;
-      try {
-        reloaded = await this.sqlite.reloadFromDisk(() => this.refreshSnapshot());
-      } catch (reloadError) {
-        logger.warn('[knowledge-store] could not reload after another process saved first', { path: this.dbPath, error: summarizeError(reloadError) });
-        throw error;
-      }
-      throw new KnowledgeStoreConflictError(reloaded, { cause: error });
-    }
-  }
   listSources(limit = 100): KnowledgeSourceRecord[] {
     return listKnowledgeSources(this.asReadView(), limit);
   }
@@ -1077,8 +1029,11 @@ export class KnowledgeStore {
       writeKnowledgeSourceRow(db, record);
       const written = readKnowledgeSourceSnapshot(db, { id: record.id });
       return { changed: true, value: { kind: 'written', source: written.source!, generation: written.generation! } };
-    }, () => this.refreshSnapshot());
-    if (result.kind === 'completed') return result.value;
+    }, () => {});
+    if (result.kind === 'completed') {
+      if (result.value.kind === 'written') this.sources.set(result.value.source.id, result.value.source);
+      return result.value;
+    }
     const current = selector ? this.getSourceSnapshot(selector) : { source: null, generation: null };
     return { kind: 'held', reason: current.generation === expectedGeneration ? 'pending-local-changes' : 'source-changed', current: current.source, generation: current.generation };
   }
@@ -1164,7 +1119,8 @@ export class KnowledgeStore {
       for (const record of prepared) writeKnowledgeSourceRow(db, record);
       assertCurrent();
       return { changed: prepared.length > 0, value: prepared.map(record => readKnowledgeSourceSnapshot(db, { id: record.id })) };
-    }, () => this.refreshSnapshot(), (sources) => {
+    }, () => {}, (sources) => {
+      for (const written of sources) if (written.source) this.sources.set(written.source.id, written.source);
       // Capture only our exact committed successor while still owning the lock.
       published(sources, this.captureSourcePublication());
     });
@@ -1476,10 +1432,10 @@ export class KnowledgeStore {
   /** Merge one node into another, re-pointing cross-reference edges. (Invariant 7.) */
   async mergeNodes(loserId: string, winnerId: string): Promise<{ merged: boolean; repointedEdges: number }> {
     await this.init();
-    return this.persisting(() => mergeKnowledgeNodes(this, loserId, winnerId, {
+    return mergeKnowledgeNodes(this, loserId, winnerId, {
       sqlite: this.sqlite, nodes: this.nodes, edges: this.edges,
       nodeRevisions: this.nodeRevisions, nodeActivationScope: this.nodeActivationScope, beforeNodeWrite: this.beforeSemanticNodeWrite,
-    }));
+    });
   }
 
   getSemanticEnrichmentState(sourceId: string): KnowledgeSemanticEnrichmentStateRecord | null {
@@ -1801,7 +1757,7 @@ export class KnowledgeStore {
 
   async upsertRefinementTask(input: KnowledgeRefinementTaskUpsertInput): Promise<KnowledgeRefinementTaskRecord> {
     await this.init();
-    return this.persisting(() => upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${crypto.randomUUID()}`));
+    return upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${crypto.randomUUID()}`);
   }
 
   async upsertUsageRecord(input: KnowledgeUsageUpsertInput, assertCurrent?: () => void): Promise<KnowledgeUsageRecord> {
@@ -1961,12 +1917,12 @@ export class KnowledgeStore {
 
   async upsertSchedule(input: KnowledgeScheduleUpsertInput): Promise<KnowledgeScheduleRecord> {
     await this.init();
-    return this.keepingImageIdentity(() => this.persisting(() => upsertKnowledgeSchedule(this.sqlite, this.schedules, input, () => `ksched-${crypto.randomUUID()}`)));
+    return upsertKnowledgeSchedule(this.sqlite, this.schedules, input, () => `ksched-${crypto.randomUUID()}`);
   }
 
   async deleteSchedule(id: string): Promise<boolean> {
     await this.init();
-    return this.keepingImageIdentity(() => this.persisting(() => deleteKnowledgeSchedule(this.sqlite, this.schedules, id)));
+    return deleteKnowledgeSchedule(this.sqlite, this.schedules, id);
   }
 
   async planKnowledgeSpaceDelete(spaceId: string): Promise<KnowledgeSpaceDeleteResult> {
@@ -2005,7 +1961,6 @@ export class KnowledgeStore {
       storeName: 'knowledge store', schemaVersion: KNOWLEDGE_SCHEMA_VERSION,
       initializeFreshSchema: true,
       validateCurrentSchema: validateCurrentKnowledgeSchema,
-      nativeSchemaReadPlan: prepareNativeKnowledgeSchemaReadPlan(),
       migrations: [
         { toVersion: 1, migrate: createSchema },
         { toVersion: 2, migrate: createWorkLedgerTable },
@@ -2077,10 +2032,7 @@ export class KnowledgeStore {
       validateNativeWorkRows(this.sqlite);
       const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite, this.scopeVerdicts)
         + pruneSettledNativeWork(this.sqlite);
-      if (pruned > 0 || verdictTableCreated) {
-        await this.sqlite.save();
-        this.imageIdentity = savedImageIdentity(this.dbPath);
-      }
+      if (pruned > 0 || verdictTableCreated) await this.sqlite.save();
       this.ready = true;
     } catch (error) {
       // No caller mutation can pass init yet. A failed initialization must not
@@ -2091,8 +2043,14 @@ export class KnowledgeStore {
   }
 
   private refreshSnapshot(): void {
-    const snapshot = loadKnowledgeStoreSnapshot(this.sqlite);
-    this.imageIdentity = savedImageIdentity(this.dbPath);
+    // Version first: a commit landing during the load is loaded again next time.
+    // One read transaction, so the maps show one committed state.
+    let snapshot!: ReturnType<typeof loadKnowledgeStoreSnapshot>;
+    this.sqlite.assertPersistedReadFrame(() => {
+      this.loadedDataVersion = this.sqlite.dataVersion();
+      snapshot = loadKnowledgeStoreSnapshot(this.sqlite);
+      return undefined;
+    });
     this.sources.clear();
     for (const record of snapshot.sources) this.sources.set(record.id, record);
     this.nodes.clear();

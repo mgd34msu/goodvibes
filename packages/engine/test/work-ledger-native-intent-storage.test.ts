@@ -281,7 +281,7 @@ test('corrupt intent payload and association mismatch fail closed; a missing exe
 test('old binary refuses schema5 and an already-open schema3 writer cannot erase intent rows', async () => {
   const f = await fixture(); await f.store.close();
   await mutateImage(f.file, db => { db.run('DROP TABLE native_work_execution_intents'); downgradeLedgerRows(db); db.run('PRAGMA user_version = 3'); });
-  const old = new SQLiteStore(f.file, { coordinated: true }); await old.init(() => {}, { schemaVersion: 3 });
+  const old = new SQLiteStore(f.file); await old.init(() => {}, { schemaVersion: 3 });
   const migrated = await open(f.file);
   await migrated.storage.transaction(f.key, () => ({ next: null, nextIntent: f.intent, value: undefined }));
   const bytes = readFileSync(f.file);

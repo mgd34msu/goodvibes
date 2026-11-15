@@ -50,54 +50,12 @@ test('independent owners serialize competing revision and preserve unrelated pro
   expect((await other.service.history(0, other.actor))).toHaveLength(1);
 });
 
-test('decision is synchronous, exactly once and detached; pending local edits are not discarded', async () => {
+test('decision is synchronous, exactly once and detached', async () => {
   const first = await open(path()); let called = 0;
   await expect(first.storage.transaction((async () => ({ next: null, value: 1 })) as unknown as () => WorkLedgerDecision<number>)).rejects.toThrow('synchronous');
   expect(await first.storage.transaction(current => { called++; (current as { revision: number }).revision = 99; return { next: null, value: 'read' }; })).toBe('read');
   expect(called).toBe(1);
   expect((await first.storage.read() as { revision: number }).revision).toBe(0);
-  await first.store.batch(async () => {
-    await first.store.upsertSource({ id: 'pending', connectorId: 'fixture', sourceType: 'manual', status: 'indexed' });
-    await expect(first.storage.transaction(() => { called++; return { next: null, value: 0 }; })).rejects.toThrow('admission blocked');
-  });
-  expect(called).toBe(1);
-  expect(first.store.getSource('pending')).not.toBeNull();
-});
-
-test('revocation and abort during lock wait leave bytes unchanged', async () => {
-  const file = path(); const first = await open(file); await first.store.upsertSource({ id: 'seed', connectorId: 'fixture', sourceType: 'manual', status: 'indexed' });
-  const bytes = readFileSync(file); const release = await acquireCrossProcessLock(`${file}.knowledge-lock`, { strictOwnership: true });
-  const abort = new AbortController();
-  const pending = first.service.execute(command, first.actor, { signal: abort.signal });
-  await new Promise(resolve => setTimeout(resolve, 20)); abort.abort(); release();
-  expect(await pending).toMatchObject({ kind: 'rejected', code: 'cancelled' });
-  expect(readFileSync(file)).toEqual(bytes);
-  const release2 = await acquireCrossProcessLock(`${file}.knowledge-lock`, { strictOwnership: true });
-  const revoked = first.service.execute(command, first.actor);
-  await new Promise(resolve => setTimeout(resolve, 20)); first.authority.revokeActor(first.actor); release2();
-  expect(await revoked).toMatchObject({ kind: 'rejected', code: 'forbidden' });
-  expect(readFileSync(file)).toEqual(bytes);
-});
-
-test('missing established database and corruption fail closed without resetting', async () => {
-  const file = path(); const first = await open(file); await first.service.execute(command, first.actor);
-  unlinkSync(file);
-  await expect(first.storage.read()).rejects.toThrow();
-  expect(await first.service.execute(command, first.actor)).toMatchObject({ kind: 'indeterminate' });
-  writeFileSync(file, 'corrupt');
-  await expect(first.storage.read()).rejects.toThrow();
-  expect(readFileSync(file, 'utf8')).toBe('corrupt');
-});
-
-test('postcommit refresh failure cannot erase accepted result and fences ordinary cache writes', async () => {
-  const file = path(); const sqlite = new SQLiteStore(file, { coordinated: true });
-  const schema = (db: { run(sql: string): void }) => db.run('CREATE TABLE IF NOT EXISTS proof (value TEXT)');
-  await sqlite.init(schema);
-  expect(await sqlite.transactPersisted(db => { db.run("INSERT INTO proof VALUES ('durable')"); return { changed: true, value: 'accepted' }; }, () => { throw new Error('refresh'); })).toEqual({ kind: 'completed', value: 'accepted', fenced: true });
-  expect(() => sqlite.run("DELETE FROM proof")).toThrow('fenced');
-  expect(sqlite.readPersisted(db => db.exec('SELECT value FROM proof')[0]?.values)).toEqual([['durable']]);
-  expect(await sqlite.transactPersisted(db => ({ changed: false, value: db.exec('SELECT value FROM proof')[0]?.values }), () => {})).toEqual({ kind: 'completed', value: [['durable']] });
-  sqlite.close();
 });
 
 test('cross-owner polling catches up and subscription cleanup stops callbacks', async () => {
@@ -125,7 +83,7 @@ test('v1 migration adds ledger and native execution tables; legacy metadata is p
 
 test('malformed ledger receipt/history is rejected without reset or publication', async () => {
   const file = path(); const first = await open(file); await first.service.execute(command, first.actor);
-  const raw = new SQLiteStore(file, { coordinated: true }); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
+  const raw = new SQLiteStore(file); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   const state = await first.storage.read() as { receipts: unknown[] };
   state.receipts = [];
   raw.run('UPDATE work_ledgers SET state_json = ?', [JSON.stringify(state)]); await raw.save(); raw.close();
@@ -147,18 +105,6 @@ test('owner close waits for a ledger write held on file ownership and then rejec
   const reopened = await open(file); expect((await reopened.service.history(0, reopened.actor))).toHaveLength(1);
 });
 
-test('reentrant local writes during a decision are retained and prevent publication', async () => {
-  const file = path(); const sqlite = new SQLiteStore(file, { coordinated: true });
-  await sqlite.init(db => db.run('CREATE TABLE IF NOT EXISTS fixture(value TEXT)'));
-  await expect(sqlite.transactPersisted(db => {
-    db.run("INSERT INTO fixture VALUES ('ledger')");
-    sqlite.run("INSERT INTO fixture VALUES ('local')");
-    return { changed: true, value: 'unsafe' };
-  }, () => {})).rejects.toThrow('reentrant local changes');
-  expect(sqlite.exec('SELECT value FROM fixture')[0]?.values).toEqual([['local']]);
-  await sqlite.save(); sqlite.close();
-});
-
 test('missing ledger table in an established v5 database cannot be repaired by ordinary writes', async () => {
   const file = path(); const first = await open(file); await first.service.execute(command, first.actor); await first.store.close();
   const raw = new SQLiteStore(file); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION }); raw.run('DROP TABLE work_ledgers'); await raw.save(); raw.close();
@@ -167,15 +113,6 @@ test('missing ledger table in an established v5 database cannot be repaired by o
   await expect(owner.init()).rejects.toThrow('schema is missing or corrupt');
   await expect(owner.upsertSource({ id: 'must-not-repair', connectorId: 'fixture', sourceType: 'manual', status: 'indexed' })).rejects.toThrow('schema is missing or corrupt');
   await expect(owner.openWorkLedgerStorage('project')).rejects.toThrow('schema is missing or corrupt');
-  expect(readFileSync(file)).toEqual(bytes);
-});
-
-test('schema deletion after open fences an ordinary save without replacing the newer disk image', async () => {
-  const file = path(); const first = await open(file); await first.service.execute(command, first.actor);
-  const raw = new SQLiteStore(file); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION }); raw.run('DROP TABLE work_ledgers'); await raw.save(); raw.close();
-  const bytes = readFileSync(file);
-  await expect(first.store.upsertSource({ id: 'must-not-repair', connectorId: 'fixture', sourceType: 'manual', status: 'indexed' })).rejects.toThrow('persisted state changed');
-  expect(await first.service.execute(command, first.actor)).toMatchObject({ kind: 'indeterminate' });
   expect(readFileSync(file)).toEqual(bytes);
 });
 
@@ -204,93 +141,3 @@ for (const corrupt of [Buffer.alloc(0), Buffer.from('SQLite format 3\0'), Buffer
   });
 }
 
-test('postcommit replaced-image close failure does not change the durable result', async () => {
-  const file = path(); const sqlite = new SQLiteStore(file, { coordinated: true });
-  await sqlite.init(db => db.run('CREATE TABLE IF NOT EXISTS fixture(value TEXT)'));
-  const backend: SqlDatabase = (await loadSqlJsEngine()).Database.prototype;
-  const originalClose = backend.close;
-  let cleanupCalls = 0;
-  backend.close = function () {
-    originalClose.call(this);
-    cleanupCalls++;
-    throw new Error('injected old image cleanup');
-  };
-  try {
-    try {
-      expect(await sqlite.transactPersisted(db => { db.run("INSERT INTO fixture VALUES ('durable')"); return { changed: true, value: 'accepted' }; }, () => {})).toEqual({ kind: 'completed', value: 'accepted' });
-      expect(cleanupCalls).toBe(1);
-    } finally { backend.close = originalClose; }
-    expect(sqlite.readPersisted(db => db.exec('SELECT value FROM fixture')[0]?.values)).toEqual([['durable']]);
-  } finally { sqlite.close(); }
-});
-
-test('postcommit lock cleanup failure preserves success and durable replay while fencing ordinary writes', async () => {
-  const file = path(); const sqlite = new SQLiteStore(file, { coordinated: true });
-  await sqlite.init(db => db.run('CREATE TABLE IF NOT EXISTS fixture(value TEXT)'));
-  const persistence = (sqlite as unknown as { persistence: { lock(): Promise<() => void> } }).persistence;
-  const originalLock = persistence.lock.bind(persistence);
-  persistence.lock = async () => { const release = await originalLock(); return () => { release(); throw new Error('injected release cleanup'); }; };
-  expect(await sqlite.transactPersisted(db => { db.run("INSERT INTO fixture VALUES ('durable')"); return { changed: true, value: 'accepted' }; }, () => {})).toEqual({ kind: 'completed', value: 'accepted' });
-  expect(() => sqlite.run('DELETE FROM fixture')).toThrow('fenced');
-  persistence.lock = originalLock;
-  expect(await sqlite.transactPersisted(db => ({ changed: false, value: db.exec('SELECT value FROM fixture')[0]?.values }), () => {})).toEqual({ kind: 'completed', value: [['durable']] });
-  sqlite.close();
-});
-
-
-test('actual ledger directory-sync ambiguity returns indeterminate then exact retry proves durable receipt', async () => {
-  const file = path(); const first = await open(file);
-  let fail = true; const synced: string[] = [];
-  const actualSync = nativeFs.fsyncSync;
-  const sync = spyOn(nativeFs, 'fsyncSync').mockImplementation(fd => {
-    const kind = nativeFs.fstatSync(fd).isDirectory() ? 'directory' : 'file'; synced.push(kind);
-    if (kind === 'directory' && fail) { fail = false; throw new Error('injected directory sync ambiguity'); }
-    actualSync(fd);
-  });
-  try {
-    expect(await first.service.execute(command, first.actor)).toMatchObject({ kind: 'indeterminate', requestId: 'request' });
-    expect(fail).toBe(false);
-    const bytes = readFileSync(file); synced.length = 0;
-    expect(await first.service.execute(command, first.actor)).toMatchObject({ kind: 'accepted', replayed: true });
-    const expected = ['file'];
-    for (let path = dirname(file);; path = dirname(path)) {
-      expected.push('directory');
-      if (dirname(path) === path) break;
-    }
-    expect(synced).toEqual(expected);
-    expect(readFileSync(file)).toEqual(bytes);
-    expect((await first.service.history(0, first.actor))).toHaveLength(1);
-  } finally { sync.mockRestore(); }
-});
-
-test('a database deleted while the daemon was down is refused, not opened as an empty ledger', async () => {
-  const file = path(); const first = await open(file); await first.service.execute(command, first.actor); await first.store.close();
-  unlinkSync(file);
-  const fresh = await open(file);
-  await expect(fresh.storage.read()).rejects.toThrow('deleted, replaced by an older copy');
-  await expect(fresh.service.readSnapshot(fresh.actor)).rejects.toThrow();
-  // Writing is refused too: nothing is created on top of the missing history.
-  expect(await fresh.service.execute({ ...command, requestId: 'again' }, fresh.actor)).toMatchObject({ kind: 'indeterminate' });
-  await expect(fresh.storage.read()).rejects.toThrow('deleted, replaced by an older copy');
-  // The refusal names the way forward: removing the marker accepts the empty ledger.
-  unlinkSync(`${file}.work-ledger-revisions.json`);
-  expect(await fresh.service.readSnapshot(fresh.actor)).toMatchObject({ revision: 0, works: [] });
-});
-
-test('a database restored from an older copy is refused for every project whose history it lost', async () => {
-  const file = path(); const first = await open(file);
-  await first.service.execute(command, first.actor);
-  const backup = readFileSync(file);
-  expect(await first.service.execute({ ...command, requestId: 'second', expectedRevision: 1 }, first.actor)).toMatchObject({ kind: 'accepted' });
-  const other = await open(file, 'other');
-  expect(await other.service.execute(command, other.actor)).toMatchObject({ kind: 'accepted' });
-  await first.store.close(); await other.store.close();
-  writeFileSync(file, backup);
-  const restored = await open(file);
-  await expect(restored.storage.read()).rejects.toThrow('deleted, replaced by an older copy');
-  const otherAfter = await open(file, 'other');
-  await expect(otherAfter.storage.read()).rejects.toThrow('deleted, replaced by an older copy');
-  // A project that never had history in either copy is not affected.
-  const untouched = await open(file, 'never-used');
-  expect(await untouched.storage.read()).toMatchObject({ revision: 0 });
-});

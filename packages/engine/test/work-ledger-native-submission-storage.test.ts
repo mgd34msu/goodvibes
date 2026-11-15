@@ -188,7 +188,7 @@ test('schema4 migration validates old authority, adds only null provenance and p
   const f = await open(); const oldCommand = { type: 'create', requestId: 'old', expectedRevision: 0, title: 'Old', goal: 'Old goal', criteria: ['First', 'First', 'Second'] };
   event(await f.service.execute(oldCommand, f.actor)); const old = legacyState(await f.storage.read() as WorkLedgerState); await f.store.close();
   await mutate(f.file, db => { db.run('UPDATE work_ledgers SET format_version = 1, state_json = ?', [JSON.stringify(old)]); db.run('PRAGMA user_version = 4'); });
-  const oldWriter = new SQLiteStore(f.file, { coordinated: true }); await oldWriter.init(() => {}, { schemaVersion: 4 });
+  const oldWriter = new SQLiteStore(f.file); await oldWriter.init(() => {}, { schemaVersion: 4 });
   const migrated = await open(f.file); const state = await migrated.storage.read() as WorkLedgerState;
   expect(state.version).toBe(2); expect(state.works[0]!.source).toBeNull(); expect(state.receipts[0]!.signature).toBe(old.receipts[0]!.signature);
   expect(await migrated.service.lookupSubmission('old', migrated.actor)).toBeNull();

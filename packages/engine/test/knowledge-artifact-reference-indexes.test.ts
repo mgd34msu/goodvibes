@@ -7,7 +7,7 @@ import { artifactReferenceIndexes, createArtifactReferenceIndexes, persistedArti
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'artifact-reference-index-')); roots.push(root); const path = join(root, 'knowledge.sqlite'), store = new SQLiteStore(path, { coordinated: true });
+  const root = mkdtempSync(join(tmpdir(), 'artifact-reference-index-')); roots.push(root); const path = join(root, 'knowledge.sqlite'), store = new SQLiteStore(path);
   await store.init(db => { db.run('CREATE TABLE IF NOT EXISTS knowledge_sources(id TEXT PRIMARY KEY, artifact_id TEXT)'); db.run('CREATE TABLE IF NOT EXISTS knowledge_extractions(id TEXT PRIMARY KEY, artifact_id TEXT)'); db.run('CREATE TABLE IF NOT EXISTS knowledge_edges(id TEXT PRIMARY KEY, from_kind TEXT NOT NULL,from_id TEXT NOT NULL,to_kind TEXT NOT NULL,to_id TEXT NOT NULL,relation TEXT NOT NULL)'); db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_edges_unique ON knowledge_edges(from_kind,from_id,to_kind,to_id,relation)'); createArtifactReferenceIndexes(db); });
   await store.save();
   return { root, path, store };

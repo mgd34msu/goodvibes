@@ -65,7 +65,7 @@ test('native group bookkeeping preserves unrelated raw JSON integer/decimal toke
   const id = f.node('input_boolean.precise')!.id, path = f.store.storagePath; await f.store.close();
   // A real saved older/native JSON record can contain numeric tokens that a JS
   // parse/stringify round trip would change. Keep them in the actual SQLite cell.
-  const setup = new SQLiteStore(path, { coordinated: true }); await setup.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
+  const setup = new SQLiteStore(path); await setup.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   try {
     const metadata = setup.exec('SELECT metadata FROM knowledge_nodes WHERE id = ?', [id])[0]!.values[0]![0]; if (typeof metadata !== 'string') throw Error('Missing actual metadata cell');
     const precise = metadata.slice(0, -1) + ',"precise":9007199254740993,"decimal":1.2300,"review":{"action":"approve","reviewer":"owner"}}';

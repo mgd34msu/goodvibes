@@ -122,7 +122,7 @@ async function planning() {
   // bytes or brute-forcing random revisions. Restore the understood native
   // trigger before reopening; every later conditional write uses the real one.
   await store.close();
-  const setup = new SQLiteStore(path, { coordinated: true }); await setup.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
+  const setup = new SQLiteStore(path); await setup.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   try {
     const trigger = setup.exec("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='knowledge_sources_revision_update'")[0]?.values[0]?.[0];
     if (typeof trigger !== 'string') throw new Error('Native source revision trigger is missing');

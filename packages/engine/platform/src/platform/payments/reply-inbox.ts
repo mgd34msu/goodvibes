@@ -34,7 +34,7 @@ import type { ChannelDelivery } from './windows.js';
 import type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
 import type { TelegramSourceAccountReader } from '../channels/telegram/source-account.js';
 import { PaymentReplySourceOwner, type PaymentReplySourceGuard } from './reply-source-owner.js';
-import type { PaymentOperationView } from './operation-view.js';
+import { purchaseDisposition, type PaymentOperationView } from './operation-view.js';
 import type { TelegramPaymentReceiveSelector } from '../channels/telegram/payment-receive-span.js';
 export type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
 
@@ -139,7 +139,8 @@ export class PaymentReplyInbox implements PaymentReplySource {
     if (!owner || this.#closed) return false;
     try {
       owner.current(); const status = owner.read(purchaseId); owner.current();
-      return status !== null && (status.state === 'completed' || status.state === 'refused' || status.state === 'cancelled' || status.state === 'failed');
+      // An ended purchase never reads replies again; a live one may still resume its window.
+      return status !== null && !purchaseDisposition(status).live;
     } catch { return false; }
   }
 

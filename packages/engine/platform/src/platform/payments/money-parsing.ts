@@ -39,6 +39,14 @@
  *   "1.234"    → same reasoning with the separators swapped: 1234 major units.
  *   "1,23"     → 2 digits, too few to be a thousands group: 1.23.
  *   "1,23,456" → matches nothing. Refused rather than salvaged.
+ *
+ * Three-decimal currencies (KWD, BHD, OMR, ...) are where those two facts
+ * collide: "0.750" and "12.500" are how those prices are printed, and they have
+ * the thousands-group shape. There, one separator with exactly three digits
+ * after it is a fraction, the same reading the owner's own maximum gets, unless
+ * the page itself shows that it groups thousands with that mark
+ * (`pageDecimalMark`). A page that gives no sign either way while also writing
+ * bare whole numbers is refused rather than guessed at.
  */
 import type { CurrencyCode, MinorUnits } from './types.js';
 
@@ -90,25 +98,22 @@ export function parseRequestedMaximum(raw: string, currency: CurrencyCode): Mino
 /** Characters a page may put around a number that carry no numeric meaning. */
 const CURRENCY_ORNAMENT = /[\p{Sc}\s   ]/gu;
 
-/**
- * Read one amount off a page, or refuse.
- *
- * Returns null, never a fallback, when the text is empty, holds no number,
- * holds more than one number, is negative, uses a separator layout that could
- * mean two different values, or exceeds the parse ceiling.
- *
- * A leading minus is refused rather than negated: a negative amount where a
- * charge belongs is a discount or a credit, and treating one as a normal amount
- * that happens to reduce the total is how a page talks a budget check into
- * passing. Discounts have their own lines, read by `parseDiscountMinorUnits`.
- */
-export function parseMinorUnits(raw: string, currency: CurrencyCode | string): MinorUnits | null {
-  if (typeof raw !== 'string') return null;
-  const exponent = minorUnitExponent(currency);
+/** The character a page writes between whole units and the fraction. */
+export type DecimalMark = '.' | ',';
 
+/** One separator, one to three digits before it and exactly three after:
+ *  a fraction or one thousands group, depending on the page. */
+const THREE_DIGIT_SPLIT = /^\d{1,3}[.,]\d{3}$/;
+
+/**
+ * The one numeric run of an amount string, with currency ornament removed, or
+ * null when the text is empty, negative, holds more than one number, or says
+ * something besides the number.
+ */
+function amountNumeral(raw: string, currency: string): string | null {
   // Strip currency symbols, the ISO code itself, and every flavour of space.
-  // Nothing here removes a digit or a separator, so the grammar below still
-  // sees the full layout the page chose.
+  // Nothing here removes a digit or a separator, so the grammar still sees the
+  // full layout the page chose.
   let text = raw.replace(CURRENCY_ORNAMENT, '');
   text = text.replace(new RegExp(currency, 'gi'), '');
   text = text.trim();
@@ -129,6 +134,101 @@ export function parseMinorUnits(raw: string, currency: CurrencyCode | string): M
   // the string said something we did not understand ("12.00/mo", "from 12.00").
   const remainder = text.replace(number, '');
   if (/[\p{L}\p{N}]/u.test(remainder)) return null;
+  return number;
+}
+
+/**
+ * The decimal mark one numeral shows by its own layout, or undefined when it
+ * shows none ("750", or a three-digit split such as "1.234").
+ */
+function revealedDecimalMark(number: string): DecimalMark | undefined {
+  const dots = number.split('.').length - 1;
+  const commas = number.split(',').length - 1;
+  if (dots > 0 && commas > 0) return number.lastIndexOf('.') > number.lastIndexOf(',') ? '.' : ',';
+  // The same mark twice can only be grouping, so the other one is the decimal.
+  if (dots > 1) return ',';
+  if (commas > 1) return '.';
+  if (dots + commas === 0) return undefined;
+  const separator: DecimalMark = dots === 1 ? '.' : ',';
+  const before = number.indexOf(separator), after = number.length - before - 1;
+  // A thousands group is exactly three digits, follows at most three, and
+  // never follows a lone zero.
+  if (after !== 3 || before > 3 || number.startsWith(`0${separator}`)) return separator;
+  return undefined;
+}
+
+/**
+ * How a checkout page writes its amounts, decided from the amounts themselves.
+ *
+ * Only three-decimal currencies need this; for every other currency the
+ * grammar in `parseMinorUnits` decides alone and the answer is `{ ok: true }`.
+ * Refused (`ok: false`) when two amounts on the page show different decimal
+ * marks, or when nothing shows one and the page writes both three-digit splits
+ * ("1,234") and bare whole numbers ("5"): "1,234" + "5" adds up to 6.234 or to
+ * 1239 and the page gives no way to tell which.
+ */
+export function pageDecimalMark(
+  amounts: readonly string[],
+  currency: CurrencyCode | string,
+): { readonly ok: true; readonly mark?: DecimalMark } | { readonly ok: false; readonly example: string } {
+  if (minorUnitExponent(currency) !== 3) return { ok: true };
+  let mark: DecimalMark | undefined;
+  let split: string | undefined;
+  let whole = false;
+  for (const raw of amounts) {
+    // Discount lines may carry a sign; the layout of the digits is what counts.
+    const unsigned = unsignedAmountText(raw);
+    const number = unsigned === null ? null : amountNumeral(unsigned, currency);
+    if (number === null) continue;
+    const shown = revealedDecimalMark(number);
+    if (shown !== undefined) {
+      if (mark !== undefined && mark !== shown) return { ok: false, example: number };
+      mark = shown;
+    } else if (THREE_DIGIT_SPLIT.test(number)) split ??= number;
+    else if (/^\d+$/.test(number) && Number(number) !== 0) whole = true;
+  }
+  if (mark !== undefined) return { ok: true, mark };
+  if (split !== undefined && whole) return { ok: false, example: split };
+  return { ok: true };
+}
+
+/**
+ * Read one amount off a page, or refuse.
+ *
+ * Returns null, never a fallback, when the text is empty, holds no number,
+ * holds more than one number, is negative, uses a separator layout that could
+ * mean two different values, or exceeds the parse ceiling.
+ *
+ * A leading minus is refused rather than negated: a negative amount where a
+ * charge belongs is a discount or a credit, and treating one as a normal amount
+ * that happens to reduce the total is how a page talks a budget check into
+ * passing. Discounts have their own lines, read by `parseDiscountMinorUnits`.
+ *
+ * `decimalMark` is the page's mark from `pageDecimalMark`. In a three-decimal
+ * currency it decides a three-digit split, and an amount that shows the other
+ * mark is refused; without it a three-digit split is a fraction, the reading
+ * `parseRequestedMaximum` gives the owner's own figure.
+ */
+export function parseMinorUnits(
+  raw: string,
+  currency: CurrencyCode | string,
+  decimalMark?: DecimalMark,
+): MinorUnits | null {
+  if (typeof raw !== 'string') return null;
+  const exponent = minorUnitExponent(currency);
+  const number = amountNumeral(raw, currency);
+  if (number === null) return null;
+
+  if (exponent === 3) {
+    const shown = revealedDecimalMark(number);
+    if (decimalMark !== undefined && shown !== undefined && shown !== decimalMark) return null;
+    if (THREE_DIGIT_SPLIT.test(number)) {
+      const separator = number.charAt(number.length - 4);
+      const [major = '', minor = ''] = number.split(separator);
+      const grouped = decimalMark !== undefined && decimalMark !== separator;
+      return exactMinorUnits(grouped ? `${major}${minor}` : major, grouped ? '' : minor, exponent);
+    }
+  }
 
   const fraction = exponent === 0 ? '' : `{1,${String(exponent)}}`;
 
@@ -159,7 +259,10 @@ export function parseMinorUnits(raw: string, currency: CurrencyCode | string): M
   } else {
     return null;
   }
+  return exactMinorUnits(majorText, minorText, exponent);
+}
 
+function exactMinorUnits(majorText: string, minorText: string, exponent: number): MinorUnits | null {
   if (!/^\d+$/.test(majorText)) return null;
   if (minorText !== '' && !/^\d+$/.test(minorText)) return null;
   if (minorText.length > exponent) return null;
@@ -185,7 +288,17 @@ export function parseMinorUnits(raw: string, currency: CurrencyCode | string): M
  * grammar unchanged, so the same ambiguity rules apply. The result is the
  * magnitude: a discount line can only lower what is charged, never raise it.
  */
-export function parseDiscountMinorUnits(raw: string, currency: CurrencyCode | string): MinorUnits | null {
+export function parseDiscountMinorUnits(
+  raw: string,
+  currency: CurrencyCode | string,
+  decimalMark?: DecimalMark,
+): MinorUnits | null {
+  const text = unsignedAmountText(raw);
+  return text === null ? null : parseMinorUnits(text, currency, decimalMark);
+}
+
+/** A reduction's text with its one sign or its parentheses taken off, or null. */
+function unsignedAmountText(raw: string): string | null {
   if (typeof raw !== 'string') return null;
   let text = raw.trim();
   if (text.startsWith('(') && text.endsWith(')')) text = text.slice(1, -1).trim();
@@ -194,8 +307,7 @@ export function parseDiscountMinorUnits(raw: string, currency: CurrencyCode | st
     const signs = text.match(/[-−–]/g)?.length ?? 0;
     if (signs === 1 && text.search(/[-−–]/) < text.search(/\d/)) text = text.replace(/[-−–]/, '');
   }
-  if (/[-−–()]/.test(text)) return null;
-  return parseMinorUnits(text, currency);
+  return /[-−–()]/.test(text) ? null : text;
 }
 
 /**

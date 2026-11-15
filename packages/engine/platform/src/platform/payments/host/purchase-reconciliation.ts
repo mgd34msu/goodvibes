@@ -1,7 +1,7 @@
 import { samePaymentEvidence } from '../evidence-equality.js';
 import { OwnedWork } from '../../utils/owned-work.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
-import { canReconcilePaymentOperation, type PaymentOperationView } from '../operation-view.js';
+import { canReconcilePaymentOperation, purchaseOutcomeText, readPurchaseOutcome, type PaymentOperationView } from '../operation-view.js';
 import type { BudgetLedger, CheckoutBudgetSettlement, CheckoutBudgetSettlementOwner } from '../budget.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import type { CheckoutJournal } from '../checkout-registry.js';
@@ -85,6 +85,12 @@ export class PurchaseReconciliationError extends Error {
   }
 }
 
+/** The owner's finding is already settled on this operation. */
+function confirmedAs(operation: PaymentOperationView, finding: PaymentReconciliationOutcome): boolean {
+  const outcome = readPurchaseOutcome(operation.outcome);
+  return outcome?.kind === 'owner-confirmed' && outcome.finding === finding;
+}
+
 /** Independent of sockets and browser drivers. The real execution lease must
  * be free before an owner can settle anything; bookkeeping never calls submit,
  * reserves replacement money, or converts a missing receipt into a no-charge. */
@@ -112,7 +118,7 @@ export class PurchaseReconciliations {
           `Your earlier finding for purchase ${purchaseId} (${checkpoint.outcome}) is already saved. Repeat that same finding to finish settling it.`);
         // Already settled: the spend and receipt may have been pruned since, so the evidence
         // pins below would fail a repeat of the same finding that should simply answer again.
-        if (checkpoint && operation.outcome === `owner-confirmed-${checkpoint.outcome}`) return operation;
+        if (checkpoint && confirmedAs(operation, checkpoint.outcome)) return operation;
         const evidence = retainEvidence(this.deps, purchaseId, operationId, checkpoint);
         const current = () => { this.current(); authorized(); writer.assertCurrent(); evidence.assertCurrent(); };
         current();
@@ -153,7 +159,7 @@ export class PurchaseReconciliations {
   async recover(): Promise<void> {
     this.current();
     for (const operation of this.deps.operations.list()) {
-      if (!operation.outcome?.startsWith('owner-reconciliation-pending-')) continue;
+      if (readPurchaseOutcome(operation.outcome)?.kind !== 'owner-reconciliation-pending') continue;
       await this.work.run(async () => {
         this.current(); const writer = this.deps.operations.recover(operation.purchaseId); if (!writer) return;
         try {
@@ -172,7 +178,7 @@ export class PurchaseReconciliations {
   private async settle(writer: PaymentOperationWriter, checkpoint: PaymentReconciliationCheckpoint, current: () => void,
     evidence: ReturnType<typeof retainEvidence>): Promise<PaymentOperationView> {
     current();
-    if (writer.read().outcome === `owner-confirmed-${checkpoint.outcome}`) return writer.read();
+    if (confirmedAs(writer.read(), checkpoint.outcome)) return writer.read();
     const originals = await this.deps.journal.list(); current();
     const original = originals.find(row => row.purchaseId === checkpoint.purchaseId) ?? null;
     const settled = this.deps.budget.state().reconciliations?.some(row => row.operationId === checkpoint.operationId) === true;
@@ -192,7 +198,7 @@ export class PurchaseReconciliations {
       await this.deps.journal.remove(checkpoint.purchaseId); current();
     }
     const operation: PaymentOperationView = { ...writer.read(), state: 'completed',
-      outcome: `owner-confirmed-${checkpoint.outcome}`, updatedAtMs: (this.deps.now ?? Date.now)(),
+      outcome: purchaseOutcomeText({ kind: 'owner-confirmed', finding: checkpoint.outcome }), updatedAtMs: (this.deps.now ?? Date.now)(),
       totalMinorUnits: (checkpoint.journal ?? checkpoint.purchase)?.totalMinorUnits ?? null,
       currency: (checkpoint.journal ?? checkpoint.purchase)?.currency ?? null };
     writer.update(operation, current); current();

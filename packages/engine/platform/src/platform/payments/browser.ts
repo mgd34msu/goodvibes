@@ -33,5 +33,5 @@ export const CVV_PROMPT_TRADEOFF_WARNING =
   + 'are within budget and would otherwise have gone ahead on their own. Never send the code in a chat.';
 
 
-export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
-export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation, PaymentOperationLimit } from './operation-view.js';
+export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, purchaseDisposition, readPurchaseOutcome, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
+export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation, PaymentOperationLimit, PurchaseDisposition, PurchaseOutcome, PaymentReconciliationFinding } from './operation-view.js';

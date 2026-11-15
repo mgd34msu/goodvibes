@@ -69,7 +69,8 @@ export const VETO_WINDOW = {
 export interface ChannelDelivery {
   readonly channel: CommandAuthorityChannel;
   readonly delivered: boolean;
-  /** Whether this channel's history can be re-read for a span we were down. */
+  /** Recorded with each delivery. A restart decides from the channel itself
+   * (`RESTART_READABLE_CHANNELS`), never from this flag. */
   readonly backfillable: boolean;
   /** Exact provider acknowledgement, when available. Not a backfill capability. */
   readonly receipt?: ChannelDeliveryReceipt | undefined;
@@ -231,30 +232,48 @@ export function advanceVeto(state: VetoState, event: VetoEvent): VetoState {
 // ---------------------------------------------------------------------------
 
 /**
- * What a restart should do with a window whose deadline passed while we were
- * down.
+ * Channels whose replies a restart can read back: the daemon archives every
+ * owner reply to a Telegram notice before it confirms the update, and the
+ * native poller drains what arrived while it was down into that archive.
+ */
+export const RESTART_READABLE_CHANNELS: readonly CommandAuthorityChannel[] = Object.freeze(['telegram']);
+
+/**
+ * What a restart does with a purchase that was waiting for the owner's reply.
  *
- * ── Keyed on DELIVERY, not on uptime ──────────────────────────────────────
+ * One order, applied first by the native restorer and then by the boot sweep
+ * to every window the restorer did not take back:
  *
- * Silence means "the owner had the chance to object and did not." Whether OUR
- * process was alive has nothing to do with whether they had that chance. An
- * earlier draft keyed this on uptime and re-opened every interrupted window;
- * that is wrong, because it re-pings them about something they deliberately
- * ignored, and a system that repeats itself is one they stop reading.
+ *  1. The notice never reached the owner on any channel (`not-delivered`):
+ *     there is nothing to resume. The purchase ends unbought, the hold is
+ *     released and the owner is told.
+ *  2. Every channel the notice reached keeps its replies across a restart
+ *     (`resume`): the window is resumed under its original authority, page and
+ *     settings. Replies archived for it are read first, and an objection or a
+ *     refusal ends it. Silence counts only where the archive proves every reply
+ *     up to the deadline was received; a recipient that is not proven gets the
+ *     notice again and a renewed deadline. An approval that expired unanswered
+ *     is still denied. `/payments pending` answers a resumed window too.
+ *  3. A channel the notice reached keeps no replies across a restart (`end`):
+ *     a reply there may have been lost, and a lost objection must not become a
+ *     veto's silence. The purchase ends unbought and the owner is told.
+ *  4. A window that should resume but cannot (its page, pairing, payment
+ *     settings, decision models or saved replies are not as they were): it
+ *     ends unbought, the hold is released and the owner is told why.
  *
- *  - delivered, then expired  → the expiry STANDS. Backfill each live channel
- *    for the downtime span and honour any objection found there before charging.
- *    Do not re-notify: the owner already saw it.
- *  - never delivered          → the undeliverable rule governs, unchanged.
- *  - cannot be backfilled     → re-open on THAT CHANNEL ONLY, because only that
- *    channel cannot distinguish silence from an objection we dropped.
+ * Keyed on DELIVERY, not on uptime: silence means "the owner had the chance to
+ * object and did not", and whether this process was alive has nothing to do
+ * with that chance. A delivered notice is never sent again to a recipient whose
+ * replies are proven, because a system that repeats itself is one people stop
+ * reading.
  */
 export interface WindowRecovery {
-  readonly outcome: 'expiry-stands' | 'undeliverable-rule' | 'reopen';
-  /** Channels whose history must be read for the downtime span before settling. */
-  readonly backfillChannels: readonly CommandAuthorityChannel[];
-  /** Channels the window re-opens on, when it re-opens at all. */
-  readonly reopenChannels: readonly CommandAuthorityChannel[];
+  readonly outcome: 'not-delivered' | 'resume' | 'end';
+  /** Channels the notice reached. */
+  readonly deliveredChannels: readonly CommandAuthorityChannel[];
+  /** Delivered channels whose replies a restart cannot read back. */
+  readonly unreadableChannels: readonly CommandAuthorityChannel[];
+  readonly deadlinePassed: boolean;
   readonly reason: string;
 }
 
@@ -262,40 +281,31 @@ export function recoverInterruptedWindow(input: {
   readonly deliveries: readonly ChannelDelivery[];
   readonly deadlinePassed: boolean;
 }): WindowRecovery {
-  const delivered = input.deliveries.filter((entry) => entry.delivered);
+  const delivered = [...new Set(input.deliveries.filter((entry) => entry.delivered).map((entry) => entry.channel))];
+  const unreadable = delivered.filter((channel) => !RESTART_READABLE_CHANNELS.includes(channel));
   if (delivered.length === 0) {
     return {
-      outcome: 'undeliverable-rule',
-      backfillChannels: [],
-      reopenChannels: [],
-      reason: 'The notification never reached the owner, so the undeliverable rule decides this, not the clock.',
+      outcome: 'not-delivered',
+      deliveredChannels: [],
+      unreadableChannels: [],
+      deadlinePassed: input.deadlinePassed,
+      reason: 'The notice never reached the owner, so there is no window to resume.',
     };
   }
-  if (!input.deadlinePassed) {
+  if (unreadable.length > 0) {
     return {
-      outcome: 'expiry-stands',
-      backfillChannels: delivered.filter((entry) => entry.backfillable).map((entry) => entry.channel),
-      reason: 'The window is still open; it is re-armed and any missed replies are backfilled.',
-      reopenChannels: [],
+      outcome: 'end',
+      deliveredChannels: delivered,
+      unreadableChannels: unreadable,
+      deadlinePassed: input.deadlinePassed,
+      reason: 'A channel the notice reached keeps no replies across a restart, so a reply there may have been lost.',
     };
   }
-
-  const unbackfillable = delivered.filter((entry) => !entry.backfillable);
-  if (unbackfillable.length > 0) {
-    return {
-      outcome: 'reopen',
-      backfillChannels: delivered.filter((entry) => entry.backfillable).map((entry) => entry.channel),
-      reopenChannels: unbackfillable.map((entry) => entry.channel),
-      reason:
-        'One or more channels cannot be re-read for the span we were down, so on those channels silence '
-        + 'is indistinguishable from an objection we dropped.',
-    };
-  }
-
   return {
-    outcome: 'expiry-stands',
-    backfillChannels: delivered.map((entry) => entry.channel),
-    reopenChannels: [],
-    reason: 'The owner was notified and the window elapsed. Backfill first, then settle, but do not ask twice.',
+    outcome: 'resume',
+    deliveredChannels: delivered,
+    unreadableChannels: [],
+    deadlinePassed: input.deadlinePassed,
+    reason: 'Every channel the notice reached keeps its replies across a restart, so the window is resumed from them.',
   };
 }

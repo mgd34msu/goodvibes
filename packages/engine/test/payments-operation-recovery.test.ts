@@ -104,7 +104,7 @@ test('a reply still being read when its window closes is recorded as that, with 
   const original = protectedPaymentRequest('late-reading');
   await operations.admit(original.purchaseId, original.input, { principalId: original.principalId, assertCurrent() {} }, () => {}, () => {});
   const deadline = Date.now() + 2000;
-  while (f.store.get(original.purchaseId)?.state !== 'failed') {
+  while (f.store.get(original.purchaseId)?.state !== 'refused') {
     if (Date.now() > deadline) throw new Error('The late reading was not accounted');
     await new Promise(resolve => setTimeout(resolve, 1));
   }
@@ -121,7 +121,7 @@ test.each(['invalid', 'duplicate', 'stale'] as const)('a reply window that could
   const original = protectedPaymentRequest(`window-${kind}`);
   await operations.admit(original.purchaseId, original.input, { principalId: original.principalId, assertCurrent() {} }, () => {}, () => {});
   const deadline = Date.now() + 2000;
-  while (f.store.get(original.purchaseId)?.state !== 'failed') {
+  while (f.store.get(original.purchaseId)?.state !== 'refused') {
     if (Date.now() > deadline) throw new Error('The window failure was not accounted');
     await new Promise(resolve => setTimeout(resolve, 1));
   }
@@ -139,7 +139,7 @@ test('boot recovery keeps its phase fallback: a possible submission with no jour
   cleanup.push(() => operations.close());
   await operations.recover();
   expect(f.store.get('possibly-submitted')).toMatchObject({ state: 'uncertain', phase: 'submit-pending' });
-  expect(f.store.get('not-submitted')).toMatchObject({ state: 'interrupted', phase: 'awaiting-window' });
+  expect(f.store.get('not-submitted')).toMatchObject({ state: 'interrupted', phase: 'awaiting-window', outcome: 'refused:daemon-stopped' });
 });
 
 test('admission before boot recovery names boot recovery, not unavailable evidence', async () => {

@@ -337,7 +337,7 @@ test('a page held by a merchant check frees once the owner reconciles it', async
   const attention = await h.settled(first, 'attention');
   // While the check is open, another checkout on the same page is told why.
   const blocked = await h.begin();
-  const refused = await h.settled(blocked, 'failed');
+  const refused = await h.settled(blocked, 'refused');
   expect(refused.outcome).toBe('refused:page-in-use');
   expect(paymentOperationDescription(refused)).toContain('already has a checkout');
   const reconciled = await h.call('payments.purchase.reconcile', { purchaseId: first, operationId: attention.operationId, outcome: 'not-purchased', inspectedMerchantHistory: true, confirm: true });
@@ -364,7 +364,7 @@ test('a window the next boot cannot restore is settled as not submitted and its 
   // The same host, now without a restorer for saved windows: nothing can resume it, so the sweep must settle it.
   const reopened = h.compose(); await reopened.registration.ready;
   expect(await h.durable.list()).toEqual([]); expect(h.budget.state().reservations).toEqual([]);
-  expect(await h.status(purchaseId)).toMatchObject({ state: 'interrupted', outcome: null });
+  expect(await h.status(purchaseId)).toMatchObject({ state: 'interrupted', outcome: 'refused:daemon-stopped' });
   expect(h.effects).not.toContain('submit');
 });
 

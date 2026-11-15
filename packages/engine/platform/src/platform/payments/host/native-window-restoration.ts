@@ -17,6 +17,7 @@ import { readPaymentsEnabled, readPaymentsServiceConfig, type PaymentsConfigRead
 import type { PaymentNoticeTarget } from '../notice-delivery.js';
 import { capturePaymentNoticeReceipt } from '../notice-receipt.js';
 import { PaymentReplyWindowError, type PaymentReplyInbox } from '../reply-inbox.js';
+import { recoverInterruptedWindow } from '../windows.js';
 import { daemonNoticeRouter } from './notifier.js';
 import { prepareRestoredPaymentReplyWindow } from './restored-reply-window.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
@@ -93,10 +94,13 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           const retiredWindow = new AbortController(), signal = AbortSignal.any([windowOwner.signal, retiredWindow.signal]);
           const windowCurrent = () => { signal.throwIfAborted(); current(); windowOwner.assertCurrent?.(); };
           const delivered = checkpoint.record.windowDeliveries?.filter(delivery => delivery.delivered) ?? [];
-          // Reopen uncovered delivered channels only, at the exact acknowledged
+          // The same order the boot sweep states: only a window whose every
+          // delivered channel keeps its replies across a restart resumes.
+          // Reopen uncovered delivered recipients only, at the exact acknowledged
           // recipient/account/topic. Never replace them with configured defaults
           // or treat a backfillable flag as proof that history was recovered.
-          if (!delivered.length || delivered.some(delivery => delivery.channel !== 'telegram')) throw new PaymentReplyWindowError('source-unavailable');
+          const rule = recoverInterruptedWindow({ deliveries: delivered, deadlinePassed: Date.now() > (checkpoint.record.windowDeadlineMs ?? 0) });
+          if (rule.outcome !== 'resume') throw new PaymentReplyWindowError('source-unavailable');
           const targets: PaymentNoticeTarget[] = [];
           const receipts = delivered.map(delivery => {
             const receipt = capturePaymentNoticeReceipt(delivery.receipt, 'telegram');

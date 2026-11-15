@@ -65,6 +65,7 @@ export {
   isTerminalVeto,
   windowDeadlineMs,
   recoverInterruptedWindow,
+  RESTART_READABLE_CHANNELS,
 } from './windows.js';
 export type {
   SilenceMeaning,
@@ -289,5 +290,5 @@ export type {
   PaymentFillCardResult,
 } from './payments-gateway-service.js';
 
-export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
-export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation, PaymentOperationLimit } from './operation-view.js';
+export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, purchaseDisposition, readPurchaseOutcome, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
+export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation, PaymentOperationLimit, PurchaseDisposition, PurchaseOutcome, PaymentReconciliationFinding } from './operation-view.js';

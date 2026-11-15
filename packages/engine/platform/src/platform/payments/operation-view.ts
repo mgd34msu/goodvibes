@@ -42,15 +42,132 @@ export interface PaymentOperationCancellation {
 export function isLivePaymentOperation(state: PaymentOperationState): boolean {
   return state === 'accepted' || state === 'running' || state === 'cancelling';
 }
+
+/** The owner's finding from the merchant's order history. */
+export type PaymentReconciliationFinding = 'purchased' | 'not-purchased';
+const CHALLENGE_STEPS = ['3d-secure', 'captcha', 'otp', 'unknown'] as const;
+const STOP_CAUSES = ['decision-unavailable', 'decision-disabled', 'reply-source-unavailable'] as const;
+
+/**
+ * What a recorded outcome says. Stored records and the wire keep the outcome as
+ * text; this is the one place that text is read, so no caller matches a prefix.
+ */
+export type PurchaseOutcome =
+  /** Nothing recorded yet. */
+  | { readonly kind: 'none' }
+  | { readonly kind: 'purchased' }
+  /** Submitted, but the merchant's page showed no confirmation. */
+  | { readonly kind: 'submitted-unverified' }
+  | { readonly kind: 'refunded' }
+  /** The owner's merchant-history finding, saved and settled. */
+  | { readonly kind: 'owner-confirmed'; readonly finding: PaymentReconciliationFinding }
+  /** The owner's finding is saved; its bookkeeping has not finished. */
+  | { readonly kind: 'owner-reconciliation-pending'; readonly finding: PaymentReconciliationFinding }
+  /** Stopped before any submission for the reason the code names. */
+  | { readonly kind: 'refused'; readonly code: string | null }
+  | { readonly kind: 'cancelled' }
+  /** The merchant asked for a verification step. */
+  | { readonly kind: 'challenge'; readonly step: typeof CHALLENGE_STEPS[number] }
+  /** Processing stopped before a decision could be made, for the cause named. */
+  | { readonly kind: 'stopped'; readonly cause: typeof STOP_CAUSES[number] };
+
+const NO_OUTCOME: PurchaseOutcome = Object.freeze({ kind: 'none' });
+/** Read for text no host writes; `readPaymentOperation` admits none, so this is only a floor. */
+const UNREADABLE_OUTCOME: PurchaseOutcome = Object.freeze({ kind: 'refused', code: null });
+
+/** Read a recorded outcome, or null when the text is not one this host writes. */
+export function readPurchaseOutcome(text: string | null): PurchaseOutcome | null {
+  if (text === null) return NO_OUTCOME;
+  if (typeof text !== 'string') return null;
+  if (text === 'purchased' || text === 'submitted-unverified' || text === 'refunded' || text === 'cancelled') return { kind: text };
+  if (text === 'refused') return { kind: 'refused', code: null };
+  if ((STOP_CAUSES as readonly string[]).includes(text)) return { kind: 'stopped', cause: text as typeof STOP_CAUSES[number] };
+  const refused = /^refused:([a-z-]+)$/.exec(text);
+  if (refused?.[1]) return { kind: 'refused', code: refused[1] };
+  const owner = /^owner-(confirmed|reconciliation-pending)-(purchased|not-purchased)$/.exec(text);
+  if (owner?.[1] && owner[2]) return { kind: owner[1] === 'confirmed' ? 'owner-confirmed' : 'owner-reconciliation-pending', finding: owner[2] as PaymentReconciliationFinding };
+  const challenge = /^challenge:(.+)$/.exec(text);
+  if (challenge?.[1] && (CHALLENGE_STEPS as readonly string[]).includes(challenge[1])) return { kind: 'challenge', step: challenge[1] as typeof CHALLENGE_STEPS[number] };
+  return null;
+}
+
+/** The stored text for an outcome. */
+export function purchaseOutcomeText(outcome: PurchaseOutcome): string | null {
+  switch (outcome.kind) {
+    case 'none': return null;
+    case 'purchased': case 'submitted-unverified': case 'refunded': case 'cancelled': return outcome.kind;
+    case 'owner-confirmed': case 'owner-reconciliation-pending': return `${outcome.kind}-${outcome.finding}`;
+    case 'refused': return outcome.code === null ? 'refused' : `refused:${outcome.code}`;
+    case 'challenge': return `challenge:${outcome.step}`;
+    case 'stopped': return outcome.cause;
+  }
+}
+
+/** Every question a reader of a purchase's status asks, answered from one table. */
+export interface PurchaseDisposition {
+  /** An executor is running it, or a start has not yet recovered it. */
+  readonly live: boolean;
+  /** Nothing will resume, reconcile or submit it again: its saved request and
+   * continuation have no further use, and it leaves the open list. */
+  readonly final: boolean;
+  /** A crash left it waiting on the owner's reply, so the next start may
+   * resume that window under its original authority. */
+  readonly resumable: boolean;
+  /** The owner may record what the merchant's order history shows. */
+  readonly reconcilable: boolean;
+  /** Listed among open purchases, however many later purchases follow it. */
+  readonly keepListed: boolean;
+  /** A start compares it with the journal and the purchase ledger before new purchases run. */
+  readonly recheckAtStart: boolean;
+  readonly outcome: PurchaseOutcome;
+}
+
+/**
+ * The one answer to "is this purchase over, and what can still happen to it".
+ *
+ * `interrupted` is recorded only for a purchase that stopped before any submit
+ * phase, so it is final: nothing was sent to the merchant and it will not
+ * resume. A window a crash left open is still `running` (or `accepted`) when
+ * the next start reads it; that is the resumable case.
+ */
+export function purchaseDisposition(operation: Pick<PaymentOperationView, 'state' | 'phase' | 'outcome'>): PurchaseDisposition {
+  const outcome = readPurchaseOutcome(operation.outcome) ?? UNREADABLE_OUTCOME;
+  const live = isLivePaymentOperation(operation.state);
+  const unverified = operation.state === 'completed' && outcome.kind === 'submitted-unverified';
+  const final = operation.state === 'refused' || operation.state === 'cancelled' || operation.state === 'failed'
+    || operation.state === 'interrupted' || (operation.state === 'completed' && !unverified);
+  const reconcilable = operation.state === 'uncertain' || operation.state === 'attention' || unverified;
+  return Object.freeze({
+    live,
+    final,
+    resumable: (operation.state === 'accepted' || operation.state === 'running') && operation.phase === 'awaiting-window' && outcome.kind === 'none',
+    reconcilable,
+    keepListed: !final,
+    recheckAtStart: live || operation.state === 'uncertain' || operation.state === 'attention',
+    outcome,
+  });
+}
+
 /** A current paired owner must inspect merchant history first. These controls
  * settle original bookkeeping only; they never resume a browser submission. */
 export function canReconcilePaymentOperation(operation: PaymentOperationView): boolean {
-  return !isLivePaymentOperation(operation.state)
-    && (operation.state === 'uncertain' || operation.state === 'attention'
-      || (operation.state === 'completed' && operation.outcome === 'submitted-unverified'));
+  return purchaseDisposition(operation).reconcilable;
 }
-/** Operation-level refusals the host records itself, beside the checkout's own codes. */
-type OperationRefusalCode = 'recovery-unavailable';
+
+/**
+ * The state an executor records when a purchase ends without reaching a
+ * submit phase: a refusal is `refused` whichever path recorded it, an owner's
+ * stop is `cancelled`, anything else is `failed`.
+ */
+export function unsubmittedEndState(outcome: string | null): 'refused' | 'cancelled' | 'failed' {
+  const kind = readPurchaseOutcome(outcome)?.kind;
+  return kind === 'refused' ? 'refused' : kind === 'cancelled' ? 'cancelled' : 'failed';
+}
+
+/** Refusals the host records itself, beside the checkout's own codes: the
+ * purchase stopped before any submission for the reason named. */
+type OperationRefusalCode = 'recovery-unavailable' | 'daemon-stopped' | 'reply-history-unavailable' | 'receive-uncovered'
+  | 'receive-unrecorded' | 'reply-unsettled' | 'reply-unreadable' | 'clock-unavailable' | 'window-unavailable' | 'page-in-use';
 // Typed by the code unions so a new refusal code is a compile error until it
 // has a sentence here; the generic fallback is only for records from elsewhere.
 const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | OperationRefusalCode, string>> = {
@@ -86,58 +203,61 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'merchant-not-recognised-expired': 'Approval for the unrecognised merchant expired.',
   'merchant-not-recognised-undeliverable': 'Approval for the unrecognised merchant could not be delivered.',
   'card-fill-failed': 'The card could not be entered on the checkout page. Nothing was submitted. Check the card fields named for this checkout, then start the purchase again.',
-  'owner-changed': 'The stored address, payment settings, pairing or checkout page changed while the purchase was running. Nothing was submitted. Review them, then start the purchase again.',
+  'owner-changed': 'The stored address, payment settings, pairing, browser page or decision settings changed while the purchase was running. Nothing was submitted. Review them, then start the purchase again.',
   'notice-unavailable': 'The purchase notice could not be prepared or sent. Nothing was submitted. Check the payment notification channels, then start the purchase again.',
   'budget-held': 'Another purchase in progress is holding the budget this one needs. Nothing was submitted. Wait for that purchase to finish, then start this one again.',
   'cart-unconfirmed': 'A cart line could not be confirmed as the item you asked for. Nothing was bought. Check the cart, or name the item more exactly, then start the purchase again.',
   'recurring-unconfirmed': 'The checkout could not be confirmed as a single payment. Nothing was bought. Start the purchase again with an order summary that holds only this order.',
   'held-reply-not-understood': 'Your reply to the purchase notice was not taken as a go-ahead, and the follow-up approval got no yes. Nothing was bought.',
   'security-code-not-given': 'The card security code was not typed before the deadline, so nothing was bought. Start the purchase again and type the code with /payments pending when asked.',
+  'daemon-stopped': 'The daemon stopped before this purchase was submitted. Nothing was sent to the merchant and it will not resume; start the purchase again if you still want it.',
+  'reply-history-unavailable': 'The purchase reply could not be saved. Receiving stopped before confirming its cursor. Nothing was submitted. Inspect payment and channel status before starting another checkout.',
+  'receive-uncovered': 'The purchase stopped because its original reply receive span could not be confirmed. Nothing was submitted. Check skipped updates, competing bot consumers and the system clock. Unattended expiry requires the native polling receiver; explicit owner replies remain separate.',
+  'receive-unrecorded': 'The purchase stopped because its completed reply receive span could not be saved. Nothing was submitted. Inspect payment storage and the original purchase status before starting another checkout.',
+  'reply-unsettled': 'A reply arrived before the window closed but was still being read when it closed, so it was neither used nor treated as silence. Nothing was submitted. Start the purchase again if you still want it.',
+  'reply-unreadable': 'A reply to the purchase notice could not be read, so it was neither used nor treated as silence. Nothing was submitted. Check decision model access, then start the purchase again if you still want it.',
+  'clock-unavailable': 'The system clock could not be read while the purchase window was open, so the window could not be timed. Nothing was submitted. Check the host clock, then start the purchase again.',
+  'window-unavailable': 'The reply window for this purchase could not be opened, or another window replaced it, so you could not be asked. Nothing was submitted. Read payments.purchase.status for any purchase already waiting for an answer, then start this one again.',
+  'page-in-use': 'This browser page already has a checkout that is running or waiting for a merchant check. Nothing was submitted. Finish or reconcile that purchase, or open the checkout in a new tab.',
 };
-/** Outcomes recorded with a `failed` state: processing stopped before a final
- * result and before any submission, for the reason named. */
-const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+/** Processing stopped before a decision, for the cause named. */
+const STOP_MESSAGES: Readonly<Record<typeof STOP_CAUSES[number], string>> = {
   'decision-unavailable': 'No decision models are currently available. Check provider keys, endpoints, model access and any local model service, then review this checkout before starting a new one.',
-  'refused:reply-history-unavailable': 'The purchase reply could not be saved. Receiving stopped before confirming its cursor. Inspect payment and channel status before starting another checkout.',
-  'refused:receive-uncovered': 'The purchase stopped because its original reply receive span could not be confirmed. Check skipped updates, competing bot consumers and the system clock. Unattended expiry requires the native polling receiver; explicit owner replies remain separate.',
-  'refused:receive-unrecorded': 'The purchase stopped because its completed reply receive span could not be saved. Inspect payment storage and the original purchase status before starting another checkout.',
   'reply-source-unavailable': 'The purchase reply channel could not be verified. Check Telegram polling or webhook registration and bot account settings, or use the paired host’s Payments controls for a new checkout.',
   'decision-disabled': 'Automated checkout requires decision models. Review the selected decision policy and this checkout before starting a new one.',
-  'refused:reply-unsettled': 'A reply arrived before the window closed but was still being read when it closed, so it was neither used nor treated as silence. Nothing was submitted. Start the purchase again if you still want it.',
-  'refused:reply-unreadable': 'A reply to the purchase notice could not be read, so it was neither used nor treated as silence. Nothing was submitted. Check decision model access, then start the purchase again if you still want it.',
-  'refused:clock-unavailable': 'The system clock could not be read while the purchase window was open, so the window could not be timed. Nothing was submitted. Check the host clock, then start the purchase again.',
-  'refused:window-unavailable': 'The reply window for this purchase could not be opened, or another window replaced it, so you could not be asked. Nothing was submitted. Read payments.purchase.status for any purchase already waiting for an answer, then start this one again.',
-  'refused:page-in-use': 'This browser page already has a checkout that is running or waiting for a merchant check. Nothing was submitted. Finish or reconcile that purchase, or open the checkout in a new tab.',
-  'refused:owner-changed': 'The stored address, payment settings, pairing, browser page or decision settings changed while the purchase was running. Nothing was submitted. Review them, then start the purchase again.',
 };
-function refusalMessage(code: string): string | undefined {
-  return Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code as keyof typeof REFUSAL_MESSAGES] : undefined;
+/** The sentence for a refusal or stop outcome, whichever state recorded it. */
+function outcomeMessage(outcome: PurchaseOutcome): string | undefined {
+  if (outcome.kind === 'stopped') return STOP_MESSAGES[outcome.cause];
+  if (outcome.kind !== 'refused' || outcome.code === null || !Object.hasOwn(REFUSAL_MESSAGES, outcome.code)) return undefined;
+  return REFUSAL_MESSAGES[outcome.code as keyof typeof REFUSAL_MESSAGES];
 }
 export function paymentOperationDescription(operation: PaymentOperationView): string {
   // The sentence the purchase itself composed (which line, which limit and
   // by how much, which step) says more than the generic one for its code.
   if (operation.reason && (operation.state === 'refused' || operation.state === 'attention' || operation.state === 'cancelled')) return operation.reason;
-  if (operation.outcome === 'owner-confirmed-purchased') return 'You confirmed this order in the merchant’s history. Original payment accounting is settled; no new order was submitted.';
-  if (operation.outcome === 'owner-confirmed-not-purchased') return 'You confirmed no order was placed. The original unspent hold was released; any already committed spend remains recorded without crediting a budget. No new order was submitted.';
-  if (operation.outcome?.startsWith('owner-reconciliation-pending-')) return 'Your merchant-history finding was saved, but payment bookkeeping has not finished. Refresh and repeat that same finding; do not place another order.';
+  const { outcome, resumable } = purchaseDisposition(operation);
+  if (outcome.kind === 'owner-confirmed') return outcome.finding === 'purchased'
+    ? 'You confirmed this order in the merchant’s history. Original payment accounting is settled; no new order was submitted.'
+    : 'You confirmed no order was placed. The original unspent hold was released; any already committed spend remains recorded without crediting a budget. No new order was submitted.';
+  if (outcome.kind === 'owner-reconciliation-pending') return 'Your merchant-history finding was saved, but payment bookkeeping has not finished. Refresh and repeat that same finding; do not place another order.';
+  if (resumable) return 'This purchase is waiting for your answer to its notice. If the daemon restarted meanwhile, it resumes that window once the payment host has recovered, or ends unbought and tells you why.';
   switch (operation.state) {
     case 'accepted': return 'Accepted for processing. No purchase outcome has been recorded yet.';
     case 'running': return 'The daemon is processing this checkout. Review any purchase notice before answering.';
     case 'cancelling': return 'Stopping was requested. Wait for final status; this does not undo a merchant submission.';
-    case 'completed': return operation.outcome === 'submitted-unverified'
-      ? 'This daemon cannot confirm orders, so the submission was recorded without merchant confirmation. Check the merchant’s order history, then record what you found.' : 'The purchase outcome is recorded in purchase history.';
-    case 'refused': return refusalMessage(operation.outcome?.replace(/^refused:/, '') ?? '')
+    case 'completed': return outcome.kind === 'submitted-unverified'
+      ? 'The merchant’s page showed no order confirmation after the submit, so the submission was recorded as unverified. A matching confirmation email from the shop marks it bought; otherwise check the merchant’s order history, then record what you found.' : 'The purchase outcome is recorded in purchase history.';
+    case 'refused': return outcomeMessage(outcome)
       ?? 'The checkout was refused. Review the checkout and payment settings before requesting another purchase.';
     case 'cancelled': return 'The checkout was stopped before submission. Nothing was sent to the merchant.';
     case 'attention': return 'The merchant requested verification. Inspect the original payment page; the daemon will not submit again.';
-    case 'interrupted': return operation.outcome === 'refused:daemon-stopped'
-      ? 'The daemon stopped before this purchase was submitted. Nothing was sent to the merchant and it will not resume; start the purchase again if you still want it.'
-      : operation.outcome === 'refused:recovery-unavailable'
-        ? REFUSAL_MESSAGES['recovery-unavailable']
-        : 'This operation was interrupted before a final result. Review its payment evidence before starting a fresh checkout.';
+    // Recorded only before any submit phase.
+    case 'interrupted': return outcome.kind === 'cancelled' ? 'The checkout was stopped before submission. Nothing was sent to the merchant.'
+      : outcomeMessage(outcome) ?? REFUSAL_MESSAGES['daemon-stopped'];
     case 'uncertain': return 'Submission or its recording is uncertain. Check purchase history and the merchant before taking further action. The daemon will not retry it.';
-    case 'failed': return (operation.outcome !== null && Object.hasOwn(FAILURE_MESSAGES, operation.outcome) ? FAILURE_MESSAGES[operation.outcome] : undefined)
-      ?? 'Processing stopped without a confirmed final outcome. Inspect the payment evidence before retrying.';
+    case 'failed': return outcomeMessage(outcome)
+      ?? 'Processing stopped without a confirmed final outcome. Nothing was submitted. Read the payment evidence before retrying.';
   }
 }
 
@@ -155,7 +275,7 @@ export function readPaymentOperation(value: unknown): PaymentOperationView {
     || typeof row['state'] !== 'string' || !(PAYMENT_OPERATION_STATES as readonly string[]).includes(row['state'])
     || !(row['phase'] === null || (typeof row['phase'] === 'string' && ['deciding', 'awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(row['phase'])))
     || !['createdAtMs', 'updatedAtMs'].every(key => typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] >= 0 && row[key] <= 8_640_000_000_000_000)
-    || !(row['outcome'] === null || (typeof row['outcome'] === 'string' && /^(?:purchased|submitted-unverified|refunded|owner-(?:confirmed|reconciliation-pending)-(?:purchased|not-purchased)|refused(?::[a-z-]+)?|cancelled|decision-unavailable|decision-disabled|reply-source-unavailable|challenge:(?:3d-secure|captcha|otp|unknown))$/.test(row['outcome'])))
+    || !(row['outcome'] === null || (typeof row['outcome'] === 'string' && row['outcome'].length <= 256 && readPurchaseOutcome(row['outcome']) !== null))
     || !(row['totalMinorUnits'] === null || (typeof row['totalMinorUnits'] === 'number' && Number.isSafeInteger(row['totalMinorUnits']) && row['totalMinorUnits'] >= 0))
     || !(row['currency'] === null || (typeof row['currency'] === 'string' && /^[A-Z]{3}$/.test(row['currency'])))) return fail();
   const exceeded = row['exceeded'] === undefined || row['exceeded'] === null ? null : readOperationLimit(row['exceeded']);

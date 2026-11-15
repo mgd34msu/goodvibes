@@ -194,13 +194,13 @@ test.each(['finish', 'close', 'write-failure'] as const)(
       }
       if (outcome === 'write-failure') {
         const deadline = Date.now() + 2000;
-        while (store.get(original.purchaseId)?.state !== 'failed') {
+        while (store.get(original.purchaseId)?.state !== 'refused') {
           if (Date.now() >= deadline) throw new Error('The failed original coverage write did not settle its operation');
           await new Promise(resolve => setTimeout(resolve, 1));
         }
       }
       finish.resolve(); await operations.close();
-      if (outcome === 'write-failure') expect(store.get(original.purchaseId)).toMatchObject({ state: 'failed', outcome: 'refused:receive-unrecorded' });
+      if (outcome === 'write-failure') expect(store.get(original.purchaseId)).toMatchObject({ state: 'refused', outcome: 'refused:receive-unrecorded' });
     }
   },
 );

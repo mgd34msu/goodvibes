@@ -49,6 +49,7 @@ import type { PaymentReplyInbox } from '../reply-inbox.js';
 import { PaymentsGatewayServiceImpl } from '../payments-gateway-service.js';
 import { readConfirmEveryPurchase, readCvvHandling, readDefaultCardId, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
 import { minorUnitExponent, parseRequestedMaximum } from '../money-parsing.js';
+import { readPurchaseOutcome } from '../operation-view.js';
 import { registrableDomain } from '../../security/public-suffix.js';
 import { paymentHostStop, PaymentHostStoppedError, type PaymentStoreHealth, type PaymentStoreStop } from '../payment-host-health.js';
 import type { CurrencyCode } from '../types.js';
@@ -439,7 +440,7 @@ export class CheckoutServiceHolder {
       put: async record => { await journal.put(record); this.operations.progress(record); } });
     this.recovery = new CheckoutRecovery({ registry: this.registry, journal,
       ledger: deps.budget, purchases: deps.purchases, notifier: deps.checkout.notifier,
-      retainInterrupted: id => deps.checkout.operations.get(id)?.outcome?.startsWith('owner-reconciliation-pending-')
+      retainInterrupted: id => readPurchaseOutcome(deps.checkout.operations.get(id)?.outcome ?? null)?.kind === 'owner-reconciliation-pending'
         ? null : deps.checkout.operations.retainRecovery(id),
       isPaymentsLeader: deps.isPaymentsLeader, now: deps.now });
   }

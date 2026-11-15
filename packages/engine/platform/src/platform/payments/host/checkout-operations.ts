@@ -13,7 +13,7 @@ import { logger } from '../../utils/logger.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
 import { CheckoutPageClaimedError, type CheckoutJournal, type CheckoutPhase, type InFlightCheckout } from '../checkout-registry.js';
 import type { BeginCheckoutInput, PaymentBeginResult } from '../payments-gateway-service.js';
-import { isLivePaymentOperation, paymentOperationDescription, type PaymentOperationLimit, type PaymentOperationState, type PaymentOperationView, type PaymentOperationCancellation } from '../operation-view.js';
+import { isLivePaymentOperation, paymentOperationDescription, purchaseDisposition, readPurchaseOutcome, unsubmittedEndState, type PaymentOperationLimit, type PaymentOperationState, type PaymentOperationView, type PaymentOperationCancellation } from '../operation-view.js';
 import { sanitizeNoticeField } from '../../security/notice-text.js';
 import type { PaymentStoreStop } from '../payment-host-health.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
@@ -117,17 +117,6 @@ const operationLifecycle = defineLifecycle<PaymentOperationState>('purchase oper
 
 /** Recorded when a daemon stop, not the owner, ended a purchase before submission. */
 const DAEMON_STOPPED = 'refused:daemon-stopped';
-
-/**
- * A purchase that has reached its end: nothing will resume, reconcile or
- * submit it again, so its protected request and continuation have no use.
- * `interrupted` counts only when no window is being resumed from it, which is
- * the caller's to check (boot prepares resumptions before it sweeps).
- */
-function isSettledOperation(operation: PaymentOperationView): boolean {
-  return operation.state === 'refused' || operation.state === 'cancelled' || operation.state === 'failed' || operation.state === 'interrupted'
-    || (operation.state === 'completed' && operation.outcome !== 'submitted-unverified');
-}
 
 /** Status text is bounded; the full sentence went to the owner already. */
 function clip(text: string): string { return text.length <= 4_000 ? text : `${text.slice(0, 3_999)}…`; }
@@ -261,8 +250,7 @@ export class CheckoutOperations {
     const status = this.store.get(record.purchaseId);
     // A graceful stop ended its window and revoked its continuation; only a
     // crash leaves a window to resume.
-    if (!status || status.state === 'cancelling' || status.outcome === 'cancelled' || status.outcome === DAEMON_STOPPED || status.phase !== 'awaiting-window'
-      || !(isLivePaymentOperation(status.state) || status.state === 'interrupted')) return;
+    if (!status || !purchaseDisposition(status).resumable) return;
     if (this.purchases.get(record.purchaseId)) return;
     const writer = this.store.recover(record.purchaseId); if (!writer) return;
     let retained = false;
@@ -303,7 +291,7 @@ export class CheckoutOperations {
       this.execution.runInAsyncScope(() => {
         const pending = this.work.run(async () => {
           const { writer, abort, request } = recovery;
-          let restored: RecoveredCheckoutExecution | undefined, operation: ActiveOperation | undefined;
+          let restored: RecoveredCheckoutExecution | undefined, operation: ActiveOperation | undefined, failure: unknown;
           const current = () => {
             const active = this.active.get(writer.purchaseId);
             if (this.closed || this.preparingRecovery.get(writer.purchaseId) !== recovery
@@ -331,6 +319,7 @@ export class CheckoutOperations {
               await this.run(restored.input, operation, restored.execute.bind(restored));
             });
           } catch (error) {
+            failure = error;
             if (operation) await this.settleFailure(operation, error);
             // Stopped before the resumed checkout took over: its original window
             // is untouched and stays resumable, as after a crash.
@@ -354,9 +343,10 @@ export class CheckoutOperations {
                   throw error;
                 }
                 if (!operation && released) {
-                  this.transition(writer, { ...writer.read(), updatedAtMs: this.now(),
-                    state: recovery.cancelRequested ? 'cancelled' : abort.signal.aborted ? 'interrupted' : 'refused' });
+                  const ended = recovery.cancelRequested ? 'cancelled' : abort.signal.aborted ? 'interrupted' : 'refused';
+                  this.transition(writer, { ...writer.read(), updatedAtMs: this.now(), state: ended });
                   await this.requests?.remove(writer.purchaseId, request.operationId, () => writer.assertCurrent());
+                  if (ended === 'refused') await this.tellOwnerNotResumed(request, failure);
                 }
               }
               if (operation) await this.releaseProtectedRequest(operation);
@@ -508,11 +498,7 @@ export class CheckoutOperations {
     if (this.keeping(operation)) return;
     const { writer } = operation;
     const status = writer.read();
-    const settled = ['refused', 'cancelled', 'failed'].includes(status.state)
-      || status.state === 'completed' && (status.outcome === 'purchased' || status.outcome === 'refunded')
-      // A daemon stop before submission whose own journal record was removed:
-      // nothing of it remains to resume or reconcile.
-      || status.state === 'interrupted' && status.phase === null;
+    const settled = purchaseDisposition(status).final;
     // A stop can race an unknown merchant result. Retire future authority
     // while retaining the original evidence needed to reconcile that result:
     // once the run has ended, nothing in this process acts on the grant again.
@@ -556,10 +542,10 @@ export class CheckoutOperations {
       const previous = writer.read();
       const recorded = this.purchases.get(writer.purchaseId);
       const state: PaymentOperationState = recorded ? 'completed' : mayHaveSubmitted(retained?.phase) || mayHaveSubmitted(previous.phase)
-        ? result.outcome.startsWith('challenge:') ? 'attention' : 'uncertain'
-        : result.outcome === 'cancelled' || operation.cancelRequested ? 'cancelled'
-          : operation.abort.signal.aborted ? 'interrupted'
-            : result.outcome.startsWith('refused') ? 'refused' : 'failed';
+        ? readPurchaseOutcome(result.outcome)?.kind === 'challenge' ? 'attention' : 'uncertain'
+        : operation.cancelRequested ? 'cancelled'
+          : operation.abort.signal.aborted && result.outcome !== 'cancelled' ? 'interrupted'
+            : unsubmittedEndState(result.outcome);
       const exceeded = operationLimit(result.exceeded);
       const settled = this.transition(writer, { ...previous, state, updatedAtMs: this.now(),
         outcome: recorded?.outcome ?? (state === 'cancelled' ? 'cancelled' : state === 'interrupted' ? DAEMON_STOPPED : result.outcome),
@@ -593,6 +579,29 @@ export class CheckoutOperations {
     try { await notify(body); }
     catch {
       try { logger.warn('The closing message for a purchase that did not complete could not be delivered. Its status keeps the reason.', { purchaseId: ended.purchaseId }); }
+      catch { /* The status record keeps the reason. */ }
+    }
+  }
+  /**
+   * A window the restart could not take back ends unbought; the owner, who was
+   * sent its notice before the restart, hears that once, here. The boot sweep
+   * skipped this record because its lease was held, and the record is gone now.
+   */
+  private async tellOwnerNotResumed(request: ProtectedPaymentRequest, failure: unknown): Promise<void> {
+    const notify = this.notify, record = request.window?.record;
+    if (!notify || !record?.windowDeliveries?.some(delivery => delivery.delivered)) return;
+    const why = failure instanceof DecisionModelsDisabledError || failure instanceof JudgmentPortMissingError
+      || failure instanceof JudgmentError && failure.kind === 'unavailable'
+      ? 'decision models were off or unavailable when it restarted'
+      : failure instanceof PaymentReplyWindowError
+        ? 'the replies sent to its notice could not be read back after the restart'
+        : 'its browser page, pairing or payment settings were not as they were before the restart';
+    const what = `${sanitizeNoticeField(record.item)} from ${sanitizeNoticeField(record.merchantDomain)}`;
+    try {
+      await notify(`The purchase of ${what} was waiting for your answer when the daemon restarted, and it could not be resumed: ${why}. `
+        + 'Nothing was bought and its hold is released. Start the purchase again if you still want it.');
+    } catch {
+      try { logger.warn('The message for a purchase that could not resume after a restart was not delivered. Its status keeps the reason.', { purchaseId: request.purchaseId }); }
       catch { /* The status record keeps the reason. */ }
     }
   }
@@ -649,7 +658,7 @@ export class CheckoutOperations {
       // reports the failure, so only a running checkout records the stop.
       else if (operation.abort.signal.aborted) {
         if (operation.launched) { state = 'interrupted'; outcome = DAEMON_STOPPED; } else state = 'cancelled';
-      } else { state = 'failed'; outcome ??= stoppedOutcome(error); }
+      } else { outcome ??= stoppedOutcome(error); state = unsubmittedEndState(outcome); }
     } catch { /* Unreadable financial evidence remains uncertain. */ }
     if (this.transition(writer, { ...previous, state, outcome, updatedAtMs: this.now() })) await this.tellOwnerOfEnd(operation, undefined);
   }
@@ -737,7 +746,7 @@ export class CheckoutOperations {
     for (const entry of entries) this.reserved.add(entry.purchaseId);
     for (const previous of this.store.list()) {
       if (this.closed) throw new CheckoutOwnershipError();
-      if (!isLivePaymentOperation(previous.state) && previous.state !== 'attention' && previous.state !== 'uncertain') continue;
+      if (!purchaseDisposition(previous).recheckAtStart) continue;
       const writer = this.store.recover(previous.purchaseId); if (!writer) continue;
       try {
         const current = writer.read();
@@ -749,8 +758,12 @@ export class CheckoutOperations {
         try {
           const recorded = this.purchases.get(current.purchaseId);
           if (recorded) { state = 'completed'; outcome = recorded.outcome; total = recorded.totalMinorUnits; currency = recorded.currency; }
-          else if (current.phase !== 'submit-pending' && current.phase !== 'submitted'
-            && (!retained || (retained.phase !== 'submit-pending' && retained.phase !== 'submitted'))) state = 'interrupted';
+          else if (!mayHaveSubmitted(current.phase) && !mayHaveSubmitted(retained?.phase)) {
+            // Nothing was submitted and no executor took it back: it is over.
+            // An owner's stop that a restart overtook is still the owner's stop.
+            if (current.state === 'cancelling') { state = 'cancelled'; outcome = 'cancelled'; }
+            else { state = 'interrupted'; outcome ??= DAEMON_STOPPED; }
+          }
         } catch { /* Unknown evidence is never absence or permission to resubmit. */ }
         this.transition(writer, { ...current, state, outcome, totalMinorUnits: total, currency, updatedAtMs: this.now() });
       } finally { writer.release(); }
@@ -774,8 +787,10 @@ export class CheckoutOperations {
     if (this.closed || this.active.has(purchaseId) || this.preparingRecovery.has(purchaseId)) return 'keep';
     let status: PaymentOperationView | null;
     try { status = this.store.get(purchaseId); } catch { return 'keep'; }
-    if (!status || status.operationId !== operationId || isSettledOperation(status)) return 'remove';
-    return isLivePaymentOperation(status.state) ? 'keep' : 'retire';
+    if (!status || status.operationId !== operationId) return 'remove';
+    const disposition = purchaseDisposition(status);
+    if (disposition.final) return 'remove';
+    return disposition.live ? 'keep' : 'retire';
   }
 
   /** The same end-of-purchase cleanup for a purchase settled outside an executor (an owner's reconciliation). */

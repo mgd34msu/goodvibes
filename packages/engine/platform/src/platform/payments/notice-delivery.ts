@@ -59,9 +59,9 @@ import { capturePaymentNoticeReceipt } from './notice-receipt.js';
 /**
  * One place a payment notice can be sent, already resolved to a routable target.
  *
- * `backfillable` is a property of the CHANNEL, not of this send: it says whether
- * that channel's history can be re-read for a span the daemon was down.
- * `recoverInterruptedWindow` keys on it, so it travels with the delivery.
+ * `backfillable` is recorded with each delivery. Whether a restart can read a
+ * channel's replies back is decided by the channel itself
+ * (`RESTART_READABLE_CHANNELS` in windows.ts), never by this flag.
  */
 export interface PaymentNoticeTarget {
   readonly channel: CommandAuthorityChannel;

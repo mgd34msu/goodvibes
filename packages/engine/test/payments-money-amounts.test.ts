@@ -354,3 +354,26 @@ describe('discount lines on a checkout', () => {
     expect(result).toMatchObject({ ok: false, field: 'discounts' });
   });
 });
+
+describe('three-decimal currencies on a checkout', () => {
+  test('a price written with three decimals is that price, as the owner\'s maximum is', async () => {
+    const { parseMinorUnits, parseRequestedMaximum } = await import('../platform/src/platform/payments/money-parsing.ts');
+    expect(parseMinorUnits('KWD 0.750', 'KWD')).toBe(750);
+    expect(parseMinorUnits('12.500', 'KWD')).toBe(12_500);
+    expect(parseMinorUnits('1.234', 'KWD')).toBe(parseRequestedMaximum('1.234', 'KWD' as never));
+    expect(parseMinorUnits('1,234.500', 'KWD')).toBe(1_234_500);
+    expect(parseMinorUnits('1.234', 'USD')).toBe(123_400);
+  });
+
+  test('the page decides a three-digit group, and a page that cannot is refused', async () => {
+    const { extractCheckout } = await import('../platform/src/platform/payments/checkout-extraction.ts');
+    const { parseCurrencyCode } = await import('../platform/src/platform/payments/types.ts');
+    const kwd = parseCurrencyCode('KWD'); if (!kwd) throw new Error('Invalid fixture currency');
+    const reading = { lines: [{ label: 'Tea', quantity: '2', unitPrice: 'KWD 0.750' }], tax: null, fees: [],
+      shippingOptions: [{ label: 'Standard', cost: '1.000' }], statedTotal: '2.500', currency: 'KWD', orderSummaryText: 'Tea' };
+    expect(extractCheckout(reading, kwd)).toMatchObject({ ok: true, checkout: { itemMinorUnits: 1_500, subtotalMinorUnits: 1_500 } });
+    const grouped = { ...reading, lines: [{ label: 'Rug', quantity: '1', unitPrice: '1,234' }], shippingOptions: [{ label: 'Standard', cost: '5' }] };
+    expect(extractCheckout({ ...grouped, statedTotal: '1,239.000' }, kwd)).toMatchObject({ ok: true, checkout: { itemMinorUnits: 1_234_000 } });
+    expect(extractCheckout({ ...grouped, statedTotal: null }, kwd)).toMatchObject({ ok: false, field: 'amounts' });
+  });
+});

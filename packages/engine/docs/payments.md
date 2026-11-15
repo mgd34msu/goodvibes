@@ -929,6 +929,13 @@ in KWD. Do not include grouping separators, currency symbols, another currency,
 ranges or prose. Precision must fit the currency. Invalid input refuses; zero
 is a real maximum and is distinct from leaving the field absent.
 
+Amounts on the checkout page are read the same way in three-decimal currencies
+(BHD, IQD, JOD, KWD, LYD, OMR, TND): `KWD 0.750` is 750 fils and `12.500` is
+twelve and a half, never a thousand times more. When another amount on the same
+page shows that the page groups thousands with that mark (`1,234.500`), a
+`1,234` there is read as grouped. A page that gives no sign either way and also
+writes bare whole numbers (`1,234` beside `5`) is refused rather than guessed at.
+
 This limit covers the complete payable total, including tax, mandatory fees and
 the selected delivery. A higher total requires a new explicit approval, even at
 a recognised merchant with ample daily budget. Denial, silence and failed notice
@@ -1021,8 +1028,8 @@ as no answer.
 ### 8.6 What each window is built on, and what happens across a restart
 
 **Neither window is built on `ApprovalBroker` or a persisted automation job.**
-Eligible native windows can be restored under their original authority as
-described in §8.6.1. Complete downtime/backlog coverage remains unfinished.
+A window waiting on the owner when the daemon stops is resumed at the next start
+or ends unbought with the owner told, by one stated order (§8.6.1).
 
 Both windows run through the same port, `PaymentNotifier.awaitAnswer()`
 (`platform/payments/notice-delivery.ts`), called inline from `runCheckout()`
@@ -1195,7 +1202,13 @@ checkpoint write already under way before it aborts the purchase. If the window
 was not durably saved when the stop landed, or the card was already being
 armed, the stop records `interrupted` with outcome `refused:daemon-stopped`,
 releases the hold and retires the continuation, and the purchase does not
-resume: start it again if you still want it. Other
+resume: start it again if you still want it. A purchase the next start finds
+still running before any submit phase, and that no window resumption takes
+back, is recorded the same way (an owner's stop that the restart overtook is
+recorded `cancelled`). `interrupted` is always final: nothing was sent to the
+merchant. Every refusal is recorded with state `refused`, whichever path
+recorded it; `failed` is left for stops with no refusal code (no decision
+models, the reply channel could not be verified). Other
 refusals name their own cause: `card-fill-failed`, `owner-changed` (the stored
 address, payment settings, pairing or page changed), `notice-unavailable`,
 `budget-held` (another purchase holds the budget), `refused:page-in-use`
@@ -1230,13 +1243,13 @@ execution lease, skipping another host’s live checkout, and retains that lease
 until timed-out dependency work has actually drained.
 
 When a window opens, its per-channel delivery report, deadline and kind are
-persisted with the journal record. The conservative sweep uses
-`recoverInterruptedWindow`'s delivery-keyed classification (§8.6.1) to report
-expiry or channels needing another read. It does not acquire receive coverage
-from the report's backfillable flag or resume a purchase. Those sweep branches
-release pre-submit holds and charge nothing; eligible native restorations are
-retained separately before the sweep. A record recovery keeps notifies the
-owner once; the notice is stamped back through the journal.
+persisted with the journal record. The boot sweep settles every window record
+the native restorer did not take back, using the same order as the restorer
+(`recoverInterruptedWindow`, §8.6.1) to tell the owner why it ended: the notice
+never arrived, it went out on a channel that keeps no replies across a restart,
+or the window could not be resumed. Those settlements release pre-submit holds
+and charge nothing. A record recovery keeps notifies the owner once; the notice
+is stamped back through the journal.
 
 The daemon's actual purchase ledger implements the recovery lookup. Only a
 missing, previously unused ledger means no recorded purchases. Invalid JSON,
@@ -1393,10 +1406,33 @@ The implementation and source regressions are present. End-to-end runtime and
 release qualification remain separate work; this description is not a claim
 that those deferred checks have passed.
 
-**The rule that follows is `recoverInterruptedWindow()`'s design, verified
-against its own unit tests and applied by boot recovery to every interrupted
-window whose record carries a persisted delivery report. Records without one
-settle conservatively by refusal. See §8.6.**
+**The order that follows is `recoverInterruptedWindow()` (payments/windows.ts),
+applied first by the native restorer and then by the boot sweep to every
+window the restorer did not take back. Records without a persisted delivery
+report settle by refusal. See §8.6.**
+
+1. **The notice never reached the owner on any channel.** There is no window to
+   resume. The purchase ends unbought, its hold is released and the owner is
+   told.
+2. **Every channel the notice reached keeps its replies across a restart.**
+   Telegram is that channel (`RESTART_READABLE_CHANNELS`): the daemon archives
+   each owner reply before confirming the update, and the native poller drains
+   what arrived while it was down into the archive. The window is resumed under
+   its original authority, page and settings: archived replies are read first
+   and an objection or refusal ends it; silence counts only with the receive
+   coverage described above; an uncovered recipient gets the notice again and a
+   renewed deadline. `/payments pending` and `payments.purchase.approve`
+   answer a resumed window like a live one.
+3. **A channel the notice reached keeps no replies across a restart.** A reply
+   there may have been lost, and a lost objection must never become a veto's
+   silence, so the purchase ends unbought and the owner is told which channel.
+   Today Telegram is the only channel a purchase notice can be sent on
+   (`payments.notifyChannels`), so this applies only to records from other
+   hosts or older versions.
+4. **The window should resume and cannot** (its browser page, pairing, payment
+   settings, decision models or saved replies are not as they were). It ends
+   unbought, its hold is released, and the owner gets one message saying the
+   purchase could not be resumed and why.
 
 **Silence means the owner had the chance to object and did not.** Whether our
 process was alive is irrelevant to whether that chance existed. An earlier draft
@@ -1409,16 +1445,13 @@ So the rule is keyed on whether the notification arrived:
 
 | On restart | Rule |
 |---|---|
-| Notification **was delivered**, window expired during downtime | **The expiry stands.** Do not re-notify, it was already seen. *Conservative sweep:* the purchase cannot resume after a restart, so it settles refused with nothing charged, and the owner is told to start it again. *Eligible native Telegram polling window (restored under original authority, below):* **backfill each live channel** for messages received while we were down and honour any objection found there; with covered silence the original deadline and the veto-proceeds or approval-denies rule apply. |
-| Notification **was never delivered** | §6 governs unchanged: in-budget proceeds, above-budget refuses, and the shipping ladder is attempted before any overage refusal. |
-| Channel **cannot be backfilled** for the downtime span | The window is **re-opened on that channel only** where the original poller is restored (an uncovered recipient gets a new acknowledged notice and deadline). The conservative sweep only reports that channel as un-reread: it re-opens nothing. For that channel we cannot distinguish silence from an objection we dropped, and only that channel is ambiguous. |
+| Notification **was delivered** on Telegram, window expired during downtime | **The expiry stands.** Do not re-notify, it was already seen. The archived replies are read for the downtime span and any objection found there is honoured; with covered silence the original deadline and the veto-proceeds or approval-denies rule apply. |
+| Notification **was delivered** on Telegram, a recipient's replies are not covered | That recipient alone gets the notice again, with a renewed deadline. For that recipient we cannot distinguish silence from an objection we dropped. |
+| Notification **was never delivered** | Nothing to resume: the purchase ends unbought and the owner is told. |
+| Notification went out on a channel that keeps **no replies** across a restart | The purchase ends unbought and the owner is told which channel. |
 
-Backfill uses each channel's existing history read. A channel that supports it
-(Telegram) is queried for the downtime span before the reservation commits; a
-channel with no readable history is treated as un-backfillable (re-opened where
-the original poller is restored, reported by the sweep otherwise). The audit
-record names which channels were backfilled, which were re-opened, and what was
-found.
+The `backfillable` flag recorded with each delivery is not read: whether a
+restart can read a channel's replies back is a fact about the channel.
 
 The same reasoning applies to the approval gate, and lands in the same place by a
 different route: an approval that expired resolves **denied** regardless, so a
@@ -2499,13 +2532,12 @@ suggestions:
 15. A serialized audit record contains **no card material**.
 16. A challenge pause never retries payment and never completes an order.
 17. A payment approval whose deadline passes **while the daemon is down**
-    resolves denied, not pending: the interrupted purchase settles refused
-    (§8.6.1).
-18. A veto window that elapsed entirely while the daemon was down never
-    charges by itself after the restart: the conservative sweep settles the
-    purchase refused and tells the owner to start it again. Only an eligible
-    native Telegram polling window restored under §8.6.1 proceeds on its
-    covered silence or re-opens for its uncovered recipients.
+    resolves denied, not pending (§8.6.1).
+18. A veto window that elapsed entirely while the daemon was down proceeds
+    only when it is resumed on Telegram with every reply up to the deadline
+    proven received and none of them an objection; an uncovered recipient gets
+    the notice again. Any window that cannot be resumed ends unbought and the
+    owner is told (§8.6.1).
 19. `'email'` never parses into `CommandAuthorityChannel`, and no payment prompt
     reaches an email path.
 20. Card material entered at a surface never appears in input history, the
@@ -2534,10 +2566,10 @@ code.
 3. **A window interrupted by downtime is keyed on DELIVERY, not uptime
    (§8.6.1).** Silence means the owner had the chance to object and did not;
    whether our process was alive has nothing to do with it. A notification that
-   was delivered and then expired stands, with a backfill for objections we might
-   have missed and no re-notification. Only an un-backfillable channel re-opens,
-   and only where the original native Telegram poller is restored; the
-   conservative sweep settles every other interrupted purchase refused.
+   was delivered and then expired stands, with the archived replies read for
+   objections we might have missed and no re-notification. Only a recipient whose
+   replies are not proven gets the notice again. A window that cannot be resumed
+   ends unbought and the owner is told why.
 4. **Exhausted overage pool refuses rather than escalating to an approval
    (§6 step 4b).** The ruling is explicit. Recorded so it is not re-opened by
    accident.
@@ -2579,9 +2611,9 @@ code.
     merely mention a renewal elsewhere on the page. That trade is deliberate, but
     the false-refusal rate is unknown until it meets real merchants.
 14. **Backfill coverage varies by channel (§8.6.1).** Telegram has a readable
-    history; a channel without one is always treated as un-backfillable and
-    re-opens. The set of channels that can be backfilled will shape how often a
-    re-opened window shows up, and that is only measurable in use.
+    history; a channel without one ends a window the restart interrupted,
+    unbought, with the owner told. Only Telegram carries purchase notices today;
+    a new notice channel needs a reply archive before its windows can resume.
 15. **eBay account age is not checked (§9.1.1).** `minAccountAgeDays` exists in
     `MarketplaceListingThresholds` and defaults to `null`, meaning no check. eBay
     does not expose a member-since date in a place that can be read reliably and

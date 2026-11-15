@@ -75,8 +75,9 @@ export function channelBackedPaymentNotifier(
     targets.push({
       channel,
       request: { target: surfaceTarget(name) },
-      // No backfill path exists: a notice missed while the daemon was down
-      // cannot be recovered by re-reading history this router never kept.
+      // This router keeps no history. Replies to a Telegram notice are read
+      // back after a restart from the payment reply archive instead, which is
+      // what RESTART_READABLE_CHANNELS (windows.ts) states; nothing reads this.
       backfillable: false,
     });
   }

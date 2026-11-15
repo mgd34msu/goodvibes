@@ -498,7 +498,7 @@ describe('registerPaymentsGatewayMethods wiring', () => {
 });
 
 describe('recovery with persisted window deliveries and the arming cleanup hook', () => {
-  test('a delivered, expired window settles by the expiry-stands rule across a restart', async () => {
+  test('a delivered window the restorer did not take back settles unbought across a restart', async () => {
     const journal = new MemoryCheckoutJournal();
     await journal.put(inFlight('awaiting-window', {
       reservationId: 'res-w1',
@@ -511,16 +511,14 @@ describe('recovery with persisted window deliveries and the arming cleanup hook'
 
     const [entry] = (await service.recoverInterruptedCheckouts()).settlements;
     expect(entry!.action).toBe('released');
-    expect(entry!.windowRecovery?.outcome).toBe('expiry-stands');
-    expect(entry!.windowRecovery?.backfillChannels).toEqual(['telegram']);
+    expect(entry!.windowRecovery?.outcome).toBe('resume');
     expect(entry!.message).toContain('veto window');
     expect(entry!.message).toContain('reached you before the restart');
     expect(entry!.message).toContain('nothing was charged');
-    expect(entry!.message).toContain('telegram');
     expect(await journal.list()).toHaveLength(0);
   });
 
-  test('a delivered window on an un-backfillable channel reports the reopen rule honestly', async () => {
+  test('a delivered window on a channel that keeps no replies ends unbought and says so', async () => {
     const journal = new MemoryCheckoutJournal();
     await journal.put(inFlight('awaiting-window', {
       windowKind: 'approval',
@@ -531,11 +529,10 @@ describe('recovery with persisted window deliveries and the arming cleanup hook'
     const service = buildService([], { journal, notices });
 
     const [entry] = (await service.recoverInterruptedCheckouts()).settlements;
-    expect(entry!.windowRecovery?.outcome).toBe('reopen');
-    expect(entry!.windowRecovery?.reopenChannels).toEqual(['tui']);
+    expect(entry!.windowRecovery?.outcome).toBe('end');
+    expect(entry!.windowRecovery?.unreadableChannels).toEqual(['tui']);
     expect(entry!.message).toContain('approval window');
-    expect(entry!.message).toContain('cannot re-read tui');
-    expect(entry!.message).toContain('nothing was charged');
+    expect(entry!.message).toContain('Nothing was charged');
   });
 
   test('a persisted report where nothing was delivered still refuses conservatively', async () => {
@@ -548,7 +545,7 @@ describe('recovery with persisted window deliveries and the arming cleanup hook'
     const service = buildService([], { journal, notices: [] });
 
     const [entry] = (await service.recoverInterruptedCheckouts()).settlements;
-    expect(entry!.windowRecovery?.outcome).toBe('undeliverable-rule');
+    expect(entry!.windowRecovery?.outcome).toBe('not-delivered');
     expect(entry!.message).toContain('never reached you on any channel');
     expect(entry!.message).toContain('refused rather than charged');
   });

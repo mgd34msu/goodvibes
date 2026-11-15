@@ -38,7 +38,7 @@
  * stop at rather than reconcile with.
  */
 import { sanitizeNoticeField } from '../security/notice-text.js';
-import { parseDiscountMinorUnits, parseMinorUnits, parseQuantity } from './money-parsing.js';
+import { pageDecimalMark, parseDiscountMinorUnits, parseMinorUnits, parseQuantity } from './money-parsing.js';
 import { parseCurrencyCode } from './types.js';
 import type { CartLine } from './cart.js';
 import type { CurrencyCode, MinorUnits, ShippingOption } from './types.js';
@@ -135,6 +135,25 @@ export function extractCheckout(
     return fail('lines', 'Refused: I could not read a single line item off this checkout.');
   }
 
+  // In a three-decimal currency "1.234" is a price of 1.234 or of 1234; the
+  // page's other amounts decide which, and every amount is read the same way.
+  const layout = pageDecimalMark([
+    ...raw.lines.map(line => line.unitPrice),
+    ...(raw.tax === null ? [] : [raw.tax]),
+    ...raw.fees.map(fee => fee.amount),
+    ...(raw.discounts ?? []).map(discount => discount.amount),
+    ...raw.shippingOptions.map(option => option.cost),
+    ...(raw.statedTotal === null ? [] : [raw.statedTotal]),
+  ], currency);
+  if (!layout.ok) {
+    return fail(
+      'amounts',
+      `Refused: this checkout writes amounts such as ${layout.example} that could be a fraction or a whole number of ${currency}, `
+      + 'and nothing on the page says which. I do not guess at prices.',
+    );
+  }
+  const mark = layout.mark;
+
   const lines: CartLine[] = [];
   let itemMinorUnits = 0;
   for (const [index, line] of raw.lines.entries()) {
@@ -145,7 +164,7 @@ export function extractCheckout(
         'Refused: a line on this checkout has a quantity I cannot read as a whole number.',
       );
     }
-    const unit = parseMinorUnits(line.unitPrice, currency);
+    const unit = parseMinorUnits(line.unitPrice, currency, mark);
     if (unit === null) {
       return fail(
         `lines[${String(index)}].unitPrice`,
@@ -166,7 +185,7 @@ export function extractCheckout(
 
   let taxMinorUnits = 0;
   if (raw.tax !== null && raw.tax.trim().length > 0) {
-    const tax = parseMinorUnits(raw.tax, currency);
+    const tax = parseMinorUnits(raw.tax, currency, mark);
     if (tax === null) {
       return fail('tax', 'Refused: I cannot read the tax line on this checkout as an exact amount.');
     }
@@ -176,7 +195,7 @@ export function extractCheckout(
   let feesMinorUnits = 0;
   const feeLabels: string[] = [];
   for (const [index, fee] of raw.fees.entries()) {
-    const amount = parseMinorUnits(fee.amount, currency);
+    const amount = parseMinorUnits(fee.amount, currency, mark);
     if (amount === null) {
       return fail(`fees[${String(index)}]`, 'Refused: I cannot read a fee line on this checkout as an exact amount.');
     }
@@ -191,7 +210,7 @@ export function extractCheckout(
   const discounts: CheckoutDiscount[] = [];
   let discountMinorUnits = 0;
   for (const [index, discount] of (raw.discounts ?? []).entries()) {
-    const amount = parseDiscountMinorUnits(discount.amount, currency);
+    const amount = parseDiscountMinorUnits(discount.amount, currency, mark);
     if (amount === null) {
       return fail(`discounts[${String(index)}]`, 'Refused: I cannot read a discount line on this checkout as an exact amount.');
     }
@@ -205,7 +224,7 @@ export function extractCheckout(
 
   const shippingOptions: ShippingOption[] = [];
   for (const [index, option] of raw.shippingOptions.entries()) {
-    const cost = parseMinorUnits(option.cost, currency);
+    const cost = parseMinorUnits(option.cost, currency, mark);
     if (cost === null) {
       return fail(
         `shippingOptions[${String(index)}]`,
@@ -237,7 +256,7 @@ export function extractCheckout(
   // assumed. With several, the ladder picks one and the flow re-verifies the
   // total on the page after the choice is applied.
   if (raw.statedTotal !== null && raw.statedTotal.trim().length > 0 && shippingOptions.length === 1) {
-    const stated = parseMinorUnits(raw.statedTotal, currency);
+    const stated = parseMinorUnits(raw.statedTotal, currency, mark);
     if (stated === null) {
       return fail('statedTotal', 'Refused: I cannot read this checkout\'s stated total as an exact amount.');
     }

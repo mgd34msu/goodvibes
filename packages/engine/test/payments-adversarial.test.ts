@@ -364,35 +364,33 @@ describe('presence is not attention', () => {
 });
 
 describe('a window interrupted by downtime is keyed on delivery, not uptime', () => {
-  test('delivered then expired: the expiry stands and he is not asked twice', () => {
-    const recovery = recoverInterruptedWindow({
-      deliveries: [{ channel: 'telegram', delivered: true, backfillable: true }],
-      deadlinePassed: true,
-    });
-    expect(recovery.outcome).toBe('expiry-stands');
-    expect(recovery.backfillChannels).toEqual(['telegram']);
-    expect(recovery.reopenChannels).toEqual([]);
+  test('delivered on a channel whose replies are kept: the window resumes, whatever the clock', () => {
+    for (const deadlinePassed of [true, false]) {
+      expect(recoverInterruptedWindow({
+        deliveries: [{ channel: 'telegram', delivered: true, backfillable: false }],
+        deadlinePassed,
+      }).outcome).toBe('resume');
+    }
   });
 
-  test('never delivered: the undeliverable rule decides, not the clock', () => {
+  test('never delivered: nothing to resume', () => {
     const recovery = recoverInterruptedWindow({
       deliveries: [{ channel: 'telegram', delivered: false, backfillable: true }],
       deadlinePassed: true,
     });
-    expect(recovery.outcome).toBe('undeliverable-rule');
+    expect(recovery.outcome).toBe('not-delivered');
   });
 
-  test('an un-backfillable channel re-opens, and only that channel', () => {
+  test('a delivered channel that keeps no replies ends the window, so a lost objection is never silence', () => {
     const recovery = recoverInterruptedWindow({
       deliveries: [
-        { channel: 'telegram', delivered: true, backfillable: true },
-        { channel: 'tui', delivered: true, backfillable: false },
+        { channel: 'telegram', delivered: true, backfillable: false },
+        { channel: 'tui', delivered: true, backfillable: true },
       ],
-      deadlinePassed: true,
+      deadlinePassed: false,
     });
-    expect(recovery.outcome).toBe('reopen');
-    expect(recovery.reopenChannels).toEqual(['tui']);
-    expect(recovery.backfillChannels).toEqual(['telegram']);
+    expect(recovery.outcome).toBe('end');
+    expect(recovery.unreadableChannels).toEqual(['tui']);
   });
 });
 

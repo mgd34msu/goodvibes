@@ -196,10 +196,9 @@ export class CheckoutRecovery {
    * `submitted` record is closed only after the purchase record is verified
    * on the ledger; when it is missing, or this composition cannot look, the
    * record is kept and the owner is told exactly what is and is not known.
-   * A record interrupted inside a window settles conservatively by refusal,
-   * because delivery of the window's notice cannot be verified after a
-   * restart; the delivery-keyed rules in `recoverInterruptedWindow` apply
-   * once deliveries are persisted.
+   * A record interrupted inside a window reaches this sweep only when the
+   * native restorer did not take it back (`recoverInterruptedWindow` states
+   * the order); it settles by refusal with the window's own sentence.
    *
    * A record is closed only after the owner was told: when the notice does not
    * land, the record and its hold stay for the next sweep, which runs again a
@@ -481,12 +480,10 @@ export class CheckoutRecovery {
   }
 
   /**
-   * The window sentence for an interrupted-window record, keyed on the
-   * PERSISTED delivery report when one exists. The purchase itself can never
-   * resume after a restart (the page and the in-flight call are gone), so
-   * every branch settles with the hold released and nothing charged; what the
-   * delivery-keyed rules decide is what the owner is told about the notice
-   * and which channels still owe a read.
+   * The window sentence for an interrupted-window record this sweep settles,
+   * from the persisted delivery report and `recoverInterruptedWindow`'s order.
+   * A window the native restorer resumed never reaches here (its lease is
+   * held); one that should have resumed and did not ends unbought.
    */
   private settleWindowSentence(
     record: InFlightCheckout,
@@ -507,20 +504,16 @@ export class CheckoutRecovery {
     const windowName = record.windowKind === 'approval'
       ? 'approval window'
       : record.windowKind === 'veto' ? 'veto window' : 'approval or veto window';
-    if (recovery.outcome === 'undeliverable-rule') {
+    if (recovery.outcome === 'not-delivered') {
       return `Its ${windowName} notice never reached you on any channel, so it settles as refused rather than charged.`;
     }
-    if (recovery.outcome === 'reopen') {
-      const channels = recovery.reopenChannels.join(', ');
-      return `Its ${windowName} notice reached you, but I cannot re-read ${channels} for the span I was down, `
-        + 'so a reply there may have been missed. The purchase could not resume after the restart, nothing '
-        + 'was charged, and it will not be retried; start it again if you still want it.';
+    if (recovery.outcome === 'end') {
+      return `Its ${windowName} notice reached you on ${recovery.unreadableChannels.join(', ')}, which keeps no replies across a restart, `
+        + 'so a reply there may have been missed. Nothing was charged and it will not be retried; start it again if you still want it.';
     }
-    const backfill = recovery.backfillChannels.length > 0
-      ? ` Any reply you sent on ${recovery.backfillChannels.join(', ')} while I was down can still be read there.`
-      : '';
-    return `Its ${windowName} notice reached you before the restart. The purchase could not resume `
-      + `afterwards, so nothing was charged and it will not be retried; start it again if you still want it.${backfill}`;
+    return `Its ${windowName} notice reached you before the restart, but the purchase could not be resumed afterwards `
+      + '(its browser page, pairing, payment settings or saved replies were not available as they were), so nothing was '
+      + 'charged and it will not be retried; start it again if you still want it.';
   }
 
   private async runArmingPageCleanup(

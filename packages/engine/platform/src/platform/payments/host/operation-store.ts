@@ -11,7 +11,7 @@ import { writeFileAtomic } from '../../utils/atomic-json-store.js';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { readFileObservation, type FileObservation } from '../../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
-import { readPaymentOperation, type PaymentOperationView } from '../operation-view.js';
+import { purchaseDisposition, purchaseOutcomeText, readPaymentOperation, type PaymentOperationView } from '../operation-view.js';
 import type { PaymentUnreadableOperation } from '../window-view.js';
 import { drainOwned } from '@goodvibes-jev/judgment';
 import { capturePaymentReconciliation, type PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
@@ -161,8 +161,7 @@ export class DurablePaymentOperations {
       const previous = this.index(), id = operation.purchaseId;
       // An order this daemon could not confirm stays listed until the owner reconciles it
       // (which changes its outcome), however many later purchases push it out of `recent`.
-      const retained = ['accepted', 'running', 'cancelling', 'attention', 'uncertain'].includes(operation.state)
-        || (operation.state === 'completed' && operation.outcome === 'submitted-unverified');
+      const retained = purchaseDisposition(operation).keepListed;
       const open = previous.value.open.filter(key => key !== id);
       if (retained) open.push(id);
       if (open.length > 256) throw new PaymentOperationStoreError('busy');
@@ -299,7 +298,7 @@ export class DurablePaymentOperations {
         assertCurrent(); const reconciliation = capturePaymentReconciliation(input);
         if (row.reconciliation || reconciliation.purchaseId !== id || reconciliation.operationId !== row.operation.operationId) throw new PaymentOperationStoreError('invalid');
         save({ ...row, version: 2, reconciliation, operation: { ...row.operation, state: 'uncertain',
-          outcome: `owner-reconciliation-pending-${reconciliation.outcome}`, updatedAtMs: reconciliation.atMs } }, ownerCurrent);
+          outcome: purchaseOutcomeText({ kind: 'owner-reconciliation-pending', finding: reconciliation.outcome }), updatedAtMs: reconciliation.atMs } }, ownerCurrent);
       },
       update: (operation: PaymentOperationView, ownerCurrent?: () => void) => {
         assertCurrent(); const next = readPaymentOperation(operation);

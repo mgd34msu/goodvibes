@@ -199,7 +199,7 @@ describe('daemon settings read/write', () => {
 });
 
 // ---------------------------------------------------------------------------
-// WorkspaceSwapManager
+// WorkspaceSwapManager: a change is saved for the next start
 // ---------------------------------------------------------------------------
 
 describe('WorkspaceSwapManager', () => {
@@ -211,127 +211,44 @@ describe('WorkspaceSwapManager', () => {
     daemonHome = tempDir('swap-daemon');
   });
 
-  afterEach(() => {
-    cleanup(baseDir, daemonHome);
-  });
-
-  function makeManager(opts: { busyCount?: number; rerootFails?: boolean } = {}) {
-    return new WorkspaceSwapManager(baseDir, {
-      runtimeBus: null,
-      daemonHomeDir: daemonHome,
-      getBusySessionCount: () => opts.busyCount ?? 0,
-      rerootStores: async () => {
-        if (opts.rerootFails) throw new Error('store reroot failed');
-      },
-    });
-  }
-
-  test('getCurrentWorkingDir returns initial dir', () => {
-    const mgr = makeManager();
-    expect(mgr.getCurrentWorkingDir()).toBe(baseDir);
-  });
-
-  test('swap succeeds when no sessions are busy', async () => {
-    const mgr = makeManager();
-    const newDir = join(baseDir, 'new-workspace');
-    const result = await mgr.requestSwap(newDir);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.previous).toBe(baseDir);
-      expect(result.current).toBe(newDir);
-    }
-    expect(mgr.getCurrentWorkingDir()).toBe(newDir);
-  });
-
-  test('swap is refused (WORKSPACE_BUSY) when sessions have pending input', async () => {
-    const mgr = makeManager({ busyCount: 2 });
-    const result = await mgr.requestSwap(join(baseDir, 'new'));
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe('WORKSPACE_BUSY');
-      if (result.code === 'WORKSPACE_BUSY') {
-        expect(result.retryAfter).toBe(5);
-      }
-    }
-    // Working dir unchanged
-    expect(mgr.getCurrentWorkingDir()).toBe(baseDir);
-  });
-
-  test('swap returns INVALID_PATH when empty string given', async () => {
-    const mgr = makeManager();
-    const result = await mgr.requestSwap('  ');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe('INVALID_PATH');
-    }
-  });
-
-  test('swap returns REROOT_FAILED when rerootStores throws', async () => {
-    const mgr = makeManager({ rerootFails: true });
-    const result = await mgr.requestSwap(join(baseDir, 'new-workspace'));
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe('REROOT_FAILED');
-    }
-  });
-
-  test('persists new workingDir to daemon settings on success', async () => {
-    const mgr = makeManager();
-    const newDir = join(baseDir, 'persisted-workspace');
-    const result = await mgr.requestSwap(newDir);
-    expect(result.ok).toBe(true);
-    expect(readDaemonSetting(daemonHome, 'runtime.workingDir')).toBe(newDir);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Path traversal behaviour
-// ---------------------------------------------------------------------------
-
-describe('WorkspaceSwapManager: path traversal', () => {
-  let baseDir: string;
-  let daemonHome: string;
-
-  beforeEach(() => {
-    baseDir = tempDir('traversal-base');
-    daemonHome = tempDir('traversal-daemon');
-  });
-
   afterEach(() => cleanup(baseDir, daemonHome));
 
-  function makeManager() {
-    return new WorkspaceSwapManager(baseDir, {
-      runtimeBus: null,
-      daemonHomeDir: daemonHome,
-      getBusySessionCount: () => 0,
-      rerootStores: async () => {},
-    });
-  }
-
-  test('requestSwap with a ".." relative path resolves against the current dir and is accepted', async () => {
-    const mgr = makeManager();
-    const result = await mgr.requestSwap('sub/../resolved-relative');
-    const expected = join(baseDir, 'resolved-relative');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.current).toBe(expected);
-    expect(mgr.getCurrentWorkingDir()).toBe(expected);
-    expect(existsSync(join(expected, '.goodvibes', 'sessions'))).toBe(true);
-    // The unresolved segment is never created.
-    expect(existsSync(join(baseDir, 'sub'))).toBe(false);
+  test('a change is saved, the running root stays, and the result says a restart applies it', async () => {
+    const mgr = new WorkspaceSwapManager(baseDir, { runtimeBus: null, daemonHomeDir: daemonHome });
+    const target = join(baseDir, 'next');
+    const result = await mgr.requestSwap(target);
+    expect(result.ok && result.restartRequired).toBe(true);
+    expect(result.ok && result.requiresRestart.length).toBeGreaterThan(0);
+    expect(mgr.getCurrentWorkingDir()).toBe(baseDir);
+    expect(readDaemonSetting(daemonHome, 'runtime.workingDir')).toBe(target);
+    expect(statSync(target).isDirectory()).toBe(true);
   });
 
-  test('requestSwap with an absolute path containing ".." segments is normalised and accepted', async () => {
-    const mgr = makeManager();
-    // String concatenation: join() would normalise the segments away before the manager sees them.
-    const rawPath = `${baseDir}/sub/../resolved-target`;
-    const result = await mgr.requestSwap(rawPath);
-    const expected = join(baseDir, 'resolved-target');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.current).toBe(expected);
-    expect(mgr.getCurrentWorkingDir()).toBe(expected);
-    expect(existsSync(join(baseDir, 'sub'))).toBe(false);
+  test('requesting the running root cancels a saved change', async () => {
+    const mgr = new WorkspaceSwapManager(baseDir, { runtimeBus: null, daemonHomeDir: daemonHome });
+    await mgr.requestSwap(join(baseDir, 'next'));
+    const result = await mgr.requestSwap(baseDir);
+    expect(result.ok && result.restartRequired).toBe(false);
+    expect(mgr.getPendingWorkingDir()).toBeNull();
+    expect(readDaemonSetting(daemonHome, 'runtime.workingDir')).toBe(baseDir);
+  });
+
+  test('a path that cannot be a directory changes nothing', async () => {
+    const file = join(baseDir, 'a-file');
+    writeFileSync(file, 'x');
+    const mgr = new WorkspaceSwapManager(baseDir, { runtimeBus: null, daemonHomeDir: daemonHome });
+    const result = await mgr.requestSwap(file);
+    expect(result.ok ? null : result.code).toBe('INVALID_PATH');
+    expect(readDaemonSetting(daemonHome, 'runtime.workingDir')).toBeUndefined();
+  });
+
+  test('a change that cannot be saved fails and is not reported as done', async () => {
+    const fileAsHome = join(baseDir, 'home-is-a-file');
+    writeFileSync(fileAsHome, 'x');
+    const mgr = new WorkspaceSwapManager(baseDir, { runtimeBus: null, daemonHomeDir: fileAsHome });
+    const result = await mgr.requestSwap(join(baseDir, 'next'));
+    expect(result.ok ? null : result.code).toBe('REROOT_FAILED');
+    expect(mgr.getPendingWorkingDir()).toBeNull();
   });
 });
 
@@ -360,130 +277,5 @@ describe('ensureDaemonHome: workspace-scoped token files are ignored', () => {
 
     const dest = join(daemonHome, 'operator-tokens.json');
     expect(existsSync(dest)).toBe(false);
-  });
-});
-
-describe('WorkspaceSwapManager: edge cases', () => {
-  let baseDir: string;
-  let daemonHome: string;
-  let emittedEvents: Array<{ domain: string; type: string }>;
-
-  beforeEach(() => {
-    baseDir = tempDir('swap-edge-base');
-    daemonHome = tempDir('swap-edge-daemon');
-    emittedEvents = [];
-  });
-
-  afterEach(() => cleanup(baseDir, daemonHome));
-
-  function makeManagerWithBus(opts: { busyCount?: number } = {}) {
-    const mockBus = {
-      emit: (domain: string, envelope: { type: string }) => {
-        emittedEvents.push({ domain, type: envelope.type });
-      },
-      on: () => () => {},
-    } as unknown as import('../platform/src/platform/runtime/events/index.ts').RuntimeEventBus;
-
-    return new WorkspaceSwapManager(baseDir, {
-      runtimeBus: mockBus,
-      daemonHomeDir: daemonHome,
-      getBusySessionCount: () => opts.busyCount ?? 0,
-      rerootStores: async () => {},
-    });
-  }
-
-  test('emits WORKSPACE_SWAP_REFUSED (not STARTED) when busy', async () => {
-    const mgr = makeManagerWithBus({ busyCount: 1 });
-    await mgr.requestSwap(join(baseDir, 'new'));
-    const types = emittedEvents.map((e) => e.type);
-    expect(types).not.toContain('WORKSPACE_SWAP_STARTED');
-    expect(types).toContain('WORKSPACE_SWAP_REFUSED');
-    expect(types).not.toContain('WORKSPACE_SWAP_COMPLETED');
-  });
-
-  test('emits STARTED then COMPLETED on successful swap', async () => {
-    const mgr = makeManagerWithBus();
-    await mgr.requestSwap(join(baseDir, 'new-ok'));
-    const types = emittedEvents.map((e) => e.type);
-    expect(types.indexOf('WORKSPACE_SWAP_STARTED')).toBeLessThan(types.indexOf('WORKSPACE_SWAP_COMPLETED'));
-  });
-
-  test('all events are emitted under workspace domain', async () => {
-    const mgr = makeManagerWithBus({ busyCount: 0 });
-    await mgr.requestSwap(join(baseDir, 'domain-test'));
-    for (const ev of emittedEvents) {
-      expect(ev.domain).toBe('workspace');
-    }
-  });
-
-  test('swap to a path that is a FILE returns INVALID_PATH', async () => {
-    const filePath = join(baseDir, 'I-am-a-file.txt');
-    writeFileSync(filePath, 'hello');
-    const mgr = makeManagerWithBus();
-    // mkdirSync on a path whose parent is a file will fail
-    const result = await mgr.requestSwap(join(filePath, 'subdir'));
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe('INVALID_PATH');
-    }
-  });
-
-  test('concurrent swap requests: first succeeds, second gets WORKSPACE_BUSY', async () => {
-    let resolveReroot!: () => void;
-    const rerootDone = new Promise<void>((res) => { resolveReroot = res; });
-    const mgr = new WorkspaceSwapManager(join(baseDir, 'concurrent-initial'), {
-      runtimeBus: null,
-      daemonHomeDir: daemonHome,
-      getBusySessionCount: () => 0,
-      rerootStores: async () => { await rerootDone; },
-    });
-
-    // Fire first swap, hangs in rerootStores
-    const first = mgr.requestSwap(join(baseDir, 'concurrent-a'));
-    // Fire second swap immediately, must be WORKSPACE_BUSY (mutex holds)
-    const second = await mgr.requestSwap(join(baseDir, 'concurrent-b'));
-    expect(second.ok).toBe(false);
-    if (!second.ok) {
-      expect(second.code).toBe('WORKSPACE_BUSY');
-    }
-    // Release the first and confirm it succeeds
-    resolveReroot();
-    const firstResult = await first;
-    expect(firstResult.ok).toBe(true);
-  });
-
-  test('persistedInDaemonSettings: false when writeDaemonSetting throws', async () => {
-    // Use a daemonHomeDir path that is actually a FILE so writeDaemonSetting cannot write
-    const fileAsHome = join(baseDir, 'not-a-dir.txt');
-    writeFileSync(fileAsHome, 'this is a file, not a directory');
-
-    // Collect WORKSPACE_SWAP_COMPLETED payloads
-    const completedPayloads: Array<Record<string, unknown>> = [];
-    const mockBus = {
-      emit: (domain: string, envelope: Record<string, unknown>) => {
-        if (envelope['type'] === 'WORKSPACE_SWAP_COMPLETED') {
-          const payload = envelope['payload'];
-          if (payload && typeof payload === 'object') {
-            completedPayloads.push(payload as Record<string, unknown>);
-          }
-        }
-      },
-      on: () => () => {},
-    } as unknown as import('../platform/src/platform/runtime/events/index.ts').RuntimeEventBus;
-
-    const mgr = new WorkspaceSwapManager(baseDir, {
-      runtimeBus: mockBus,
-      daemonHomeDir: fileAsHome, // writeDaemonSetting will fail to write inside a file path
-      getBusySessionCount: () => 0,
-      rerootStores: async () => {},
-    });
-
-    const result = await mgr.requestSwap(join(baseDir, 'persist-fail-target'));
-    // Swap itself should succeed
-    expect(result.ok).toBe(true);
-    // COMPLETED event must have been emitted
-    expect(completedPayloads).toHaveLength(1);
-    // persistedInDaemonSettings must be false because settings persistence failed.
-    expect(completedPayloads[0]!['persistedInDaemonSettings']).toBe(false);
   });
 });

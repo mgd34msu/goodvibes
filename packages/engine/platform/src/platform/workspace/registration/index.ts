@@ -8,12 +8,20 @@
 
 export {
   WorkspaceRegistrationStore,
+  openWorkspaceRegistrationStore,
+  normalizeLegacyRegisterRows,
   withWorkspaceRegistrationWriteLockSync,
   readWorkspaceRegisterSync,
   type WorkspaceRegisterRead,
   type WorkspaceRegistrationStoreOptions,
   type RegisterWorkspaceResult,
 } from './store.js';
+export {
+  readCheckpointEligibilitySync,
+  createCheckpointEligibilityChecker,
+  checkpointEligibilityRefusal,
+  type CheckpointEligibility,
+} from './checkpoint-eligibility.js';
 // The store's refusal rule for roots that are too broad, for callers that ask
 // before offering a registration.
 export { broadRootReason } from '../checkpoint/root-guard.js';
@@ -27,6 +35,7 @@ export {
   WorkspaceRegistrationError,
   NativeWorkspaceScopeError,
   type NativeWorkspaceScope,
+  type NativeWorkspaceScopeReason,
   type RegisteredWorkspaceRecord,
   type DeclinedWorkspaceRecord,
   type WorkspaceRegistrySnapshot,

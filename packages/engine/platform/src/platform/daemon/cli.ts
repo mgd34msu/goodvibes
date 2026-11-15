@@ -18,7 +18,7 @@ import { configureActivityLogger, flushActivityLogSync, logger } from '../utils/
 import { GlobalNetworkTransportInstaller } from '../runtime/network/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { ensureDaemonHome } from '../workspace/daemon-home.js';
-import { resolveDaemonCliPaths } from './cli-paths.js';
+import { parseCliFlag, resolveDaemonCliPaths } from './cli-paths.js';
 import { reportFatalBootFailure, writeExitingStdoutLine, writeFatalLine } from './fatal-boot-report.js';
 import { readDaemonCliTokens } from './cli-tokens.js';
 import { WorkspaceSwapManager } from '../workspace/workspace-swap-manager.js';
@@ -131,14 +131,13 @@ async function main(): Promise<void> {
 
   const userAuth = runtimeServices.localUserAuthManager;
 
+  // A working-directory change is saved for the next start; this process stays on workingDir.
   const swapManager = new WorkspaceSwapManager(workingDir, {
     runtimeBus,
     daemonHomeDir,
-    getBusySessionCount: () => runtimeServices.sessionBroker.countBusySessions(),
-    rerootStores: (newDir: string) => runtimeServices.rerootStores(newDir),
+    startOverride: parseCliFlag(process.argv, '--working-dir') !== undefined ? '--working-dir'
+      : process.env['GOODVIBES_WORKING_DIR'] ? 'GOODVIBES_WORKING_DIR' : undefined,
   });
-  // A turn recorded while the stores move would land in the old workspace's files.
-  runtimeServices.sessionBroker.setIntakeHold(() => swapManager.isSwapping());
 
   // The daemon CLI IS the platform-released artifact, so its update identity is
   // the platform release version and the running executable. Embedders never get

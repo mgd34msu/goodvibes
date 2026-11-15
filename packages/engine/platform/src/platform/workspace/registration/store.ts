@@ -1,4 +1,3 @@
-import { withFileWriteLockSync } from '../checkpoint/sync-write-lock.js';
 /**
  * workspace/registration/store.ts
  *
@@ -38,15 +37,16 @@ import { withFileWriteLockSync } from '../checkpoint/sync-write-lock.js';
 import { PersistentStore } from '../../state/persistent-store.js';
 import { confirmFileDurable } from '../../utils/atomic-json-store.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname, sep } from 'node:path';
-import { acquireCrossProcessLock } from '../checkpoint/cross-process-lock.js';
+import { closeSync, fstatSync, openSync, readFileSync, realpathSync, statSync, type BigIntStats } from 'node:fs';
+import { sep } from 'node:path';
+import { acquireCrossProcessLock, CrossProcessLockBusyError, withCrossProcessLockSync } from '../checkpoint/cross-process-lock.js';
 import { broadRootReason } from '../checkpoint/root-guard.js';
 import { normalizeWorkspaceRoot, resolveWorkspaceRegistration } from './resolution.js';
 import {
   WorkspaceRegistrationError,
   NativeWorkspaceScopeError,
   type NativeWorkspaceScope,
+  type NativeWorkspaceScopeReason,
   type DeclinedWorkspaceRecord,
   type RegisteredWorkspaceRecord,
   type ResolveWorkspaceInput,
@@ -56,19 +56,67 @@ import {
 } from './types.js';
 import { probeWorktreeLinkAsync } from './worktree-link.js';
 
-interface ScopeTombstone {
-  readonly root: string;
-  readonly scopeId?: string;
-  readonly generation: number;
-}
-
 interface PersistedRegistry extends Record<string, unknown> {
   version: 1 | 2;
   workspaces: RegisteredWorkspaceRecord[];
   declines: DeclinedWorkspaceRecord[];
   registryId?: string;
   scopeGeneration?: number;
-  scopeTombstones?: ScopeTombstone[];
+}
+
+const EPOCH = new Date(0).toISOString();
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function timestamp(value: unknown): string {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? value : EPOCH;
+}
+
+/** Keep one row per root: the later timestamp wins, a tie keeps the first seen. */
+function dedupe<T extends { readonly root: string }>(rows: readonly T[], at: (row: T) => string): T[] {
+  const byRoot = new Map<string, T>();
+  for (const row of rows) {
+    const seen = byRoot.get(row.root);
+    if (!seen || at(row) > at(seen)) byRoot.set(row.root, row);
+  }
+  return [...byRoot.values()];
+}
+
+/**
+ * The one definition of a valid legacy (version 1) row, applied wherever legacy
+ * rows enter: reading a version 1 register and folding the pre-split copy in.
+ * Roots are normalized, a missing or unparseable timestamp reads as the oldest
+ * possible (the row predates the field), rows without a root are dropped, and
+ * duplicate roots collapse to the later row. A version 1 row never carries a
+ * native scope, even if a copied row has a similarly named field. After this,
+ * promoting the document to version 2 on the first write cannot fail on an old
+ * row.
+ */
+export function normalizeLegacyRegisterRows(workspaces: unknown, declines: unknown): {
+  readonly workspaces: RegisteredWorkspaceRecord[];
+  readonly declines: DeclinedWorkspaceRecord[];
+} {
+  const rows: RegisteredWorkspaceRecord[] = [];
+  for (const row of Array.isArray(workspaces) ? workspaces as unknown[] : []) {
+    if (!isObject(row) || typeof row.root !== 'string' || row.root.trim() === '') continue;
+    const label = typeof row.label === 'string' ? row.label.trim() : '';
+    const origin = typeof row.origin === 'string' ? row.origin.trim() : '';
+    rows.push({
+      root: normalizeWorkspaceRoot(row.root.trim()),
+      registeredAt: timestamp(row.registeredAt),
+      ...(label ? { label } : {}),
+      ...(origin ? { origin } : {}),
+      ...(row.checkpointEligible === true ? { checkpointEligible: true } : {}),
+    });
+  }
+  const declined: DeclinedWorkspaceRecord[] = [];
+  for (const row of Array.isArray(declines) ? declines as unknown[] : []) {
+    if (!isObject(row) || typeof row.root !== 'string' || row.root.trim() === '') continue;
+    declined.push({ root: normalizeWorkspaceRoot(row.root.trim()), declinedAt: timestamp(row.declinedAt) });
+  }
+  return { workspaces: dedupe(rows, (row) => row.registeredAt), declines: dedupe(declined, (row) => row.declinedAt) };
 }
 
 function validate(snapshot: PersistedRegistry | null): PersistedRegistry {
@@ -85,47 +133,34 @@ function validate(snapshot: PersistedRegistry | null): PersistedRegistry {
     const validId = (value: unknown, prefix: string): value is string => typeof value === 'string'
       && new RegExp(`^${prefix}:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`).test(value);
     if (!validId(snapshot.registryId, 'workspace-registry') || !validGeneration(generation)
-      || !Array.isArray(snapshot.scopeTombstones) || !Array.isArray(snapshot.declines)) {
+      || !Array.isArray(snapshot.declines)) {
       throw new Error('Workspace native scope metadata is invalid.');
     }
     const roots = new Set<string>();
     const ids = new Set<string>();
     for (const row of snapshot.workspaces) {
       if (!row || !validRoot(row.root) || typeof row.registeredAt !== 'string' || roots.has(row.root)) {
-        throw new Error('Workspace native registration is invalid.');
+        const what = !row || typeof row.root !== 'string' ? 'a row without a root'
+          : roots.has(row.root) ? `a second row for ${row.root}` : `the row for ${row.root}`;
+        throw new Error(`Workspace registration is invalid: ${what} (root must be normalized and unique, registeredAt a string).`);
       }
       roots.add(row.root);
       if (row.nativeScope !== undefined) {
         const scope = row.nativeScope;
         if (!scope || !validId(scope.id, 'workspace') || !validRoot(scope.canonicalRoot)
           || !validGeneration(scope.generation) || ids.has(scope.id)) {
-          throw new Error('Workspace native incarnation is invalid.');
+          throw new Error(`Workspace native incarnation is invalid for ${row.root}.`);
         }
         ids.add(scope.id);
       }
     }
-    for (const tombstone of snapshot.scopeTombstones) {
-      if (!tombstone || !validRoot(tombstone.root) || !validGeneration(tombstone.generation)
-        || (tombstone.scopeId !== undefined && (!validId(tombstone.scopeId, 'workspace') || ids.has(tombstone.scopeId)))) {
-        throw new Error('Workspace native tombstone is invalid.');
-      }
-      if (tombstone.scopeId) ids.add(tombstone.scopeId);
-    }
-    if (snapshot.declines.some((row) => !row || !validRoot(row.root) || typeof row.declinedAt !== 'string')) {
-      throw new Error('Workspace native decline is invalid.');
+    const badDecline = snapshot.declines.find((row) => !row || !validRoot(row.root) || typeof row.declinedAt !== 'string');
+    if (badDecline !== undefined) {
+      throw new Error(`Workspace decline is invalid${badDecline && typeof badDecline.root === 'string' ? ` for ${badDecline.root}` : ''}.`);
     }
     return snapshot;
   }
-  return {
-    version: 1,
-    // v1 never attested a native incarnation, even if a copied row contains
-    // similarly named fields. Do not promote such fields on the next write.
-    workspaces: snapshot.workspaces.map((row) => {
-      const { nativeScope: _unattested, ...registration } = row;
-      return registration;
-    }),
-    declines: Array.isArray(snapshot.declines) ? snapshot.declines : [],
-  };
+  return { version: 1, ...normalizeLegacyRegisterRows(snapshot.workspaces, snapshot.declines) };
 }
 
 /** One synchronous read of the register file, judged by the store's own rules. */
@@ -134,7 +169,7 @@ export type WorkspaceRegisterRead =
   | {
     readonly state: 'ok';
     readonly version: 1 | 2;
-    /** v1 rows keep every field they were written with, except an unattested `nativeScope`. */
+    /** v1 rows come normalized (see normalizeLegacyRegisterRows). */
     readonly workspaces: readonly RegisteredWorkspaceRecord[];
     readonly declines: readonly DeclinedWorkspaceRecord[];
   }
@@ -181,14 +216,14 @@ function canonicalDirectory(root: string): string | null {
 }
 
 /**
- * Synchronous legacy boot writers cannot wait on an async lock. They use the
- * SAME strict ownership protocol and fail immediately on contention, before
- * reading. The fully-written owner is published atomically; no age takeover.
+ * Synchronous legacy boot writers cannot wait on an async lock. They take the
+ * same `<file>.lock` the store's writers take and fail at once on contention,
+ * before reading.
  */
 export function withWorkspaceRegistrationWriteLockSync<T>(path: string, write: () => T): T {
-  try { return withFileWriteLockSync(path, write); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'FILE_WRITER_BUSY') throw error;
-    throw Object.assign(new Error('Workspace registry writer lock is already owned.'), { code: 'WORKSPACE_REGISTRY_BUSY' });
+  try { return withCrossProcessLockSync(`${path}.lock`, write); } catch (error) {
+    if (!(error instanceof CrossProcessLockBusyError)) throw error;
+    throw Object.assign(new Error('Workspace registry writer lock is already owned.', { cause: error }), { code: 'WORKSPACE_REGISTRY_BUSY' });
   }
 }
 
@@ -196,10 +231,53 @@ export function withWorkspaceRegistrationWriteLockSync<T>(path: string, write: (
 function advance(state: PersistedRegistry): PersistedRegistry {
   const generation = state.version === 2 ? state.scopeGeneration! + 1 : 1;
   if (!Number.isSafeInteger(generation)) throw new Error('Workspace scope generation exhausted.');
+  // Removal tombstones written by earlier builds were never read; drop them.
+  const { scopeTombstones: _dropped, ...rest } = state;
   return {
-    ...state, version: 2, registryId: state.version === 2 ? state.registryId! : `workspace-registry:${randomUUID()}`,
-    scopeGeneration: generation, scopeTombstones: state.version === 2 ? state.scopeTombstones! : [],
+    ...rest, version: 2, registryId: state.version === 2 ? state.registryId! : `workspace-registry:${randomUUID()}`,
+    scopeGeneration: generation,
   };
+}
+
+function fileIdentity(stat: BigIntStats): string {
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+}
+
+const SCOPE_REFUSALS: Record<NativeWorkspaceScopeReason, (root: string, detail?: string) => { state: string; next: readonly string[] }> = {
+  'not-registered': (root) => ({ state: `${root} is not a registered workspace`,
+    next: [`Register ${root} (workspaces.registrations.add, or \`goodvibes-agent workspaces register --yes\` in that directory), then retry.`] }),
+  declined: (root, detail) => ({ state: `registration was declined at ${detail ?? root}`,
+    next: [`Register ${root} explicitly (workspaces.registrations.add), which clears that decline, then retry.`] }),
+  'registry-unreadable': (_root, detail) => ({ state: `the workspace register cannot be read${detail ? `: ${detail}` : ''}`,
+    next: ['Repair or remove the bad entry in the workspace register (~/.goodvibes/shared), then retry.'] }),
+  'root-missing': (root) => ({ state: `${root} is not an existing directory`,
+    next: ['Run the work from an existing project directory, or recreate the directory, then retry.'] }),
+  unmigrated: (root) => ({ state: `${root} was registered before native work existed and has no native scope`,
+    next: [`Register ${root} again (workspaces.registrations.add); that grants its native scope. Then retry.`] }),
+  changed: (root, detail) => ({ state: `the registration of ${root} changed${detail ? ` (${detail})` : ''}`,
+    next: ['Start the step again so it reads the current registration.'] }),
+  retry: (_root, detail) => ({ state: `the workspace register changed or could not be confirmed on disk while it was read${detail ? `: ${detail}` : ''}`,
+    next: ['Retry; nothing was changed.'] }),
+};
+
+function scopeRefusal(code: NativeWorkspaceScopeError['code'], reason: NativeWorkspaceScopeReason, root: string, detail?: string): NativeWorkspaceScopeError {
+  const { state, next } = SCOPE_REFUSALS[reason](root, detail);
+  return new NativeWorkspaceScopeError(code, { reason, state, next });
+}
+
+/** One store per register file in this process, so its queue orders every writer and reader here. */
+const openStores = new Map<string, WorkspaceRegistrationStore>();
+
+/**
+ * The process's store for `options.path`, created on first use. Every caller
+ * in one process that reads or writes the shared register goes through this, so
+ * the in-process queue orders all of them. `:memory:` always gets a new store.
+ */
+export function openWorkspaceRegistrationStore(options: WorkspaceRegistrationStoreOptions): WorkspaceRegistrationStore {
+  if (options.path === ':memory:') return new WorkspaceRegistrationStore(options);
+  let store = openStores.get(options.path);
+  if (!store) { store = new WorkspaceRegistrationStore(options); openStores.set(options.path, store); }
+  return store;
 }
 
 export interface WorkspaceRegistrationStoreOptions {
@@ -224,14 +302,16 @@ export interface WorkspaceRegistrationStoreOptions {
 export interface RegisterWorkspaceResult {
   readonly record: RegisteredWorkspaceRecord;
   readonly alreadyRegistered: boolean;
+  /** True when this call gave an already registered root its native scope (it was registered before native work existed). */
+  readonly nativeScopeGranted?: boolean;
 }
 
 export class WorkspaceRegistrationStore {
   private readonly store: PersistentStore<PersistedRegistry>;
   private readonly path: string;
   private memoryState: PersistedRegistry | null = null;
-  /** A failed/pending authority commit cannot be promoted by a later read in this owner. */
-  private nativeDurabilityUncertain = false;
+  /** Identity (device, inode, size, times) of the last register file confirmed on disk by this store. */
+  private durableIdentity: string | null = null;
   /** Read-only source for the pre-split location; see fallbackReadPath. */
   private readonly fallbackStore: PersistentStore<PersistedRegistry> | null;
   private readonly homeDir: string;
@@ -269,7 +349,7 @@ export class WorkspaceRegistrationStore {
     const guarded = async (): Promise<T> => {
       const lockPath = this.store.lockPath;
       if (!lockPath) return fn();
-      const release = await acquireCrossProcessLock(lockPath, { totalTimeoutMs: 10_000, strictOwnership: true });
+      const release = await acquireCrossProcessLock(lockPath, { totalTimeoutMs: 10_000 });
       try {
         return await fn();
       } finally {
@@ -306,90 +386,119 @@ export class WorkspaceRegistrationStore {
 
   private async persist(state: PersistedRegistry): Promise<void> {
     validate(state);
-    const durable = state.version === 2;
-    // Fence before any await. Even after rename throws, the new incarnation or
-    // tombstone may be visible. Never roll it back or call that visibility a
-    // successful commit. Only a subsequent explicit durable mutation recovers
-    // this owner; an idempotent/no-write operation does not clear the fence.
-    if (durable) this.nativeDurabilityUncertain = true;
-    await this.store.persist(state, { durable });
+    // A failed write fails this call only. Bytes a failed write may have left
+    // visible are confirmed on disk by the next scope read before it trusts them.
+    await this.store.persist(state, { durable: state.version === 2 });
     if (this.path === ':memory:') this.memoryState = structuredClone(state);
-    if (durable) this.nativeDurabilityUncertain = false;
+  }
+
+  /**
+   * Read the register's bytes, confirming once per file identity that they are
+   * on disk: a crash can leave a renamed-in file visible before it was synced,
+   * and native admission must not trust it until it is. Later reads of the same
+   * file cost an open, an fstat and a read.
+   */
+  private readDurableBytes(root: string): string | null {
+    let fd: number;
+    try { fd = openSync(this.path, 'r'); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw scopeRefusal('unavailable', 'registry-unreadable', root, error instanceof Error ? error.message : String(error));
+    }
+    let bytes: string;
+    let identity: string;
+    try {
+      identity = fileIdentity(fstatSync(fd, { bigint: true }));
+      bytes = readFileSync(fd, 'utf-8');
+    } catch (error) {
+      throw scopeRefusal('unavailable', 'registry-unreadable', root, error instanceof Error ? error.message : String(error));
+    } finally { closeSync(fd); }
+    // Writers replace the file by rename, never in place, so bytes read from a
+    // file already confirmed are confirmed bytes.
+    if (identity === this.durableIdentity) return bytes;
+    try {
+      confirmFileDurable(this.path);
+      if (fileIdentity(statSync(this.path, { bigint: true })) !== identity) throw new Error('the file was replaced during the read');
+    } catch (error) {
+      throw scopeRefusal('unavailable', 'retry', root, error instanceof Error ? error.message : String(error));
+    }
+    this.durableIdentity = identity;
+    return bytes;
   }
 
   /**
    * Strict authoritative read, deliberately without legacy fallback, corruption
    * recovery, or authority migration. No cached scope survives a removed file.
    * Worktree-link facts are not accepted as authority by this first native slice.
+   * A refusal names its state and next step (NativeWorkspaceScopeError.refusal).
    */
   currentScope(root: string): NativeWorkspaceScope {
-    if (this.nativeDurabilityUncertain) throw new NativeWorkspaceScopeError('unavailable');
     let state: PersistedRegistry;
-    let bytes: string | undefined;
-    try {
-      bytes = this.path === ':memory:' ? undefined : readFileSync(this.path, 'utf-8');
-      const raw = bytes === undefined ? this.memoryState : JSON.parse(bytes) as PersistedRegistry;
-      if (raw === null) throw new NativeWorkspaceScopeError('unavailable');
-      state = validate(raw);
-    } catch { throw new NativeWorkspaceScopeError('unavailable'); }
-    if (state.version !== 2) throw new NativeWorkspaceScopeError('unmigrated');
+    let raw: PersistedRegistry | null;
+    if (this.path === ':memory:') raw = this.memoryState;
+    else {
+      const bytes = this.readDurableBytes(root);
+      try { raw = bytes === null ? null : JSON.parse(bytes) as PersistedRegistry; } catch (error) {
+        throw scopeRefusal('unavailable', 'registry-unreadable', root, error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (raw === null) throw scopeRefusal('unavailable', 'not-registered', root);
+    try { state = validate(raw); } catch (error) {
+      throw scopeRefusal('unavailable', 'registry-unreadable', root, error instanceof Error ? error.message : String(error));
+    }
+    if (state.version !== 2) throw scopeRefusal('unmigrated', 'unmigrated', root);
     const canonical = canonicalDirectory(root);
-    if (!canonical) throw new NativeWorkspaceScopeError('unavailable');
+    if (!canonical) throw scopeRefusal('unavailable', 'root-missing', root);
     const registrations = state.workspaces.map((row) => ({
       ...row, root: canonicalDirectory(row.root) ?? row.root,
     }));
+    const declinedRoots = state.declines.map((row) => canonicalDirectory(row.root) ?? row.root);
     const resolution = resolveWorkspaceRegistration({
       path: canonical, registrations,
-      declines: state.declines.map((row) => ({ ...row, root: canonicalDirectory(row.root) ?? row.root })),
+      declines: state.declines.map((row, index) => ({ ...row, root: declinedRoots[index]! })),
     });
-    if (resolution.status !== 'covered') throw new NativeWorkspaceScopeError('unavailable');
+    if (resolution.status === 'declined') throw scopeRefusal('unavailable', 'declined', canonical, resolution.declinedRoot ?? undefined);
+    if (resolution.status !== 'covered') throw scopeRefusal('unavailable', 'not-registered', canonical);
     const matching = registrations.filter((row) => row.root === resolution.coveredBy);
-    if (matching.length !== 1) throw new NativeWorkspaceScopeError('unavailable');
+    if (matching.length !== 1) {
+      throw scopeRefusal('unavailable', 'registry-unreadable', canonical, `${matching.length} registrations resolve to ${resolution.coveredBy}; remove all but one with workspaces.registrations.remove`);
+    }
     const registered = matching[0]!;
     const scope = registered.nativeScope;
-    if (!scope) throw new NativeWorkspaceScopeError('unmigrated');
-    if (scope.canonicalRoot !== registered.root || broadRootReason(registered.root, this.homeDir, this.daemonStateDir)) {
-      throw new NativeWorkspaceScopeError('changed');
+    if (!scope) throw scopeRefusal('unmigrated', 'unmigrated', registered.root);
+    if (scope.canonicalRoot !== registered.root) {
+      throw scopeRefusal('changed', 'changed', registered.root, `it was registered as ${scope.canonicalRoot} and now resolves to ${registered.root}; register it again`);
     }
-    if (bytes !== undefined) {
-      try {
-        // A new owner cannot infer that visible post-rename bytes were durably
-        // acknowledged before a crash. Establish their durability before native
-        // admission, including full directory ancestry. Re-read so confirmation
-        // of a concurrently replaced file cannot attest the earlier snapshot.
-        confirmFileDurable(this.path);
-        if (readFileSync(this.path, 'utf-8') !== bytes) throw new Error('Workspace scope changed during durability confirmation.');
-      } catch {
-        this.nativeDurabilityUncertain = true;
-        throw new NativeWorkspaceScopeError('unavailable');
-      }
-    }
+    const broad = broadRootReason(registered.root, this.homeDir, this.daemonStateDir);
+    if (broad) throw scopeRefusal('changed', 'changed', registered.root, `it is ${broad}`);
     return Object.freeze({ root: canonical, scopeId: scope.id,
       // This root's own incarnation plus what is registered or declined inside its
       // subtree. The registry-wide generation moves on every unrelated add, remove
       // or decline and would stale every in-flight input; a nearer registration or
       // a decline below this root, and a removed-then-re-added root, still change it.
-      scopeRevision: `${state.registryId!}:${scope.generation}:${subtreeDigest(registered.root, registrations, state.declines.map((row) => canonicalDirectory(row.root) ?? row.root))}` });
+      scopeRevision: `${state.registryId!}:${scope.generation}:${subtreeDigest(registered.root, registrations, declinedRoots)}` });
   }
 
-  /** Own the writer lock while the host acquires inner ownership; launch uses the synchronous validator. */
+  /**
+   * Run `callback` holding the register's writer lock, after one check that
+   * `expected` is still the current scope. Every writer of the register takes
+   * that lock, so nothing can change the registration while the callback runs:
+   * the `assertCurrent` it is handed only says whether the callback is still
+   * inside this call, with no read.
+   */
   withCurrentScope<T>(expected: NativeWorkspaceScope, callback: (assertCurrent: () => void) => T | Promise<T>): Promise<T> {
     // Copy now, before queuing, so mutation of a caller's object cannot rebind it.
     const pinned = Object.freeze({ root: expected.root, scopeId: expected.scopeId, scopeRevision: expected.scopeRevision });
     return this.run(async () => {
+      const current = this.currentScope(pinned.root);
+      if (current.root !== pinned.root || current.scopeId !== pinned.scopeId || current.scopeRevision !== pinned.scopeRevision) {
+        throw scopeRefusal('changed', 'changed', pinned.root);
+      }
       let live = true;
       const assertCurrent = (): void => {
-        if (!live) throw new NativeWorkspaceScopeError('callback');
-        const current = this.currentScope(pinned.root);
-        if (current.root !== pinned.root || current.scopeId !== pinned.scopeId || current.scopeRevision !== pinned.scopeRevision) {
-          throw new NativeWorkspaceScopeError('changed');
-        }
+        if (!live) throw scopeRefusal('callback', 'changed', pinned.root, 'the step ran after its registration check had ended');
       };
       try {
-        assertCurrent();
-        const result = await callback(assertCurrent);
-        assertCurrent();
-        return result;
+        return await callback(assertCurrent);
       } finally { live = false; }
     });
   }
@@ -418,36 +527,45 @@ export class WorkspaceRegistrationStore {
     return this.run(async () => {
       const state = await this.readForMutation();
       const existing = state.workspaces.find((w) => w.root === target);
+      const mintScope = (generation: number): Pick<RegisteredWorkspaceRecord, 'nativeScope'> => {
+        const canonicalRoot = canonicalDirectory(target);
+        return canonicalRoot === null || broadRootReason(canonicalRoot, this.homeDir, this.daemonStateDir) ? {} : {
+          nativeScope: { id: `workspace:${randomUUID()}`, canonicalRoot, generation },
+        };
+      };
       if (existing) {
         const origin = opts?.origin?.trim();
         const wantsUpgrade =
           (origin !== undefined && origin !== '' && existing.origin !== origin)
           || (opts?.checkpointEligible === true && existing.checkpointEligible !== true);
-        if (!wantsUpgrade) return { record: existing, alreadyRegistered: true };
+        // A root registered before native work existed gets its native scope
+        // from this explicit registration; re-registering is how it is granted.
+        const next = advance(state);
+        const granted: Pick<RegisteredWorkspaceRecord, 'nativeScope'> = existing.nativeScope === undefined ? mintScope(next.scopeGeneration!) : {};
+        const nativeScopeGranted = granted.nativeScope !== undefined;
+        if (!wantsUpgrade && !nativeScopeGranted) return { record: existing, alreadyRegistered: true };
         const upgraded: RegisteredWorkspaceRecord = {
           ...existing,
           ...(origin ? { origin } : {}),
           ...(opts?.checkpointEligible === true ? { checkpointEligible: true } : {}),
+          ...granted,
         };
         await this.persist({
-          ...advance(state),
+          ...next,
           workspaces: state.workspaces.map((w) => (w.root === target ? upgraded : w)),
           declines: state.declines,
         });
-        return { record: upgraded, alreadyRegistered: true };
+        return { record: upgraded, alreadyRegistered: true, ...(nativeScopeGranted ? { nativeScopeGranted: true } : {}) };
       }
 
       const next = advance(state);
-      const canonicalRoot = canonicalDirectory(target);
       const record: RegisteredWorkspaceRecord = {
         root: target,
         registeredAt: new Date().toISOString(),
         ...(opts?.label?.trim() ? { label: opts.label.trim() } : {}),
         ...(opts?.origin?.trim() ? { origin: opts.origin.trim() } : {}),
         ...(opts?.checkpointEligible === true ? { checkpointEligible: true } : {}),
-        ...(canonicalRoot === null || broadRootReason(canonicalRoot, this.homeDir, this.daemonStateDir) ? {} : {
-          nativeScope: { id: `workspace:${randomUUID()}`, canonicalRoot, generation: next.scopeGeneration! },
-        }),
+        ...mintScope(next.scopeGeneration!),
       };
       // Registering a root clears any remembered decline at exactly that root.
       const declines = state.declines.filter((d) => d.root !== target);
@@ -463,13 +581,8 @@ export class WorkspaceRegistrationStore {
       const state = await this.readForMutation();
       const workspaces = state.workspaces.filter((w) => w.root !== target);
       const removed = workspaces.length !== state.workspaces.length;
-      if (removed) {
-        const next = advance(state);
-        const old = state.workspaces.find((row) => row.root === target)!;
-        await this.persist({ ...next, workspaces, scopeTombstones: [...next.scopeTombstones!, {
-          root: target, ...(old.nativeScope ? { scopeId: old.nativeScope.id } : {}), generation: next.scopeGeneration!,
-        }] });
-      }
+      // The generation moves, so a root registered again later gets a new scope.
+      if (removed) await this.persist({ ...advance(state), workspaces });
       return { root: target, removed };
     });
   }

@@ -310,8 +310,6 @@ export interface RuntimeServices {
   /** Asks the trust question through `trustPromptRef`; concurrent callers share one prompt. */
   readonly requestTrustDecision: () => Promise<WorkspaceTrustLevel>;
   readonly integrationHelpers: IntegrationHelperService;
-  /** Re-root path-bound stores (MemoryStore, ProjectIndex) to a new working directory, called by WorkspaceSwapManager after verification; stores needing a process restart just warn-log and keep serving the old path until the daemon restarts with the new --working-dir. */
-  rerootStores(newWorkingDir: string): Promise<void>;
   /**
    * Cancel the agent runs this graph is hosting, returning how many.
    *

@@ -179,7 +179,27 @@ function clampLimit(raw: unknown): number {
 
 /** Structural deps, the read/write surface `checkpoints.*` + `sessions.changes.get` needs. */
 export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot' | 'resolveRoot'>
-  & Partial<Pick<WorkspaceCheckpointManager, 'retentionFailure'>>;
+  & Partial<Pick<WorkspaceCheckpointManager, 'retentionFailure'>>
+  & {
+    /**
+     * The manager of the workspace a session works in, when the host keeps one
+     * per workspace (a daemon hosting sessions in other projects). Undefined:
+     * the session works in this manager's workspace.
+     */
+    forSession?(sessionId: string): CheckpointsGatewayManager | undefined;
+    /** The manager whose store holds checkpoint `id`, when the host keeps several. Undefined: this one. */
+    forCheckpoint?(id: string): Promise<CheckpointsGatewayManager | undefined>;
+  };
+
+/** The manager for the session's workspace, or the default one. */
+function managerFor(manager: CheckpointsGatewayManager, sessionId: string | undefined): CheckpointsGatewayManager {
+  return (sessionId === undefined ? undefined : manager.forSession?.(sessionId)) ?? manager;
+}
+
+/** The manager whose store holds the checkpoint, or the default one (which answers an unknown id with its 404). */
+async function managerHolding(manager: CheckpointsGatewayManager, id: string): Promise<CheckpointsGatewayManager> {
+  return (await manager.forCheckpoint?.(id)) ?? manager;
+}
 
 export function createCheckpointsListHandler(manager: CheckpointsGatewayManager): GatewayMethodHandler {
   return async (invocation) => {
@@ -188,10 +208,11 @@ export function createCheckpointsListHandler(manager: CheckpointsGatewayManager)
     const sessionId = optionalString(params.sessionId);
     const since = optionalNumber(params.since, 'since');
     const limit = clampLimit(params.limit);
-    const checkpoints = await manager.list({ kind, sessionId, since, limit });
+    const scoped = managerFor(manager, sessionId);
+    const checkpoints = await scoped.list({ kind, sessionId, since, limit });
     // Present only while the last automatic retention sweep is failing, so a
     // store that is growing past its limits says why instead of looking healthy.
-    const retentionFailure = manager.retentionFailure?.() ?? null;
+    const retentionFailure = scoped.retentionFailure?.() ?? null;
     return retentionFailure ? { checkpoints, retentionFailure } : { checkpoints };
   };
 }
@@ -206,7 +227,7 @@ export function createSessionChangesHandler(manager: CheckpointsGatewayManager):
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requiredString(params.sessionId, 'sessionId');
-    const changes = await manager.sessionChanges(sessionId);
+    const changes = await managerFor(manager, sessionId).sessionChanges(sessionId);
     return changes;
   };
 }
@@ -216,7 +237,7 @@ export function createCheckpointsCreateHandler(manager: CheckpointsGatewayManage
     const body = readInvocationParams(invocation);
     const kind = validateCheckpointKind(body.kind, true);
     if (!kind) throw new GatewayVerbError('Missing required field: kind', 'INVALID_ARGUMENT', 400, 'kind');
-    const checkpoint = await manager.create({
+    const checkpoint = await managerFor(manager, optionalString(body.sessionId)).create({
       kind,
       label: optionalString(body.label),
       retentionClass: validateRetentionClass(body.retentionClass),
@@ -237,7 +258,8 @@ export function createCheckpointsDiffHandler(manager: CheckpointsGatewayManager)
     const params = readInvocationParams(invocation);
     const a = requiredString(params.a, 'a');
     const b = optionalString(params.b);
-    const diff = await callOrHonestNotFound(() => manager.diff(a, b));
+    const holder = await managerHolding(manager, a);
+    const diff = await callOrHonestNotFound(() => holder.diff(a, b));
     return { diff };
   };
 }
@@ -258,8 +280,9 @@ export function createCheckpointsRestorePreviewHandler(
     // `diff(id)` (second arg omitted) diffs the checkpoint against the live
     // working tree and routes through requireCheckpoint, so an unknown id is a
     // 404 here before any token is minted.
-    const diff = await callOrHonestNotFound(() => manager.diff(id));
-    const checkpoint = (await manager.list()).find((c) => c.id === id);
+    const holder = await managerHolding(manager, id);
+    const diff = await callOrHonestNotFound(() => holder.diff(id));
+    const checkpoint = (await holder.list()).find((c) => c.id === id);
     const affectedPaths = diff.files;
     const { token, expiresAt } = tokens.issue(id);
     return {
@@ -326,7 +349,8 @@ export function createCheckpointsRestoreHandler(
       };
     }
 
-    const result = await callOrHonestNotFound(() => manager.restore(id, {
+    const holder = await managerHolding(manager, id);
+    const result = await callOrHonestNotFound(() => holder.restore(id, {
       paths,
       safetyCheckpoint: optionalBoolean(body.safetyCheckpoint, 'safetyCheckpoint'),
     }));
@@ -350,8 +374,9 @@ export function createCheckpointsRevertHunkPreviewHandler(
     const path = requiredString(params.path, 'path');
     const hunk = requiredString(params.hunk, 'hunk');
     // Diff paths are relative to the root the manager resolved at init (the
-    // enclosing repository's top level when started in a subdirectory).
-    const preview = previewHunkRevert(await manager.resolveRoot(), path, hunk);
+    // enclosing repository's top level when started in a subdirectory), in the
+    // workspace of the session the diff came from.
+    const preview = previewHunkRevert(await managerFor(manager, optionalString(params.sessionId)).resolveRoot(), path, hunk);
     if (!preview.applies) {
       return { ...preview, token: null, expiresAt: null };
     }
@@ -404,7 +429,7 @@ export function createCheckpointsRevertHunkHandler(
 
     let receipt;
     try {
-      receipt = await applyHunkRevert(manager, path, hunk);
+      receipt = await applyHunkRevert(managerFor(manager, sessionId), path, hunk);
     } catch (err) {
       if (err instanceof HunkRevertConflictError) {
         // The hunk went stale (the file changed since the diff was taken). Honest

@@ -26,6 +26,7 @@ export {
   UntrustedContentLedger,
   createUntrustedContentPort,
   currentUntrustedContentScope,
+  disclosedDateOf,
   evaluateOutwardEffect,
   getProcessUntrustedContentLedger,
   grantOwnerApproval,
@@ -38,6 +39,7 @@ export {
 } from './untrusted-content.js';
 export type {
   AuthoritySurface,
+  DisclosedDate,
   OutwardEffectDecision,
   OutwardEffectRequest,
   OwnerApproval,

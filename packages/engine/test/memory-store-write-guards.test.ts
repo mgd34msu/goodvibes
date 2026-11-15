@@ -53,6 +53,19 @@ describe('a write the read path would refuse is refused when written', () => {
   });
 });
 
+describe('an add that names its id', () => {
+  test('a resend of the same add stores one record; the same id with another record is refused', async () => {
+    const store = await (await setup()).open();
+    const id = 'mem_lz00000_0123abcd';
+    const first = await store.add({ id, cls: 'fact', summary: 'sent twice' });
+    const again = await store.add({ id, cls: 'fact', summary: 'sent twice' });
+    expect(again.id).toBe(first.id);
+    expect(store.retrieve({})).toHaveLength(1);
+    await expect(store.add({ id, cls: 'fact', summary: 'something else' })).rejects.toThrow(/different memory/);
+    expect(store.retrieve({})).toHaveLength(1);
+  });
+});
+
 describe('importing a bundle', () => {
   test('a bundle with one malformed record imports nothing', async () => {
     const store = await (await setup()).open();

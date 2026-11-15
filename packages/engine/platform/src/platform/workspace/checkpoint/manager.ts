@@ -120,6 +120,7 @@ export class WorkspaceCheckpointManager {
   private readonly autoRetention: boolean;
   private readonly lockTimeoutMs: number | undefined;
   private readonly automaticSnapshotsAllowed: () => boolean;
+  private readonly ownsSession: ((sessionId: string | undefined) => boolean) | undefined;
   private readonly homeDir: string;
   private readonly daemonStateDir: string;
   /** Non-null (the honest refusal message) when the resolved root was refused as too broad; drives both the skipped auto-subscription and rejected explicit `create()` calls. */
@@ -207,6 +208,7 @@ export class WorkspaceCheckpointManager {
     this.autoRetention = opts.autoRetention ?? true;
     this.lockTimeoutMs = opts.lockTimeoutMs;
     this.automaticSnapshotsAllowed = opts.automaticSnapshotsAllowed ?? (() => true);
+    this.ownsSession = opts.ownsSession;
     this.homeDir = opts.homeDir ?? homedir();
     this.daemonStateDir = opts.daemonStateDir ?? join(this.homeDir, '.goodvibes');
     // Build against the raw root first; init() may rebuild once the git-root
@@ -418,12 +420,17 @@ export class WorkspaceCheckpointManager {
    * auto-snapshot call here is deliberately `.catch()`-guarded.
    */
   private subscribeToAutomaticSnapshots(bus: RuntimeEventBus): void {
-    const snapshotTurn = (turnId: string, reason: string): void => {
-      if (!this.automaticSnapshotsAllowed()) return;
+    // A workspace that shares the bus with others snapshots only its own sessions'
+    // events, stamped with the session the event names.
+    const owned = (eventSessionId: string | undefined): boolean => this.ownsSession?.(eventSessionId) ?? true;
+    const stamp = (resolved: string | undefined, eventSessionId: string | undefined): string | undefined =>
+      resolved ?? (this.ownsSession ? eventSessionId : undefined);
+    const snapshotTurn = (turnId: string, reason: string, eventSessionId: string | undefined): void => {
+      if (!owned(eventSessionId) || !this.automaticSnapshotsAllowed()) return;
       // Resolve the owning session synchronously, at event-fire time, so the id
       // is captured even though create() runs async and the resolver's backing
       // state (e.g. the session's active turn/agent) may move on afterwards.
-      const sessionId = this.resolveSessionId?.({ turnId });
+      const sessionId = stamp(this.resolveSessionId?.({ turnId }), eventSessionId);
       this.create({ kind: 'turn', turnId, sessionId, retentionClass: 'standard', label: `turn ${reason}` }).catch((err) => {
         logger.warn('WorkspaceCheckpointManager: automatic turn snapshot failed', {
           turnId,
@@ -432,9 +439,9 @@ export class WorkspaceCheckpointManager {
         });
       });
     };
-    const snapshotAgentRun = (agentId: string): void => {
-      if (!this.automaticSnapshotsAllowed()) return;
-      const sessionId = this.resolveSessionId?.({ agentId });
+    const snapshotAgentRun = (agentId: string, eventSessionId: string | undefined): void => {
+      if (!owned(eventSessionId) || !this.automaticSnapshotsAllowed()) return;
+      const sessionId = stamp(this.resolveSessionId?.({ agentId }), eventSessionId);
       this.create({ kind: 'agent-run', agentId, sessionId, retentionClass: 'standard', label: 'agent run' }).catch((err) => {
         logger.warn('WorkspaceCheckpointManager: automatic agent-run snapshot failed', {
           agentId,
@@ -444,17 +451,17 @@ export class WorkspaceCheckpointManager {
     };
 
     this.unsubscribers.push(
-      bus.on<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>('TURN_COMPLETED', ({ payload }) => {
-        snapshotTurn(payload.turnId, 'completed');
+      bus.on<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>('TURN_COMPLETED', ({ payload, sessionId }) => {
+        snapshotTurn(payload.turnId, 'completed', sessionId);
       }),
-      bus.on<Extract<TurnEvent, { type: 'TURN_ERROR' }>>('TURN_ERROR', ({ payload }) => {
-        snapshotTurn(payload.turnId, 'error');
+      bus.on<Extract<TurnEvent, { type: 'TURN_ERROR' }>>('TURN_ERROR', ({ payload, sessionId }) => {
+        snapshotTurn(payload.turnId, 'error', sessionId);
       }),
-      bus.on<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>('TURN_CANCEL', ({ payload }) => {
-        snapshotTurn(payload.turnId, 'cancelled');
+      bus.on<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>('TURN_CANCEL', ({ payload, sessionId }) => {
+        snapshotTurn(payload.turnId, 'cancelled', sessionId);
       }),
-      bus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', ({ payload }) => {
-        snapshotAgentRun(payload.agentId);
+      bus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', ({ payload, sessionId }) => {
+        snapshotAgentRun(payload.agentId, sessionId);
       }),
     );
   }

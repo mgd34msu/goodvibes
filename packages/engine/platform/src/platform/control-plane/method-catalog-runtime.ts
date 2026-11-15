@@ -552,12 +552,13 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'memory.records.add',
     title: 'Add Memory Record',
-    description: 'Add a memory record to the daemon-owned canonical store. The daemon is the single writer for its store; a client surface routes its writes here instead of opening the store file, so two processes never write the same sql.js file. New records default to confidence 60 (the recall floor) and reviewState fresh unless the review block overrides them.',
+    description: 'Add a memory record to the daemon-owned canonical store. The daemon is the single writer for its store; a client surface routes its writes here instead of opening the store file, so two processes never write the same sql.js file. New records default to confidence 60 (the recall floor) and reviewState fresh unless the review block overrides them. An optional caller-generated id (mem_<base36 time>_<8 hex>) makes the add safe to resend: the same id with the same record returns the stored row, the same id with a different record is refused.',
     category: 'memory',
     access: 'admin',
     scopes: ['write:memory'],
     http: { method: 'POST', path: '/api/memory/records' },
     inputSchema: bodyEnvelopeSchema({
+      id: STRING_SCHEMA,
       cls: MEMORY_CLASS_SCHEMA,
       summary: STRING_SCHEMA,
       scope: MEMORY_SCOPE_SCHEMA,

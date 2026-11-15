@@ -250,14 +250,13 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'shell-ast-normalization',
     name: 'Shell AST Normalization',
     description:
-      'Enables the Shell AST parser for compound command verdict evaluation. '
-      + 'Produces per-segment verdicts (safe/unsafe) with user-facing denial '
-      + 'explanations that are strictly more specific than the baseline. '
-      + 'Default-on: the AST path is safe to default because a parser failure '
-      + 'falls back automatically to the baseline flat segmentation matcher '
-      + '(never a hard error, never a blanket allow), and the '
-      + 'permission gate reads the catastrophic case before the call in both modes. Disable at '
-      + 'runtime to force the baseline flat segmentation mode for every command.',
+      'Parses each exec command into segments just before it runs and refuses a '
+      + 'command in which a segment (or the whole command) has nothing to run, '
+      + 'naming that segment. It does not decide '
+      + 'risk: the permission gate has already decided every command before this '
+      + 'parse, with this flag on or off. When the parser cannot read the command '
+      + '(a parse error), the command is allowed through to run as the gate decided. '
+      + 'Disable to skip the parse entirely.',
     defaultState: 'enabled',
     tier: 8,
     runtimeToggleable: true,

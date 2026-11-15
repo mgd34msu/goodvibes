@@ -22,10 +22,13 @@
  *    such pre-flight check (it would simply omit the Authorization header and
  *    let the daemon's own 401 propagate), so it is reproduced here as a guard
  *    that runs before every delegated call.
- *  - A bounded per-call timeout via an AbortController-wrapped `fetchImpl`,
- *    matching this surface's prior default (2s) for ordinary verbs and a longer
- *    one for the verbs whose cost grows with the store, the platform transport accepts
- *    an injectable `fetchImpl` for exactly this kind of consumer policy.
+ *  - A bounded per-call timeout via an AbortController-wrapped `fetchImpl`:
+ *    2s for ordinary verbs, 15s for an add (the host may embed the record before
+ *    it answers), and a longer one for the verbs whose cost grows with the store.
+ *    The platform transport accepts an injectable `fetchImpl` for exactly this
+ *    kind of consumer policy. An add carries an id, so an add whose answer is
+ *    lost is reported as an unknown outcome naming that id, and a resend of it
+ *    cannot store a second copy.
  */
 
 import { createMemorySpineRestTransport as createPlatformMemorySpineRestTransport, captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, memoryVerbUnavailableError } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
@@ -33,6 +36,8 @@ import type { MemoryTransport, MemoryOperationOptions } from '@goodvibes-jev/eng
 import type { SessionRegistrationConnection } from './session-spine-rest-transport.ts';
 
 const DEFAULT_MEMORY_WIRE_TIMEOUT_MS = 2_000;
+/** An add writes, and the host may compute an embedding before it answers. */
+const DEFAULT_MEMORY_ADD_TIMEOUT_MS = 15_000;
 /** For verbs whose cost grows with the store: a whole bundle, a diagnostic sweep, a semantic search. */
 const DEFAULT_LONG_MEMORY_WIRE_TIMEOUT_MS = 60_000;
 const LONG_RUNNING_VERBS: ReadonlySet<string> = new Set([
@@ -41,8 +46,10 @@ const LONG_RUNNING_VERBS: ReadonlySet<string> = new Set([
 
 export interface MemorySpineRestTransportOptions {
   readonly resolveConnection: () => SessionRegistrationConnection;
-  /** Bound for ordinary verbs (add, get, list, link, ...). Default 2s. */
+  /** Bound for ordinary verbs (get, list, link, ...). Default 2s. */
   readonly timeoutMs?: number;
+  /** Bound for an add. Default 15s. */
+  readonly addTimeoutMs?: number;
   /** Bound for bundle, doctor, vector-stats and semantic-search verbs. Default 60s. */
   readonly longTimeoutMs?: number;
 }
@@ -84,6 +91,7 @@ function requireToken(connection: SessionRegistrationConnection): void {
 export function createMemorySpineRestTransport(options: MemorySpineRestTransportOptions): MemoryTransport {
   const timeoutMs = options.timeoutMs ?? DEFAULT_MEMORY_WIRE_TIMEOUT_MS;
   const longTimeoutMs = options.longTimeoutMs ?? DEFAULT_LONG_MEMORY_WIRE_TIMEOUT_MS;
+  const addTimeoutMs = options.addTimeoutMs ?? DEFAULT_MEMORY_ADD_TIMEOUT_MS;
   const resolveConnection = options.resolveConnection;
   const captureOperationScope = () => {
     const connection = resolveConnection();
@@ -110,7 +118,7 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
       requireToken(connection);
       const transport = createPlatformMemorySpineRestTransport({
         baseUrl: connection.baseUrl, authToken: connection.token,
-        fetchImpl: deadlineFetch(verb, LONG_RUNNING_VERBS.has(verb) ? longTimeoutMs : timeoutMs),
+        fetchImpl: deadlineFetch(verb, LONG_RUNNING_VERBS.has(verb) ? longTimeoutMs : verb === 'add' ? addTimeoutMs : timeoutMs),
       });
       const result = invoke(transport, operation);
       if (!result) throw memoryVerbUnavailableError(verb);

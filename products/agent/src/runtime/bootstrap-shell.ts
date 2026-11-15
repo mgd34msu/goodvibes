@@ -20,6 +20,7 @@ import { createSystemMessageRouter, type SystemMessageRouter } from '../core/sys
 import { getConfigSnapshot } from '../config/index.ts';
 import { createBootstrapCommandContext } from './bootstrap-command-context.ts';
 import { startPlanActivationTurn } from './plan-activation.ts';
+import { ownerInputFor } from './owner-input.ts';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
 import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
@@ -206,7 +207,13 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       startPlanActivationTurn({
         planId,
         task,
-        handleUserInput: (text) => orchestrator.handleUserInput(text),
+        // The composer's path once the shell bound it, so the plan's first turn is
+        // recorded with intake and routed like a typed message; a local turn before that.
+        handleUserInput: async (text) => {
+          const route = ownerInputFor(orchestrator);
+          if (route) route(text);
+          else await orchestrator.handleUserInput(text);
+        },
         notify: (message) => {
           systemMessageRouter.high(message);
           requestRender();

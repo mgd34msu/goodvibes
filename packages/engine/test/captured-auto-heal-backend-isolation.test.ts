@@ -160,12 +160,13 @@ for (const interruption of ['per-call cancellation', 'owner cancellation', 'auth
       if (interruption === 'per-call cancellation') f.a.callController.abort();
       else if (interruption === 'owner cancellation') f.a.ownerController.abort();
       else if (interruption === 'authority revocation') revokeContractInputAuthority(f.a.authority);
-      else f.a.revokePermission();
-      // Settlement occurs while both model promises are still gated. Revoked
-      // permissions/authority must reach the owned signal without a response.
+      else { f.a.revokePermission(); a.release(); }
+      // Cancellation and revoked authority reach the owned signal while the model
+      // is still gated. A read-policy change has no event: A's response arrives,
+      // and the stage check withholds it before anything is published.
       const held = await pendingA;
       expect(held.success).toBe(false); expect(held.error).toContain('Output withheld');
-      expect(requestA.options.signal!.aborted).toBe(true);
+      if (interruption !== 'permission revocation') expect(requestA.options.signal!.aborted).toBe(true);
       expect(requestB.options.signal!.aborted).toBe(false);
       let borrowedCalls = 0;
       const borrowing = f.a.write('substitute.ts', async () => { borrowedCalls++; return repairedB; }, f.b.backend);

@@ -24,7 +24,9 @@ export interface ASTGuardResult {
 }
 
 /**
- * Guards one shell command before it runs.
+ * Guards one shell command before it runs. It refuses only a command in which
+ * a segment has nothing to run; risk was decided by the permission gate before this runs.
+ * A command the parser cannot read is allowed: it runs as the gate decided.
  *
  * @param command     - The raw shell command string.
  * @param flagManager - Feature flags (AST parsing).

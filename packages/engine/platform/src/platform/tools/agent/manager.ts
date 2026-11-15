@@ -1106,6 +1106,16 @@ export class AgentManager {
     return [...this.agents.values()].filter((agent) => agent.cohort === cohort);
   }
 
+  /** The agents still pending or running. */
+  listActive(): AgentRecord[] {
+    return [...this.agents.values()].filter((agent) => agent.status === 'pending' || agent.status === 'running');
+  }
+
+  /**
+   * Forgets every record, running ones included: a running agent keeps running
+   * with nothing left to list, message or cancel it. A caller that replaces the
+   * records (loading a saved session) refuses first while {@link listActive} is not empty.
+   */
   clear(): void {
     this.agents.clear();
     this.executionBoundaries.clear();

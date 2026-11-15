@@ -395,11 +395,11 @@ describe('the profile capture tool', () => {
     const result = await tool.execute({
       action: 'record_trip', title: 'T', from: '2026-08-06', to: '2026-08-09', said: 'x',
     });
-    // Reported as a spoken refusal rather than a tool error, so it cannot be
-    // summarised away as a friendly acknowledgement.
-    expect(result.success).toBe(true);
+    // A failed call whose body still says what to tell the owner.
+    expect(result.success).toBe(false);
     const payload = JSON.parse(result.output as string);
     expect(payload.stored).toBe(false);
+    expect(payload.state).toBe('unavailable');
     expect(payload.reason).toContain('could not');
   });
 

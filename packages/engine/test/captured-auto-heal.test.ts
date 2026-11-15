@@ -71,7 +71,7 @@ for (const stage of ['formatter', 'linter'] as const) test.skipIf(!available)(`c
   expect(port.requests.some((request) => Object.hasOwn(request.questions, 'fixes_errors'))).toBe(true);
 });
 
-for (const boundary of ['model', 'judgment'] as const) for (const change of ['cancel', 'revoke', 'deny'] as const) test(`captured ${boundary} ${change} aborts the owned signal and blocks late repair`, async () => {
+for (const boundary of ['model', 'judgment'] as const) for (const change of ['cancel', 'revoke', 'deny'] as const) test(`captured ${boundary} ${change} stops the repair before anything is published`, async () => {
   const f = await fixture(); const started = deferred(); const release = deferred(); let observedSignal: AbortSignal | undefined; let judgments = 0; let calls = 0;
   const base = readings().port;
   install({ model: base.model, async ask(request) {
@@ -84,9 +84,11 @@ for (const boundary of ['model', 'judgment'] as const) for (const change of ['ca
     return repaired;
   }).execute(args);
   await started.promise;
-  if (change === 'cancel') f.controller.abort(); else if (change === 'revoke') revokeContractInputAuthority(f.authority); else f.deny();
+  // Cancel and revoke abort the call in flight; a read-policy change has no event, so the
+  // call finishes and the next stage check refuses before anything is judged or published.
+  if (change === 'cancel') f.controller.abort(); else if (change === 'revoke') revokeContractInputAuthority(f.authority); else { f.deny(); release.resolve(); }
   const result = await Promise.race([pending, Bun.sleep(4000).then(() => { throw Error('repair failed to settle while backend ignored cancellation'); })]);
-  expect(result.success).toBe(false); expect(result.output).toBeUndefined(); expect(observedSignal?.aborted).toBe(true);
+  expect(result.success).toBe(false); expect(result.output).toBeUndefined(); if (change !== 'deny') expect(observedSignal?.aborted).toBe(true);
   expect(readFileSync(join(f.root, 'value.ts'), 'utf8')).toBe(broken);
   const before = judgments; release.resolve(); await Bun.sleep(100);
   expect(calls).toBe(1); expect(judgments).toBe(before); if (boundary === 'model') expect(judgments).toBe(0);

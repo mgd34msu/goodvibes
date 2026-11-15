@@ -727,6 +727,11 @@
       "types": "./platform/dist/platform/git/index.d.ts",
       "import": "./platform/dist/platform/git/index.js"
     },
+    "./platform/platform/git/diff": {
+      "bun": "./platform/src/platform/git/diff.ts",
+      "types": "./platform/dist/platform/git/diff.d.ts",
+      "import": "./platform/dist/platform/git/diff.js"
+    },
     "./platform/platform/google": {
       "bun": "./platform/src/platform/google/index.ts",
       "types": "./platform/dist/platform/google/index.d.ts",

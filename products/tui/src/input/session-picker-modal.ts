@@ -31,7 +31,6 @@ import { SavedSessionPickerState } from '@goodvibes-jev/engine/terminal-shell/se
  * the row.
  */
 
-import { unlinkSync } from 'node:fs';
 import type { SessionInfo, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { SharedSessionRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { CrossSurfaceView, SessionReadFacade } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
@@ -98,6 +97,8 @@ export class SessionPickerModal extends SavedSessionPickerState {
      * next keystroke, which is what a modal with no render hook can honestly do.
      */
     private readonly onRosterRefreshed?: () => void,
+    /** The session this terminal has open; the picker never deletes it (its next save would write it back). */
+    private readonly currentSessionId?: () => string | undefined,
   ) {
     super(sessionManager);
   }
@@ -149,12 +150,18 @@ export class SessionPickerModal extends SavedSessionPickerState {
   }
 
   /**
-   * Delete the currently selected session from disk.
-   * Refreshes the list after deletion.
+   * Delete the currently selected saved session through SessionManager, the
+   * one owner of saved sessions. The open session is refused: the running
+   * conversation would write it back on its next save. Refreshes the list.
    */
   deleteSelected(): boolean {
     const session = this.getSelected();
     if (!session) return false;
+    if (session.name === this.currentSessionId?.()) {
+      this.deleteConfirmationTarget = null;
+      this.statusMessage = `Cannot delete ${session.name}: it is the session open here. Switch to another session first (/session resume <id>), then delete it.`;
+      return false;
+    }
     if (this.deleteConfirmationTarget !== session.name) {
       this.deleteConfirmationTarget = session.name;
       this.statusMessage = `Press d again to delete ${session.name}.`;
@@ -162,8 +169,7 @@ export class SessionPickerModal extends SavedSessionPickerState {
     }
 
     try {
-      // Delete directly via filePath so it works with any session directory
-      unlinkSync(session.filePath);
+      this.sessionManager.delete(session.name);
       // Reload list from the global session manager (removes the deleted entry)
       this.sessions = this.sessionManager.list();
       // Adjust selection

@@ -116,10 +116,14 @@ export function createMemoryProjectionGit(): MemoryProjectionGit {
       if (staged.status !== 1) {
         throw new Error(`memory projection git diff failed for ${dir}: ${staged.stderr || staged.stdout}`);
       }
+      // The projection's own identity, unsigned: the owner's signing settings
+      // (a passphrase prompt, a hardware touch) must never hold a memory write.
       const result = run([
         '-C', dir,
         '-c', 'user.name=GoodVibes Memory Projection',
         '-c', 'user.email=memory-projection@goodvibes.local',
+        '-c', 'commit.gpgsign=false',
+        '-c', 'tag.gpgsign=false',
         'commit', '--no-verify', '-m', message,
       ]);
       if (!result.ok) {

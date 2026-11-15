@@ -20,15 +20,18 @@
  *   2. hand each steer/follow-up to `onSteer` (the surface-side injection into
  *      the TUI's turn machinery, narrate "steer received from <surface>" and
  *      fire the next-turn boundary), skipping the TUI's own submissions;
- *   3. acknowledge on the wire via `sessions.inputs.deliver` (queued → delivered)
- *      so every surface sees delivery truth live and the input is not re-picked.
+ *   3. claim each input on the wire BEFORE injecting it (`sessions.inputs.deliver`
+ *      with `claim: true`, queued → delivered). The daemon grants a claim to one
+ *      caller, so two terminals showing the same session never both run one steer;
+ *      the claim is also the acknowledgement every surface reads as delivered.
  *
  * Discipline (mirrors SessionSpineClient): every wire call is best-effort and
  * never throws into the render/keystroke path; a failed poll leaves the cursor
  * where it was so the input is retried on the next tick. The cursor never moves
- * past an input that was not acknowledged (the daemon's `since` filter is
- * exclusive, so it would never be listed again); an input already injected but
- * not yet acknowledged is acknowledged on the retry without being injected twice.
+ * past an input that was not claimed (the daemon's `since` filter is exclusive,
+ * so it would never be listed again). A refused claim means another surface took
+ * the input: it is no longer queued, so it is not listed again. A claimed input
+ * whose injection threw is retried from memory on the next tick.
  */
 
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -48,6 +51,12 @@ export interface SpineInboundInputsClient {
     sessionId: string,
     options: { readonly state?: string; readonly since?: number; readonly limit?: number },
   ): Promise<{ readonly inputs: readonly SharedSessionInputRecord[] }>;
+  /**
+   * `sessions.inputs.deliver { claim: true }`: queued → delivered for exactly one
+   * caller; every other caller is refused. Absent on an older wire, where the
+   * input is injected first and acknowledged after.
+   */
+  claimInput?(sessionId: string, inputId: string): Promise<unknown>;
   deliverInput(
     sessionId: string,
     inputId: string,
@@ -97,8 +106,10 @@ export class SessionInboundInputPoller {
   /** Exclusive createdAt cursor, per session, a session swap resets it. */
   private cursor = 0;
   private cursorSessionId: string | null = null;
-  /** Inputs already handed to onSteer whose delivery ack has not gone through yet. */
+  /** Inputs already handed to onSteer whose delivery ack has not gone through yet (wire without claims). */
   private readonly injected = new Set<string>();
+  /** Inputs this surface claimed whose injection threw; injected again on the next pass. */
+  private readonly claimedNotInjected = new Map<string, InboundSteer>();
 
   constructor(options: SessionInboundInputPollerOptions) {
     this.sessionId = options.sessionId;
@@ -161,11 +172,15 @@ export class SessionInboundInputPoller {
       this.cursor = 0;
       this.cursorSessionId = sessionId;
       this.injected.clear();
+      this.claimedNotInjected.clear();
     }
 
     this.polling = true;
     let delivered = 0;
     try {
+      for (const [inputId, steer] of this.claimedNotInjected) {
+        if (this.inject(steer)) this.claimedNotInjected.delete(inputId);
+      }
       const result = await client.listInputs(sessionId, { state: 'queued', since: this.cursor });
       const inputs = result?.inputs ?? [];
       // The cursor advances across a contiguous prefix of inputs that are done
@@ -187,29 +202,42 @@ export class SessionInboundInputPoller {
           continue;
         }
 
-        if (!this.injected.has(input.id)) {
-          const steer: InboundSteer = {
-            inputId: input.id,
-            sessionId,
-            intent: input.intent,
-            body: input.body,
-            surfaceKind: input.surfaceKind,
-            surfaceId: input.surfaceId,
-            displayName: input.displayName,
-          };
+        const steer: InboundSteer = {
+          inputId: input.id,
+          sessionId,
+          intent: input.intent,
+          body: input.body,
+          surfaceKind: input.surfaceKind,
+          surfaceId: input.surfaceId,
+          displayName: input.displayName,
+        };
+        if (client.claimInput) {
           try {
-            this.onSteer(steer);
-            this.injected.add(input.id);
+            await client.claimInput(sessionId, input.id);
           } catch (error) {
-            // Not injected, so not acknowledged: the sending surface must not be
-            // told a steer was delivered that never reached the turn. It is
-            // retried on the next tick, and the loop carries on with the rest.
+            // Refused: another surface claimed it and runs it; it is no longer
+            // queued, so it is not listed again. Unreachable: still queued, and
+            // the held cursor lists it again next tick. Either way, not injected here.
             cursorHeld = true;
-            this.log.debug('session inbound steer injection threw; not acknowledged, will retry', {
+            this.log.debug('session inbound steer not claimed; another surface holds it or the claim will be retried', {
               error: error instanceof Error ? error.message : String(error),
             });
             continue;
           }
+          delivered += 1;
+          settle(input.createdAt);
+          if (!this.inject(steer)) this.claimedNotInjected.set(input.id, steer);
+          continue;
+        }
+        if (!this.injected.has(input.id)) {
+          if (!this.inject(steer)) {
+            // Not injected, so not acknowledged: the sending surface must not be
+            // told a steer was delivered that never reached the turn. It is
+            // retried on the next tick, and the loop carries on with the rest.
+            cursorHeld = true;
+            continue;
+          }
+          this.injected.add(input.id);
         }
         try {
           // consumed:false → queued → delivered (surface has collected it).
@@ -233,6 +261,19 @@ export class SessionInboundInputPoller {
       this.polling = false;
     }
     return delivered;
+  }
+
+  /** Hand one steer to the turn machinery; false when that threw (logged, retried by the caller). */
+  private inject(steer: InboundSteer): boolean {
+    try {
+      this.onSteer(steer);
+      return true;
+    } catch (error) {
+      this.log.debug('session inbound steer injection threw; will retry', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 }
 

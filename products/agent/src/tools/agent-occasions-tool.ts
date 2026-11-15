@@ -16,7 +16,9 @@
  * `list` DOES return dates, and that is not a contradiction: it is him asking his
  * own system over an authenticated verb, which is the explicit ask that unlocks a
  * closed-tier read. What must never happen is those dates riding into an
- * outbound message, so `list`'s output says so in the line the model reads.
+ * outbound message, so `list` (and `plans`) record the dates they show on the
+ * turn's ledger and the outbound check holds any text that carries one, naming
+ * the rule; the line the model reads says the same.
  *
  * §4.4, the kind is chosen by HIM at capture time and never inferred. This file
  * supplies no default, and `confirm` refuses without one. The three kinds are

@@ -128,8 +128,15 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
         web: browserAccess,
       });
     } else {
-      setConfig('controlPlane.hostMode', 'local');
-      setConfig('controlPlane.host', controller.runtimeSnapshot?.bindSettings.controlPlane.host || '127.0.0.1');
+      // No local servers chosen. When this terminal was pointed at an existing
+      // daemon, that target stays: writing the local bind here would dial loopback
+      // after the restart and drop the connection just made.
+      if (getDaemonSource(controller) === 'adopt') {
+        writeAdoptedDaemonTarget(controller, setConfig);
+      } else {
+        setConfig('controlPlane.hostMode', 'local');
+        setConfig('controlPlane.host', controller.runtimeSnapshot?.bindSettings.controlPlane.host || '127.0.0.1');
+      }
       setConfig('httpListener.hostMode', 'local');
       setConfig('httpListener.host', controller.runtimeSnapshot?.bindSettings.httpListener.host || '127.0.0.1');
       setConfig('web.hostMode', 'local');
@@ -340,6 +347,17 @@ function addCloudflareOperations(
     }
   }
 
+/** The existing daemon this terminal was pointed at, as "Connect to an existing daemon" applied it. */
+function writeAdoptedDaemonTarget(
+  controller: OnboardingWizardControllerLike,
+  setConfig: (key: Extract<OnboardingApplyOperation, { kind: 'set-config' }>['key'], value: unknown) => void,
+): void {
+  const adoptHost = controller.getStringFieldValue('network.adopt-daemon-host', '127.0.0.1') || '127.0.0.1';
+  setConfig('controlPlane.hostMode', isLoopbackAddress(adoptHost) ? 'local' : 'custom');
+  setConfig('controlPlane.host', adoptHost);
+  setConfig('controlPlane.port', controller.getPortFieldValue('network.adopt-daemon-port', 3421));
+}
+
 export function addNetworkOperations(
   controller: OnboardingWizardControllerLike,
     operations: OnboardingApplyOperation[],
@@ -379,10 +397,7 @@ export function addNetworkOperations(
       if (getDaemonSource(controller) === 'adopt') {
         // "Connect to an existing daemon" already pointed this TUI at that daemon and promised Apply keeps it;
         // writing this machine's own bind values here would silently dial loopback again after the restart.
-        const adoptHost = controller.getStringFieldValue('network.adopt-daemon-host', '127.0.0.1') || '127.0.0.1';
-        setConfig('controlPlane.hostMode', isLoopbackAddress(adoptHost) ? 'local' : 'custom');
-        setConfig('controlPlane.host', adoptHost);
-        setConfig('controlPlane.port', controller.getPortFieldValue('network.adopt-daemon-port', 3421));
+        writeAdoptedDaemonTarget(controller, setConfig);
       } else {
         setConfig('controlPlane.hostMode', enabled.controlPlaneRemote ? (customNetwork ? 'custom' : 'network') : 'local');
         setConfig('controlPlane.host', enabled.controlPlaneRemote ? (customNetwork ? controlPlaneHost : '0.0.0.0') : '127.0.0.1');

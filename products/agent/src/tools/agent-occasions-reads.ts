@@ -11,12 +11,16 @@
  *
  * Two of these reads are the only place in this surface a DATE appears at all:
  * `list` and `plans`. That is docs/occasions.md §4.3's explicit exception, him
- * asking his own system over an authenticated verb, and `list`'s output says in
- * so many words that those dates do not go into anything outbound. `pending`, the
- * read a nudge actually comes from, carries no date to print.
+ * asking his own system over an authenticated verb. Both record the dates they
+ * showed on the turn's untrusted-content ledger, and the one outbound check
+ * (evaluateOutwardEffect) holds any message, email or channel text that carries
+ * one, naming the rule; the line in `list`'s output tells the model the same.
+ * `pending`, the read a nudge actually comes from, carries no date to print.
  */
 
 import { homedir } from 'node:os';
+import { disclosedDateOf, type DisclosedDate } from '@goodvibes-jev/engine/platform/platform/security';
+import { getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { homeRelativePath } from './agent-harness-tool-utils.ts';
 import {
   narrowOccasionsGifts,
@@ -82,12 +86,23 @@ export function renderInterviewResponse(response: OccasionsInterviewResponse, mi
 
 // ── Reads ──────────────────────────────────────────────────────────────────
 
+/** Mark the private dates a read is about to show, so the outbound check holds text carrying one. */
+function recordShownDates(shown: readonly { readonly label: string; readonly date: string | null | undefined }[]): void {
+  const dates: DisclosedDate[] = [];
+  for (const entry of shown) {
+    const date = entry.date ? disclosedDateOf(entry.label, entry.date) : null;
+    if (date) dates.push(date);
+  }
+  getSessionUntrustedContentLedger().recordDisclosedDates(dates);
+}
+
 export async function handleList(deps: AgentOccasionsToolDeps): Promise<ToolOutcome> {
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.list, {});
   if (!result.ok) return fail(['Could not read your dates.', `  ${result.error ?? 'no reason given'}`]);
   const response = narrowOccasionsList(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
 
+  recordShownDates(response.occasions.map((view) => ({ label: view.occasion.title, date: view.nextOccurrence })));
   const lines: string[] = [`Your dates (today is ${response.today}, ${response.timezone}):`];
   if (response.subjectAssessment === 'not-evaluated') lines.push('Classic lists the native declarations; person/owner attribution was not inferred.');
   if (response.occasions.length === 0) lines.push('  (none recorded)');
@@ -114,7 +129,7 @@ export async function handleList(deps: AgentOccasionsToolDeps): Promise<ToolOutc
   // own system. They answer HIM. They do not go into anything outbound.
   lines.push(
     'These dates are for answering him directly. Do not put a date from this list into a message,'
-    + ' an email, a channel reply or any other outbound text.',
+    + ' an email, a channel reply or any other outbound text: a send that carries one is held.',
   );
   return ok(lines);
 }
@@ -164,6 +179,7 @@ export async function handlePlans(deps: AgentOccasionsToolDeps): Promise<ToolOut
   const response = narrowOccasionsPlans(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
 
+  recordShownDates(response.plans.flatMap((plan) => [{ label: plan.title, date: plan.from }, { label: plan.title, date: plan.to }]));
   const lines: string[] = [`Your plans (today is ${response.today}):`];
   if (response.plans.length === 0) lines.push('  (none recorded)');
   for (const plan of response.plans) {

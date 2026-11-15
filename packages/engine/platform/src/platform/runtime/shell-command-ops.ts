@@ -39,6 +39,8 @@ export interface ShellAgentManagerService {
   cancel(agentId: string): boolean;
   cancelGraph(graphId: string): string[];
   cancelSubtree(rootAgentId: string): string[];
+  /** The agents still pending or running; a caller about to replace the records refuses while any are. */
+  listActive?(): AgentRecord[];
   clear(): void;
   exportState(): AgentRecord[];
   importState(records: AgentRecord[]): void;

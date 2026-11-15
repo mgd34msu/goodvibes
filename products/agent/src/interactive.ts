@@ -76,6 +76,8 @@ import { wireSpokenTurnRuntime } from './audio/spoken-turn-wiring.ts';
 import { installVoiceCapture } from './shell/voice-capture-shell.ts';
 import { createProcessFaultHandlers } from './runtime/process-fault-capture.ts';
 import { attachSpokenTurnModelRouting, createSpokenTurnInputOptions } from './audio/spoken-turn-model-routing.ts';
+import { bindOwnerInput } from './runtime/owner-input.ts';
+import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import { allowTerminalWrite, createShellLayout, installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell';
 import { buildCommandArgsHint } from './input/command-args-hint.ts';
 import './config/surface.ts';
@@ -551,13 +553,17 @@ async function main() {
     commandContext.nativeConversationIntake = remoteConversation.observeIntake(commandContext.nativeConversationIntake);
   }
 
-  const dispatchNativeTurn = async (state: NativeConversationIntakeState, spokenOutput = false): Promise<void> => {
+  const dispatchNativeTurn = async (
+    state: NativeConversationIntakeState,
+    spokenOutput = false,
+    turnOptions?: OrchestratorUserInputOptions,
+  ): Promise<void> => {
     if (state.hostedTurn && commandContext.nativeConversationIntake) {
       await remoteConversation.observeNative(state, commandContext.nativeConversationIntake);
       return;
     }
     if (!isNativeConversationTurnReady(state)) return;
-    const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
+    const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions);
     try {
       await dispatchNativeConversationTurn(state, orchestrator, inputOptions);
     } catch (error) {
@@ -678,7 +684,18 @@ async function main() {
     sendTurn(text, options);
   };
 
-  function sendTurn(text: string, options: ProductInputContext): void {
+  /**
+   * The owner-input path: native intake, the routing decision (the connected
+   * host's loop or this process) and the turn-finished signal. Typed, spoken,
+   * companion and plan input all end here. `notSent` gets the text back when it
+   * was refused before admission (the composer puts it back in the draft).
+   */
+  function sendTurn(
+    text: string,
+    options: ProductInputContext,
+    turnOptions?: OrchestratorUserInputOptions,
+    notSent: (text: string) => void = restoreDraft,
+  ): void {
     if (!text) {
       render();
       return;
@@ -694,13 +711,13 @@ async function main() {
             systemMessageRouter.userAction(message);
             render();
           },
-          dispatch: (state) => dispatchNativeTurn(state, options.spokenOutput),
+          dispatch: (state) => dispatchNativeTurn(state, options.spokenOutput, turnOptions),
         });
         // Refused (another input still being admitted, no intake, input not acceptable): nothing was sent.
-        if (state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') restoreDraft(source.text);
+        if (state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') notSent(source.text);
       } catch (error) {
         // Routing failed before the input was admitted: give back the draft.
-        restoreDraft(source.text);
+        notSent(source.text);
         systemMessageRouter.high(`Your message was not sent: ${summarizeError(error)}`);
         render();
       }
@@ -735,6 +752,12 @@ async function main() {
     // Spoken input is sent as said; only typed composer text has a grammar.
     { submitSpokenInput: (text: string, content?: ContentPart[]): void => submitTurn(text, content, { spokenOutput: true, source: captureNativeConversationInput(text, content) }) },
   );
+  // Companion messages and an activated plan take the composer's path as sent (no
+  // composer grammar), carrying their origin; refused text is shown, not put in the draft.
+  bindOwnerInput(orchestrator, (text, turnOptions) => sendTurn(text, {}, turnOptions, (unsent) => {
+    systemMessageRouter.high(`Not sent: "${unsent.length > 120 ? `${unsent.slice(0, 117)}...` : unsent}". Send it again once the current message is taken.`);
+    render();
+  }));
   // Composer line prompts: masked for card material, echoed for addresses (see input/handler-line-prompts.ts).
   commandContext.beginConcealedInput = (request) => input.beginConcealedInput(request);
   commandContext.beginPlainInput = (request) => input.beginPlainInput(request);

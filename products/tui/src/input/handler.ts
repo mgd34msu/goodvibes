@@ -267,6 +267,7 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       uiServices.sessions.sessionBroker,
       getSharedHostedSessionRoster(),
       () => this.requestRender(),
+      () => this.commandContext?.session.runtime.sessionId,
     ); // third source: the daemon-hosted roster
     this.profilePickerModal = new ProfilePickerModal(uiServices.shell.profileManager);
     this.selectionQueue = attachSelectionModalQueue(this); // wires exitApp teardown too, see selection-modal-queue.ts

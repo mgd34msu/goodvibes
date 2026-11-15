@@ -46,6 +46,7 @@
  */
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from '../../state/memory-operation.js';
 import { buildUrl, createJsonRequestInit, requestJsonRaw } from '@goodvibes-jev/engine/transport-http';
+import { newMemoryId } from '../../state/memory-id.js';
 import type {
   MemoryAddOptions,
   MemoryBundle,
@@ -62,6 +63,30 @@ import type { MemoryVectorStats } from '../../state/memory-vector-store.js';
 import type { HonestMemorySearchOptions, HonestMemorySearchResult } from '../../state/memory-recall-contract.js';
 import { classifyMemoryWireError, memoryVerbUnavailableError } from './wire-verb-availability.js';
 import type { MemoryTransport, MemoryUpdatePatch } from './client.js';
+
+/**
+ * An add whose request went out and whose answer never came back (a deadline,
+ * a dropped connection): the host may have stored it. The message names the id
+ * to check, and resending the same add with that id cannot store it twice.
+ */
+export class MemoryAddOutcomeUnknownError extends Error {
+  readonly code = 'MEMORY_ADD_OUTCOME_UNKNOWN';
+  readonly retryable = true;
+  constructor(readonly recordId: string, cause: unknown) {
+    super(`The memory add ${recordId} was sent but no answer came back (${cause instanceof Error ? cause.message : String(cause)}), `
+      + `so it may or may not be stored. Check with memory get ${recordId} before adding it again; `
+      + 'resending the same add with this id cannot store it twice.', { cause });
+    this.name = 'MemoryAddOutcomeUnknownError';
+  }
+}
+
+/** A transport failure with no response, other than a refused connection (which sent nothing). */
+function answerLost(error: unknown): boolean {
+  const transport = (error as { transport?: { status?: unknown; cause?: unknown } } | null)?.transport;
+  if (!transport || transport.status !== 0) return false;
+  const code = (transport.cause as { code?: unknown } | null | undefined)?.code;
+  return code !== 'ECONNREFUSED' && code !== 'ConnectionRefused';
+}
 
 /** Fold for a NULLABLE record-scoped verb: record-miss -> null; version-skew -> honest reject; else rethrow. */
 function foldNullableMemoryWire404(verb: string, error: unknown): null {
@@ -114,10 +139,18 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
   return {
     captureOperationScope: () => current,
     add: async (opts: MemoryAddOptions, operation?: MemoryOperationOptions): Promise<MemoryRecord> => {
-      const response = await request<{ record: MemoryRecord }>(
-        operation, url('/api/memory/records'), createJsonRequestInit(token, opts, 'POST'),
-      );
-      return response.record;
+      // The id travels with the add so the host treats a resend as the same add.
+      const id = opts.id ?? newMemoryId();
+      const body: MemoryAddOptions = { ...opts, id };
+      try {
+        const response = await request<{ record: MemoryRecord }>(
+          operation, url('/api/memory/records'), createJsonRequestInit(token, body, 'POST'),
+        );
+        return response.record;
+      } catch (error) {
+        if (answerLost(error)) throw new MemoryAddOutcomeUnknownError(id, (error as { cause?: unknown }).cause ?? error);
+        throw error;
+      }
     },
     honestSearch: async (filter?: MemorySearchFilter, searchOptions?: HonestMemorySearchOptions, operation?: MemoryOperationOptions): Promise<HonestMemorySearchResult> => {
       const body = { ...(filter ?? {}), ...(searchOptions?.recall !== undefined ? { recall: searchOptions.recall } : {}) };

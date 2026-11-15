@@ -67,9 +67,11 @@ import {
   containmentFor,
 } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '@goodvibes-jev/engine/platform/platform/agents';
-import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createSessionSurface, createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
 
 /** The operator policy a session hosted by THIS daemon runs under. */
 function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {
@@ -134,6 +136,22 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
     );
   };
 
+  // One checkpoint manager per hosted workspace; the daemon's own workspace keeps the daemon's.
+  const workspaceCheckpoints = daemonWorkspaceCheckpoints(services.runtimeBus);
+  const checkpointsFor = (workspaceRoot: string): { readonly close: () => Promise<void> } | null => {
+    if (workspaceCheckpoints.isDaemonWorkspace(workspaceRoot)) return null;
+    const checkpointing = createWorkspaceCheckpointing({
+      workspaceRoot,
+      surface: createSessionSurface({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDirectory: workspaceRoot, homeDirectory: services.homeDirectory }),
+      runtimeBus: services.runtimeBus,
+      configManager: services.configManager,
+      shellPaths: services.shellPaths,
+      ownsSession: workspaceCheckpoints.ownsSession(workspaceRoot),
+    });
+    const remove = workspaceCheckpoints.addWorkspace(workspaceRoot, checkpointing);
+    return { close: async () => { remove(); await checkpointing.close(); } };
+  };
+
   return {
     nativeConversation: nativeHostedConversationOwner(services.gatewayMethods),
     floorFactory: async ({ workspaceRoot }): Promise<HostedWorkspaceFloor> => {
@@ -174,13 +192,21 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         // new floors only; existing floors do not watch the persisted cache.
         const discovered = services.providerRegistry.listDiscoveredServers();
         if (discovered.length > 0) floor.providerRegistry.registerDiscoveredProviders([...discovered]);
+        // Snapshots this workspace's tree after each of its sessions' turns, so
+        // checkpoints.restore and sessions.changes.get work for a hosted session.
+        const checkpoints = checkpointsFor(workspaceRoot);
         return {
           services: floor,
           devicePosture: services.devicePosture,
           // Each workspace floor owns its own contract store and runner.
           contractRunner: floor.contractRunner,
           execPosture: hostedExecPosture,
-          dispose: (): void => floor.dispose(),
+          dispose: (): void => {
+            void checkpoints?.close().catch((error: unknown) => {
+              logger.warn('hosted workspace checkpoints did not close cleanly', { workspaceRoot, error: error instanceof Error ? error.message : String(error) });
+            });
+            floor.dispose();
+          },
         };
       } catch (error) {
         // Until publication, this factory owns its returned client graph. The
@@ -191,6 +217,11 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         throw new Error('Daemon hosted workspace provider preload failed', { cause: error });
       }
     },
-    systemPrompt: hostedSystemPrompt,
+    // Called for every session the engine binds to a workspace (create and
+    // rebuild), so the session's turns reach that workspace's checkpoints.
+    systemPrompt: (input) => {
+      workspaceCheckpoints.bindSession(input.sessionId, input.workspaceRoot);
+      return hostedSystemPrompt(input);
+    },
   };
 }

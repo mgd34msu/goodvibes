@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { WorkspaceCheckpointManager, checkpointEligibilityRefusal } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from './index.js';
@@ -52,6 +53,8 @@ export function createWorkspaceCheckpointing(opts: {
   readonly shellPaths: StoreShellPaths;
   /** Stamps automatic snapshots with the live session id, so a checkpoint made this launch is found by the session-scoped restore lookup. */
   readonly resolveSessionId?: (ctx: { readonly turnId?: string | undefined; readonly agentId?: string | undefined }) => string | undefined;
+  /** Which sessions' turns this workspace snapshots, when the bus carries several workspaces' sessions. */
+  readonly ownsSession?: (sessionId: string | undefined) => boolean;
 }): WorkspaceCheckpointing {
   const registration = createWorkspaceRegistrationLiveChecker(opts.shellPaths, opts.workspaceRoot);
   const guarded = (): boolean => readCheckpointRegistrationSetting(opts.configManager) === 'guarded';
@@ -70,6 +73,7 @@ export function createWorkspaceCheckpointing(opts: {
     runtimeBus: opts.runtimeBus,
     automaticSnapshotsAllowed: currentlyAllowed,
     ...(opts.resolveSessionId ? { resolveSessionId: opts.resolveSessionId } : {}),
+    ...(opts.ownsSession ? { ownsSession: opts.ownsSession } : {}),
   });
 
   // Eager initialization remains observable through checkpoint calls, which can
@@ -103,4 +107,103 @@ export function createWorkspaceCheckpointing(opts: {
   };
 
   return { manager, gatewayManager, currentlyAllowed, close: () => manager.drain() };
+}
+
+/** The verbs' surface over one workspace's checkpointing, with the routes to the others. */
+export type RoutedCheckpointGateway = WorkspaceCheckpointing['gatewayManager'] & {
+  retentionFailure(): ReturnType<WorkspaceCheckpointManager['retentionFailure']>;
+  forSession?(sessionId: string): RoutedCheckpointGateway | undefined;
+  forCheckpoint?(id: string): Promise<RoutedCheckpointGateway | undefined>;
+};
+
+function gatewayOf(checkpointing: WorkspaceCheckpointing): RoutedCheckpointGateway {
+  const base = checkpointing.gatewayManager;
+  return {
+    // Read live: init may move the root to the enclosing repository's top level.
+    get workspaceRoot() { return base.workspaceRoot; },
+    resolveRoot: () => base.resolveRoot(),
+    list: (filter) => base.list(filter),
+    diff: (a, b) => base.diff(a, b),
+    restore: (id, restoreOpts) => base.restore(id, restoreOpts),
+    sessionChanges: (sessionId) => base.sessionChanges(sessionId),
+    create: (createOpts) => base.create(createOpts),
+    retentionFailure: () => checkpointing.manager.retentionFailure(),
+  };
+}
+
+/**
+ * The checkpoint managers of one daemon: its own workspace's, and one per
+ * workspace a hosted session works in. Each snapshots only its own sessions'
+ * turns (every session publishes on the daemon's one bus), and the
+ * `checkpoints.*` and `sessions.changes.get` verbs reach the manager of the
+ * session's workspace, or the store that holds the checkpoint they name.
+ */
+export interface DaemonWorkspaceCheckpoints {
+  /** A hosted session works in `workspaceRoot` (told at create and at rebuild). */
+  bindSession(sessionId: string, workspaceRoot: string): void;
+  /** Which sessions a workspace's manager snapshots: its hosted sessions, plus every unhosted one for the daemon's own. */
+  ownsSession(workspaceRoot: string, options?: { readonly daemonOwn?: boolean }): (sessionId: string | undefined) => boolean;
+  /** Add a hosted workspace's checkpointing; returns its removal. */
+  addWorkspace(workspaceRoot: string, checkpointing: WorkspaceCheckpointing): () => void;
+  /** Whether `workspaceRoot` is the daemon's own (its manager already covers it). */
+  isDaemonWorkspace(workspaceRoot: string): boolean;
+  /** The gateway surface for the verbs: the daemon's own, routed by session and by checkpoint id. */
+  gateway(daemon: WorkspaceCheckpointing, daemonRoot: string): RoutedCheckpointGateway;
+}
+
+/** Sessions remembered per daemon; the oldest binding goes first past this bound. */
+const MAX_BOUND_SESSIONS = 4096;
+const byBus = new WeakMap<object, DaemonWorkspaceCheckpoints>();
+
+/** The daemon's checkpoint managers, one registry per runtime bus (the daemon's own). */
+export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonWorkspaceCheckpoints {
+  const existing = byBus.get(runtimeBus);
+  if (existing) return existing;
+  const sessions = new Map<string, string>();
+  const workspaces = new Map<string, WorkspaceCheckpointing>();
+  let daemonRoot: string | undefined;
+  const workspaceOf = (sessionId: string | undefined): string | undefined => (sessionId === undefined ? undefined : sessions.get(sessionId));
+  const registry: DaemonWorkspaceCheckpoints = {
+    bindSession(sessionId, workspaceRoot) {
+      sessions.delete(sessionId);
+      sessions.set(sessionId, resolve(workspaceRoot));
+      if (sessions.size > MAX_BOUND_SESSIONS) sessions.delete(sessions.keys().next().value!);
+    },
+    ownsSession(workspaceRoot, options) {
+      const root = resolve(workspaceRoot);
+      return (sessionId) => {
+        const bound = workspaceOf(sessionId);
+        return bound === undefined ? options?.daemonOwn === true : bound === root;
+      };
+    },
+    addWorkspace(workspaceRoot, checkpointing) {
+      const root = resolve(workspaceRoot);
+      workspaces.set(root, checkpointing);
+      return () => { if (workspaces.get(root) === checkpointing) workspaces.delete(root); };
+    },
+    isDaemonWorkspace(workspaceRoot) {
+      return daemonRoot !== undefined && resolve(workspaceRoot) === daemonRoot;
+    },
+    gateway(daemon, root) {
+      daemonRoot = resolve(root);
+      return {
+        ...gatewayOf(daemon),
+        get workspaceRoot() { return daemon.gatewayManager.workspaceRoot; },
+        forSession(sessionId) {
+          const bound = workspaceOf(sessionId);
+          const hosted = bound === undefined ? undefined : workspaces.get(bound);
+          return hosted ? gatewayOf(hosted) : undefined;
+        },
+        async forCheckpoint(id) {
+          // In-memory manifests: a lookup, not a store read. The daemon's own answers an unknown id.
+          for (const hosted of workspaces.values()) {
+            if ((await hosted.manager.list()).some((checkpoint) => checkpoint.id === id)) return gatewayOf(hosted);
+          }
+          return undefined;
+        },
+      };
+    },
+  };
+  byBus.set(runtimeBus, registry);
+  return registry;
 }

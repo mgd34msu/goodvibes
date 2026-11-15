@@ -1,21 +1,28 @@
 /**
- * structured-diff.ts, parse raw `git diff` output into a complete, structured
- * form consumers render with their diff-view machinery.
+ * structured-diff.ts, the one reader of git's unified diff: the TUI, the web
+ * UI (through the browser-safe `git/diff` subpath) and the daemon's hunk revert
+ * all parse with it, so one rule decides what a hunk is and how its lines are
+ * numbered.
  *
- * The old consumer path for `/git diff` sliced the raw text at 4,000 chars and
- * printed the stub. This module is the platform-side replacement: the FULL diff is
- * parsed into per-file entries with per-hunk lines, no size cap anywhere, so
- * a surface renders it structurally (per-file, per-hunk, colored lines) and the
- * truncation branch dies. `reconstructUnifiedDiff` proves the structure is
- * complete: parse → reconstruct round-trips the original text.
+ * The FULL diff is parsed into per-file entries with per-hunk lines, no size cap
+ * anywhere. Each line carries its old and new line number. A hunk ends when the
+ * line counts in its header are used up, so a plain `diff -u` concatenation
+ * without `diff --git` lines still splits into files. `reconstructUnifiedDiff`
+ * proves the structure is complete: parse → reconstruct round-trips the text.
+ *
+ * No imports and no Node globals: this module runs in the browser as is.
  */
 
 /** One line inside a hunk. */
 export interface StructuredDiffLine {
-  /** 'context' (unchanged), 'add' (+), or 'del' (-). */
-  readonly kind: 'context' | 'add' | 'del';
-  /** The line content WITHOUT its +/-/space prefix. */
+  /** 'context' (unchanged), 'add' (+), 'del' (-), or 'meta' (a `\ No newline at end of file` marker). */
+  readonly kind: 'context' | 'add' | 'del' | 'meta';
+  /** The line content WITHOUT its +/-/space prefix; a meta line keeps its text verbatim. */
   readonly text: string;
+  /** 1-based line number in the old file (context and del lines); null for add and meta. */
+  readonly oldLine: number | null;
+  /** 1-based line number in the new file (context and add lines); null for del and meta. */
+  readonly newLine: number | null;
 }
 
 /** One @@ hunk: header coordinates plus every line, unabridged. */
@@ -60,6 +67,8 @@ function stripPathPrefix(raw: string): string {
 }
 
 const C_ESCAPES: Readonly<Record<string, number>> = { a: 7, b: 8, f: 12, n: 10, r: 13, t: 9, v: 11, '"': 34, '\\': 92 };
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder('utf-8');
 
 /** Decodes git's C-quoted path ("a/\303\251"), where non-ASCII bytes are octal escapes. */
 function unquoteCPath(quoted: string): string {
@@ -67,14 +76,14 @@ function unquoteCPath(quoted: string): string {
   const bytes: number[] = [];
   for (let index = 0; index < body.length; index += 1) {
     const char = body[index]!;
-    if (char !== '\\') { bytes.push(...Buffer.from(char, 'utf-8')); continue; }
+    if (char !== '\\') { bytes.push(...UTF8_ENCODER.encode(char)); continue; }
     const octal = /^[0-7]{1,3}/.exec(body.slice(index + 1));
     if (octal) { bytes.push(parseInt(octal[0], 8)); index += octal[0].length; continue; }
     const escaped = body[index + 1];
     if (escaped !== undefined && C_ESCAPES[escaped] !== undefined) { bytes.push(C_ESCAPES[escaped]!); index += 1; continue; }
     bytes.push(92);
   }
-  return Buffer.from(bytes).toString('utf-8');
+  return UTF8_DECODER.decode(new Uint8Array(bytes));
 }
 
 /** One path as git writes it, plain or C-quoted, without its a/ b/ prefix. */
@@ -83,10 +92,105 @@ function readGitPath(raw: string): string {
   return stripPathPrefix(text.length >= 2 && text.startsWith('"') && text.endsWith('"') ? unquoteCPath(text) : text);
 }
 
+/** The path on a `---`/`+++` line; git ends a path that holds a space with a tab and a timestamp. */
 function parsePath(line: string, prefix: string): string | null {
-  const raw = line.slice(prefix.length).trim();
+  let raw = line.slice(prefix.length);
+  if (!raw.startsWith('"')) raw = raw.replace(/\t.*$/, '');
+  raw = raw.trim();
   if (raw === '/dev/null') return null;
   return readGitPath(raw);
+}
+
+/** A hunk being read: its header, its lines, and where each side's next line number stands. */
+interface OpenHunk {
+  readonly header: string;
+  readonly oldStart: number;
+  readonly oldLines: number;
+  readonly newStart: number;
+  readonly newLines: number;
+  readonly lines: StructuredDiffLine[];
+  oldNext: number;
+  newNext: number;
+}
+
+function openHunk(header: string): OpenHunk | null {
+  const match = HUNK_HEADER.exec(header);
+  if (!match) return null;
+  const oldStart = Number(match[1]), newStart = Number(match[3]);
+  return {
+    header,
+    oldStart,
+    oldLines: match[2] !== undefined ? Number(match[2]) : 1,
+    newStart,
+    newLines: match[4] !== undefined ? Number(match[4]) : 1,
+    lines: [],
+    oldNext: oldStart,
+    newNext: newStart,
+  };
+}
+
+/** Whether every line the header counts has been read. */
+function hunkComplete(hunk: OpenHunk): boolean {
+  return hunk.oldNext >= hunk.oldStart + hunk.oldLines && hunk.newNext >= hunk.newStart + hunk.newLines;
+}
+
+/**
+ * Read one body line into the open hunk. False when the line is not part of it:
+ * the header's counts are used up (only a `\` marker may still follow) or the
+ * line has no body prefix. An empty line counts as an empty context line, which
+ * is how editors that strip trailing spaces leave one.
+ */
+function readHunkLine(hunk: OpenHunk, line: string): boolean {
+  if (line.startsWith('\\')) {
+    if (hunk.lines.length === 0) return false;
+    hunk.lines.push({ kind: 'meta', text: line, oldLine: null, newLine: null });
+    return true;
+  }
+  if (hunkComplete(hunk)) return false;
+  if (line.startsWith('+')) {
+    hunk.lines.push({ kind: 'add', text: line.slice(1), oldLine: null, newLine: hunk.newNext });
+    hunk.newNext += 1;
+  } else if (line.startsWith('-')) {
+    hunk.lines.push({ kind: 'del', text: line.slice(1), oldLine: hunk.oldNext, newLine: null });
+    hunk.oldNext += 1;
+  } else if (line.startsWith(' ') || line === '') {
+    hunk.lines.push({ kind: 'context', text: line.slice(1), oldLine: hunk.oldNext, newLine: hunk.newNext });
+    hunk.oldNext += 1;
+    hunk.newNext += 1;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+function closeHunk(hunk: OpenHunk): StructuredDiffHunk {
+  const { header, oldStart, oldLines, newStart, newLines, lines } = hunk;
+  return { header, oldStart, oldLines, newStart, newLines, lines };
+}
+
+/**
+ * Parse text that is only hunks (no file headers), as a client sends back one
+ * hunk to revert. `unread` holds every other non-empty line, so a caller that
+ * needs exact input can refuse a malformed one.
+ */
+export function parseUnifiedHunks(raw: string): { readonly hunks: readonly StructuredDiffHunk[]; readonly unread: readonly string[] } {
+  const hunks: StructuredDiffHunk[] = [];
+  const unread: string[] = [];
+  const lines = raw.split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  let open: OpenHunk | null = null;
+  for (const line of lines) {
+    const next = openHunk(line);
+    if (next) {
+      if (open) hunks.push(closeHunk(open));
+      open = next;
+      continue;
+    }
+    if (open && readHunkLine(open, line)) continue;
+    if (line.length > 0) unread.push(line);
+  }
+  if (open) hunks.push(closeHunk(open));
+  return { hunks, unread };
 }
 
 /** The old and new path on a `diff --git` line, which git does not delimit when a path holds a space. */
@@ -129,11 +233,14 @@ export function parseUnifiedDiff(raw: string): StructuredDiff {
     renamed: boolean;
     added: boolean;
     deleted: boolean;
-    hunks: Array<{ header: string; oldStart: number; oldLines: number; newStart: number; newLines: number; lines: StructuredDiffLine[] }>;
+    hunks: StructuredDiffHunk[];
   }
   let current: Building | null = null;
+  let hunk: OpenHunk | null = null;
 
   const finalize = (): void => {
+    if (current && hunk) current.hunks.push(closeHunk(hunk));
+    hunk = null;
     if (!current) return;
     const additions = current.hunks.reduce((sum, hunk) => sum + hunk.lines.filter((l) => l.kind === 'add').length, 0);
     const deletions = current.hunks.reduce((sum, hunk) => sum + hunk.lines.filter((l) => l.kind === 'del').length, 0);
@@ -158,53 +265,35 @@ export function parseUnifiedDiff(raw: string): StructuredDiff {
     current = null;
   };
 
-  let inHunk = false;
   for (const line of lines) {
     if (line.startsWith('diff --git ')) {
       finalize();
-      inHunk = false;
       // Fallback paths from the diff --git line itself (kept when ---/+++ follow).
       current = { headerLines: [line], oldPath: null, newPath: null, binary: false, renamed: false, added: false, deleted: false, hunks: [] };
       const paths = parseDiffGitPaths(line.slice('diff --git '.length));
       if (paths) [current.oldPath, current.newPath] = paths;
       continue;
     }
-    if (!current) {
-      // Tolerate diffs that start directly with ---/+++ (no diff --git line).
-      if (line.startsWith('--- ')) {
-        current = { headerLines: [], oldPath: null, newPath: null, binary: false, renamed: false, added: false, deleted: false, hunks: [] };
-        inHunk = false;
-      } else {
-        continue;
-      }
+    if (hunk && readHunkLine(hunk, line)) continue;
+    // Tolerate diffs without diff --git lines: a `---` line outside a hunk opens the
+    // next file once the current one has hunks (or when none is open).
+    if (line.startsWith('--- ') && (!current || current.hunks.length > 0 || hunk)) {
+      finalize();
+      current = { headerLines: [], oldPath: null, newPath: null, binary: false, renamed: false, added: false, deleted: false, hunks: [] };
     }
-    const hunkMatch = HUNK_HEADER.exec(line);
-    if (hunkMatch) {
-      inHunk = true;
-      current.hunks.push({
-        header: line,
-        oldStart: Number(hunkMatch[1]),
-        oldLines: hunkMatch[2] !== undefined ? Number(hunkMatch[2]) : 1,
-        newStart: Number(hunkMatch[3]),
-        newLines: hunkMatch[4] !== undefined ? Number(hunkMatch[4]) : 1,
-        lines: [],
-      });
-      continue;
-    }
-    if (inHunk && (line.startsWith('+') || line.startsWith('-') || line.startsWith(' ') || line === '' || line.startsWith('\\'))) {
-      const hunk = current.hunks[current.hunks.length - 1]!;
-      if (line.startsWith('+')) hunk.lines.push({ kind: 'add', text: line.slice(1) });
-      else if (line.startsWith('-')) hunk.lines.push({ kind: 'del', text: line.slice(1) });
-      else if (line.startsWith('\\')) hunk.lines.push({ kind: 'context', text: line });
-      else hunk.lines.push({ kind: 'context', text: line.slice(1) });
+    if (!current) continue;
+    const next = openHunk(line);
+    if (next) {
+      if (hunk) current.hunks.push(closeHunk(hunk));
+      hunk = next;
       continue;
     }
     // File-header territory (index/---/+++/rename/binary/mode lines).
-    inHunk = false;
+    if (hunk) { current.hunks.push(closeHunk(hunk)); hunk = null; }
     current.headerLines.push(line);
     if (line.startsWith('--- ')) current.oldPath = parsePath(line, '--- ');
     else if (line.startsWith('+++ ')) current.newPath = parsePath(line, '+++ ');
-    else if (line.startsWith('Binary files ')) current.binary = true;
+    else if (line.startsWith('Binary files ') || line.startsWith('GIT binary patch')) current.binary = true;
     // An empty file added or deleted has no ---/+++ lines, so its mode line is the only signal.
     else if (line.startsWith('new file mode ')) { current.added = true; current.oldPath = null; }
     else if (line.startsWith('deleted file mode ')) { current.deleted = true; current.newPath = null; }
@@ -234,7 +323,7 @@ export function reconstructUnifiedDiff(diff: StructuredDiff): string {
       for (const line of hunk.lines) {
         if (line.kind === 'add') out.push(`+${line.text}`);
         else if (line.kind === 'del') out.push(`-${line.text}`);
-        else if (line.text.startsWith('\\')) out.push(line.text);
+        else if (line.kind === 'meta') out.push(line.text);
         else out.push(` ${line.text}`);
       }
     }

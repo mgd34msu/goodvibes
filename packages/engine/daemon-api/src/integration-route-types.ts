@@ -53,6 +53,8 @@ export interface MemoryProvenanceLinkInput {
 
 /** The add-record body, structurally compatible with the platform's MemoryAddOptions. */
 export interface MemoryRecordAddInput {
+  /** A caller-generated record id; a resend with the same id and record returns the stored row. */
+  readonly id?: string | undefined;
   readonly cls: string;
   readonly summary: string;
   readonly scope?: string | undefined;

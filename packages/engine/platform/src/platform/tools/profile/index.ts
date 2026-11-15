@@ -20,11 +20,12 @@
  *
  * ## Refusals are spoken, never swallowed
  *
- * Every failure path returns `success: true` with a `stored: false` payload and
- * a plain sentence naming what stopped it. That is deliberate: a tool error
- * tends to be summarised away as "something went wrong", and the standing rule
- * for this subsystem is that nothing unresolved drops silently. The agent is
- * told, in the same structure as a success, exactly what to repeat to the owner.
+ * A refused or failed write is a failed call (`success: false`) whose output
+ * is the same structure as a success with `stored: false`: the `state` it was
+ * left in, the `reason` in a plain sentence, and the `next` step. Anything that
+ * reads `success` records no write that did not happen, and the agent is told
+ * exactly what to repeat to the owner. An acknowledgement that changed nothing
+ * because the answer already stood is a success that says so (`changed: false`).
  */
 import type { Tool, ToolResult } from '../../types/tools.js';
 import { PROFILE_TOOL_SCHEMA, type ProfileToolInput } from './schema.js';
@@ -55,10 +56,21 @@ export interface ProfileToolDeps {
 
 type ToolAnswer = Omit<ToolResult, 'callId'>;
 
-function refused(reason: string, extra: Record<string, unknown> = {}): ToolAnswer {
+/** Why nothing was stored: the profile is not here, the turn may not write, the input is incomplete, or the store said no. */
+type RefusalState = 'unavailable' | 'not-permitted' | 'needs-input' | 'store-refused';
+
+const TELL_OWNER = 'Tell the owner plainly that it was not stored, and why.';
+
+function refused(
+  reason: string,
+  state: RefusalState,
+  next: readonly string[],
+  extra: Record<string, unknown> = {},
+): ToolAnswer {
   return {
-    success: true,
-    output: JSON.stringify({ stored: false, reason, ...extra }),
+    success: false,
+    error: `Not stored (${state}).`,
+    output: JSON.stringify({ stored: false, state, reason, next, ...extra }),
   };
 }
 
@@ -102,8 +114,9 @@ function createInstance(
       const port = deps.holder.getPort();
       if (!port) {
         return refused(
-          'The owner profile is not available in this process, so nothing could be recorded. '
-          + 'Tell the owner plainly that you could not store it.',
+          'The owner profile is not available in this process, so nothing could be recorded.',
+          'unavailable',
+          [TELL_OWNER],
         );
       }
 
@@ -111,7 +124,9 @@ function createInstance(
         // Trips, dates and confirmation details are the owner's private data: a turn that cannot
         // write as the owner (an unlisted channel, a forwarded message) cannot read them either.
         if (!authority.canCapture) {
-          return refused(`${authority.reason} The owner's dates and plans were not read.`);
+          return refused(`${authority.reason} The owner's dates and plans were not read.`, 'not-permitted', [
+            'Tell the person the owner\'s dates and plans are not shared on this channel.',
+          ]);
         }
         const [dates, plans] = await Promise.all([
           port.occasions.list(),
@@ -152,12 +167,13 @@ function createInstance(
       // the thing to be quiet and being told it cannot comply is the whole
       // complaint in miniature.
       if (action === 'acknowledge_occasion') {
-        if (!authority.canCapture) return refused(authority.reason);
+        if (!authority.canCapture) return refused(authority.reason, 'not-permitted', [TELL_OWNER]);
         const occasionId = text(input.occasionId);
         if (occasionId.length === 0) {
           return refused(
-            'Which occasion? Call `list` for the ids, then acknowledge the one the owner meant. Nothing '
-            + 'was changed.',
+            'Which occasion? Nothing was changed.',
+            'needs-input',
+            ['Call `list` for the ids, then acknowledge the one the owner meant.'],
           );
         }
         // An occurrence the model supplies must be one this occasion actually has; anything else would
@@ -169,7 +185,9 @@ function createInstance(
           if (!ISO_DATE.test(occurrence) || next !== occurrence) {
             return refused(
               `'${occurrence}' is not an upcoming date of that occasion${next ? `; its next occurrence is ${next} (YYYY-MM-DD)` : ''}. `
-              + 'Omit `occurrence` to acknowledge the upcoming one. Nothing was changed.',
+              + 'Nothing was changed.',
+              'needs-input',
+              ['Omit `occurrence` to acknowledge the upcoming one.'],
             );
           }
         }
@@ -179,12 +197,14 @@ function createInstance(
           ...(occurrence.length > 0 ? { occurrence } : {}),
         });
         if (!outcome.ok) {
-          return refused(outcome.reason ?? 'That occasion was not acknowledged.');
+          return refused(outcome.reason ?? 'That occasion was not acknowledged.', 'store-refused', [TELL_OWNER]);
         }
         // Already answered yes or no: nothing was written, and the reply says
         // which answer stands, so the turn does not report a change that did
         // not happen.
-        if (outcome.changed === false) return refused(outcome.reply, { tellOwner: outcome.reply });
+        if (outcome.changed === false) {
+          return { success: true, output: JSON.stringify({ stored: false, changed: false, id: occasionId, tellOwner: outcome.reply }) };
+        }
         return stored({
           what: 'acknowledgement',
           id: occasionId,
@@ -199,13 +219,14 @@ function createInstance(
 
       // Everything below this line writes.
       const blocked = captureAllowed();
-      if (blocked) return refused(blocked);
+      if (blocked) return refused(blocked, 'not-permitted', [TELL_OWNER]);
 
       const said = text(input.said);
       if (said.length === 0) {
         return refused(
-          'I need the owner\'s own words for the record before I can store this. Call this again with '
-          + '`said` set to what the owner actually wrote.',
+          'I need the owner\'s own words for the record before I can store this.',
+          'needs-input',
+          ['Call this again with `said` set to what the owner actually wrote.'],
         );
       }
 
@@ -219,9 +240,9 @@ function createInstance(
         const title = text(input.title);
         const from = text(input.from);
         const to = text(input.to);
-        if (title.length === 0) return refused('A trip needs a name before I can record it.');
+        if (title.length === 0) return refused('A trip needs a name before I can record it.', 'needs-input', ['Ask the owner what to call the trip.']);
         if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) {
-          return refused('I need both ends of the trip as YYYY-MM-DD. Nothing was stored.');
+          return refused('I need both ends of the trip as YYYY-MM-DD.', 'needs-input', ['Call again with `from` and `to` as YYYY-MM-DD.']);
         }
         const details = Array.isArray(input.details)
           ? input.details.map((detail) => text(detail)).filter((detail) => detail.length > 0)
@@ -235,7 +256,7 @@ function createInstance(
           ...(details.length > 0 ? { details } : {}),
           ...writeIdentity,
         });
-        if (!outcome.ok) return refused(outcome.reason ?? 'The trip was not recorded.');
+        if (!outcome.ok) return refused(outcome.reason ?? 'The trip was not recorded.', 'store-refused', [TELL_OWNER]);
         return stored({
           what: 'trip',
           id: outcome.occasionId,
@@ -258,12 +279,15 @@ function createInstance(
         const title = text(input.title);
         const date = text(input.date);
         const kind = text(input.kind);
-        if (title.length === 0) return refused('The date needs a name before I can record it.');
-        if (date.length === 0) return refused('I need the date itself, MM-DD for a yearly one, YYYY-MM-DD for a single day.');
+        if (title.length === 0) return refused('The date needs a name before I can record it.', 'needs-input', ['Ask the owner what the date is for.']);
+        if (date.length === 0) {
+          return refused('I need the date itself.', 'needs-input', ['Call again with `date`: MM-DD for a yearly one, YYYY-MM-DD for a single day.']);
+        }
         if (kind.length === 0) {
           return refused(
-            'Ask the owner which kind this is, something to sort a gift for, something to just remember, '
-            + 'or neither. Nothing is recorded until the owner says, because that is not something to guess at.',
+            'Nothing is recorded until the owner says which kind this is, because that is not something to guess at.',
+            'needs-input',
+            ['Ask the owner which kind this is: something to sort a gift for, something to just remember, or neither.'],
           );
         }
         const outcome = await port.occasions.confirmOccasion({
@@ -276,7 +300,7 @@ function createInstance(
           ...(typeof input.leadDays === 'number' ? { leadDays: input.leadDays } : {}),
           ...writeIdentity,
         });
-        if (!outcome.ok) return refused(outcome.reason ?? 'The date was not recorded.');
+        if (!outcome.ok) return refused(outcome.reason ?? 'The date was not recorded.', 'store-refused', [TELL_OWNER]);
         return stored({
           what: 'date',
           id: outcome.occasionId,
@@ -293,15 +317,15 @@ function createInstance(
         const fieldId = text(input.fieldId);
         const value = text(input.value);
         if (fieldId.length === 0 || value.length === 0) {
-          return refused('A profile field needs both `fieldId` and `value`.');
+          return refused('A profile field needs both `fieldId` and `value`.', 'needs-input', ['Call again with both `fieldId` and `value`.']);
         }
         if (!profileFieldById(fieldId)) {
-          return refused(`There is no profile field called "${fieldId}".`, {
+          return refused(`There is no profile field called "${fieldId}".`, 'needs-input', ['Call again with one of `validFieldIds`.'], {
             validFieldIds: [...openTierFieldIds(), ...closedTierFieldIds()],
           });
         }
         const outcome = await port.profile.set({ fieldId, value, ...writeIdentity });
-        if (!outcome.ok) return refused(outcome.reason ?? 'The field was not recorded.');
+        if (!outcome.ok) return refused(outcome.reason ?? 'The field was not recorded.', 'store-refused', [TELL_OWNER]);
         return stored({
           what: 'field',
           fieldId,
@@ -314,14 +338,14 @@ function createInstance(
       if (action === 'note') {
         const body = text(input.text);
         const section = canonicalProfileSection(text(input.section)) ?? '';
-        if (body.length === 0) return refused('A note needs its text.');
+        if (body.length === 0) return refused('A note needs its text.', 'needs-input', ['Call again with `text` set to the note.']);
         if (section.length === 0) {
-          return refused(`There is no profile section called "${text(input.section)}".`, {
+          return refused(`There is no profile section called "${text(input.section)}".`, 'needs-input', ['Call again with one of `validSections`.'], {
             validSections: PROFILE_SECTIONS,
           });
         }
         const outcome = await port.profile.append({ section, text: body, ...writeIdentity });
-        if (!outcome.ok) return refused(outcome.reason ?? 'The note was not recorded.');
+        if (!outcome.ok) return refused(outcome.reason ?? 'The note was not recorded.', 'store-refused', [TELL_OWNER]);
         return stored({
           what: 'note',
           section,

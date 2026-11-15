@@ -44,6 +44,7 @@ import {
 } from '../platform/src/platform/security/turn-boundary.ts';
 import {
   UntrustedContentLedger,
+  disclosedDateOf,
   evaluateOutwardEffect,
 } from '../platform/src/platform/security/untrusted-content.ts';
 import {
@@ -519,5 +520,22 @@ describe('checkOwnerApproval: content binding is the default, not flag-gated', (
     // No fingerprint on the approval means there is nothing to compare; the
     // taint path above is what refuses this shape when derivation is at stake.
     expect(result.authorized).toBe(true);
+  });
+});
+
+describe('private dates an occasions read showed this turn', () => {
+  const request = { toolName: 'agent_email', action: ACTION, description: 'sending the email' } as const;
+
+  test('a send whose text carries one is held, naming the rule; other text goes; the next turn forgets them', async () => {
+    const ledger = new UntrustedContentLedger();
+    ledger.recordDisclosedDates([disclosedDateOf("Mum's birthday", '2026-06-14')!]);
+    for (const body of ['See you on June 14th', 'party on 14 Jun', 'date: 2026-06-14', 'on 6/14 then']) {
+      const held = await evaluateOutwardEffect({ request, ledger, content: { body } });
+      expect(held.allowed).toBe(false);
+      expect(held.reason).toContain('never put into outbound text');
+    }
+    expect((await evaluateOutwardEffect({ request, ledger, content: { body: 'Lunch on Friday?' } })).allowed).toBe(true);
+    ledger.startTurn();
+    expect((await evaluateOutwardEffect({ request, ledger, content: { body: 'See you on June 14th' } })).allowed).toBe(true);
   });
 });

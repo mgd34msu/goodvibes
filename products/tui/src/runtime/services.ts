@@ -69,6 +69,7 @@ import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/platform/pl
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { createNotificationDispatcher, startNotificationFlush, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
 import { createDurabilityServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
 import { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
@@ -552,6 +553,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     admitExpensiveWork,
   });
   disposalScope.registry.add('code index store', () => codeIndexStore.close());
+  // With the daemon enabled (the default) it owns the home's shared housekeeping:
+  // the daily copy of the canonical memory store and the wake-model sweep and
+  // provisioning. This terminal's own stores (its knowledge files, logs,
+  // telemetry and sessions, all under its own surface directory) stay its to keep.
+  const daemonOwnsHomeHousekeeping = resolveDaemonEnabled(configManager);
   const codeInjectionOrchestratorDeps = {
     codeIndex: codeIndexStore,
     isCodeInjectionSettingEnabled: () => isCodeInjectionSettingEnabled(configManager),
@@ -569,6 +575,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       shellPaths,
       ...(options.currentSessionId ? { currentSessionId: options.currentSessionId } : {}),
     });
+  if (daemonOwnsHomeHousekeeping) storeSnapshotScheduler.stop();
   const { processRegistry } = createFleetServices({
     // Shared archive-aware fleet registry, see fleet-services.ts
     agentManager,
@@ -653,7 +660,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     shellPaths,
     voiceProviders,
     admitExpensiveWork,
-    provisionWakeModelsAtBoot: options.provisionWakeModelsAtBoot === true,
+    provisionWakeModelsAtBoot: options.provisionWakeModelsAtBoot === true && !daemonOwnsHomeHousekeeping,
   });
   void voiceSetup;
 

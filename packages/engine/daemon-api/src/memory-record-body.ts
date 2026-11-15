@@ -160,7 +160,10 @@ export function parseMemoryRecordAddBody(body: JsonRecord): MemoryRecordAddInput
   const review = readReviewField(body);
   if (review instanceof Response) return review;
   const provenance = readProvenanceField(body);
+  const id = readString(body, 'id');
+  if (id instanceof Response) return id;
   return {
+    ...(id.value ? { id: id.value } : {}),
     cls: cls.value,
     summary: summary.value,
     ...(scope.value ? { scope: scope.value } : {}),

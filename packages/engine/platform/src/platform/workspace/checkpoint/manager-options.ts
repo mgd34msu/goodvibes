@@ -80,6 +80,13 @@ export interface WorkspaceCheckpointManagerOptions {
    * governed by it. Defaults to always allowed.
    */
   readonly automaticSnapshotsAllowed?: (() => boolean) | undefined;
+  /**
+   * Whether a turn or agent-run event on the shared bus is this workspace's: a
+   * daemon hosting sessions in several workspaces publishes every session's
+   * events on one bus, and each workspace snapshots only its own sessions'
+   * turns. Given the event's session id. Defaults to every event.
+   */
+  readonly ownsSession?: ((sessionId: string | undefined) => boolean) | undefined;
   readonly retention?: Partial<RetentionConfig> | undefined;
   /** Clock override for deterministic tests. */
   readonly now?: (() => number) | undefined;

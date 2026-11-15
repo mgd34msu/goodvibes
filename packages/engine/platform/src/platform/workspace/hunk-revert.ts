@@ -22,6 +22,7 @@
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { WorkspaceCheckpoint } from './checkpoint/types.js';
+import { parseUnifiedHunks } from '../git/structured-diff.js';
 
 /** Thrown when a hunk cannot be reverse-applied cleanly (stale/drifted/malformed). */
 export class HunkRevertConflictError extends Error {
@@ -54,8 +55,6 @@ export interface RevertHunkConflict {
 
 export type RevertHunkResult = RevertHunkSuccess | RevertHunkConflict;
 
-const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
-
 interface ParsedHunk {
   readonly header: string;
   readonly newStart: number;
@@ -68,55 +67,44 @@ interface ParsedHunk {
 }
 
 /**
- * Parse a single unified-diff hunk. Rejects input with zero or more than one
- * `@@` header, this verb reverts exactly one hunk, so a multi-hunk paste is a
- * caller error, not something to partially honor.
+ * Read exactly one unified-diff hunk with the one diff reader the review
+ * surfaces parse with (git/structured-diff.ts). Zero or several `@@` headers,
+ * or any line that is not part of the hunk, is refused: this verb reverts
+ * exactly one hunk, so anything else is a caller error, not something to
+ * partially honor.
  */
-function parseSingleHunk(hunk: string): ParsedHunk {
-  const lines = hunk.split('\n');
-  const headerIdxs = lines
-    .map((line, i) => (HUNK_HEADER_RE.test(line) ? i : -1))
-    .filter((i) => i >= 0);
-  if (headerIdxs.length === 0) {
+function readSingleHunk(text: string): ParsedHunk {
+  const { hunks, unread } = parseUnifiedHunks(text);
+  if (hunks.length === 0) {
     throw new HunkRevertConflictError('input is not a unified-diff hunk: no "@@ … @@" header found');
   }
-  if (headerIdxs.length > 1) {
+  if (hunks.length > 1) {
     throw new HunkRevertConflictError('input contains more than one hunk; revert exactly one "@@ … @@" hunk at a time');
   }
-  const headerIdx = headerIdxs[0]!;
-  const header = lines[headerIdx]!;
-  const match = HUNK_HEADER_RE.exec(header)!;
-  const newStart = Number(match[3]);
-
+  if (unread.length > 0) {
+    throw new HunkRevertConflictError(`malformed hunk: ${JSON.stringify(unread[0])} is not a line of it (each body line starts with a space, + or -, and the header's line counts must match the body)`);
+  }
+  const hunk = hunks[0]!;
   const newBlock: string[] = [];
   const oldBlock: string[] = [];
   let addedCount = 0;
   let removedCount = 0;
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const raw = lines[i]!;
-    // A trailing empty element from split() (file/hunk ended with a newline) is
-    // not a body line; the "\ No newline at end of file" marker is metadata.
-    if (raw.length === 0) continue;
-    if (raw.startsWith('\\')) continue;
-    const prefix = raw[0];
-    const body = raw.slice(1);
-    if (prefix === ' ') {
-      newBlock.push(body);
-      oldBlock.push(body);
-    } else if (prefix === '+') {
-      newBlock.push(body);
+  for (const line of hunk.lines) {
+    if (line.kind === 'context') {
+      newBlock.push(line.text);
+      oldBlock.push(line.text);
+    } else if (line.kind === 'add') {
+      newBlock.push(line.text);
       addedCount++;
-    } else if (prefix === '-') {
-      oldBlock.push(body);
+    } else if (line.kind === 'del') {
+      oldBlock.push(line.text);
       removedCount++;
-    } else {
-      throw new HunkRevertConflictError(`malformed hunk body line (expected leading space/+/-): ${JSON.stringify(raw)}`);
     }
   }
   if (addedCount === 0 && removedCount === 0) {
     throw new HunkRevertConflictError('hunk changes nothing (no + or - lines); nothing to revert');
   }
-  return { header, newStart, newBlock, oldBlock, addedCount, removedCount };
+  return { header: hunk.header, newStart: hunk.newStart, newBlock, oldBlock, addedCount, removedCount };
 }
 
 /** Does `block` occur in `lines` starting exactly at index `at`? */
@@ -147,7 +135,7 @@ function allMatchOffsets(lines: readonly string[], block: readonly string[]): nu
 export function reverseApplyHunk(fileContent: string, hunk: string): RevertHunkResult {
   let parsed: ParsedHunk;
   try {
-    parsed = parseSingleHunk(hunk);
+    parsed = readSingleHunk(hunk);
   } catch (err) {
     if (err instanceof HunkRevertConflictError) return { ok: false, reason: err.message };
     throw err;

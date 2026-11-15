@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
-import { assertContractInputAuthority } from '../../contract/input-authority.js';
+import { assertContractInputAuthority, registerContractInputCleanup } from '../../contract/input-authority.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { runCapturedCommand, type CapturedExecAuthority } from '../exec/captured-exec.js';
 import { AutoHealer, type HealResult } from './auto-heal.js';
@@ -13,6 +13,7 @@ import { resolveLanguages, type ResolvedLanguages } from '../../intelligence/con
 import { createShellPathService } from '../../runtime/shell-paths.js';
 import { assertCapturedPublicationOwner } from './captured-publication.js';
 import { assertCapturedWriteRevision } from './captured-write-revision.js';
+import { StaleError } from '../../utils/revision.js';
 import { assertCapturedToolAccessCurrent, assertCapturedToolMutationCurrent, assertCapturedToolReadAccess, capturedToolPublicationContext, captureCapturedToolWriteRevision, hasCapturedToolInvocation } from './captured-input-tools.js';
 
 export interface CapturedAutoHealBackend { readonly kind: 'captured-auto-heal-backend' }
@@ -40,7 +41,23 @@ function workspaceLanguages(config: HealConfig): () => ResolvedLanguages | undef
   };
 }
 
-type HealConfig = Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getHomeDirectory' | 'getWorkingDirectory'>>;
+type HealConfig = Pick<ConfigManager, 'get'>
+  & Partial<Pick<ConfigManager, 'getHomeDirectory' | 'getWorkingDirectory' | 'onDidChangeIncarnation' | 'revisionSource'>>;
+
+/**
+ * Aborts the heal when the settings that admitted the write change: the owner's
+ * own change event, so a provider call or formatter in flight stops at once and
+ * nothing polls. Whether the call is still wanted is the invocation's signal,
+ * already joined to the heal's signal.
+ */
+function abortOnSettingsChange(config: HealConfig, operation: AbortController): () => void {
+  const source = config.revisionSource;
+  if (!config.onDidChangeIncarnation || !source) return () => {};
+  const captured = source.revision();
+  return config.onDidChangeIncarnation(() => {
+    if (!operation.signal.aborted) operation.abort(new StaleError(source, captured, source.revision()));
+  });
+}
 
 /** Returning a repair never itself authorizes a write. Recheck immediately before publication. */
 export async function healToolFile(
@@ -60,13 +77,13 @@ export async function healToolFile(
     const assertSource = () => { signal.throwIfAborted(); assertInvocation?.(); };
     const reading = !isClassicOperation() && assertInvocation && config.get('tools.autoHeal') && errors.length ? captureJudgmentPort('tools.auto-heal.acceptance', { signal, assertCurrent: assertSource }) : undefined;
     const check = () => { assertSource(); reading?.assertCurrent(); };
-    const monitor = setInterval(() => { try { check(); } catch (error) { controller.abort(error); } }, 50);
-    monitor.unref?.();
+    const stopWatching = abortOnSettingsChange(config, controller);
     try {
       const result = await executePolicyCheck(() => new AutoHealer(config, llm, undefined, check, signal, reading, workspaceLanguages(config)).heal(path, content, errors), signal);
+      // Once, before the caller publishes: the caller re-checks the invocation, not the acceptance reading.
       check();
       return { ...result, assertCurrent: async () => { check(); }, assertCurrentSynchronous: check };
-    } finally { clearInterval(monitor); }
+    } finally { stopWatching(); }
   }
   if (!config.get('tools.autoHeal')) return { healed: false, content, assertCurrent: async () => {}, assertCurrentSynchronous: () => {} };
   const binding = backend && backends.get(backend);
@@ -119,25 +136,22 @@ export async function healToolFile(
     }
     return transformed;
   };
-  // Providers/judgments can await or retry internally. Carry an owned signal
-  // and revoke it when the live authority changes, as contained exec does.
-  // This cannot retract an already-started transmission; it prevents late
-  // stages/publication and lets cooperative providers stop pending retries.
-  let checking = false;
-  let pending: Promise<void> = Promise.resolve();
-  const monitor = setInterval(() => {
-    if (checking || signal.aborted) return;
-    checking = true;
-    pending = check().catch((error: unknown) => { operation.abort(error); }).finally(() => { checking = false; });
-  }, 50);
-  monitor.unref?.();
-  let result: HealResult;
+  // Providers and formatters can await or retry internally: the owned signal
+  // stops them when the invocation is cancelled, the contract's input authority
+  // is revoked, or the settings that admitted the write change. The healer checks between its stages; the caller
+  // runs `assertCurrent` once more immediately before it publishes a repair.
+  const stopWatching = abortOnSettingsChange(config, operation);
+  let watchingContract = true;
+  const stopWatchingContract = registerContractInputCleanup(binding.authority, () => {
+    if (watchingContract && !operation.signal.aborted) operation.abort(new Error('captured input authority is missing or revoked'));
+  });
   try {
-    result = await new AutoHealer(config, llm, { check, checkSynchronous, transform, signal }, assertInvocation, signal, reading).heal(target, content, errors);
+    const result = await new AutoHealer(config, llm, { check, checkSynchronous, transform, signal }, assertInvocation, signal, reading).heal(target, content, errors);
+    return { ...result, assertCurrent: check, assertCurrentSynchronous: checkSynchronous };
   } finally {
-    clearInterval(monitor);
-    await pending;
+    stopWatching();
+    // Disposal runs the cleanup once; the heal is over, so it must not abort the caller's final check.
+    watchingContract = false;
+    stopWatchingContract();
   }
-  await check();
-  return { ...result, assertCurrent: check, assertCurrentSynchronous: checkSynchronous };
 }

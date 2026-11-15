@@ -64,6 +64,7 @@ async function startHarness(): Promise<Harness> {
     listInputs: async (sessionId, opts) => ({
       inputs: await transport.operator.sessions.inputs(sessionId, opts.limit, { state: opts.state, since: opts.since }),
     }),
+    claimInput: (sessionId, inputId) => transport.operator.sessions.deliverInput(sessionId, inputId, { claim: true }),
     deliverInput: (sessionId, inputId, opts) => transport.operator.sessions.deliverInput(sessionId, inputId, opts),
   };
   return { daemon, homeDirectory, workingDir, transport, spineClient, inboundClient };
@@ -159,6 +160,32 @@ describe('live-surface steer delivery against a real bootDaemon', () => {
       expect(deliveredInputs.some((i) => i.body === 'please resize the left sidebar')).toBe(true);
     } finally {
       poller?.dispose();
+      await stopHarness(harness);
+    }
+  }, 15_000);
+
+  test('two terminals showing one session run a steer once: the daemon grants the claim to one', async () => {
+    const harness = await startHarness();
+    let first: SessionInboundInputPoller | null = null;
+    let second: SessionInboundInputPoller | null = null;
+    try {
+      await registerLiveTuiSession(harness, 'tui-shared');
+      await webuiSteer(harness, 'tui-shared', 'run this once');
+      await waitFor(async () => {
+        const inputs = await listInputsByState(harness, 'tui-shared', 'queued');
+        return inputs.find((i) => i.body === 'run this once') ?? null;
+      });
+      const received: InboundSteer[] = [];
+      first = new SessionInboundInputPoller({ sessionId: () => 'tui-shared', onSteer: (s) => received.push(s), log: SILENT });
+      second = new SessionInboundInputPoller({ sessionId: () => 'tui-shared', onSteer: (s) => received.push(s), log: SILENT });
+      first.activate(harness.inboundClient);
+      second.activate(harness.inboundClient);
+      await Promise.all([first.pollOnce(), second.pollOnce()]);
+      await Promise.all([first.pollOnce(), second.pollOnce()]);
+      expect(received.map((s) => s.body)).toEqual(['run this once']);
+    } finally {
+      first?.dispose();
+      second?.dispose();
       await stopHarness(harness);
     }
   }, 15_000);

@@ -38,6 +38,19 @@ describe('adopting an existing daemon', () => {
     expect(setConfigValues(wizard, 'controlPlane.hostMode')).toEqual(['custom']);
   });
 
+  test('Apply with no local servers chosen keeps the adopted remote daemon as the target', () => {
+    const wizard = new OnboardingWizardController();
+    wizard.open('new');
+    wizard.selectLocalTuiOnly();
+    expect(wizard.hasServerCapabilitiesSelected()).toBe(false);
+    wizard.setFieldValue('network.daemon-source', 'adopt');
+    wizard.setFieldValue('network.adopt-daemon-host', '10.0.0.5');
+    wizard.setFieldValue('network.adopt-daemon-port', '4000');
+    expect(setConfigValues(wizard, 'controlPlane.host')).toEqual(['10.0.0.5']);
+    expect(setConfigValues(wizard, 'controlPlane.port')).toEqual([4000]);
+    expect(setConfigValues(wizard, 'controlPlane.hostMode')).toEqual(['custom']);
+  });
+
   test('adopting a loopback daemon stays local', () => {
     const wizard = adoptingWizard('127.0.0.1', '4000');
     expect(setConfigValues(wizard, 'controlPlane.hostMode')).toEqual(['local']);

@@ -320,8 +320,63 @@ export function retainTaintEvidence(ledger: UntrustedContentLedger, window: Tain
  * Scoped to a turn by a watermark, because the dangerous composition is "read
  * something a stranger wrote, then act outwards in the same breath".
  */
+/**
+ * A private date a read showed the owner this turn (an occasion, a trip): the
+ * name it was shown under and every spelling of it an outbound text could carry.
+ */
+export interface DisclosedDate {
+  readonly label: string;
+  readonly date: string;
+  /** Case-insensitive patterns, each matched on word boundaries. */
+  readonly patterns: readonly RegExp[];
+}
+
+const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+/** Most dates a turn keeps; an occasions list larger than this is cut at the bound. */
+const MAX_DISCLOSED_DATES = 512;
+
+/**
+ * The spellings of `YYYY-MM-DD` or `MM-DD` an outbound text could carry:
+ * the ISO form, `MM-DD`, `M/D`, `D/M`, and the month name (full or three
+ * letters) before or after the day, with or without an ordinal. Null for a
+ * value that is not a calendar date.
+ */
+export function disclosedDateOf(label: string, date: string): DisclosedDate | null {
+  const match = /^(?:(\d{4})-)?(\d{2})-(\d{2})$/.exec(date.trim());
+  if (!match) return null;
+  const month = Number(match[2]), day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const name = MONTH_NAMES[month - 1]!;
+  const monthWord = `(?:${name}|${name.slice(0, 3)}\\.?)`;
+  const dayWord = `0?${day}(?:st|nd|rd|th)?`;
+  const mm = String(month).padStart(2, '0'), dd = String(day).padStart(2, '0');
+  const sources = [
+    ...(match[1] ? [`${match[1]}-${mm}-${dd}`] : []),
+    `${mm}-${dd}`,
+    `0?${month}/0?${day}`,
+    `0?${day}/0?${month}`,
+    `${monthWord}\\s+${dayWord}`,
+    `${dayWord}\\s+(?:of\\s+)?${monthWord}`,
+  ];
+  return Object.freeze({ label, date: date.trim(), patterns: Object.freeze(sources.map((source) => new RegExp(`(?<![\\w/-])${source}(?![\\w/-])`, 'i'))) });
+}
+
+/** The first disclosed date any field of `content` carries, with the field it is in. */
+export function findDisclosedDate(
+  dates: readonly DisclosedDate[],
+  content: Readonly<Record<string, string | undefined>>,
+): { readonly date: DisclosedDate; readonly field: string } | null {
+  for (const [field, text] of Object.entries(content)) {
+    if (!text) continue;
+    for (const date of dates) if (date.patterns.some((pattern) => pattern.test(text))) return { date, field };
+  }
+  return null;
+}
+
 export class UntrustedContentLedger {
   #publicationRevision = 0;
+  /** Private dates shown this turn, per untrusted-content scope ('' when unscoped). */
+  private readonly disclosedDates = new Map<string, DisclosedDate[]>();
   private readonly ingests: UntrustedIngest[] = [];
   private readonly incompleteIngests = new WeakMap<UntrustedIngest, 'missing' | 'truncated'>();
   private ingestSequence = 0;
@@ -399,9 +454,33 @@ export class UntrustedContentLedger {
     return newest > start;
   }
 
+  /**
+   * A read showed the owner these private dates (an occasions list, his plans).
+   * Until the turn ends, the outbound check holds any text that carries one.
+   */
+  recordDisclosedDates(dates: readonly DisclosedDate[], scope: string | undefined = currentUntrustedContentScope()): void {
+    if (dates.length === 0) return;
+    this.#publicationRevision++;
+    const key = scope ?? '';
+    const kept = this.disclosedDates.get(key) ?? [];
+    kept.push(...dates);
+    if (kept.length > MAX_DISCLOSED_DATES) kept.splice(0, kept.length - MAX_DISCLOSED_DATES);
+    this.disclosedDates.delete(key);
+    this.disclosedDates.set(key, kept);
+    if (this.disclosedDates.size > MAX_SCOPE_WATERMARKS) this.disclosedDates.delete(this.disclosedDates.keys().next().value!);
+  }
+
+  /** The private dates shown this turn, to this scope and unscoped. */
+  disclosedDatesThisTurn(): readonly DisclosedDate[] {
+    const scope = currentUntrustedContentScope();
+    const unscoped = this.disclosedDates.get('') ?? [];
+    return scope === undefined ? unscoped : [...unscoped, ...(this.disclosedDates.get(scope) ?? [])];
+  }
+
   /** Called when a new owner turn begins: the previous turn's exposure ends. */
   startTurn(scope: string | undefined = currentUntrustedContentScope()): void {
     this.#publicationRevision++;
+    this.disclosedDates.delete(scope ?? '');
     if (scope === undefined) {
       this.previousTurnStartSequence = this.turnStartSequence;
       this.turnStartSequence = this.ingestSequence;
@@ -794,12 +873,45 @@ export async function evaluateOutwardEffect(input: {
   if (input.sourcePolicy !== 'required' && isYoloExecution()) {
     return { allowed: true, reason: null, fix: null, untrustedOrigins: input.ledger.originsThisTurn(), taint: [] };
   }
+  const ownerAsked = input.requestedBy === 'owner-direct';
+  const disclosed = input.ledger.disclosedDatesThisTurn();
+  if (disclosed.length > 0) {
+    // Family dates and the owner's plans answer him; they never ride into outbound
+    // text. Code reads the fields; no model is asked.
+    const carried = input.content === undefined ? null : findDisclosedDate(disclosed, input.content);
+    if (carried || input.content === undefined) {
+      const approved = checkOwnerApproval({
+        approval: input.approval,
+        action: input.request.action,
+        clearingContentTaint: input.content !== undefined,
+        contentInQuestion: input.content,
+        ...(input.now === undefined ? {} : { now: input.now }),
+      });
+      if (!approved.authorized) {
+        return {
+          allowed: false,
+          untrustedOrigins: input.ledger.originsThisTurn(),
+          taint: [],
+          reason: carried
+            ? `Held: the ${carried.field} of ${input.request.description} carries ${carried.date.date} (${carried.date.label}), a private date shown to the owner this turn. `
+              + 'Rule: dates from the occasions list and the owner\'s plans answer him and are never put into outbound text.'
+            : `Held: this turn showed the owner private dates, and ${input.request.description} did not say which of its fields leave, so they cannot be checked for one. `
+              + 'Rule: dates from the occasions list and the owner\'s plans are never put into outbound text.',
+          fix: [
+            describeApprovalMismatch(approved.mismatch),
+            ownerAsked
+              ? `Take the date out and it goes, or, since you asked for this, approve it as it stands: ${describeRemedy(input.ownerRemedy)}`
+              : 'Take the date out of the text and send it again, or tell the owner and let them send it.',
+          ].filter((part) => part.length > 0).join(' '),
+        };
+      }
+    }
+  }
   const origins = input.ledger.originsThisTurn();
   if (origins.length === 0) {
     return { allowed: true, reason: null, fix: null, untrustedOrigins: [], taint: [] };
   }
   const exposures = input.ledger.exposuresThisTurn();
-  const ownerAsked = input.requestedBy === 'owner-direct';
   const assessment = await assessOutwardContent(input.ledger, input.content, input.taintOptions);
   if (assessment.kind === 'clean') {
     return { allowed: true, reason: null, fix: null, untrustedOrigins: origins, taint: [] };

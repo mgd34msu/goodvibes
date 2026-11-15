@@ -9,9 +9,9 @@
  */
 
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
-import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
+import { MEMORY_ID_SHAPE, newMemoryId } from './memory-id.js';
 import { SQLiteStore } from './sqlite-store.js';
 import {
   SqliteVecMemoryIndex,
@@ -153,6 +153,13 @@ export interface MemorySearchFilter {
 }
 
 export interface MemoryAddOptions {
+  /**
+   * An id the caller generated (`mem_<base36 time>_<8 hex>`), which makes the add
+   * safe to resend: the same id with the same record returns the stored row
+   * instead of adding a second one; the same id with a different record is refused.
+   * Absent: the store generates one.
+   */
+  id?: string | undefined;
   scope?: MemoryScope | undefined;
   cls: MemoryClass;
   summary: string;
@@ -188,10 +195,13 @@ export interface MemoryAddInsert {
 
 const ADD_RECORD_COLUMNS = ['id', 'scope', 'cls', 'summary', 'detail', 'tags', 'provenance', 'review_state', 'confidence',
   'reviewed_at', 'reviewed_by', 'stale_reason', 'created_at', 'updated_at', 'valid_from', 'valid_until'];
-const MEMORY_ID_SHAPE = /^mem_[a-z0-9]+_[a-f0-9]{8}$/;
 
-function newMemoryId(at: number): string {
-  return `mem_${at.toString(36)}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
+/** Whether a stored row is what an add of `opts` would have stored: a resend of the same add. */
+function isSameAdd(stored: MemoryRecord, opts: MemoryAddOptions): boolean {
+  const tags = opts.tags ?? [];
+  return stored.cls === opts.cls && stored.summary === opts.summary && stored.scope === (opts.scope ?? 'project')
+    && (stored.detail ?? undefined) === (opts.detail ?? undefined)
+    && stored.tags.length === tags.length && stored.tags.every((tag, index) => tag === tags[index]);
 }
 
 function addRecordParameters(record: MemoryRecord): Array<string | number | null> {
@@ -410,7 +420,18 @@ export class MemoryStore {
 
     const now = insert.createdAt ?? Date.now();
     if (!Number.isFinite(now)) throw new Error('MemoryStore: the staged creation time is not a time; nothing was stored.');
-    const id = insert.id ?? newMemoryId(now);
+    if (insert.id === undefined && opts.id !== undefined) {
+      if (!MEMORY_ID_SHAPE.test(opts.id)) {
+        throw new Error(`MemoryStore: ${opts.id} is not a memory id (mem_<base36 time>_<8 hex>); nothing was stored.`);
+      }
+      const existing = this.get(opts.id);
+      if (existing) {
+        // A resend of an add that already landed (its reply was lost): the stored row is the answer.
+        if (isSameAdd(existing, opts)) return existing;
+        throw new Error(`MemoryStore: ${opts.id} already holds a different memory; nothing was stored. Add it without an id, or with a new one.`);
+      }
+    }
+    const id = insert.id ?? opts.id ?? newMemoryId(now);
     if (insert.id !== undefined && (!MEMORY_ID_SHAPE.test(insert.id) || this.get(insert.id) !== null)) {
       throw new Error(`MemoryStore: ${insert.id} is not a new memory id; nothing was stored. Plan the record again and retry.`);
     }

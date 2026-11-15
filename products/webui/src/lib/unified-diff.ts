@@ -1,21 +1,15 @@
 /**
- * unified-diff.ts, a tolerant parser for the git unified-diff string the daemon
- * returns from `checkpoints.diff` (result.diff.unifiedDiff), plus the helpers that
+ * unified-diff.ts, the web UI's view of a git unified diff (the daemon's
+ * `checkpoints.diff` and `sessions.changes.get` text), plus the helpers that
  * turn one selected hunk into a structured, human-readable steer context block.
  *
- * WHY THIS EXISTS: the only file-diff surface the daemon exposes is workspace
- * checkpoints (checkpoints.list + checkpoints.diff, verified against the installed
- * operator contract: there is NO per-session file-diff verb; checkpoints carry
- * turnId/agentId but no sessionId). CheckpointsView already renders that unifiedDiff
- * as one opaque <pre>. To let a user select a single hunk and comment on it, we first
- * need to break the diff into files → hunks with real line ranges. This parser does
- * only that, no rendering, no network, so it is unit-testable in isolation.
- *
- * Tolerance: the parser prefers the `--- a/…` / `+++ b/…` header lines for paths and
- * falls back to the `diff --git a/… b/…` line; a block with neither still yields its
- * hunks under an 'unknown' path rather than being dropped. Binary/GIT-binary blocks
- * are surfaced as files with `binary: true` and no hunks (never silently hidden).
+ * The parsing itself is the engine's one reader (`@goodvibes-jev/engine/platform/
+ * platform/git/diff`), which the TUI and the daemon's hunk revert use too, so a
+ * hunk is numbered and cut here exactly as the daemon reads it back when it is
+ * reverted. This module only shapes that result for the views: a display path,
+ * a binary flag, stable hunk ids and per-hunk counts.
  */
+import { parseUnifiedDiff as parseStructuredDiff, type StructuredDiffFile } from '@goodvibes-jev/engine/platform/platform/git/diff';
 
 export type DiffLineType = 'context' | 'add' | 'del' | 'meta';
 
@@ -55,172 +49,43 @@ export interface DiffFile {
   readonly hunks: readonly DiffHunk[];
 }
 
-const HUNK_HEADER = /^@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
-
-function stripPrefix(raw: string): string {
-  // git prefixes paths with a/ and b/. /dev/null is the added/deleted sentinel.
-  if (raw === '/dev/null') return '';
-  return raw.replace(/^[ab]\//, '');
-}
-
-function parseDiffGitPaths(line: string): { oldPath: string; newPath: string } | null {
-  // `diff --git a/foo b/foo`. Paths with spaces are ambiguous here, we treat the
-  // `--- `/`+++ ` lines as authoritative when present and only fall back to this.
-  const match = /^diff --git (.+) (.+)$/.exec(line);
-  if (!match) return null;
-  return { oldPath: stripPrefix(match[1]), newPath: stripPrefix(match[2]) };
-}
-
-interface MutableFile {
-  oldPath: string;
-  newPath: string;
-  status: DiffFileStatus;
-  binary: boolean;
-  hunks: DiffHunk[];
+/** A binary file keeps the status its mode lines gave it; the engine folds that into 'binary'. */
+function viewStatus(file: StructuredDiffFile): DiffFileStatus {
+  if (file.status !== 'binary') return file.status;
+  if (file.oldPath === null) return 'added';
+  if (file.newPath === null) return 'deleted';
+  return file.oldPath !== file.newPath ? 'renamed' : 'modified';
 }
 
 /**
- * Parse a git unified-diff string into files and hunks. Returns [] for an
- * empty/whitespace-only diff (the honest "no file differences" case the caller
- * renders as such).
+ * Parse a git unified-diff string into files and hunks for the views. Returns []
+ * for an empty/whitespace-only diff (the honest "no file differences" case the
+ * caller renders as such).
  */
-export function parseUnifiedDiff(unifiedDiff: string): DiffFile[] {
-  if (!unifiedDiff.trim()) return [];
-  const lines = unifiedDiff.split('\n');
-  const files: MutableFile[] = [];
-  let current: MutableFile | null = null;
-  let hunkIndex = 0;
-
-  // Hunk-in-progress state.
-  let hunkLines: DiffLine[] = [];
-  let hunkMeta: { header: string; oldStart: number; oldCount: number; newStart: number; newCount: number } | null = null;
-  let oldCursor = 0;
-  let newCursor = 0;
-  let addCount = 0;
-  let delCount = 0;
-
-  function flushHunk(): void {
-    if (!current || !hunkMeta) return;
-    current.hunks.push({
-      id: `${files.length - 1}:${hunkIndex}`,
-      header: hunkMeta.header,
-      oldStart: hunkMeta.oldStart,
-      oldCount: hunkMeta.oldCount,
-      newStart: hunkMeta.newStart,
-      newCount: hunkMeta.newCount,
-      lines: hunkLines,
-      addCount,
-      delCount,
-    });
-    hunkIndex += 1;
-    hunkLines = [];
-    hunkMeta = null;
-    addCount = 0;
-    delCount = 0;
-  }
-
-  // Returns the newly-opened file so the caller assigns `current` where TS can see the
-  // non-null assignment (TS does not track reassignments made inside a nested closure,
-  // which would otherwise leave `current` typed as its `null` initializer at read sites).
-  function startFile(oldPath: string, newPath: string): MutableFile {
-    flushHunk();
-    const file: MutableFile = { oldPath, newPath, status: 'modified', binary: false, hunks: [] };
-    files.push(file);
-    hunkIndex = 0;
-    return file;
-  }
-
-  for (const line of lines) {
-    if (line.startsWith('diff --git ')) {
-      const paths = parseDiffGitPaths(line);
-      current = startFile(paths?.oldPath ?? '', paths?.newPath ?? '');
-      continue;
-    }
-
-    // A bare `--- `/`+++ ` pair with no preceding `diff --git` (e.g. a plain
-    // `diff -u` fragment): open a file lazily on the `--- ` line.
-    const hunkComplete = hunkMeta && oldCursor >= hunkMeta.oldStart + hunkMeta.oldCount && newCursor >= hunkMeta.newStart + hunkMeta.newCount;
-    if (line.startsWith('--- ') && (!hunkMeta || hunkComplete)) {
-      const oldPath = stripPrefix(line.slice(4).replace(/\t.*$/, ''));
-      if (!current || current.hunks.length > 0 || hunkMeta) {
-        current = startFile(oldPath, current?.newPath ?? '');
-      } else {
-        current.oldPath = oldPath;
-      }
-      continue;
-    }
-    if (line.startsWith('+++ ') && !hunkMeta) {
-      const newPath = stripPrefix(line.slice(4).replace(/\t.*$/, ''));
-      if (current) current.newPath = newPath;
-      continue;
-    }
-
-    if (line.startsWith('new file mode')) {
-      if (current) current.status = 'added';
-      continue;
-    }
-    if (line.startsWith('deleted file mode')) {
-      if (current) current.status = 'deleted';
-      continue;
-    }
-    if (line.startsWith('rename from') || line.startsWith('rename to') || line.startsWith('copy from') || line.startsWith('copy to')) {
-      if (current) current.status = 'renamed';
-      continue;
-    }
-    if (line.startsWith('Binary files') || line.startsWith('GIT binary patch')) {
-      if (current) current.binary = true;
-      continue;
-    }
-
-    const hunkMatch = HUNK_HEADER.exec(line);
-    if (hunkMatch) {
-      flushHunk();
-      current ??= startFile('', '');
-      // The count groups are optional in the header (`@@ -a +c @@` omits them); an
-      // absent group is undefined at runtime and defaults to a count of 1. Truthiness
-      // (not `=== undefined`) keeps the check honest to the string-or-undefined runtime
-      // shape without eslint flagging the comparison as impossible.
-      const oldStart = Number(hunkMatch[1]);
-      const oldCount = hunkMatch[2] ? Number(hunkMatch[2]) : 1;
-      const newStart = Number(hunkMatch[3]);
-      const newCount = hunkMatch[4] ? Number(hunkMatch[4]) : 1;
-      hunkMeta = { header: line, oldStart, oldCount, newStart, newCount };
-      oldCursor = oldStart;
-      newCursor = newStart;
-      continue;
-    }
-
-    if (!hunkMeta) continue; // header noise (index …, mode …) between files
-
-    // Inside a hunk body.
-    if (line.startsWith('+')) {
-      hunkLines.push({ type: 'add', text: line.slice(1), oldLine: null, newLine: newCursor });
-      newCursor += 1;
-      addCount += 1;
-    } else if (line.startsWith('-')) {
-      hunkLines.push({ type: 'del', text: line.slice(1), oldLine: oldCursor, newLine: null });
-      oldCursor += 1;
-      delCount += 1;
-    } else if (line.startsWith('\\')) {
-      // "\ No newline at end of file", metadata, belongs to neither side.
-      hunkLines.push({ type: 'meta', text: line, oldLine: null, newLine: null });
-    } else if (line.startsWith(' ')) {
-      hunkLines.push({ type: 'context', text: line.slice(1), oldLine: oldCursor, newLine: newCursor });
-      oldCursor += 1;
-      newCursor += 1;
-    }
-  }
-  flushHunk();
-
-  return files.map((f) => ({
-    path: f.status === 'deleted' ? (f.oldPath || f.newPath || 'unknown') : (f.newPath || f.oldPath || 'unknown'),
-    oldPath: f.oldPath,
-    newPath: f.newPath,
-    status: f.status,
-    binary: f.binary,
-    hunks: f.hunks,
-  }));
-}
+export const parseUnifiedDiff = (unifiedDiff: string): DiffFile[] =>
+  parseStructuredDiff(unifiedDiff).files.map((file, fileIndex) => {
+    const oldPath = file.oldPath ?? '';
+    const newPath = file.newPath ?? '';
+    const status = viewStatus(file);
+    return {
+      path: status === 'deleted' ? (oldPath || newPath || 'unknown') : (newPath || oldPath || 'unknown'),
+      oldPath,
+      newPath,
+      status,
+      binary: file.status === 'binary',
+      hunks: file.hunks.map((hunk, hunkIndex) => ({
+        id: `${fileIndex}:${hunkIndex}`,
+        header: hunk.header,
+        oldStart: hunk.oldStart,
+        oldCount: hunk.oldLines,
+        newStart: hunk.newStart,
+        newCount: hunk.newLines,
+        lines: hunk.lines.map((line) => ({ type: line.kind, text: line.text, oldLine: line.oldLine, newLine: line.newLine })),
+        addCount: hunk.lines.filter((line) => line.kind === 'add').length,
+        delCount: hunk.lines.filter((line) => line.kind === 'del').length,
+      })),
+    };
+  });
 
 /** The old-file line span a hunk touches, as an inclusive {from,to} (0/0 when the hunk adds only). */
 export function hunkOldRange(hunk: Pick<DiffHunk, 'oldStart' | 'oldCount'>): { from: number; to: number } {

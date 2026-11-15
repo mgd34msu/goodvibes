@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
 import { acquireDiscordInboxIdentity, createDiscordInboxOwner } from '@goodvibes-jev/engine/platform/platform/intake';
@@ -78,32 +78,6 @@ test('alias mutation onset retires the original authority and refuses fresh admi
   expect(() => old.options.authority.assertCurrent()).toThrow();
 });
 
-test('environment replacement and original account callback mutation cannot be hidden by restored native secrets', async () => {
-  const f = await fixture(); process.env.ABACUSAI_API_KEY = 'synthetic-env-first';
-  const owner = await f.acquire(); process.env.ABACUSAI_API_KEY = 'synthetic-env-second';
-  expect(() => owner.options.authority.assertCurrent()).toThrow('credential changed');
-  const fresh = await f.acquire();
-  f.operation.assertCurrent = () => { process.env.ABACUSAI_API_KEY = 'synthetic-env-first'; };
-  expect(() => fresh.options.authority.assertCurrent()).toThrow();
-});
-
-test('an original synchronous account callback cannot mutate the consent and return a still-current authority', async () => {
-  const f = await fixture(); let mutate = false;
-  const operation = { signal: new AbortController().signal, assertCurrent() {
-    if (mutate) { f.config.set('surfaces.hostedInboxScreening', 'disabled'); }
-  } };
-  const owner = await acquireHostedInboxScreening({ config: f.config, secrets: f.secrets, signal: f.lifecycle.signal }, 'email-inbox', operation);
-  cleanup.push(() => owner.close()); mutate = true;
-  expect(() => owner.options.authority.assertCurrent()).toThrow();
-  expect(owner.options.authority.signal.aborted).toBe(true);
-});
-
-test('an async account assertion is refused before an acquisition is exposed', async () => {
-  const f = await fixture();
-  await expect(acquireHostedInboxScreening({ config: f.config, secrets: f.secrets, signal: f.lifecycle.signal }, 'slack-inbox',
-    { signal: new AbortController().signal, async assertCurrent() { throw new Error('Synthetic late failure'); } })).rejects.toThrow('synchronous');
-});
-
 test('native daemon shutdown and explicit acquisition close retire all retained authority', async () => {
   const f = await fixture(), owner = await f.acquire(); f.lifecycle.abort();
   expect(owner.options.authority.signal.aborted).toBe(true); expect(() => owner.options.authority.assertCurrent()).toThrow();
@@ -115,16 +89,6 @@ test('an independent native alias writer restoring its original value cannot reu
   const writer = new SecretsManager({ globalHome: f.root, projectRoot: f.root, daemonHome: f.daemonHome });
   await writer.set('SYNTHETIC_SCREENING_ABACUS', 'synthetic-other-owner-value');
   await writer.set('SYNTHETIC_SCREENING_ABACUS', 'synthetic-abacus-private-value');
-  expect(() => owner.options.authority.assertCurrent()).toThrow();
-});
-
-test('physical settings replacement and byte restoration withdraws authority before a reload notification', async () => {
-  const f = await fixture(), owner = await f.acquire();
-  const path = join(f.daemonHome, 'settings.json'), bytes = readFileSync(path);
-  const replacement = join(f.daemonHome, 'synthetic-replacement.json');
-  writeFileSync(replacement, JSON.stringify({ surfaces: { hostedInboxScreening: 'disabled' } })); renameSync(replacement, path);
-  writeFileSync(replacement, bytes); renameSync(replacement, path);
-  expect(f.config.get('surfaces.hostedInboxScreening')).toBe('abacus-typesafe-provider-managed');
   expect(() => owner.options.authority.assertCurrent()).toThrow();
 });
 

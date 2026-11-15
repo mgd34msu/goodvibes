@@ -1,3 +1,4 @@
+import { RefusalError, readRefusal, refusal } from '@goodvibes-jev/engine/errors';
 import { reportFatalBootFailure } from '@goodvibes-jev/engine/platform/platform/daemon';
 
 export type DaemonProcessExitCode = 0 | 1;
@@ -33,9 +34,12 @@ export interface DaemonProcessHandle {
   readonly ready: Promise<unknown>;
   readonly finished: Promise<DaemonProcessExitCode>;
   /**
-   * Synchronously fences startup and returns the same promise on every call.
-   * `failed` makes the eventual exit status 1 even when startup and close
-   * both succeed (the host ended for a reason that is itself a failure).
+   * Fences startup and returns the same promise on every call. The host's
+   * close runs on the next microtask, so a caller inside startup (an output
+   * port, a handover callback) never re-enters the host mid-statement; startup
+   * sees the close at its next await. `failed` makes the eventual exit status 1
+   * even when startup and close both succeed (the host ended for a reason that
+   * is itself a failure).
    */
   shutdown(failed?: boolean): Promise<DaemonProcessExitCode>;
 }
@@ -106,17 +110,21 @@ export function runDaemonProcess(
     closeStarted = true;
     let closing: Promise<void>;
     try {
-      // Invoke synchronously so the host's admission fence closes immediately.
       closing = host.close();
-    } catch {
-      closing = Promise.reject(new Error('Daemon shutdown failed'));
+    } catch (error) {
+      closing = Promise.reject(error);
     }
     void Promise.resolve(closing).then(
       () => { closeSettled = true; finishIfDrained(); },
-      () => {
+      (error: unknown) => {
         closeFailed = true;
         closeSettled = true;
-        if (!terminal) reportFatalBootFailure('Daemon shutdown failed');
+        if (!terminal) {
+          reportFatalBootFailure(new RefusalError(refusal({
+            code: 'DAEMON_SHUTDOWN_FAILED', state: 'the daemon did not shut down cleanly', reason: 'Daemon shutdown failed',
+            next: ['Check that no goodvibes-daemon process is still running before starting it again'],
+          }), { cause: error }));
+        }
         finishIfDrained();
       },
     );
@@ -132,7 +140,7 @@ export function runDaemonProcess(
       finish(1);
     }, timeoutMs);
     deadlineSet = true;
-    closeHost();
+    queueMicrotask(closeHost);
     return finished;
   }
 
@@ -149,15 +157,21 @@ export function runDaemonProcess(
     return host.start();
   }).then(
     (value) => { startupSettled = true; finishIfDrained(); return value; },
-    () => {
+    (error: unknown) => {
       startupFailed = true;
       startupSettled = true;
-      if (!terminal) reportFatalBootFailure('Daemon startup failed');
+      // The one report of a failed start: the phase and the reason that caused it.
+      if (!terminal) {
+        reportFatalBootFailure(readRefusal(error) ? error : new RefusalError(refusal({
+          code: 'DAEMON_START_FAILED', state: 'the daemon did not start', reason: 'Daemon startup failed',
+          next: ['Read the daemon activity log for this start, then start the daemon again (goodvibes-daemon serve, or goodvibes-daemon start-service)'],
+        }), { cause: error }));
+      }
       void shutdown();
       // shutdown may already be running when the factory fails.
       closeHost();
       finishIfDrained();
-      throw new Error('Daemon startup failed');
+      throw new Error('Daemon startup failed', { cause: error });
     },
   );
   // A process runner must remain safe even when nobody awaits startup.

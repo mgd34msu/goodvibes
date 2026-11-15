@@ -5,7 +5,8 @@ import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { enrichProviderAccountsSnapshot } from '../runtime/onboarding/provider-key-capture.ts';
 import type { OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
 import { collectOnboardingSnapshot } from '../runtime/onboarding/index.ts';
-import { detectLegacyUnit, resolveConfiguredServiceName } from '../runtime/legacy-daemon-migration.ts';
+import { homedir } from 'node:os';
+import { detectLegacyUnit, resolveConfiguredServiceName } from '@goodvibes-jev/engine/terminal-shell/legacy-daemon-migration';
 import {
   expandPrompt,
   handleBlockCopy,
@@ -49,7 +50,8 @@ export function collectOnboardingSnapshotForHandler(handler: InputHandler): Retu
     // Without this the adopt/migrate step reads as "no legacy daemon" and stays hidden.
     legacyDaemon: {
       detect: () => ({
-        ...detectLegacyUnit({ homeDir: handler.uiServices.environment.homeDirectory }),
+        // Unit files live under the login home systemd reads, not a relocated tree home.
+        ...detectLegacyUnit({ unitHomeDir: homedir() }),
         trackedServiceName: resolveConfiguredServiceName(handler.uiServices.platform.configManager),
       }),
     },

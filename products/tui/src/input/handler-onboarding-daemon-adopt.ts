@@ -6,6 +6,7 @@
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveDaemonCompanionToken } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -16,7 +17,7 @@ import {
   resolveInstalledDaemonBinary,
   runLegacyDaemonMigration,
   MANAGED_SERVICE_NAME,
-} from '../runtime/legacy-daemon-migration.ts';
+} from '@goodvibes-jev/engine/terminal-shell/legacy-daemon-migration';
 import type { InputHandlerLike as InputHandler } from './handler-types.ts';
 import {
   formatRuntimeActiveSuccessMessage,
@@ -25,6 +26,7 @@ import {
   runtimePortDiagnostic,
 } from './onboarding/onboarding-runtime-status.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
+import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.ts';
 
 /**
  * Immediately (not deferred to the final wizard Apply):
@@ -141,7 +143,7 @@ export async function handleConnectExistingDaemonForHandler(handler: InputHandle
  * `goodvibes-daemon.service` unit (an earlier release shipped detect+disclose only; this
  * closes that inheritance). This is a thin wrapper over
  * `detectLegacyUnit` + `runLegacyDaemonMigration`
- * (`../runtime/legacy-daemon-migration.ts`), the actual migration mechanics
+ * (the shared `legacy-daemon-migration` engine), the actual migration mechanics
  * (never auto-migrate, new-up-then-old-down with a health check before the
  * legacy unit is touched, adopt-or-warn for an unrecognized process on the
  * port) live there and are exercised against fakes in
@@ -179,8 +181,13 @@ export async function handleMigrateLegacyDaemonServiceForHandler(handler: InputH
     const port = Number(configManager.get('controlPlane.port') ?? 3421);
     const binaryPath = resolveInstalledDaemonBinary({ moduleUrl: import.meta.url });
 
-    const manager = buildManagedDaemonServiceManager({ binaryPath, homeDir: homeDirectory, host, port });
-    const legacy = detectLegacyUnit({ homeDir: homeDirectory });
+    // The daemon's settings are brought to the current shape before the unit is rendered from them.
+    runDaemonConfigMigration(homeDirectory);
+    const unitHomeDir = homedir();
+    const manager = buildManagedDaemonServiceManager({
+      binaryPath, homeDir: homeDirectory, unitHomeDir, daemonHomeDirectory: resolveGoodVibesDaemonHome(homeDirectory), host, port,
+    });
+    const legacy = detectLegacyUnit({ unitHomeDir });
     const result = await runLegacyDaemonMigration(
       { host, port, trackedServiceName: MANAGED_SERVICE_NAME, confirmMigration: confirm },
       manager,

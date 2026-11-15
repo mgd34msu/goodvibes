@@ -96,7 +96,7 @@ test('trusted source scope revocation fences reads and prevents all later networ
 });
 
 test('configuration ABA during asynchronous source construction is refused before polling or registration', async () => {
-  await expect(fixture({ startupMutation: true })).rejects.toThrow('could not acquire its owned source');
+  await expect(fixture({ startupMutation: true })).rejects.toThrow('could not acquire its owned account and storage');
 });
 
 test('native settings construct the canonical bot account and explicit DM registry for the real daemon source', async () => {
@@ -111,7 +111,7 @@ test('native settings construct the canonical bot account and explicit DM regist
 for (const mutation of ['account', 'channels'] as const) {
   test(`native configured ${mutation} ABA during startup retires the source before any provider request`, async () => {
     await expect(fixture({ configuredRegistry: true, registryStartupMutation: mutation }))
-      .rejects.toThrow('could not acquire its owned source');
+      .rejects.toThrow('could not acquire its owned account and storage');
   });
   test(`native configured ${mutation} replacement and restoration cannot release the previous mirror`, async () => {
     const f = await fixture({ configuredRegistry: true }); await f.inbox();

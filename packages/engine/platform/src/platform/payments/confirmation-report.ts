@@ -10,15 +10,42 @@
  * body never reaches the report.
  * A mail about no purchase, or about two, sends nothing: the general inbound
  * path already surfaces the mail itself.
+ *
+ * Each purchase is reported once per kind of mail (confirmed, shipped,
+ * delivered), worded by kind. The kind comes from the subject in code; a
+ * purchase whose delivery was reported is no longer a candidate, so later shop
+ * mail costs it no reading, and a kind already reported sends nothing and
+ * costs no extraction.
  */
 import { correlatePurchaseMail, extractConfirmationFacts, readRefundMail, type InboundMailFacts } from './order-correlation.js';
-import { renderConfirmationReport, renderRefundReport } from './message.js';
+import { renderConfirmationReport, renderRefundReport, type OrderMailKind } from './message.js';
 import type { PurchaseRecord } from './purchase-record.js';
 import { ownerSuppliedText, parseCurrencyCode } from './types.js';
 
 export type ConfirmationReportOutcome =
-  | { readonly kind: 'reported'; readonly purchaseId: string; readonly refund?: boolean | undefined }
-  | { readonly kind: 'not-reported'; readonly reason: 'unrelated' | 'ambiguous' | 'unreportable' };
+  | { readonly kind: 'reported'; readonly purchaseId: string; readonly refund?: boolean | undefined; readonly mailKind?: OrderMailKind | undefined }
+  | { readonly kind: 'not-reported'; readonly reason: 'unrelated' | 'ambiguous' | 'unreportable' | 'already-reported' };
+
+const DELIVERED_SUBJECT = /\b(?:has been|was|got|been) delivered\b|^\s*delivered\b|\bdelivery (?:complete|confirmation)\b/i;
+const SHIPPED_SUBJECT = /\b(?:shipped|dispatched|on (?:its|the) way|out for delivery|in transit|tracking)\b/i;
+
+/**
+ * The kind of order mail, read from its subject in code. A confirmation that
+ * carries a tracking reference reports the shipment.
+ */
+export function orderMailKind(subject: string, trackingReference: string | null = null): OrderMailKind {
+  if (DELIVERED_SUBJECT.test(subject)) return 'delivered';
+  if (SHIPPED_SUBJECT.test(subject) || trackingReference !== null) return 'shipped';
+  return 'confirmed';
+}
+
+/** What was already reported per purchase, and the write that records a new report. */
+export interface OrderMailReports {
+  /** Every purchase's reported kinds, read once per mail. */
+  kinds(): ReadonlyMap<string, readonly OrderMailKind[]>;
+  /** False when that kind was already recorded; then nothing is sent again. */
+  record(purchaseId: string, kind: OrderMailKind): Promise<boolean>;
+}
 
 /** The bare address of a `From:` value: `Shop <orders@shop.example>` becomes `orders@shop.example`. */
 export function mailboxAddress(from: string): string {
@@ -37,8 +64,15 @@ export async function reportOrderConfirmation(input: {
    * recorded, which sends nothing again. Absent: refunds are not recognised.
    */
   readonly recordRefund?: ((purchaseId: string, refundedAt: string) => Promise<boolean>) | undefined;
+  /** Absent: every matching mail is reported (no memory across mails). */
+  readonly reports?: OrderMailReports | undefined;
 }): Promise<ConfirmationReportOutcome> {
-  const correlation = await correlatePurchaseMail(input.mail, input.purchases);
+  const reports = input.reports;
+  const reportedKinds = reports?.kinds();
+  // A purchase whose delivery was reported has nothing left to report.
+  const open = reportedKinds === undefined ? input.purchases
+    : input.purchases.filter(record => !reportedKinds.get(record.purchaseId)?.includes('delivered'));
+  const correlation = await correlatePurchaseMail(input.mail, open);
   if (correlation.kind === 'unrelated') return { kind: 'not-reported', reason: 'unrelated' };
   if (correlation.kind === 'ambiguous') return { kind: 'not-reported', reason: 'ambiguous' };
   const { record, senderDomain } = correlation;
@@ -52,11 +86,21 @@ export async function reportOrderConfirmation(input: {
     if (recorded) await input.send(renderRefundReport({ facts, senderDomain }));
     return { kind: 'reported', purchaseId: record.purchaseId, refund: true };
   }
+  const reported = reportedKinds?.get(record.purchaseId) ?? [];
+  const subjectKind = orderMailKind(input.mail.subject);
+  if (reported.includes(subjectKind) && subjectKind !== 'confirmed') return { kind: 'not-reported', reason: 'already-reported' };
+  if (subjectKind === 'confirmed' && reported.includes('confirmed') && reported.includes('shipped')) {
+    return { kind: 'not-reported', reason: 'already-reported' };
+  }
   const confirmation = await extractConfirmationFacts(input.mail);
+  const kind = orderMailKind(input.mail.subject, confirmation.trackingReference);
+  if (reported.includes(kind)) return { kind: 'not-reported', reason: 'already-reported' };
   await input.send(renderConfirmationReport({
     facts,
     confirmation,
     senderDomain,
+    kind,
   }));
-  return { kind: 'reported', purchaseId: record.purchaseId };
+  if (reports !== undefined) await reports.record(record.purchaseId, kind);
+  return { kind: 'reported', purchaseId: record.purchaseId, mailKind: kind };
 }

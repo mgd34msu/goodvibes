@@ -1,7 +1,5 @@
 /** Explicit Discord account/DM scope over the canonical source and registration owners. */
 import { realpath } from 'node:fs/promises';
-import { join } from 'node:path';
-import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { createInboxRouteResolver } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { acquireDiscordInboxIdentity, resolveDiscordInboxElectionScope, acquireDiscordInboxRegistryRevision, createDiscordInboxOwner, createOwnedTriagedInboxSource,
@@ -9,7 +7,7 @@ import { acquireDiscordInboxIdentity, resolveDiscordInboxElectionScope, acquireD
 } from '@goodvibes-jev/engine/platform/platform/intake';
 import { createMultiOwnerDaemonInboxFactory, type DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import { attachDaemonInboxTagging, type DaemonTriageTaggingActivation } from './tagged-inbox-composition.js';
-import { ownInboxEligibility } from './inbox-eligibility.js';
+import { ownAccountInboxStore } from './account-inbox-store.js';
 
 export interface DiscordDaemonInboxOptions extends Pick<DiscordInboxOwnerOptions, 'account' | 'channels' | 'screening' | 'timeoutMs'> {
   /** Separately established semantic destination/account grant, never inferred from screening. */
@@ -28,36 +26,74 @@ export function createDiscordDaemonInboxFactory(options: DiscordDaemonInboxOptio
   return createMultiOwnerDaemonInboxFactory([createDiscordDaemonInboxSourceFactory(options, factories)]);
 }
 
-/** Operator-selected bot identity and DM registry; the host separately owns both screening services. */
+/** The configured Discord inbox account: the bot user and its one-to-one DM channels. */
+export interface ConfiguredDiscordInboxAccount {
+  readonly userId: string;
+  readonly channelIds: readonly string[];
+}
+
+const snowflake = (value: unknown): value is string => typeof value === 'string'
+  && /^[1-9]\d{0,19}$/.test(value) && BigInt(value) < (1n << 64n);
+
+/**
+ * The one parser of the configured Discord inbox account. Returns why it is
+ * incomplete instead of the account; the caller decides how to refuse.
+ */
+export function parseConfiguredDiscordInboxAccount(config: { get(key: string): unknown }):
+  { readonly account: ConfiguredDiscordInboxAccount } | { readonly incomplete: string } {
+  const userId = config.get('surfaces.discord.inboxBotUserId');
+  const registry = config.get('surfaces.discord.inboxChannelIds');
+  if (!snowflake(userId) || typeof registry !== 'string' || registry.length > 4_300) {
+    return { incomplete: 'Discord inbox requires its expected bot and one-to-one DM registry' };
+  }
+  const channelIds = registry.split(',').map(value => value.trim());
+  if (channelIds.length < 1 || channelIds.length > 200 || channelIds.some(id => !snowflake(id))
+    || new Set(channelIds).size !== channelIds.length) {
+    return { incomplete: 'Discord inbox requires 1–200 unique canonical one-to-one DM channel IDs' };
+  }
+  return { account: Object.freeze({ userId, channelIds: Object.freeze(channelIds) }) };
+}
+
+/**
+ * Operator-selected bot identity and DM registry; the host separately owns both
+ * screening services. With `selected`, the account was parsed once by the
+ * configured-account selector and its lifetime (aborted by that selector's
+ * setting and credential subscriptions) is the only currentness check here.
+ */
 export function createConfiguredDiscordDaemonInboxSourceFactory(
   screening: DiscordDaemonInboxOptions['screening'],
   factories: DiscordDaemonInboxSourceFactories = {},
+  selected?: {
+    readonly account: ConfiguredDiscordInboxAccount;
+    readonly operation: { readonly signal: AbortSignal; assertCurrent(): void };
+    /** Triage asks on the route screening was admitted on, like Slack and email. */
+    readonly triageAuthority?: InboxTriageAuthority | undefined;
+  },
 ): DaemonInboxSourceFactory {
   return async (context, routing, controls) => {
     const config = context.configManager;
     const keys = ['surfaces.discord.inboxBotUserId', 'surfaces.discord.inboxChannelIds'] as const;
-    const [userId, registry] = keys.map(key => config.get(key));
-    const snowflake = (value: unknown): value is string => typeof value === 'string'
-      && /^[1-9]\d{0,19}$/.test(value) && BigInt(value) < (1n << 64n);
-    if (!snowflake(userId) || typeof registry !== 'string' || registry.length > 4_300) {
-      throw new Error('Discord inbox requires its expected bot user ID and explicit one-to-one DM channel IDs');
+    let account: ConfiguredDiscordInboxAccount;
+    if (selected) account = selected.account;
+    else {
+      const parsed = parseConfiguredDiscordInboxAccount(config);
+      if ('incomplete' in parsed) throw new Error(parsed.incomplete);
+      account = parsed.account;
     }
-    const channelIds = registry.split(',').map(value => value.trim());
-    if (channelIds.length < 1 || channelIds.length > 200 || channelIds.some(id => !snowflake(id))
-      || new Set(channelIds).size !== channelIds.length) {
-      throw new Error('Discord inbox DM registry must contain 1–200 unique canonical channel IDs');
-    }
-    if (!controls.onConfigurationChange) throw new Error('Discord inbox requires its native configuration subscription owner');
-    const subscribe = controls.onConfigurationChange;
+    const { userId, channelIds } = account;
+    const registryAtStart = selected ? undefined : config.get(keys[1]);
     const lifetime = new AbortController();
     const unsubscribe: Array<() => void> = [];
     let source: OwnedInboxSource | undefined;
     let closing: Promise<void> | undefined;
-    const current = () => {
-      if (lifetime.signal.aborted || config.get(keys[0]) !== userId || config.get(keys[1]) !== registry) {
-        throw new Error('Discord inbox configured account or DM registry changed');
-      }
-    };
+    const signal = selected ? AbortSignal.any([lifetime.signal, selected.operation.signal]) : lifetime.signal;
+    const current = selected
+      ? (): void => { lifetime.signal.throwIfAborted(); selected.operation.assertCurrent(); }
+      : (): void => {
+        if (lifetime.signal.aborted || config.get(keys[0]) !== userId || config.get(keys[1]) !== registryAtStart) {
+          throw new Error('Discord inbox configured account or DM registry changed');
+        }
+      };
     const close = (): Promise<void> => {
       if (!closing) {
         lifetime.abort();
@@ -72,23 +108,26 @@ export function createConfiguredDiscordDaemonInboxSourceFactory(
       return closing;
     };
     try {
-      for (const key of keys) unsubscribe.push(subscribe(key, () => lifetime.abort()));
+      if (!selected) {
+        if (!controls.onConfigurationChange) throw new Error('Discord inbox requires its native configuration subscription owner');
+        for (const key of keys) unsubscribe.push(controls.onConfigurationChange(key, () => lifetime.abort()));
+      }
       current();
       const workingDirectory = await realpath(context.workingDirectory); current();
-      const revision = await acquireDiscordInboxRegistryRevision({ workingDirectory, assertCurrent: current, beforeWrite: controls.beforeDiscordIdentityWrite }, { userId }, channelIds); current();
+      const revision = await acquireDiscordInboxRegistryRevision({ workingDirectory, assertCurrent: current, beforeWrite: controls.beforeDiscordIdentityWrite }, { userId }, [...channelIds]); current();
       source = await createDiscordDaemonInboxSourceFactory({
         account: { userId },
-        channels: { channelIds, signal: lifetime.signal, assertCurrent: current,
-          revision },
+        channels: { channelIds: [...channelIds], signal, assertCurrent: current, revision },
         screening,
-      }, factories, true)(context, routing, controls);
+        ...(selected?.triageAuthority ? { triageAuthority: selected.triageAuthority } : {}),
+      }, factories, true, selected !== undefined)(context, routing, controls);
       current();
       return { ...source, close, unregister() { void close().catch(() => {}); } };
     } catch (error) { await close(); throw error; }
   };
 }
 export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInboxOptions,
-  factories: DiscordDaemonInboxSourceFactories = {}, configuredRegistry = false): DaemonInboxSourceFactory {
+  factories: DiscordDaemonInboxSourceFactories = {}, configuredRegistry = false, selectedLifetime = false): DaemonInboxSourceFactory {
   const createOwner = factories.createOwner ?? createDiscordInboxOwner;
   const authority = options.triageAuthority;
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady,
@@ -106,86 +145,62 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
     if (settings[0] !== true) throw new Error('Discord inbox composition requires Discord to be enabled');
     let generation = 0, closed = false;
     let owner: VerifiedDiscordInboxOwner | undefined;
-    let surface: OwnedInboxSource | undefined;
-    let release: (() => void) | undefined;
-    let eligibility: ReturnType<typeof ownInboxEligibility> | undefined;
-    const constructed = Promise.withResolvers<OwnedInboxSource>();
-    void constructed.promise.catch(() => {});
     // Subscribe before the first await, including owner and storage construction.
     const unsubscribe = controls.onAccountInvalidation(() => { generation++; owner?.invalidateCredential(); });
     const startupGeneration = generation;
-    const current = () => {
-      const quarantine = context.configManager.getIngestionQuarantine?.();
-      if (closed || !quarantine || quarantine.some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
-        || entry.key === 'surfaces.discord' || entry.key.startsWith('surfaces.discord.'))
-        || (context.configManager.get('cluster.enabled') === true) !== clustered
-        || keys.some((key, i) => context.configManager.get(key) !== settings[i])) {
-        throw new Error('Discord inbox configuration scope changed');
-      }
-    };
+    // A selected account's lifetime is aborted by the selector's own setting and
+    // credential subscriptions; nothing here re-reads what they already watch.
+    const current = selectedLifetime
+      ? (): void => { if (closed) throw new Error('Discord inbox configuration scope changed'); options.channels.assertCurrent(); }
+      : (): void => {
+        const quarantine = context.configManager.getIngestionQuarantine?.();
+        if (closed || !quarantine || quarantine.some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
+          || entry.key === 'surfaces.discord' || entry.key.startsWith('surfaces.discord.'))
+          || (context.configManager.get('cluster.enabled') === true) !== clustered
+          || keys.some((key, i) => context.configManager.get(key) !== settings[i])) {
+          throw new Error('Discord inbox configuration scope changed');
+        }
+      };
     const startupCurrent = () => { current(); if (generation !== startupGeneration) throw new Error('Discord inbox startup was revoked'); };
+    let workingDirectory: string;
+    let identity: Awaited<ReturnType<typeof acquireDiscordInboxIdentity>>;
     try {
       startupCurrent();
-      const workingDirectory = await realpath(context.workingDirectory); startupCurrent();
+      workingDirectory = await realpath(context.workingDirectory); startupCurrent();
       const resolveProfileId = routing.resolveProfileId.bind(routing);
       const resolveRouteId = createInboxRouteResolver({ getProfileForChannel: resolveProfileId, resolveProfile: resolveProfileId });
-      const identity = await acquireDiscordInboxIdentity({ workingDirectory, assertCurrent: startupCurrent, beforeWrite: controls.beforeDiscordIdentityWrite }, options, { configuredRegistry });
+      identity = await acquireDiscordInboxIdentity({ workingDirectory, assertCurrent: startupCurrent, beforeWrite: controls.beforeDiscordIdentityWrite }, options, { configuredRegistry });
       startupCurrent();
       owner = await createOwner({ ...context, resolveRouteId }, {
         identity, account: options.account, channels: options.channels, screening: options.screening, assertCurrent: current,
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       });
-      startupCurrent();
-      const electionScope = clustered ? resolveDiscordInboxElectionScope(identity) : owner.scopeId;
-      const storeFileName = `inbox-discord-${owner.scopeId}.sqlite`;
-      release = await acquireCrossProcessLock(join(workingDirectory, '.goodvibes', 'tui', 'operator', `${storeFileName}.owner.lock`), {
-        strictOwnership: true, totalTimeoutMs: 100,
-      });
-      startupCurrent();
-      surface = await createOwnedTriagedInboxSource({ ...context, workingDirectory }, {
-        beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite, providerId: 'discord', accountScopeId: owner.scopeId, ...(authority ? { authority } : {}),
-        adapters: new Map([['discord', owner.adapter]]), storeFileName, triageStoreFileName: owner.triageStoreFileName,
-        ...(clustered ? { awaitInitialPoll: false } : {}), acquireReadLease: () => owner!.acquireReadLease(),
-        gatePolling(_provider, control) {
-          if (!clustered) return controls.gatePolling(`discord:${electionScope}`, control);
-          eligibility = ownInboxEligibility({ verify: async () => {
-            const registration = await constructed.promise;
-            await registration.ready;
-            return owner!.verifyEligibility();
-          }, control,
-            ...(factories.eligibilityClock ? { clock: factories.eligibilityClock } : {}),
-            register: gated => controls.gatePollingOwned!(`discord:${electionScope}`, gated),
-          });
-          return () => eligibility!.close();
-        },
-      });
-      constructed.resolve(surface);
-    } catch {
-      constructed.reject(new Error('Discord inbox source construction failed'));
-      closed = true; unsubscribe();
-      const cleanup = await Promise.allSettled([surface?.close(), owner?.close(), eligibility?.close()]);
-      if (cleanup[0]?.status === 'fulfilled') release?.();
-      throw new Error('Discord inbox composition could not acquire its owned source');
+    } catch (error) {
+      closed = true;
+      try { unsubscribe(); } catch { /* The acquisition failure is the error reported. */ }
+      await Promise.allSettled([owner?.close()]);
+      throw new Error('The discord inbox could not acquire its owned account and storage', { cause: error });
     }
-    const registration = surface;
-    const owned = owner;
-    const unlock = release;
-    let closing: Promise<void> | undefined;
-    const close = () => {
-      if (!closing) {
-        closed = true; // Fence new reads synchronously, before asynchronous drainage.
-        closing = Promise.resolve().then(async () => {
-          let failed = false; try { unsubscribe(); } catch { failed = true; }
-          const [store, provider] = await Promise.allSettled([registration.close(), owned.close()]);
-          if (store.status === 'fulfilled') unlock();
-          if (failed || store.status === 'rejected' || provider.status === 'rejected') throw new Error('Discord inbox did not close cleanly');
-        });
-      }
-      return closing;
-    };
-    const result = { ...registration, close, unregister() { void close().catch(() => {}); },
-      ready: Promise.all([registration.ready, eligibility?.ready]).then(() => {}),
-    };
+    const owned = owner, ownedIdentity = identity, ownedDirectory = workingDirectory;
+    let result: OwnedInboxSource;
+    try {
+      result = await ownAccountInboxStore({
+        provider: 'discord', controls, workingDirectory: ownedDirectory, clustered, owner: owned, assertCurrent: startupCurrent,
+        ...(factories.eligibilityClock ? { eligibilityClock: factories.eligibilityClock } : {}),
+        prepare: startupCurrent,
+        electionScope: () => clustered ? resolveDiscordInboxElectionScope(ownedIdentity) : owned.scopeId,
+        register: store => createOwnedTriagedInboxSource({ ...context, workingDirectory: ownedDirectory }, {
+          beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite,
+          providerId: 'discord', accountScopeId: owned.scopeId, ...(authority ? { authority } : {}),
+          adapters: new Map([['discord', owned.adapter]]), triageStoreFileName: owned.triageStoreFileName,
+          acquireReadLease: () => owned.acquireReadLease(), ...store,
+        }),
+        releaseExtras: () => { closed = true; unsubscribe(); },
+      });
+    } catch (error) { closed = true; throw error; }
+    // Fence new reads synchronously, before asynchronous drainage.
+    const drain = result.close;
+    result = { ...result, close: () => { closed = true; return drain(); }, unregister() { closed = true; void drain().catch(() => {}); } };
     return triageTagging ? attachDaemonInboxTagging(result, triageTagging, controls, {
       provider: 'discord', accountScopeId: owned.scopeId, assertCurrent: current,
       ...(triageTagging.forumTagIds ? { forumTagIds: triageTagging.forumTagIds } : {}),

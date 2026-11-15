@@ -59,9 +59,11 @@ for (const timedOut of [false, true]) {
 test('startup cancellation during endpoint probe fences all retirement writes', async () => {
   const f = fixture(false); const abort = new AbortController();
   let release!: (value: boolean) => void;
+  const probing = Promise.withResolvers<void>();
   const result = reconcileRedundantLegacyUnit({ ...f.input, signal: abort.signal,
-    endpointProbe: () => new Promise<boolean>((resolve) => { release = resolve; }),
+    endpointProbe: () => new Promise<boolean>((resolve) => { release = resolve; probing.resolve(); }),
   });
+  await probing.promise;
   abort.abort(); release(true);
   expect(await result).toEqual({ action: 'noop', reason: 'aborted', lines: [] });
   expect(f.calls).not.toContain('disable'); expect(f.removed).toEqual([]);

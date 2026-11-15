@@ -1,80 +1,98 @@
 /**
  * The unattended startup reconcile for the redundant install-script
- * `goodvibes-daemon.service` unit, split out of `legacy-daemon-migration.ts`
- * (which owns the shared unit definition, detection, and the CONSENTED
- * `migrate-service` engine) so each module stays within the architecture
- * gate's file-size cap. Same layer (`src/runtime/`), same injectable-seam
- * discipline; see the sibling module's banner for the naming and layering
- * rationale.
+ * `goodvibes-daemon.service` unit, beside `legacy-daemon-migration.ts` (which
+ * owns the shared unit definition, detection, and the CONSENTED
+ * `migrate-service` engine). Same injectable-seam discipline; see the sibling
+ * module's banner for the naming rationale.
+ *
+ * It runs on a daemon that is already listening, so every systemctl call is
+ * an asynchronous child process: a slow user bus delays the reconcile, never
+ * the daemon's answers.
  */
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
-  defaultActionRunner,
   defaultPortProbe,
   legacyUnitPath,
   parseMainPid,
   LEGACY_SERVICE_UNIT_NAME,
   SYSTEMCTL_TIMEOUT_MS,
   type ManagedServiceActionRunner,
-} from './legacy-daemon-migration.ts';
+} from './legacy-daemon-migration.js';
 
 type ManagedServiceActionResult = ReturnType<ManagedServiceActionRunner>;
+/** A systemctl runner for the reconcile; a synchronous test fake satisfies it too. */
+export type ReconcileActionRunner = (command: string, args: readonly string[]) => ManagedServiceActionResult | Promise<ManagedServiceActionResult>;
 
 /**
- * The exact marker string the suite installer writes into every unit it
+ * The exact marker string scripts/install.sh writes into every unit it
  * creates (as a `# managed by goodvibes install.sh` comment). The reconcile
  * check below keys on it to tell an installer-created legacy unit, safe to
  * auto-retire, apart from a hand-written one that must only ever be reported.
- * Kept in lockstep with `INSTALLER_MARKER` in the suite installer
- * (goodvibes-daemon scripts/install.sh).
+ * The installer tests read this constant and require `INSTALLER_MARKER` in
+ * scripts/install.sh to equal it.
  */
 export const INSTALLER_UNIT_MARKER = 'managed by goodvibes install.sh';
 
 
 
 /**
- * CUMULATIVE ceiling on the reconcile's whole boot-path pass. Per-call
- * timeouts alone still allow ~5 sequential slow-but-completing calls to stack
- * up (a degraded, not wedged, user bus), blocking the already-listening
- * daemon's event loop for tens of seconds. One overall deadline covers the
- * pass: once it is exceeded, every remaining call is skipped (reported as
- * `status: null`, which the guards treat as unknown → refusal) and the result
- * carries a notice saying so.
+ * CUMULATIVE ceiling on the reconcile's whole pass. Once it passes, every
+ * remaining call is skipped (reported as `status: null`, which the guards
+ * treat as unknown, so they refuse) and the result says so.
  */
 export const RECONCILE_DEADLINE_MS = 8_000;
 
+const SKIPPED: ManagedServiceActionResult = { status: null, stdout: '', stderr: 'reconcile time budget exceeded; call skipped' } as ManagedServiceActionResult;
 
+/** One systemctl call as an asynchronous child, killed when its timeout or the pass's signal fires. */
+function spawnSystemctl(command: string, args: readonly string[], timeoutMs: number, signal: AbortSignal): Promise<ManagedServiceActionResult> {
+  return new Promise((resolve) => {
+    if (signal.aborted) { resolve(SKIPPED); return; }
+    let stdout = '', stderr = '', settled = false;
+    const finish = (status: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      resolve({ status, stdout, stderr } as ManagedServiceActionResult);
+    };
+    const child = spawn(command, [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const onAbort = (): void => { child.kill('SIGKILL'); finish(null); };
+    const timer = setTimeout(onAbort, timeoutMs);
+    signal.addEventListener('abort', onAbort, { once: true });
+    child.stdout?.setEncoding('utf-8').on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr?.setEncoding('utf-8').on('data', (chunk: string) => { stderr += chunk; });
+    child.once('error', (error) => { stderr += error.message; finish(null); });
+    child.once('close', (code) => finish(code));
+  });
+}
 
 /**
- * Wrap a runner with the reconcile's cumulative deadline: calls after the
- * deadline are skipped outright; calls near it get only the remaining budget
- * as their per-call timeout (default runner only, injected runners are test
- * fakes that answer instantly).
+ * The reconcile's runner: an injected runner, or asynchronous systemctl
+ * children bounded per call and by the pass's deadline signal.
  */
 function makeDeadlineBoundRunner(
-  injected: ManagedServiceActionRunner | undefined,
+  injected: ReconcileActionRunner | undefined,
   perCallTimeoutMs: number,
-  deadlineMs: number,
-): { run: ManagedServiceActionRunner; deadlineHit: () => boolean } {
-  const startedAt = Date.now();
+  deadline: AbortSignal,
+): { run: (command: string, args: readonly string[]) => Promise<ManagedServiceActionResult>; deadlineHit: () => boolean } {
   let hit = false;
-  const run: ManagedServiceActionRunner = (command, args) => {
-    const remaining = deadlineMs - (Date.now() - startedAt);
-    if (remaining <= 0) {
-      hit = true;
-      return { status: null, stdout: '', stderr: 'reconcile time budget exceeded: call skipped' } as ManagedServiceActionResult;
-    }
-    if (injected) return injected(command, args);
-    return defaultActionRunner(Math.min(perCallTimeoutMs, remaining))(command, args);
+  const run = async (command: string, args: readonly string[]): Promise<ManagedServiceActionResult> => {
+    if (deadline.aborted) { hit = true; return SKIPPED; }
+    if (injected) return await injected(command, args);
+    const result = await spawnSystemctl(command, args, perCallTimeoutMs, deadline);
+    if (deadline.aborted) hit = true;
+    return result;
   };
   return { run, deadlineHit: () => hit };
 }
 
-
-
 export interface ReconcileRedundantLegacyUnitInput {
   readonly homeDir: string;
+  /** Startup owner cancellation; checked again after asynchronous endpoint observation. */
+  readonly signal?: AbortSignal;
   /** The unit name this tool manages (e.g. 'goodvibes'). */
   readonly trackedServiceName: string;
   /**
@@ -93,7 +111,7 @@ export interface ReconcileRedundantLegacyUnitInput {
   /** Injectable removal of the legacy unit file. Defaults to a real `rmSync`. */
   readonly legacyUnitFileRemove?: ((path: string) => void) | undefined;
   /** Injectable systemctl runner (is-active/MainPID probes + disable/daemon-reload). */
-  readonly actionRunner?: ManagedServiceActionRunner | undefined;
+  readonly actionRunner?: ReconcileActionRunner | undefined;
   /** Injectable liveness check for unit MainPIDs. Defaults to a signal-0 probe. */
   readonly processAlive?: ((pid: number) => boolean) | undefined;
   /** This process's pid, for the self-supervision guard. Defaults to `process.pid`. */
@@ -115,6 +133,7 @@ export interface ReconcileRedundantLegacyUnitInput {
 }
 
 export type ReconcileRedundantLegacyUnitReason =
+  | 'aborted'
   | 'no-legacy-unit'
   | 'canonical-not-active'
   | 'canonical-mainpid-not-alive'
@@ -126,14 +145,16 @@ export type ReconcileRedundantLegacyUnitReason =
   | 'marker-unreadable'
   | 'disable-failed'
   | 'disable-timeout'
+  | 'remove-failed'
+  | 'reload-failed'
   | 'retired';
 
 export interface ReconcileRedundantLegacyUnitResult {
   /**
    * 'removed' = legacy unit auto-retired; 'notice' = left alone with a printed
    * hint (hand-written, or unreadable); 'failed' = retirement was attempted but
-   * a destructive step failed or its outcome could not be confirmed (this tool
-   * removed nothing); 'noop' = guard refused or nothing to do.
+   * a step failed or its outcome could not be confirmed (the receipt states
+   * which earlier steps completed); 'noop' = guard refused or nothing to do.
    */
   readonly action: 'removed' | 'notice' | 'noop' | 'failed';
   /** Machine-readable why, so callers can leave a breadcrumb for every refusal. */
@@ -173,7 +194,7 @@ function defaultReadOwnCgroup(): string {
  *   - NEVER acts from inside the legacy unit itself: if this process IS the
  *     legacy unit's MainPID, or /proc/self/cgroup names the legacy unit,
  *     running `disable --now` would SIGTERM the very daemon executing this
- *     code (mid-boot, from inside a blocking spawnSync). Refuses instead.
+ *     code. Refuses instead.
  *   - NEVER stops a RUNNING legacy daemon: if the legacy unit's MainPID is a
  *     live process, it may be the daemon serving the endpoint clients are
  *     configured to reach (the wrong-port two-daemon state), the unattended
@@ -193,34 +214,37 @@ function defaultReadOwnCgroup(): string {
  *     actionable notice. An UNREADABLE unit file is reported as unreadable,
  *     never misdiagnosed as hand-written.
  *   - The whole pass shares ONE cumulative time budget (RECONCILE_DEADLINE_MS)
- *     on top of the per-call timeout, so even a degraded-but-completing user
- *     bus cannot stack five slow calls into a half-minute boot stall.
+ *     on top of the per-call timeout; every call is asynchronous, so the
+ *     listening daemon keeps answering while systemctl is slow.
  * Every side effect goes through the same injectable seams the migration engine
  * uses, so tests exercise it deterministically and never touch a real service.
  */
 export async function reconcileRedundantLegacyUnit(
   input: ReconcileRedundantLegacyUnitInput,
 ): Promise<ReconcileRedundantLegacyUnitResult> {
+  const aborted = (): ReconcileRedundantLegacyUnitResult => ({ action: 'noop', reason: 'aborted', lines: [] });
+  if (input.signal?.aborted) return aborted();
   const path = legacyUnitPath(input.homeDir);
   const fileExists = input.legacyUnitFileExists ?? existsSync;
   if (!fileExists(path)) return { action: 'noop', reason: 'no-legacy-unit', lines: [] };
 
+  const deadlineSignal = AbortSignal.timeout(input.deadlineMs ?? RECONCILE_DEADLINE_MS);
   const { run, deadlineHit } = makeDeadlineBoundRunner(
     input.actionRunner,
     input.systemctlTimeoutMs ?? SYSTEMCTL_TIMEOUT_MS,
-    input.deadlineMs ?? RECONCILE_DEADLINE_MS,
+    input.signal ? AbortSignal.any([input.signal, deadlineSignal]) : deadlineSignal,
   );
   const systemctl = input.systemctlCommand ?? 'systemctl';
   const canonicalUnit = `${input.trackedServiceName}.service`;
   const legacyUnit = `${LEGACY_SERVICE_UNIT_NAME}.service`;
   const deadlineNote = (): string[] =>
     deadlineHit()
-      ? ['note: the reconcile hit its overall time budget; remaining checks were skipped; it will re-run at the next daemon start.']
+      ? ['note: the reconcile hit its overall time budget: remaining checks were skipped; it will re-run at the next daemon start.']
       : [];
 
   // Guard 1: the canonical unit must report active. (A timed-out, skipped, or
   // failed probe, e.g. a wedged user bus, lands here too and refuses.)
-  const probe = run(systemctl, ['--user', 'is-active', canonicalUnit]);
+  const probe = await run(systemctl, ['--user', 'is-active', canonicalUnit]);
   const canonicalActive = (probe.status ?? 1) === 0 && (probe.stdout ?? '').trim() === 'active';
   if (!canonicalActive) {
     return {
@@ -237,7 +261,7 @@ export async function reconcileRedundantLegacyUnit(
   // Guard 2: 'active' alone does not prove the canonical unit is the daemon
   // actually serving (Type=simple reports active from fork onward). Require
   // its MainPID to resolve and be a live process.
-  const canonicalPid = parseMainPid(run(systemctl, ['--user', 'show', '-p', 'MainPID', '--value', canonicalUnit]));
+  const canonicalPid = parseMainPid(await run(systemctl, ['--user', 'show', '-p', 'MainPID', '--value', canonicalUnit]));
   const alive = input.processAlive ?? defaultProcessAlive;
   if (canonicalPid === undefined || !alive(canonicalPid)) {
     return {
@@ -253,7 +277,7 @@ export async function reconcileRedundantLegacyUnit(
 
   // Guard 3: never disable the unit that launched THIS process. `disable
   // --now` on our own supervising unit would SIGTERM this daemon's whole
-  // cgroup mid-boot, from inside the blocking systemctl call.
+  // cgroup mid-boot.
   //
   // The legacy MainPID probe is TRI-STATE, exactly like guards 1-2: a reply
   // whose status is non-zero or null (bus flap, timeout, skipped-by-deadline)
@@ -263,7 +287,7 @@ export async function reconcileRedundantLegacyUnit(
   // it: in the wrong-port state the legacy daemon itself answers the
   // configured-endpoint probe). Unknown refuses.
   const ownPid = input.ownPid ?? process.pid;
-  const legacyPidReply = run(systemctl, ['--user', 'show', '-p', 'MainPID', '--value', legacyUnit]);
+  const legacyPidReply = await run(systemctl, ['--user', 'show', '-p', 'MainPID', '--value', legacyUnit]);
   const legacyPidKnown = (legacyPidReply.status ?? 1) === 0;
   const legacyPid = parseMainPid(legacyPidReply);
   const ownCgroup = (input.readOwnCgroup ?? defaultReadOwnCgroup)();
@@ -283,7 +307,7 @@ export async function reconcileRedundantLegacyUnit(
       reason: 'legacy-state-unknown',
       lines: [
         `legacy-unit reconcile: could not determine whether ${legacyUnit} has a running daemon (the MainPID query ` +
-          'failed or timed out): refusing to act on a guess; it will be re-checked at the next daemon start.',
+          'failed or timed out), refusing to act on a guess; it will be re-checked at the next daemon start.',
         ...deadlineNote(),
       ],
     };
@@ -328,6 +352,8 @@ export async function reconcileRedundantLegacyUnit(
     }
   }
 
+  if (input.signal?.aborted) return aborted();
+
   const readFile = input.legacyUnitFileRead ?? ((p: string) => readFileSync(p, 'utf-8'));
   let marked = false;
   let readError: string | undefined;
@@ -346,7 +372,7 @@ export async function reconcileRedundantLegacyUnit(
       reason: 'marker-unreadable',
       lines: [
         `note: ${canonicalUnit} is active and a separate ${legacyUnit} exists at ${path}, but its unit file could not ` +
-          `be read (${readError}): left untouched. Inspect it yourself; if it is redundant, retire it with: ` +
+          `be read (${readError}). Left untouched. Inspect it yourself; if it is redundant, retire it with: ` +
           `systemctl --user disable --now ${legacyUnit} && rm ${path} && systemctl --user daemon-reload`,
       ],
     };
@@ -369,7 +395,23 @@ export async function reconcileRedundantLegacyUnit(
   // unit file if the disable actually succeeded, otherwise the enablement
   // symlink dangles at a deleted file and this tool can never repair it (the
   // next pass no-ops at the file-exists check).
-  const disableResult = run(systemctl, ['--user', 'disable', '--now', legacyUnit]);
+  const finishDisabledRetirement = async (disableTimedOut: boolean): Promise<ReconcileRedundantLegacyUnitResult> => {
+    const removeFile = input.legacyUnitFileRemove ?? ((p: string) => rmSync(p, { force: true }));
+    let removed = false;
+    try { removeFile(path); removed = true; }
+    catch { /* The operation did not confirm removal, regardless of its error text. */ }
+    let reloaded = false;
+    try { reloaded = (await run(systemctl, ['--user', 'daemon-reload'])).status === 0; }
+    catch { /* Preserve the completed disable/removal receipt when the runner throws. */ }
+    const lines = [disableTimedOut
+      ? `reconciled: the disable command timed out waiting on the stop job, but re-inspection confirms the installer-managed ${legacyUnit} is no longer enabled${removed ? `, its unit file was removed (${path})` : ''}. Its stop may still be completing.`
+      : `reconciled: ${canonicalUnit} is active and serving, so the redundant installer-managed ${legacyUnit} was disabled${removed ? ` and removed (${path})` : ''}.`];
+    if (!removed) lines.push(`Removal of ${path} could not be confirmed; inspect the unit definition before retrying.`);
+    if (!reloaded) lines.push('daemon-reload did not report success; verify with `systemctl --user daemon-reload` before treating reconciliation as complete.');
+    lines.push(...deadlineNote());
+    return { action: removed && reloaded ? 'removed' : 'failed', reason: !removed ? 'remove-failed' : !reloaded ? 'reload-failed' : 'retired', lines };
+  };
+  const disableResult = await run(systemctl, ['--user', 'disable', '--now', legacyUnit]);
   const disableStatus = disableResult.status ?? 1;
   if (disableStatus !== 0) {
     if (disableResult.status === null) {
@@ -377,31 +419,14 @@ export async function reconcileRedundantLegacyUnit(
       // removes the enablement symlinks synchronously BEFORE waiting on the
       // stop job, so the disable may well have taken effect even though the
       // client was killed. Re-inspect instead of printing a blanket denial.
-      const reinspect = run(systemctl, ['--user', 'is-enabled', legacyUnit]);
+      const reinspect = await run(systemctl, ['--user', 'is-enabled', legacyUnit]);
       const reinspectOut = (reinspect.stdout ?? '').trim();
       const confirmedDisabled = (reinspect.status !== null)
         && (reinspectOut === 'disabled' || reinspectOut === 'not-found');
       if (confirmedDisabled) {
         // The disable took effect; only the client timed out waiting on the
         // stop job. Proceed as success, saying exactly that.
-        const removeFileAfterTimeout = input.legacyUnitFileRemove ?? ((p: string) => rmSync(p, { force: true }));
-        let removeErrorAfterTimeout: string | undefined;
-        try {
-          removeFileAfterTimeout(path);
-        } catch (error) {
-          removeErrorAfterTimeout = summarizeError(error);
-        }
-        run(systemctl, ['--user', 'daemon-reload']);
-        const lines = [
-          `reconciled: the disable command timed out waiting on the stop job, but re-inspection confirms the ` +
-            `installer-managed ${legacyUnit} is no longer enabled${removeErrorAfterTimeout ? '' : `; its unit file was removed (${path})`}. ` +
-            'Its stop may still be completing.',
-        ];
-        if (removeErrorAfterTimeout) {
-          lines.push(`note: could not remove ${path}: ${removeErrorAfterTimeout}; remove it by hand.`);
-        }
-        lines.push(...deadlineNote());
-        return { action: 'removed', reason: 'retired', lines };
+        return await finishDisabledRetirement(true);
       }
       return {
         action: 'failed',
@@ -421,29 +446,12 @@ export async function reconcileRedundantLegacyUnit(
       reason: 'disable-failed',
       lines: [
         `legacy-unit reconcile: the disable of the redundant installer-managed ${legacyUnit} reported failure ` +
-          `(${detail}): this tool removed nothing; the unit file at ${path} was left in place.`,
+          `(${detail}); this tool removed nothing; the unit file at ${path} was left in place.`,
         `Verify its state and retire it yourself: systemctl --user is-enabled ${legacyUnit} ; ` +
           `systemctl --user disable --now ${legacyUnit} && rm ${path} && systemctl --user daemon-reload`,
       ],
     };
   }
 
-  const removeFile = input.legacyUnitFileRemove ?? ((p: string) => rmSync(p, { force: true }));
-  let removeError: string | undefined;
-  try {
-    removeFile(path);
-  } catch (error) {
-    removeError = summarizeError(error);
-  }
-  run(systemctl, ['--user', 'daemon-reload']);
-
-  const lines = [
-    `reconciled: ${canonicalUnit} is active and serving, so the redundant installer-managed ${legacyUnit} ` +
-      `was disabled${removeError ? '' : ` and removed (${path})`}.`,
-  ];
-  if (removeError) {
-    lines.push(`note: could not remove ${path}: ${removeError}; remove it by hand.`);
-  }
-  lines.push(...deadlineNote());
-  return { action: 'removed', reason: 'retired', lines };
+  return await finishDisabledRetirement(false);
 }

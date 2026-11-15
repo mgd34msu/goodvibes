@@ -24,8 +24,8 @@ export interface DaemonBootOperations {
   synchronizeServices(): Promise<void>;
   initializePlugins(): Promise<void>;
   closePlugins(): Promise<void>;
-  /** Generic step-only reporting; deliberately omits potentially private rejection details. */
-  reportFailure(step: DaemonBootStep): void | Promise<void>;
+  /** A failed step and its cause; the reporter masks the cause before it is written. */
+  reportFailure(step: DaemonBootStep, error: unknown): void | Promise<void>;
 }
 
 export interface DaemonBootSnapshot {
@@ -81,7 +81,7 @@ export function createDaemonBootController(operations: DaemonBootOperations): Da
     } catch (error) {
       if (error === BOOT_INTERRUPTED) { steps.set(name, 'skipped'); return; }
       steps.set(name, 'failed');
-      try { await operations.reportFailure(name); }
+      try { await operations.reportFailure(name, error); }
       catch { /* A reporting failure cannot strand later boot steps or cleanup. */ }
     }
   }
@@ -97,11 +97,7 @@ export function createDaemonBootController(operations: DaemonBootOperations): Da
       // Raw rejection values may carry secrets or hostile getters; never retain them.
       void cleanup.catch(() => {});
       const failed = (): void => reject(new Error(`${label} cleanup failed`));
-      try {
-        const result = action();
-        if (result !== undefined && (result === closing || result === cleanup)) failed();
-        else void Promise.resolve(result).then(resolve, failed);
-      }
+      try { void Promise.resolve(action()).then(resolve, failed); }
       catch { failed(); }
       return cleanup;
     };

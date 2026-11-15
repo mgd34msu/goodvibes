@@ -7,15 +7,19 @@ import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import { createSlackDaemonInboxSourceFactory, type SlackDaemonInboxSourceFactories } from './slack-inbox-composition.js';
 import { createEmailDaemonInboxSourceFactory, type EmailDaemonInboxSourceFactories } from './email-inbox-composition.js';
-import { createConfiguredDiscordDaemonInboxSourceFactory, type DiscordDaemonInboxSourceFactories } from './discord-inbox-composition.js';
+import { createConfiguredDiscordDaemonInboxSourceFactory, parseConfiguredDiscordInboxAccount, type ConfiguredDiscordInboxAccount, type DiscordDaemonInboxSourceFactories } from './discord-inbox-composition.js';
 import type { HostedInboxScreeningOperation } from './hosted-source-screening-composition.js';
 import { INBOX_ADMISSION_ACTIONS, InboxAdmissionRefusal, inboxAdmissionReason, type InboxAdmissionReason } from './inbox-admission-refusal.js';
 
-const slackKeys = ['surfaces.slack.enabled', 'surfaces.slack.workspaceId', 'surfaces.slack.inboxUserId'] as const;
-const emailKeys = ['surfaces.email.imap.host', 'surfaces.email.host', 'surfaces.email.imapHost',
+// Every setting a selected account depends on, plus the cluster switch that
+// decides how its poller is elected: a write to any of them ends the account's
+// lifetime, and the reacquiring source builds a fresh one.
+const slackKeys = ['cluster.enabled', 'surfaces.slack.enabled', 'surfaces.slack.workspaceId', 'surfaces.slack.inboxUserId'] as const;
+const emailKeys = ['cluster.enabled', 'surfaces.email.imap.host', 'surfaces.email.host', 'surfaces.email.imapHost',
   'surfaces.email.user', 'surfaces.email.username', 'surfaces.email.imapUser', 'surfaces.email.imap.user', 'surfaces.email.imap.port',
   'surfaces.email.imapPort', 'surfaces.email.imap.secure', 'surfaces.email.imap.mailbox'] as const;
-const discordKeys = ['surfaces.discord.enabled', 'surfaces.discord.inboxBotUserId', 'surfaces.discord.inboxChannelIds'] as const;
+const discordKeys = ['cluster.enabled', 'surfaces.discord.enabled', 'surfaces.discord.applicationId', 'surfaces.discord.guildId',
+  'surfaces.discord.defaultChannelId', 'surfaces.discord.inboxBotUserId', 'surfaces.discord.inboxChannelIds'] as const;
 type Context = Parameters<DaemonInboxFactory>[0];
 type Controls = Parameters<DaemonInboxFactory>[2];
 
@@ -39,13 +43,14 @@ function selectedAccount<T>(context: Context, controls: Controls, provider: 'sla
   try {
     subscriptions.push(controls.onAccountInvalidation(() => lifetime.abort()));
     for (const key of keys) subscriptions.push(controls.onConfigurationChange(key, () => lifetime.abort()));
-    const values = keys.map(key => context.configManager.get(key));
+    // The one currentness check for every layer of this account: the
+    // subscriptions above abort the lifetime on a write to any key it depends on,
+    // so no layer re-reads them. A settings file whose provider section was
+    // quarantined at load is the one fact a key read cannot show.
     const assertCurrent = (): void => {
-      lifetime.signal.throwIfAborted();
       const quarantine = context.configManager.getIngestionQuarantine?.();
-      if (closed || !quarantine || quarantine.some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
-        || entry.key === `surfaces.${provider}` || entry.key.startsWith(`surfaces.${provider}.`))
-        || keys.some((key, index) => context.configManager.get(key) !== values[index])) {
+      if (closed || lifetime.signal.aborted || !quarantine || quarantine.some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
+        || entry.key === `surfaces.${provider}` || entry.key.startsWith(`surfaces.${provider}.`))) {
         throw new InboxAdmissionRefusal('settings-changing', 'Configured inbox account changed or is unavailable');
       }
     };
@@ -54,6 +59,20 @@ function selectedAccount<T>(context: Context, controls: Controls, provider: 'sla
     assertCurrent();
     return { account, operation: { signal: lifetime.signal, assertCurrent }, close };
   } catch (error) { close(); throw error; }
+}
+
+/** The innermost cause's error name and errno-style code: which failure it was, without its message. */
+function failureKind(error: unknown): { readonly name?: string; readonly code?: string } {
+  let current: unknown = error;
+  let name: string | undefined, code: string | undefined;
+  for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth++) {
+    if (current instanceof Error) name = current.name;
+    const own = Object.getOwnPropertyDescriptor(current, 'code');
+    if (own && 'value' in own && typeof own.value === 'string' && /^E[A-Z0-9_]{2,30}$/.test(own.value)) code = own.value;
+    const cause = Object.getOwnPropertyDescriptor(current, 'cause');
+    current = cause && 'value' in cause ? cause.value : undefined;
+  }
+  return { ...(name === undefined ? {} : { name }), ...(code === undefined ? {} : { code }) };
 }
 
 function boundedName(value: unknown): value is string {
@@ -84,17 +103,13 @@ export function selectConfiguredEmailInboxAccount(context: Context, controls: Co
 }
 
 export function selectConfiguredDiscordInboxAccount(context: Context, controls: Controls) {
-  return selectedAccount(context, controls, 'discord', discordKeys, () => {
-    const userId = context.configManager.get('surfaces.discord.inboxBotUserId');
-    const registry = context.configManager.get('surfaces.discord.inboxChannelIds');
-    const snowflake = (value: unknown): value is string => typeof value === 'string'
-      && /^[1-9]\d{0,19}$/.test(value) && BigInt(value) < (1n << 64n);
-    if (context.configManager.get('surfaces.discord.enabled') !== true || !snowflake(userId)
-      || typeof registry !== 'string' || registry.length > 4_300) throw new InboxAdmissionRefusal('account-incomplete', 'Discord inbox requires its expected bot and one-to-one DM registry');
-    const channelIds = registry.split(',').map(value => value.trim());
-    if (channelIds.length < 1 || channelIds.length > 200 || channelIds.some(id => !snowflake(id))
-      || new Set(channelIds).size !== channelIds.length) throw new InboxAdmissionRefusal('account-incomplete', 'Discord inbox requires 1–200 unique canonical one-to-one DM channel IDs');
-    return Object.freeze({ userId, channelIds: Object.freeze(channelIds) });
+  return selectedAccount(context, controls, 'discord', discordKeys, (): ConfiguredDiscordInboxAccount => {
+    if (context.configManager.get('surfaces.discord.enabled') !== true) {
+      throw new InboxAdmissionRefusal('account-incomplete', 'Discord inbox requires its expected bot and one-to-one DM registry');
+    }
+    const parsed = parseConfiguredDiscordInboxAccount(context.configManager);
+    if ('incomplete' in parsed) throw new InboxAdmissionRefusal('account-incomplete', parsed.incomplete);
+    return parsed.account;
   });
 }
 
@@ -127,12 +142,14 @@ export function createConfiguredHostedInboxSourceFactory(provider: 'slack' | 'em
       const screening: ProtectedSourceOwnerOptions = acquisition.options;
       // Triage asks on the same model route screening was admitted on, and stops with it.
       const triageAuthority = triageAuthorityFromScreening(provider, undefined, screening);
+      const operation = selection.operation;
       if (provider === 'slack' && 'workspaceId' in selection.account) {
-        source = await createSlackDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority }, factories.slack)(context, routing, controls);
+        source = await createSlackDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority, operation }, factories.slack)(context, routing, controls);
       } else if (provider === 'email' && 'host' in selection.account) {
-        source = await createEmailDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority }, factories.email)(context, routing, controls);
+        source = await createEmailDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority, operation }, factories.email)(context, routing, controls);
       } else if (provider === 'discord' && 'channelIds' in selection.account) {
-        source = await createConfiguredDiscordDaemonInboxSourceFactory(screening, factories.discord)(context, routing, controls);
+        source = await createConfiguredDiscordDaemonInboxSourceFactory(screening, factories.discord,
+          { account: selection.account, operation, triageAuthority })(context, routing, controls);
       } else throw new Error('Configured inbox account family changed');
       selection.operation.assertCurrent();
       return { ...source, close, unregister() { void close().catch(() => {}); } };
@@ -279,9 +296,14 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
           // Mutation onset can legitimately refuse new admission, and the
           // notification that would replace this source may already have
           // fired, so retry a bounded number of times as well. A retired owner
-          // is never reused. Only the fixed reason is reported: the error
-          // itself can sit next to account or credential material.
-          try { context.logger.warn('Native inbox source admission is unavailable', { provider, reason, action: INBOX_ADMISSION_ACTIONS[reason] }); } catch { /* Reporting cannot grant admission. */ }
+          // is never reused. The fixed reason is reported with the innermost
+          // cause's error name and errno-style code; the message can sit next
+          // to account or credential material and stays out.
+          try {
+            context.logger.warn('Native inbox source admission is unavailable', {
+              provider, reason, action: INBOX_ADMISSION_ACTIONS[reason], ...failureKind(error),
+            });
+          } catch { /* Reporting cannot grant admission. */ }
           retryAdmission();
         }
       }

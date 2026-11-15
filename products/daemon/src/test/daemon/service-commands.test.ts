@@ -705,6 +705,8 @@ describe('runDaemonServiceCli: migrate-service', () => {
         if (unit === 'goodvibes-daemon.service') return { status: 0, stdout: 'active' };
         return newUnitStarted && isActiveState === 'active' ? { status: 0, stdout: 'active' } : { status: 3, stdout: 'inactive' };
       }
+      // The new unit's main process is this test process: alive, as a serving daemon's would be.
+      if (args[1] === 'show') return { status: 0, stdout: `${process.pid}\n` };
       if (args[1] === 'enable' && enableFails) {
         return { status: 1, stderr: 'Failed to enable unit: access denied' };
       }
@@ -773,7 +775,8 @@ describe('runDaemonServiceCli: migrate-service', () => {
       expect(text).toContain('named goodvibes-daemon.service');
       expect(text).toContain('dry run');
       expect(text).toContain('install and start the new goodvibes.service unit');
-      expect(text).toContain('stop, disable, and remove the install-script');
+      expect(text).toContain('stop the install-script goodvibes-daemon.service unit to release');
+      expect(text).toContain('then disable and remove the install-script unit');
       expect(text).toContain('Nothing has been changed');
       expect(existsSync(join(dir, '.config', 'systemd', 'user', 'goodvibes.service'))).toBe(false);
       // The only tracked-unit traffic allowed here is a read-only status
@@ -874,6 +877,7 @@ describe('runDaemonServiceCli: migrate-service', () => {
           actionRunner: runner,
           confirmMigration: true,
           legacyUnitFileRemove: (p) => removedPaths.push(p),
+          portProbe: () => true,
         }),
       );
 
@@ -896,7 +900,7 @@ describe('runDaemonServiceCli: migrate-service', () => {
 
       const text = result.lines.join('\n');
       expect(text).toContain('migrated');
-      expect(text).toContain('installed, enabled, and running');
+      expect(text).toContain('installed, enabled, and serving on');
       expect(text).toContain('stopped, disabled, and removed');
     });
 

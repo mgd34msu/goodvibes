@@ -94,22 +94,12 @@ export function createClusterGroupComposition(options: {
    */
   readonly rejoinRetryDelaysMs?: readonly number[] | undefined;
   /**
-   * The leader election's own answer to "am I the master".
-   *
-   * Config replication needs exactly one machine issuing revisions, and it must
-   * be the SAME machine leadership already picked, two notions of master in
-   * one process would disagree the moment one of them changed.
-   *
-   * Late-bound because the coordinator is built from this composition's
-   * transport: it does not exist yet when this function runs.
-   */
-  readonly isMaster?: (() => boolean) | undefined;
-  /**
    * Which surfaces this machine currently holds, and why.
    *
    * The per-surface election establishes this; the group layer only reports it,
-   * in `cluster status` and in /status. Late-bound for the same reason
-   * `isMaster` is. Absent means the group layer reports that the information is
+   * in `cluster status` and in /status. Late-bound because the coordinator is
+   * built from this composition's transport and does not exist yet when this
+   * function runs. Absent means the group layer reports that the information is
    * unavailable rather than reporting an empty list as though this machine held
    * nothing, a distinction an operator diagnosing a silent inbox depends on.
    */
@@ -149,7 +139,6 @@ export function createClusterGroupComposition(options: {
     version: VERSION,
     clock,
     logger,
-    ...(options.isMaster ? { isMaster: options.isMaster } : {}),
     ...(options.surfaceHoldings ? { surfaceHoldings: options.surfaceHoldings } : {}),
     // Only daemon-owned, group-scoped keys ever reach this; the platform's
     // replication policy decides which, and refuses anything machine-specific.
@@ -263,10 +252,10 @@ export function createClusterGroupComposition(options: {
  *
  * They are mutually dependent and the dependency runs both ways, which is why
  * this exists rather than two calls at the composition root: the election
- * coordinates over the GROUP's transport, and the group's config replication
- * needs the ELECTION's answer to "am I the master". The master signal is read
- * through a closure because the coordinator does not exist yet when the group
- * layer is constructed.
+ * coordinates over the GROUP's transport, and the group's status reports the
+ * ELECTION's surface holdings. Holdings are read through a closure because the
+ * coordinator does not exist yet when the group layer is constructed. Config
+ * replication needs no master: every member issues its own changes.
  *
  * Constructing either is inert, no socket, no key material read, until
  * `startCluster` runs.
@@ -282,7 +271,6 @@ export function createClusterServices(options: {
   let coordinator: ClusterCoordinator | null = null;
   const clusterGroup = createClusterGroupComposition({
     ...options,
-    isMaster: () => coordinator?.isMaster ?? false,
     // The elections actually running are the only honest source for this, so
     // the group layer reads them rather than keeping a second tally that could
     // disagree. Before the coordinator exists there is nothing to report, and

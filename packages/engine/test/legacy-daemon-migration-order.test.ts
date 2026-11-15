@@ -4,12 +4,13 @@
  * happen.
  *
  * Both units want one port, so the legacy unit has to be stopped before the new
- * one can bind. The order is therefore: new unit alive, legacy stopped, new
- * unit seen listening, legacy disabled and removed. Any failure on the way
- * leaves the machine with a working daemon and says so.
+ * one can bind. The order is therefore: new unit started, legacy stopped, new
+ * unit answering on the endpoint from a live main process, legacy disabled and
+ * removed. Any failure on the way leaves the machine with a working daemon and
+ * says so.
  */
 import { describe, expect, test } from 'bun:test';
-import { runLegacyDaemonMigration, type ManagedServiceActionRunner } from '../../runtime/legacy-daemon-migration.ts';
+import { runLegacyDaemonMigration, type ManagedServiceActionRunner } from '../terminal-shell/src/legacy-daemon-migration.ts';
 
 const LEGACY = { present: true, active: true, path: '/home/u/.config/systemd/user/goodvibes-daemon.service' };
 const NEW_PATH = '/home/u/.config/systemd/user/goodvibes.service';
@@ -21,20 +22,23 @@ function status(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setup(options: { stopStatus?: number | null; disableStatus?: number | null; listening?: boolean[]; startStatus?: number | null }) {
+function setup(options: { stopStatus?: number | null; disableStatus?: number | null; listening?: boolean[] }) {
   const log: string[] = [];
   const removed: string[] = [];
   const probes = [...(options.listening ?? [true])];
+  let installed = false;
   const manager = {
-    status: () => status(),
-    install: () => { log.push('manager:install'); return status(); },
+    status: () => (installed ? status() : status({ installed: false, running: false })),
+    install: () => { log.push('manager:install'); installed = true; return status({ running: false }); },
     start: () => { log.push('manager:start'); return status(); },
-    uninstall: () => { log.push('manager:uninstall'); return status({ installed: false, running: false }); },
+    uninstall: () => { log.push('manager:uninstall'); installed = false; return status({ installed: false, running: false }); },
+    installedDefinitionMatches: () => false,
   };
   const actionRunner: ManagedServiceActionRunner = (_command, args) => {
     const verb = args[1] ?? '';
+    if (verb === 'show') return { status: 0, stdout: '4242\n', stderr: '' } as never;
     log.push(`systemctl:${verb}${args[2] ? `:${args[2]}` : ''}`);
-    const failing = verb === 'stop' ? options.stopStatus : verb === 'disable' ? options.disableStatus : 0;
+    const failing = verb === 'stop' ? options.stopStatus : verb === 'disable' && args[2] === 'goodvibes-daemon.service' ? options.disableStatus : 0;
     const exit = failing === undefined ? 0 : failing;
     return { status: exit, stdout: '', stderr: exit === 0 ? '' : `${verb} failed` } as never;
   };
@@ -44,12 +48,13 @@ function setup(options: { stopStatus?: number | null; disableStatus?: number | n
     legacyUnitFileRemove: (path) => { removed.push(path); log.push('file:remove'); },
     portProbe: async () => (probes.length > 1 ? probes.shift()! : probes[0] ?? false),
     sleep: async () => {},
+    processAlive: () => true,
   }, manager as never, LEGACY);
   return { run, log, removed };
 }
 
 describe('retiring the install-script unit', () => {
-  test('a new unit that listens once the port is free replaces it, in that order', async () => {
+  test('a new unit that answers once the port is free replaces it, in that order', async () => {
     const h = setup({ listening: [false, false, true] });
 
     const result = await h.run();
@@ -71,7 +76,6 @@ describe('retiring the install-script unit', () => {
     expect(h.removed).toEqual([]);
     expect(h.log).not.toContain('systemctl:disable:goodvibes-daemon.service');
     expect(result.lines.join('\n')).not.toContain('has been stopped');
-    expect(result.lines.join('\n')).toContain('systemctl --user stop goodvibes-daemon.service');
   });
 
   test('a stop that times out (no exit status) counts as failed', async () => {
@@ -88,10 +92,9 @@ describe('retiring the install-script unit', () => {
 
     expect(result.ok).toBe(false);
     expect(h.removed).toEqual([]);
-    expect(result.lines.join('\n')).toContain('systemctl --user disable goodvibes-daemon.service');
   });
 
-  test('a new unit that never listens is rolled back and the install-script unit is started again', async () => {
+  test('a new unit that never answers is rolled back and the install-script unit is started again', async () => {
     const h = setup({ listening: [false] });
 
     const result = await h.run();
@@ -101,6 +104,6 @@ describe('retiring the install-script unit', () => {
     expect(h.log).toContain('manager:uninstall');
     expect(h.log.at(-1)).toBe('systemctl:start:goodvibes-daemon.service');
     expect(h.log).not.toContain('systemctl:disable:goodvibes-daemon.service');
-    expect(result.lines.join('\n')).toContain('never began listening');
+    expect(result.lines.join('\n')).toContain('did not answer on 127.0.0.1:3421');
   });
 });

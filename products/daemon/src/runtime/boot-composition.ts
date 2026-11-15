@@ -163,6 +163,13 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
       }, registry)),
     initializePlugins: () => runtime.pluginManager.init(createDaemonPluginLoaderDeps(runtime)),
     closePlugins: () => runtime.pluginManager.close(),
-    reportFailure(step) { logger.warn('Daemon boot step failed', { step }); },
+    // The name and errno-style code say why; the message can carry settings values and stays out.
+    reportFailure(step, error) {
+      const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+      logger.warn('Daemon boot step failed', {
+        step, name: error instanceof Error ? error.name : typeof error,
+        ...(code === undefined ? {} : { code }),
+      });
+    },
   };
 }

@@ -19,7 +19,12 @@ export interface DaemonProviderDiscoveryDependencies {
   readonly persist?: (roots: Parameters<typeof persistProviders>[0], servers: DiscoveredServer[]) => void | Promise<void>;
 }
 
-/** One owned startup scan of this computer's servers, without TUI model selection or cache-removal policy. */
+/**
+ * Scans of this computer's servers, without TUI model selection or
+ * cache-removal policy. `start()` runs a scan unless one is already running,
+ * so the host scans at start and again on wake from sleep: a local model
+ * server started after the daemon is found without a restart.
+ */
 export function createDaemonProviderDiscovery(
   roots: Parameters<typeof persistProviders>[0],
   register: (servers: DiscoveredServer[]) => void,
@@ -30,7 +35,7 @@ export function createDaemonProviderDiscovery(
   let work: Promise<void> | undefined;
   function start(): void {
     if (closed || work) return;
-    work = Promise.resolve().then(async () => {
+    const scan: Promise<void> = Promise.resolve().then(async () => {
       if (closed) return;
       const { servers } = await (dependencies.scan ?? scanLocalhost)(lifetime.signal);
       if (closed) return;
@@ -39,11 +44,17 @@ export function createDaemonProviderDiscovery(
       // A synchronous callback can reenter host.close(). Fence persistence too.
       if (closed) return;
       await (dependencies.persist ?? persistProviders)(roots, servers);
-    }).catch(() => {
+    }).catch((error: unknown) => {
       if (closed) return;
-      // Never inspect or retain scanner/provider/filesystem rejection values.
-      try { logger.warn('Daemon background provider discovery failed'); } catch { /* Logging is best effort. */ }
-    });
+      // The name and errno-style code say why; the message can carry a server's reply and stays out.
+      try {
+        const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+        logger.warn('Daemon background provider discovery failed', {
+          name: error instanceof Error ? error.name : typeof error, ...(code === undefined ? {} : { code }),
+        });
+      } catch { /* Logging is best effort. */ }
+    }).finally(() => { if (work === scan) work = undefined; });
+    work = scan;
   }
   function close(): Promise<void> {
     closed = true;

@@ -11,6 +11,7 @@ import { observeNativeStartupPhase } from './startup-observation.js';
 import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { drainOwned } from '@goodvibes-jev/judgment';
 import { defineLifecycle, logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
 export interface DaemonHostBinding {
   readonly host?: string;
@@ -104,6 +105,33 @@ export interface DaemonHost {
 
 const INTERRUPTED = Symbol('daemon host interrupted');
 
+/** The innermost errno-style code of a failure's cause chain, read from own data properties only. */
+function causeCode(error: unknown): string | undefined {
+  let code: string | undefined;
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth++) {
+    const own = Object.getOwnPropertyDescriptor(current, 'code');
+    if (own && 'value' in own && typeof own.value === 'string') code = own.value;
+    const cause = Object.getOwnPropertyDescriptor(current, 'cause');
+    current = cause && 'value' in cause ? cause.value : undefined;
+  }
+  return code;
+}
+
+/** A failed start as a refusal: the phase, what to do next, and the original error as its cause. */
+function startupRefusal(phase: DaemonHostPhase, error: unknown): RefusalError {
+  const code = causeCode(error);
+  const next = code === 'EADDRINUSE'
+    ? 'Another process is listening on the configured port: stop it, or change controlPlane.port in the daemon settings, then start the daemon again'
+    : code === 'EACCES' || code === 'EPERM'
+      ? 'The daemon was refused access to a file or port it needs: check the permissions of the daemon home and the configured port, then start it again'
+      : 'Read the daemon activity log for this start, then start the daemon again (goodvibes-daemon serve, or goodvibes-daemon start-service)';
+  return new RefusalError(refusal({
+    code: 'DAEMON_START_FAILED', state: 'the daemon did not start',
+    reason: `Daemon host ${phase} failed`, next: [next],
+  }), { cause: error });
+}
+
 /**
  * Construction is inert so a process runner can install signals first. The
  * same graph supplies boot, hosted sessions, cluster identity and payments.
@@ -132,7 +160,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
   let closing: Promise<void> | undefined;
   let discovery: ReturnType<typeof createDaemonProviderDiscovery> | undefined;
   let bootClosing: Promise<void> | undefined;
-  let startupFailure: Error | undefined;
+  let startupFailure: RefusalError | undefined;
   let startupHandover: Exclude<Awaited<ReturnType<DaemonHostServer['start']>>, void> | undefined;
   const cleanupFailures: Error[] = [];
   let phase: DaemonHostPhase = 'runtime acquisition';
@@ -157,13 +185,12 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         || updateArtifact.execPath !== nativeExecPath || updateArtifact.version !== nativeVersion) throw new Error('Native data publisher changed');
       const result: unknown = nativeGuard.call(updateArtifact);
       if (result !== undefined) { drainOwned(result); throw new Error('Native data publication requires a synchronous installation guard'); }
-      fence();
     },
   })) : options.runtime.nativeDataWriter ?? options.runtime.configManager.getNativeDataWriter();
-  // Never inspect, stringify or retain rejection values from external owners.
+  // The failing owner's error rides as `cause`; the one fatal report masks and prints it.
   async function bounded(label: string, action: () => void | Promise<void>): Promise<void> {
-    try { await action(); } catch {
-      const failure = new Error(`Daemon host ${label} failed`);
+    try { await action(); } catch (error) {
+      const failure = new Error(`Daemon host ${label} failed`, { cause: error });
       cleanupFailures.push(failure);
       throw failure;
     }
@@ -215,7 +242,6 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       fence();
       const discovered = onlyLoopbackServers(loadPersistedProviders({ homeDirectory: runtime.homeDirectory, surfaceRoot: runtime.surfaceRoot }));
       if (discovered.length > 0) runtime.providerRegistry.registerDiscoveredProviders(discovered);
-      fence();
 
       discovery = createDaemonProviderDiscovery(
         { homeDirectory: runtime.homeDirectory, surfaceRoot: runtime.surfaceRoot },
@@ -223,6 +249,10 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         factories.providerDiscovery,
       );
       discovery.start();
+      // A local model server started after the daemon, or still loading at
+      // start, is found by the scan that runs on wake from sleep.
+      const scanOnWake = runtime.powerManager.onSleepEdge({ onWake: () => { discovery?.start(); } });
+      scope.registry.add('provider discovery on wake', scanOnWake);
 
       phase = 'server construction';
       observeNativeStartupPhase('listener-construction');
@@ -265,10 +295,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         ...(options.onIncompleteHandover ? { onIncompleteHandover: options.onIncompleteHandover } : {}),
       });
       ownListener('daemon server', daemon);
-      fence();
-      assertInstallationCurrent();
       daemon.enable({ daemon: true }, binding?.token);
-      fence();
 
       if (options.httpListener) {
         phase = 'HTTP listener construction';
@@ -281,9 +308,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
           serveFactory: createSafeHostServeFactory('Configured HTTP listener', http.serveFactory),
         });
         ownListener('HTTP listener', listener);
-        fence();
         listener.enable({ httpListener: true }, http.token ?? binding?.token);
-        fence();
       }
 
       phase = 'cluster startup';
@@ -314,8 +339,8 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         startupHandover = undefined;
       }
       fence();
-      // Listener startup awaits accepted backend owners. Retirement during
-      // that work cannot admit a new listener or boot effects afterward.
+      // An installation retired during listener startup admits no second
+      // listener and no boot effects afterward.
       assertInstallationCurrent();
       if (!daemon.isRunning) throw new Error('Daemon server did not start');
       if (listener) {
@@ -349,12 +374,15 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         }
         startupHandover = undefined;
       }
+      // Native activation runs handover callbacks that can close this host.
       fence();
       moveTo(boot.state === 'ready' ? 'ready' : 'degraded');
       observeNativeStartupPhase('foreground-ready');
     } catch (error) {
       if (error === INTERRUPTED) return;
-      startupFailure = new Error(`Daemon host ${phase} failed`);
+      // The phase is the refusal; the original error rides as its cause, so
+      // the process's fatal report can name its errno code (a busy port).
+      startupFailure = startupRefusal(phase, error);
       // A failed start is reported as failed at once, not as `starting` until close() runs.
       if (state === 'starting') moveTo('failed');
       throw startupFailure;

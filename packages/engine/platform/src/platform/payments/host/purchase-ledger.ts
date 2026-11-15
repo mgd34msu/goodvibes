@@ -11,6 +11,7 @@ import type { PurchaseRecord } from '../purchase-record.js';
 import { samePaymentEvidence } from '../evidence-equality.js';
 import { drainOwned } from '@goodvibes-jev/judgment';
 import type { PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
+import { ORDER_MAIL_KINDS, type OrderMailKind } from '../message.js';
 
 export interface OwnerPurchaseReconciliation {
   readonly purchaseId: string;
@@ -36,6 +37,23 @@ function readReconciliations(value: unknown): readonly OwnerPurchaseReconciliati
     seen.add(row['operationId'] as string);
     return Object.freeze({ ...row }) as unknown as OwnerPurchaseReconciliation;
   }));
+}
+
+/**
+ * Which kinds of merchant mail were already reported to the owner, per
+ * purchase, kept beside the rows in the same file and the same write.
+ */
+function readMailReports(value: unknown): ReadonlyMap<string, readonly OrderMailKind[]> {
+  if (value === undefined) return new Map();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PaymentPurchaseLedgerError('unavailable');
+  const reports = new Map<string, readonly OrderMailKind[]>();
+  for (const [purchaseId, kinds] of Object.entries(value)) {
+    if (!Array.isArray(kinds) || kinds.some(kind => !(ORDER_MAIL_KINDS as readonly unknown[]).includes(kind))) {
+      throw new PaymentPurchaseLedgerError('unavailable');
+    }
+    reports.set(purchaseId, Object.freeze([...kinds] as OrderMailKind[]));
+  }
+  return reports;
 }
 
 export interface StoredPurchase extends PurchaseRecord { readonly merchantDiscovered: boolean }
@@ -100,6 +118,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       const envelope = raw as Readonly<Record<string, unknown>>;
       if (envelope['version'] !== PURCHASES_FILE_VERSION || !Array.isArray(envelope['purchases'])) throw new Error();
       if (readReconciliations(envelope['purchaseReconciliations']).length > 0) this.declareReconciliation();
+      readMailReports(envelope['mailReported']);
       const rows: StoredPurchase[] = [], byId = new Map<string, StoredPurchase>();
       for (const value of envelope['purchases'] as readonly unknown[]) {
         const row = capturePurchaseRecord(value);
@@ -216,6 +235,45 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       if (!observation.bytes.equals(Buffer.from(contents, 'utf8'))) throw new Error();
       const byId = new Map(previous.byId); byId.set(purchaseId, updated as StoredPurchase);
       this.cached = { observation, envelope, rows, byId };
+      return true;
+    } catch (error) {
+      if (error instanceof PaymentPurchaseLedgerError) throw error;
+      this.unavailable = true;
+      throw new PaymentPurchaseLedgerError('write-uncertain');
+    } finally {
+      try { release?.(); }
+      catch { this.unavailable = true; throw new PaymentPurchaseLedgerError('write-uncertain'); }
+    }
+  }
+
+  /** The kinds of merchant mail already reported to the owner, per purchase: one ledger read. */
+  reportedMailKinds(): ReadonlyMap<string, readonly OrderMailKind[]> {
+    return readMailReports(this.read().envelope['mailReported']);
+  }
+
+  /**
+   * Record that the owner was told about this kind of mail for this purchase.
+   * False when there is no such purchase or that kind was already reported, so
+   * the caller sends nothing a second time.
+   */
+  async recordMailReported(purchaseId: string, kind: OrderMailKind): Promise<boolean> {
+    if (!(ORDER_MAIL_KINDS as readonly string[]).includes(kind)) throw new PaymentPurchaseLedgerError('invalid-record');
+    let release: (() => void) | undefined;
+    try {
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      const previous = this.read();
+      if (!previous.byId.has(purchaseId)) return false;
+      const reports = readMailReports(previous.envelope['mailReported']);
+      const kinds = reports.get(purchaseId) ?? [];
+      if (kinds.includes(kind)) return false;
+      const mailReported = Object.fromEntries([...reports, [purchaseId, [...kinds, kind]]]);
+      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: previous.rows, mailReported };
+      const contents = `${JSON.stringify(envelope, null, 2)}\n`;
+      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
+        assertCurrent: () => this.assertFileCurrent(previous.observation) });
+      const observation = readFileObservation(this.filePath);
+      if (!observation.bytes.equals(Buffer.from(contents, 'utf8'))) throw new Error();
+      this.cached = { ...previous, observation, envelope };
       return true;
     } catch (error) {
       if (error instanceof PaymentPurchaseLedgerError) throw error;

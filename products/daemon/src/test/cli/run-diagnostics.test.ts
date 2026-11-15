@@ -3,6 +3,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { runDaemonCli, type DaemonCliOptions } from '../../cli/run.js';
 import { DAEMON_COMMANDS } from '../../cli/command-catalog.js';
+import { installationRefused, type InstallationRefusalCode } from '../../config/installation-refusal.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const roots: string[] = [];
@@ -21,7 +22,7 @@ describe('a refused service activation says why and what to do', () => {
   test('an installation ownership guard prints a fixed reason and next step', async () => {
     const result = await run(['install-service'], {
       runtime: composedRuntime,
-      resolveServiceExecutable: () => { throw new Error('Running daemon does not own the installed native version'); },
+      resolveServiceExecutable: () => { throw installationRefused('INSTALLATION_NOT_OWNED', 'Running daemon does not own the installed native version'); },
     });
     expect(result.code).toBe(1);
     expect(result.stderr[0]).toBe('Daemon command failed');
@@ -29,28 +30,27 @@ describe('a refused service activation says why and what to do', () => {
     expect(result.stderr[1]).toContain('installer');
   });
 
-  test.each([
-    ['Original compiled Darwin daemon selection is unavailable', 'INSTALLATION_NOT_OWNED'],
-    ['Running Darwin daemon does not own a complete verified installation', 'INSTALLATION_NOT_OWNED'],
-    ['Darwin daemon reader profile differs from its actual compiled readers', 'INSTALLATION_UNAVAILABLE'],
-    ['Darwin daemon installation has an unfinished transaction', 'INSTALLATION_UNSETTLED'],
-  ])('the macOS guard "%s" prints %s', async (message, code) => {
+  test.each(['INSTALLATION_NOT_OWNED', 'INSTALLATION_UNAVAILABLE', 'INSTALLATION_UNSETTLED'] as const)('the guard code %s is printed with its next step', async (code: InstallationRefusalCode) => {
     const result = await run(['install-service'], {
       runtime: composedRuntime,
-      resolveServiceExecutable: () => { throw new Error(message); },
+      resolveServiceExecutable: () => { throw installationRefused(code, 'Installation guard'); },
     });
     expect(result.code).toBe(1);
     expect(result.stderr[0]).toBe('Daemon command failed');
     expect(result.stderr[1]).toContain(code);
   });
 
-  test('any other exception text stays out of the output', async () => {
+  test('any other failure prints its reason with credentials masked', async () => {
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
     const result = await run(['install-service'], {
       runtime: composedRuntime,
-      resolveServiceExecutable: () => { throw new Error('PRIVATE_CONFIG_VALUE'); },
+      resolveServiceExecutable: () => { throw Object.assign(new Error(`Port 3421 is already in use (token ${token})`), { code: 'EADDRINUSE' }); },
     });
     expect(result.code).toBe(1);
-    expect(result.stderr).toEqual(['Daemon command failed']);
+    expect(result.stderr[0]).toBe('Daemon command failed');
+    expect(result.stderr[1]).toContain('3421');
+    expect(result.stderr[1]).toContain('EADDRINUSE');
+    expect(result.stderr.join('\n')).not.toContain(token);
   });
 });
 

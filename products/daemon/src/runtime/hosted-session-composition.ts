@@ -182,12 +182,13 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
           execPosture: hostedExecPosture,
           dispose: (): void => floor.dispose(),
         };
-      } catch {
-        // Until publication, this factory owns its returned client graph.
-        // Never inspect or expose external readiness/registration failures.
+      } catch (error) {
+        // Until publication, this factory owns its returned client graph. The
+        // cause rides on the failure; the session engine logs it and refuses
+        // the create with the workspace named.
         try { floor.dispose(); }
-        catch { throw new Error('Daemon hosted workspace provider preload cleanup failed'); }
-        throw new Error('Daemon hosted workspace provider preload failed');
+        catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Daemon hosted workspace provider preload and cleanup failed'); }
+        throw new Error('Daemon hosted workspace provider preload failed', { cause: error });
       }
     },
     systemPrompt: hostedSystemPrompt,

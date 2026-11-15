@@ -456,7 +456,24 @@ export class HostedSessionManager {
     this.assertSessionCapacity();
 
     const sessionId = newHostedSessionId();
-    const lease = await this.floors.acquire(workspaceRoot);
+    let lease: HostedWorkspaceFloorLease;
+    try {
+      lease = await this.floors.acquire(workspaceRoot);
+    } catch (error) {
+      // Shutdown keeps its own refusal; a floor that could not be built is a
+      // refusal that names the workspace and what to check.
+      this.assertUsable();
+      // A wrapper the floor factory wrote names the step; the cause gives only
+      // its name and errno-style code, since its message can carry settings values.
+      const wrapped = error instanceof Error && error.cause !== undefined;
+      const cause = wrapped ? (error as Error).cause : error;
+      const code = cause !== null && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string' ? cause.code : undefined;
+      logger.warn('[hosted-sessions] the workspace floor for a new session could not be built', {
+        workspaceRoot, ...(wrapped ? { step: (error as Error).message } : {}),
+        name: cause instanceof Error ? cause.name : typeof cause, ...(code === undefined ? {} : { code }),
+      });
+      throw new HostedSessionUnavailableError(sessionId, `provider setup failed for ${workspaceRoot}; check the provider settings for that workspace, then create the session again`);
+    }
     let live: LiveSession;
     try {
       // A factory may await provider readiness while shutdown or another create

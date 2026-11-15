@@ -75,14 +75,14 @@ const REPORTED_MAIL_MEMORY = 512;
 
 /**
  * Reads each message on the owner's mailbox against the purchase ledger and, when
- * it confirms one purchase, sends the owner a report of that purchase through the
- * payment notifier. Messages are handled one at a time, each with one reading of
+ * it is about one purchase, sends the owner a report of that purchase through the
+ * payment notifier: once per kind of mail (confirmed, shipped, delivered). Messages are handled one at a time, each with one reading of
  * which recent purchase it is about. Nothing here can fail the mailbox poll: a
  * refusal (Classic operation has no decision models) or a send failure is logged,
  * and the message is forgotten so the mailbox offering it again tries again.
  */
 export function createOrderMailObserver(deps: {
-  readonly purchases: Pick<DaemonPurchaseLedger, 'list'> & Partial<Pick<DaemonPurchaseLedger, 'recordRefund'>>;
+  readonly purchases: Pick<DaemonPurchaseLedger, 'list'> & Partial<Pick<DaemonPurchaseLedger, 'recordRefund' | 'reportedMailKinds' | 'recordMailReported'>>;
   readonly notifier: Pick<PaymentNotifier, 'deliver'>;
 }): OwnerMailHandler {
   const seen = new Set<string>();
@@ -105,6 +105,11 @@ export function createOrderMailObserver(deps: {
           if (!deliveries.some(delivery => delivery.delivered)) logger.warn('A purchase confirmation report reached no channel', { channels: deliveries.length });
         },
         ...(deps.purchases.recordRefund ? { recordRefund: deps.purchases.recordRefund.bind(deps.purchases) } : {}),
+        // Each purchase is reported once per kind (confirmed, shipped, delivered), across restarts.
+        ...(deps.purchases.reportedMailKinds && deps.purchases.recordMailReported ? { reports: {
+          kinds: deps.purchases.reportedMailKinds.bind(deps.purchases),
+          record: deps.purchases.recordMailReported.bind(deps.purchases),
+        } } : {}),
       });
       if (outcome.kind === 'not-reported' && outcome.reason === 'ambiguous') {
         logger.info('A store mail reads as about more than one purchase; no confirmation report was sent');

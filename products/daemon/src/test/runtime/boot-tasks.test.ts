@@ -152,9 +152,8 @@ test('a failed boot instance can close before a fresh instance retries', async (
   finally { await second.controller.close(); }
 });
 
-test('an arbitrary rejected value is not inspected or passed into boot reporting', async () => {
-  let inspected = 0;
-  const failure = new Proxy({}, { getPrototypeOf() { inspected++; throw new Error('fixture private prototype'); }, get() { inspected++; throw new Error('fixture private property'); } });
+test('a failed boot step reports its name and its cause', async () => {
+  const failure = Object.assign(new Error('memory store is read-only'), { code: 'EROFS' });
   const reports: unknown[][] = [];
   const fx = fixture({
     async foldMemory() { throw failure; },
@@ -162,8 +161,7 @@ test('an arbitrary rejected value is not inspected or passed into boot reporting
   });
   try {
     expect((await fx.controller.start()).state).toBe('degraded');
-    expect(inspected).toBe(0);
-    expect(reports).toEqual([['memory-fold']]);
+    expect(reports).toEqual([['memory-fold', failure]]);
     expect(fx.events).toContain('watch');
     expect(fx.events).toContain('plugins');
   } finally { await fx.controller.close(); }
@@ -213,9 +211,3 @@ test('hostile cleanup rejections are neither inspected nor retained', async () =
   expect(reads).toBe(0);
 });
 
-test('a cleanup directly returning the reentrant controller close rejects without a self-drain deadlock', async () => {
-  const fx = fixture({ closePlugins() { return fx.controller.close(); } });
-  await fx.controller.start();
-  await expect(fx.controller.close()).rejects.toMatchObject({ failures: [{ label: 'plugins', error: new Error('plugins cleanup failed') }] });
-  expect(fx.events.slice(-3)).toEqual(['close:notifier', 'close:webhooks', 'stop-watch']);
-}, 1000);

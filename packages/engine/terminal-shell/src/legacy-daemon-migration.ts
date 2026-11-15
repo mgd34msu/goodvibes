@@ -1,61 +1,49 @@
 /**
- * The `goodvibes-daemon.service` detect/migrate engine, shared
- * by the daemon CLI (`src/daemon/service-commands.ts`, the `migrate-service`
- * subcommand) and the interactive TUI's onboarding guided UX
- * (`src/input/handler-onboarding-daemon-adopt.ts`).
+ * The `goodvibes-daemon.service` detect/migrate engine, the one copy both
+ * products use: the daemon CLI's `migrate-service`, the daemon's boot-time
+ * reconcile (`legacy-daemon-reconcile.ts`) and the terminal app's onboarding
+ * "migrate the install-script daemon" step. A rule changed here applies to a
+ * host whichever entry point the person used.
  *
  * NAMING, load-bearing: this module's identifiers say "legacy" because the
  * engine migrates AWAY from the `goodvibes-daemon.service` unit name toward
- * the runtime-managed unit, but that same name is what the suite installer
- * (goodvibes-daemon scripts/install.sh)
- * actively creates for curl-installed hosts TODAY. It is a parallel,
- * first-class install path, not an obsolete one. User-facing copy therefore
- * describes it as "the install-script unit" and never labels it legacy or
- * implies it should be removed unless the user is explicitly migrating.
+ * the runtime-managed unit, that name was used by an older install script/
+ * release (scripts/install.sh now creates `goodvibes.service` and treats
+ * `goodvibes-daemon.service` as the retired name it migrates existing hosts
+ * away from; see migrate_legacy_installer_unit there). An already-installed
+ * `goodvibes-daemon.service` unit is still real and may still be running,
+ * though, so user-facing copy describes it as "the install-script unit" and
+ * never labels it legacy or implies it should be removed unless the user is
+ * explicitly migrating.
  *
- * This lives under `src/runtime/`, not `src/daemon/`, specifically so the
- * `input` layer can consume it directly: the architecture gate's
- * `input-no-entrypoints` rule forbids `src/input/**` from importing
- * `src/daemon/**` (input must stay a pure event-handling layer, never
- * depending on CLI/daemon entrypoint concerns), and `src/runtime/**` is the
- * shared, entrypoint-agnostic layer both sides are already allowed to import.
- *
- * An earlier release shipped DETECT + DISCLOSE only: a read-only check for
- * the prior generation's systemd unit name plus a manual-removal hint, never
- * touching it. This module adds the guided, CONSENTED migration itself.
  * Design constraints, all load-bearing (see also the per-function docs):
  *   - NEVER auto-migrate. Without explicit consent nothing runs except a
  *     dry-run plan.
- *   - NEW-UP-THEN-OLD-DOWN. The new unit is installed, started, and verified
- *     healthy (a fresh, honest systemd `is-active` read through the injected
- *     actionRunner) BEFORE the legacy unit is touched. A new unit that fails or
- *     doesn't come up healthy rolls itself back (uninstalled) and never touches
- *     the legacy one. Both units want the same port, so the legacy unit is then
- *     only STOPPED and the new unit must be seen listening on the port; if it
- *     never does, the legacy unit is started again and the new one rolled back.
- *     Only a listening new unit lets the legacy unit be disabled and removed,
- *     and a failed stop or disable keeps the unit file and reports failure.
+ *   - NEW-UP-THEN-OLD-DOWN. The new unit is installed and started first. Both
+ *     units want the same port, so `is-active` on the new unit proves only that
+ *     its process was forked. The legacy unit is then only STOPPED, and the new
+ *     unit must answer on the configured endpoint from a live MainPID; if it
+ *     never does, the legacy unit is started again and the new one rolled
+ *     back. Only a serving new unit lets the legacy unit be disabled and
+ *     removed, and a failed stop or disable keeps the unit file and reports it.
  *   - ADOPT-OR-WARN, NEVER KILL. If the legacy unit file is simply absent but
- *     something is already listening on the configured host:port (this dev
- *     host's real case: a manually `nohup`'d daemon with no unit at all),
- *     that is an unidentified process, not a managed unit, nothing to stop
- *     or disable, and this module never attempts to kill it.
- *   - Every action (legacy stop/disable, unit-file removal, daemon-reload)
- *     goes through the injectable `actionRunner`/`legacyUnitFileRemove` seams
- *     tests use, no code path here bypasses them, so the migration is
- *     exercised deterministically via fakes and never touches a real running
- *     service in tests.
+ *     something is already listening on the configured host:port (a manually
+ *     `nohup`'d daemon with no unit at all), that is an unidentified process,
+ *     not a managed unit, nothing to stop or disable, and this module never
+ *     attempts to kill it.
+ *   - Every action (legacy stop/start/disable, unit-file removal,
+ *     daemon-reload) goes through the injectable `actionRunner`/
+ *     `legacyUnitFileRemove` seams, so the migration is exercised
+ *     deterministically via fakes and never touches a real running service in
+ *     tests.
  */
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { TuiConfigManager } from '../config/host-settings.ts';
-import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.ts';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { PlatformServiceManager, resolveDaemonServiceDefault, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
  * platform's public `platform/daemon` entry point only re-exports the class and
@@ -67,14 +55,10 @@ type ManagedServiceDefinition = NonNullable<ManagedServiceManagerOptions['defini
 export type ManagedServiceActionRunner = NonNullable<ManagedServiceManagerOptions['actionRunner']>;
 type ManagedServiceActionResult = ReturnType<ManagedServiceActionRunner>;
 
-// The one unit name/description this tool manages, shared by the daemon CLI
-// (`goodvibes-daemon install-service|uninstall-service|service-status|migrate-service`)
-// and the TUI onboarding UX, so both build the EXACT same service definition.
-// `service.serviceName`/nothing-set config default is 'goodvibes'
-// (schema-domain-runtime.ts), which is what PlatformServiceManager actually
-// resolves to in the common case via `resolveServiceName()`'s `config.get(...)
-// ?? defaultServiceName`.
-export const MANAGED_SERVICE_NAME = 'goodvibes';
+// Product defaults match the released installer's systemd name and Darwin
+// LaunchAgent label. The shared schema stays unchanged: any explicit stored
+// name (including 'goodvibes') or invocation overlay outranks this fallback.
+export const MANAGED_SERVICE_NAME = process.platform === 'darwin' ? 'sh.goodvibes.daemon' : 'goodvibes';
 export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session broker + companion host)';
 
 /**
@@ -84,65 +68,94 @@ export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session bro
  * wizard's detection banner resolves this at snapshot-collection time and
  * carries it on `OnboardingLegacyDaemonSnapshot.trackedServiceName`).
  * Mirrors the platform's own internal `resolveServiceName()` precedence exactly:
- * the `service.serviceName` config key first, trimmed, falling back to the
- * default (`MANAGED_SERVICE_NAME`, which `buildManagedDaemonServiceManager`
- * passes as `defaultServiceName`) when the key is unset or blank. Takes a
- * minimal `{ get }` shape rather than the full ConfigManager class so
+ * the product default replaces only the shared schema's pure default origin;
+ * configured names and overlays remain first, with the product fallback when
+ * unset or blank. Takes a minimal accessor/provenance shape rather than the full ConfigManager class so
  * snapshot code and tests can pass whatever config accessor they already
  * hold.
  */
-export function resolveConfiguredServiceName(config: { get(key: string): unknown }): string {
+export function resolveConfiguredServiceName(config: {
+  get(key: string): unknown;
+  describeConfigKeySource?(key: 'service.serviceName'): { readonly tier: string; readonly effectiveOrigin?: string };
+}, defaultServiceName: string = MANAGED_SERVICE_NAME): string {
+  const source = config.describeConfigKeySource?.('service.serviceName');
+  if (source?.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default')) return defaultServiceName;
   const raw = config.get('service.serviceName');
   const configured = raw === undefined || raw === null ? '' : String(raw).trim();
-  return configured || MANAGED_SERVICE_NAME;
+  return configured || defaultServiceName;
 }
 
 export interface BuildManagedDaemonServiceManagerParams {
   readonly binaryPath: string;
+  /**
+   * The GoodVibes tree home, GOODVIBES_HOME-overridable, used to root the
+   * ConfigManager and the daemon's own `--daemon-home` state directory. NEVER
+   * used for unit-file path resolution: see `unitHomeDir` for that. A unit
+   * path search rooted here would look for `~/.config/systemd/user/` under
+   * whatever GOODVIBES_HOME points at instead of the real login home systemd
+   * actually reads, the same class of bug the boot-time reconcile in
+   * reconcile already guards against with the identical split.
+   */
   readonly homeDir: string;
+  /** Resolved identity/settings tier; independent of the tree and login homes. */
+  readonly daemonHomeDirectory?: string | undefined;
+  /**
+   * The LOGIN user's home, where `~/.config/systemd/user/` (or the launchd/
+   * Windows equivalent) actually lives, regardless of any GOODVIBES_HOME/
+   * GOODVIBES_DAEMON_HOME override in effect. Threaded through to
+   * `PlatformServiceManager`'s own `homeDirectory` option, which resolves the
+   * unit file PATH directly from it. Required (no default to `homeDir`) so a
+   * caller cannot silently reintroduce the GOODVIBES_HOME-rooted bug by
+   * omission.
+   */
+  readonly unitHomeDir: string;
   readonly host: string;
   readonly port: number;
   /** Defaults to `homeDir`, overridable so tests can scope both to one tempdir. */
   readonly workingDirectory?: string | undefined;
-  /** Injected in tests; a real `ConfigManager` rooted at `homeDir` otherwise. */
+  /** The caller's own settings; a read-only `ConfigManager` rooted at `homeDir` otherwise. */
   readonly configManager?: ConfigManager | undefined;
+  /** The settings surface a default `ConfigManager` reads. Both products keep their state under `tui`. */
+  readonly surfaceRoot?: string | undefined;
   /** Injectable systemctl/launchctl/schtasks runner so tests never touch the host. */
   readonly actionRunner?: ManagedServiceActionRunner | undefined;
+  /** Optional retained executable restriction, checked by the native service owner. */
+  readonly assertCurrent?: (() => void) | undefined;
 }
 
 /**
  * Build the ONE `PlatformServiceManager` this tool manages, the single
- * source of truth for the unit's definition (`ExecStart` command/args,
- * name, description). Both `src/daemon/service-commands.ts` (the CLI) and
- * `src/input/handler-onboarding-daemon-adopt.ts` (the onboarding guided UX)
- * call this so a migration triggered from either surface installs the
- * identical unit, no risk of the two consumers drifting apart.
+ * source of truth for the unit's definition (`ExecStart` command/args, name,
+ * description). The daemon CLI, the daemon's boot-time reconcile and the
+ * terminal app's onboarding all call this, so every path installs the
+ * identical unit.
  */
 export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServiceManagerParams): PlatformServiceManager {
   const workingDirectory = params.workingDirectory ?? params.homeDir;
-  if (!params.configManager) runDaemonConfigMigration(params.homeDir);
-  const configManager = params.configManager ?? new TuiConfigManager({
+  const configManager = params.configManager ?? new ConfigManager({
     workingDir: workingDirectory,
     homeDir: params.homeDir,
-    surfaceRoot: 'tui',
+    surfaceRoot: params.surfaceRoot ?? 'tui',
+    readOnly: true,
   });
+  const defaultServiceName = resolveDaemonServiceDefault(params.unitHomeDir);
   // The unit's ExecStart deliberately carries NO endpoint flags
   // (--hostname/--port): the daemon resolves controlPlane.hostMode/host/port
   // from the user's settings at boot, so a later config change (or a host
   // already configured for hostMode=network / a non-default port) keeps its
   // endpoint without a unit rewrite. Baking endpoint values here is what
   // silently re-pinned custom-configured hosts back to the values current at
-  // install time. The suite installer writes the same shape, the two paths
+  // install time. scripts/install.sh writes the same shape, the two paths
   // must produce the identical running daemon (see the installer parity test).
   // `params.host`/`params.port` remain inputs because the migration engine
   // still needs them for its read-only port-liveness probe.
   const definition: ManagedServiceDefinition = {
-    name: MANAGED_SERVICE_NAME,
+    name: resolveConfiguredServiceName(configManager, defaultServiceName),
     description: MANAGED_SERVICE_DESCRIPTION,
     workingDirectory,
     command: params.binaryPath,
     // `--daemon-home` names the daemon's own STATE directory, the one holding
-    // operator-tokens.json, auth-users.json and daemon-settings.json, which is
+    // operator-tokens.json and the daemon tier's settings.json, which is
     // `<home>/.goodvibes/daemon`. This baked the USER HOME, so a serviced
     // daemon filed its identity a level above where every reader in this
     // repository looks: the platform's platform/config goodvibes-home resolves the flag AS the state
@@ -152,17 +165,21 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
     // the mismatch is invisible from the outside, the daemon simply mints a
     // second operator-tokens.json in the home directory and the client keeps
     // reading the empty one under .goodvibes/daemon.
-    args: ['--daemon-home', join(params.homeDir, '.goodvibes', 'daemon')],
-    env: {},
+    args: ['--daemon-home', params.daemonHomeDirectory ?? join(params.homeDir, '.goodvibes', 'daemon')],
+    // Service managers do not inherit the invoking shell's relocated tree.
+    env: params.homeDir === params.unitHomeDir ? {} : { GOODVIBES_HOME: params.homeDir },
     restartOnFailure: true,
   };
   return new PlatformServiceManager(configManager, {
     workingDirectory,
-    homeDirectory: params.homeDir,
+    // Unit paths resolve from the LOGIN home, never the (possibly
+    // GOODVIBES_HOME-relocated) tree home above, see `unitHomeDir`'s doc.
+    homeDirectory: params.unitHomeDir,
     definitionOverride: definition,
-    defaultServiceName: MANAGED_SERVICE_NAME,
+    defaultServiceName,
     defaultServiceDescription: MANAGED_SERVICE_DESCRIPTION,
     actionRunner: params.actionRunner,
+    assertCurrent: params.assertCurrent,
     // No `featureFlags` passed: `isFeatureGateEnabled` treats a missing reader
     // as always-open. Both consumers here are the user's explicit request to
     // manage the service, unlike the daemon's own HTTP /api/service/* routes
@@ -186,12 +203,9 @@ export interface ResolveDaemonBinaryOptions {
  *   3. `process.execPath` when this IS the compiled daemon binary.
  *   4. Bare `goodvibes-daemon` (resolved on PATH by systemd's service environment).
  *
- * Lives here (not in `src/daemon/service-commands.ts`) so both consumers can
- * call it: it only needs the CALLER's own `import.meta.url` to locate the
- * packaged `bin/` directory two levels up from ANY `src/<layer>/*.ts` file
- * (`src/daemon/service-commands.ts` and `src/input/handler-onboarding-daemon-adopt.ts`
- * are equally one level deep under `src/`), so the resolution has no actual
- * CLI/daemon-specific dependency.
+ * It carries no CLI-specific dependency: it only needs the CALLER's own
+ * `import.meta.url` to locate the packaged `bin/` directory two levels up
+ * from any `src/<layer>/*.ts` file of a product.
  */
 export function resolveInstalledDaemonBinary(options: ResolveDaemonBinaryOptions = {}): string {
   const env = options.env ?? process.env;
@@ -211,7 +225,7 @@ export function resolveInstalledDaemonBinary(options: ResolveDaemonBinaryOptions
   }
 
   const execPath = options.execPath ?? process.execPath;
-  if (execPath && /goodvibes-daemon/.test(execPath)) return execPath;
+  if (execPath && basename(execPath) === 'goodvibes-daemon') return execPath;
 
   return 'goodvibes-daemon';
 }
@@ -229,7 +243,14 @@ export function legacyUnitPath(homeDir: string): string {
 }
 
 export interface DetectLegacyUnitInput {
-  readonly homeDir: string;
+  /**
+   * The LOGIN user's home, where the legacy unit file would actually live
+   * (`~/.config/systemd/user/goodvibes-daemon.service`), never the
+   * GOODVIBES_HOME-overridable tree home. See
+   * `BuildManagedDaemonServiceManagerParams.unitHomeDir` for the identical
+   * split and why it matters.
+   */
+  readonly unitHomeDir: string;
   /** Injectable existsSync so tests never touch the host filesystem. */
   readonly legacyUnitFileExists?: ((path: string) => boolean) | undefined;
   /** Injectable systemctl/launchctl/schtasks runner so tests never touch the host. */
@@ -243,7 +264,7 @@ export interface DetectLegacyUnitInput {
  * `systemctl --user is-active` query through the injected actionRunner.
  */
 export function detectLegacyUnit(input: DetectLegacyUnitInput): LegacyUnitInfo {
-  const path = legacyUnitPath(input.homeDir);
+  const path = legacyUnitPath(input.unitHomeDir);
   const fileExists = input.legacyUnitFileExists ?? existsSync;
   if (!fileExists(path)) return { present: false, active: false, path };
   const run: ManagedServiceActionRunner = input.actionRunner ?? defaultActionRunner(SYSTEMCTL_TIMEOUT_MS);
@@ -291,7 +312,7 @@ export function legacyUnitNote(legacy: LegacyUnitInfo, trackedServiceName: strin
   const stateWord = legacy.active ? 'installed and RUNNING' : 'installed (not currently active)';
   return (
     `note: a separate service named ${LEGACY_SERVICE_UNIT_NAME}.service is ${stateWord} at ${legacy.path}; ` +
-    `that unit name is managed by the goodvibes install script (older installs used it too), while this tool manages ` +
+    `that unit name was used by an older install script/release, while this tool manages ` +
     `${trackedServiceName}.service and will not touch the other unit automatically. Keep whichever one you use; running ` +
     `both would start two daemons competing for the same port. To retire the install-script unit in favor of this ` +
     `tool's: systemctl --user disable --now ${LEGACY_SERVICE_UNIT_NAME}.service && rm ${legacy.path} && systemctl --user daemon-reload`
@@ -362,13 +383,21 @@ export interface RunLegacyDaemonMigrationParams {
   readonly legacyUnitFileRemove?: ((path: string) => void) | undefined;
   /** Injectable systemctl runner for the legacy stop/disable/daemon-reload steps. */
   readonly actionRunner?: ManagedServiceActionRunner | undefined;
-  /** Injectable pause between listen checks of the new unit. Defaults to a real timer. */
+  /** Optional retained executable restriction, checked by the native service owner. */
+  readonly assertCurrent?: (() => void) | undefined;
+  /** Injectable pause between endpoint checks of the new unit. Defaults to a real timer. */
   readonly sleep?: ((ms: number) => Promise<void>) | undefined;
+  /** Injectable liveness check for the new unit's MainPID. Defaults to a signal-0 probe. */
+  readonly processAlive?: ((pid: number) => boolean) | undefined;
 }
 
-/** How long the new unit gets to start listening once the legacy unit has released the port. */
+/** How long the new unit gets to answer on the endpoint once the legacy unit has released it: 20 checks, 250 ms apart. */
 const NEW_UNIT_LISTEN_ATTEMPTS = 20;
 const NEW_UNIT_LISTEN_INTERVAL_MS = 250;
+
+function signalZeroAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
 
 /**
  * Belt-and-braces guard: throws if the resolved unit `status` is the
@@ -385,7 +414,7 @@ function assertUnitIsNotLegacy(status: ManagedServiceStatus, legacy: LegacyUnitI
   if (status.path === legacy.path || resolveManagedUnitName(status) === LEGACY_SERVICE_UNIT_NAME) {
     throw new Error(
       `refusing to ${action}: the resolved managed unit (${resolveManagedUnitName(status)} at ${status.path}) is the ` +
-        `install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit: this should already have been caught by the pre-flight ` +
+        `install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit; this should already have been caught by the pre-flight ` +
         'collision check in runLegacyDaemonMigration',
     );
   }
@@ -408,7 +437,8 @@ export async function runLegacyDaemonMigration(
   manager: PlatformServiceManager,
   legacy: LegacyUnitInfo,
 ): Promise<LegacyDaemonMigrationResult> {
-  const { trackedServiceName } = params;
+  const { trackedServiceName, assertCurrent } = params;
+  assertCurrent?.();
   // Computed once, up front, and reused for every branch below (this is the
   // exact same single call each branch made individually before, see the
   // fix note on `resolveManagedUnitName` for why the name/path it reports
@@ -418,7 +448,9 @@ export async function runLegacyDaemonMigration(
 
   if (!legacy.present) {
     const probe = params.portProbe ?? defaultPortProbe;
+    assertCurrent?.();
     const occupied = await probe(params.host, params.port);
+    assertCurrent?.();
     if (occupied) {
       return {
         ok: false,
@@ -427,10 +459,11 @@ export async function runLegacyDaemonMigration(
           `migrate-service: no install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit was found, but something is already ` +
             `listening on ${params.host}:${params.port}.`,
           "That looks like a process this tool doesn't manage (for example, a manually-started `nohup` daemon) rather " +
-            'than a systemd unit: there is nothing here to stop or disable, and this tool will not attempt to kill an ' +
+            'than a systemd unit; there is nothing here to stop or disable, and this tool will not attempt to kill an ' +
             'unrecognized process.',
-          'Stop that process yourself (or point this TUI at it instead; see the onboarding "connect to an existing ' +
-            'daemon" option), then re-run migrate-service or install-service once the port is free.',
+          'Stop that process yourself, then re-run migrate-service or install-service once the port is free; or, if ' +
+            "it's already the daemon you want running, leave it alone: a client surface can still reach it at this " +
+            "host:port directly, with no service unit required for this tool to manage.",
         ],
         status: currentStatus,
       };
@@ -440,7 +473,7 @@ export async function runLegacyDaemonMigration(
       exitCode: 0,
       lines: [
         `migrate-service: no install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit was found and ${params.host}:${params.port} ` +
-          'is free: there is nothing to migrate.',
+          'is free; there is nothing to migrate.',
         `Run install-service to set up the managed ${resolvedUnitName}.service directly.`,
       ],
       status: currentStatus,
@@ -488,147 +521,192 @@ export async function runLegacyDaemonMigration(
     };
   }
 
+  // Resume: an earlier run installed and started this exact unit and then failed while retiring the
+  // legacy unit. Only a managed unit that is installed, running and byte-identical to what this tool
+  // renders is treated as ours; anything else is still refused below.
+  let resuming = false;
+  if (currentStatus.installed && currentStatus.running) {
+    try { resuming = manager.installedDefinitionMatches(); } catch { resuming = false; }
+  }
+
+  // A running target or existing definition belongs to the user. Never
+  // replace it or mistake it for a resource this migration may remove.
+  if (!resuming && (currentStatus.installed || currentStatus.running)) {
+    return {
+      ok: false,
+      exitCode: 1,
+      lines: [
+        currentStatus.running
+          ? `migrate-service refused: the managed unit is already running (${currentStatus.path}).`
+          : `migrate-service refused: the managed unit already exists at ${currentStatus.path}.`,
+        'Keep or reconcile that unit explicitly before migrating; neither unit was changed.',
+      ],
+      status: currentStatus,
+    };
+  }
+
   if (!params.confirmMigration) {
     return {
       ok: true,
       exitCode: 0,
       lines: [
         legacyUnitNote(legacy, resolvedUnitName),
-        'migrate-service (dry run: re-run with confirmation to execute): this would',
-        `  1. install and start the new ${resolvedUnitName}.service unit`,
-        '  2. verify it comes up healthy (a fresh, honest systemd is-active check)',
-        `  3. stop the install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit to release the port, and confirm the new unit listens on it ` +
-          '(otherwise the install-script unit is started again and the new unit is rolled back)',
+        'migrate-service (dry run, re-run with confirmation to execute): this would',
+        resuming
+          ? `  1. skip install: the managed ${resolvedUnitName}.service unit is already installed, running and identical to what this tool renders (an earlier migration stopped before retiring the legacy unit)`
+          : `  1. install and start the new ${resolvedUnitName}.service unit`,
+        resuming
+          ? '  2. skip the start: the managed unit is already running'
+          : '  2. confirm systemd reports it active',
+        `  3. stop the install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit to release ${params.host}:${params.port}, and confirm ` +
+          'the new unit answers there from a live main process (otherwise the install-script unit is started again and the new unit is rolled back)',
         `  4. only then disable and remove the install-script unit and run \`systemctl --user daemon-reload\``,
-        'Nothing has been changed. Nothing is migrated automatically: re-run with explicit confirmation ' +
+        'Nothing has been changed. Nothing is migrated automatically; re-run with explicit confirmation ' +
           "(the CLI's -y/--yes flag) to execute this plan.",
       ],
       status: currentStatus,
     };
   }
 
-  // Consented: new-up-then-old-down. The legacy unit is not touched until the
-  // new unit is verified healthy.
-  // Belt-and-braces: the collision check above already returns before
-  // reaching here whenever the resolved unit is the legacy one, this
-  // re-asserts the same invariant right at the mutation site so a future
-  // change to the check above can never silently reopen the hole.
-  assertUnitIsNotLegacy(currentStatus, legacy, 'install the new unit');
-  const installed = manager.install();
-  if (installed.actionError) {
-    return {
-      ok: false,
-      exitCode: 1,
-      lines: [
-        `migrate-service aborted: could not write the new ${resolvedUnitName}.service unit (${installed.actionError}).`,
-        `The install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit was never touched.`,
-      ],
-      status: installed,
-    };
-  }
-  const started = manager.start();
-  const healthCheck = manager.status();
-  const healthy = !started.actionError && healthCheck.running;
-  if (!healthy) {
-    assertUnitIsNotLegacy(installed, legacy, 'roll back (uninstall) the new unit');
-    const rollback = manager.uninstall();
-    const rollbackNote = rollback.actionError
-      ? `rolling back the new unit ALSO hit an error (${rollback.actionError}): remove ${installed.path} by hand.`
-      : 'the newly-written unit has been rolled back (removed).';
-    return {
-      ok: false,
-      exitCode: 1,
-      lines: [
-        `migrate-service aborted: the new ${resolvedUnitName}.service unit did not come up healthy` +
-          (started.actionError ? ` (${started.actionError}).` : '.'),
-        rollbackNote,
-        `The install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit was never touched and should still be running as before.`,
-      ],
-      status: healthCheck,
-    };
+  // Only a newly created target can be rolled back. Keep its recovery file
+  // until stop/disable has a confirmed outcome, and report cleanup exceptions.
+  let healthCheck = currentStatus;
+  const rollbackNewUnit = (): string => {
+    try {
+      const now = manager.status();
+      healthCheck = now;
+      assertUnitIsNotLegacy(now, legacy, 'roll back the new unit');
+      if (now.path !== currentStatus.path) return 'rollback refused: the managed unit path changed; inspect both units manually.';
+      const rollbackRunner = params.actionRunner ?? defaultActionRunner(SYSTEMCTL_TIMEOUT_MS);
+      assertCurrent?.();
+      const disabled = rollbackRunner('systemctl', ['--user', 'disable', '--now', `${resolvedUnitName}.service`]);
+      assertCurrent?.();
+      if (disabled.status !== 0) return `rollback incomplete: could not confirm the new unit was stopped and disabled; ${now.path} was retained for recovery.`;
+      const rollback = manager.uninstall();
+      healthCheck = rollback;
+      if (rollback.actionError || rollback.installed) return `rollback incomplete: could not confirm removal of ${now.path}; inspect it manually.`;
+      assertCurrent?.();
+      const reload = rollbackRunner('systemctl', ['--user', 'daemon-reload']);
+      assertCurrent?.();
+      if (reload.status !== 0) return 'rollback incomplete: the new unit file was removed, but daemon-reload was not confirmed.';
+      return 'the newly-written unit has been rolled back (removed).';
+    } catch {
+      return 'rollback incomplete: cleanup threw; inspect the managed unit and its service state manually.';
+    }
+  };
+
+  if (!resuming) {
+    assertUnitIsNotLegacy(currentStatus, legacy, 'install the new unit');
+    let setupError: string | undefined;
+    try {
+      const installed = manager.install();
+      healthCheck = installed;
+      if (installed.actionError) setupError = 'the new unit could not be installed';
+      else {
+        const started = manager.start();
+        healthCheck = manager.status();
+        if (started.actionError || !healthCheck.running) setupError = 'the new unit did not come up healthy';
+      }
+    } catch {
+      setupError = 'the new unit setup or health check threw';
+    }
+    if (setupError) {
+      const rollbackNote = rollbackNewUnit();
+      return {
+        ok: false,
+        exitCode: 1,
+        lines: [
+          `migrate-service aborted: ${setupError}.`,
+          rollbackNote,
+          `The install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit was never touched and should still be running as before.`,
+        ],
+        status: healthCheck,
+      };
+    }
   }
 
-  // The new unit reads as running, which only proves its process is alive: the
-  // legacy unit still holds the port, so the new one cannot have bound it yet.
-  // Release the port by stopping the legacy unit (it stays enabled and its file
-  // stays until the new unit is proven), then require the new unit to listen.
+  // The new unit reads as active, which only proves its process was forked:
+  // the legacy unit still holds the port. Stop the legacy unit (it stays
+  // enabled, with its file, until the new unit is proven), then require the
+  // new unit to answer on the configured endpoint from a live main process.
   const run: ManagedServiceActionRunner = params.actionRunner ?? defaultActionRunner(SYSTEMCTL_TIMEOUT_MS);
-  const legacyUnit = `${LEGACY_SERVICE_UNIT_NAME}.service`;
-  const describeFailure = (result: ManagedServiceActionResult): string => String(result.stderr || result.stdout || 'no output').trim();
-  const stopResult = run('systemctl', ['--user', 'stop', legacyUnit]);
-  if ((stopResult.status ?? 1) !== 0) {
-    return {
-      ok: false,
-      exitCode: 1,
-      lines: [
-        `migrate-service incomplete: the new ${resolvedUnitName}.service unit is installed and running, but stopping the install-script unit failed (${describeFailure(stopResult)}).`,
-        `The install-script ${legacyUnit} unit was left enabled, with its unit file in place at ${legacy.path}; it may still be running on ${params.host}:${params.port}, so the new unit may not be able to bind that port.`,
-        `Stop it yourself with \`systemctl --user stop ${legacyUnit}\` and re-run migrate-service.`,
-      ],
-      status: healthCheck,
-    };
-  }
+  const legacyName = `${LEGACY_SERVICE_UNIT_NAME}.service`;
+  const retirementStatus = (action: 'stop' | 'start' | 'disable' | 'daemon-reload'): number | null | undefined => {
+    const args = action === 'daemon-reload' ? ['--user', action] : ['--user', action, legacyName];
+    try {
+      assertCurrent?.();
+      const status = run('systemctl', args)?.status;
+      assertCurrent?.();
+      return status;
+    } catch { return undefined; }
+  };
+  const RETRY_NOTE = `Retry (resumes only the retirement of ${legacyName}; the healthy managed unit is not reinstalled): goodvibes-daemon migrate-service -y`;
   const probe = params.portProbe ?? defaultPortProbe;
-  const sleep = params.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  let listening = false;
-  for (let attempt = 0; attempt < NEW_UNIT_LISTEN_ATTEMPTS && !listening; attempt += 1) {
-    if (attempt > 0) await sleep(NEW_UNIT_LISTEN_INTERVAL_MS);
-    listening = await probe(params.host, params.port);
-  }
-  if (!listening) {
-    // Put the world back the way it was: the legacy unit was only stopped, so
-    // starting it again restores the daemon the owner had.
-    assertUnitIsNotLegacy(installed, legacy, 'roll back (uninstall) the new unit');
-    const rollback = manager.uninstall();
-    const restart = run('systemctl', ['--user', 'start', legacyUnit]);
-    const restartNote = (restart.status ?? 1) === 0
-      ? `The install-script ${legacyUnit} unit was started again and is unchanged.`
-      : `Starting the install-script ${legacyUnit} unit again failed (${describeFailure(restart)}): start it by hand with \`systemctl --user start ${legacyUnit}\`.`;
+  const sleep = params.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+  const alive = params.processAlive ?? signalZeroAlive;
+  // Bounded: at most NEW_UNIT_LISTEN_ATTEMPTS endpoint checks in this one-time command.
+  const newUnitServes = async (): Promise<boolean> => {
+    for (let attempt = 0; attempt < NEW_UNIT_LISTEN_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) await sleep(NEW_UNIT_LISTEN_INTERVAL_MS);
+      assertCurrent?.();
+      if (!await probe(params.host, params.port)) continue;
+      let reply: ManagedServiceActionResult;
+      try { reply = run('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', `${resolvedUnitName}.service`]); }
+      catch { continue; }
+      const pid = parseMainPid(reply);
+      if (pid !== undefined && alive(pid)) return true;
+    }
+    return false;
+  };
+  const retirementRefused = (action: 'stop' | 'disable'): LegacyDaemonMigrationResult => ({
+    ok: false, exitCode: 1, status: healthCheck,
+    lines: [
+      `migration incomplete: the new ${resolvedUnitName}.service unit is ${action === 'stop' ? 'running' : 'serving'}, but ${action} of ${legacyName} did not report success.`,
+      `The legacy unit definition at ${legacy.path} was not removed. Its running or enabled state is unconfirmed.`,
+      `Verify the legacy unit: systemctl --user status ${legacyName}`,
+      RETRY_NOTE,
+    ],
+  });
+  if (retirementStatus('stop') !== 0) return retirementRefused('stop');
+  const serving = await newUnitServes();
+  if (!serving) {
+    const rollbackNote = rollbackNewUnit();
+    const restarted = retirementStatus('start') === 0;
     return {
-      ok: false,
-      exitCode: 1,
+      ok: false, exitCode: 1, status: healthCheck,
       lines: [
-        `migrate-service aborted: the new ${resolvedUnitName}.service unit is running but never began listening on ${params.host}:${params.port} once the install-script unit released it.`,
-        rollback.actionError
-          ? `rolling back the new unit hit an error (${rollback.actionError}): remove ${installed.path} by hand.`
-          : 'the newly-written unit has been rolled back (removed).',
-        restartNote,
+        `migrate-service aborted: the new ${resolvedUnitName}.service unit did not answer on ${params.host}:${params.port} ` +
+          `from a live main process once ${legacyName} released it.`,
+        rollbackNote,
+        restarted
+          ? `${legacyName} was started again and its unit file was left in place at ${legacy.path}.`
+          : `Starting ${legacyName} again did not report success; start it yourself: systemctl --user start ${legacyName}`,
       ],
-      status: healthCheck,
     };
   }
-
-  // The new unit answers on the configured port, now, and only now, retire the
-  // legacy unit for good. A failed disable keeps the unit file: removing it
-  // would leave a dangling enablement that still starts at login.
-  const disableResult = run('systemctl', ['--user', 'disable', legacyUnit]);
-  if ((disableResult.status ?? 1) !== 0) {
-    return {
-      ok: false,
-      exitCode: 1,
-      lines: [
-        `migrate-service incomplete: the new ${resolvedUnitName}.service unit is installed, enabled, and listening on ${params.host}:${params.port}, and the install-script unit is stopped, but disabling it failed (${describeFailure(disableResult)}).`,
-        `Its unit file was left in place at ${legacy.path} so it does not become a dangling enablement.`,
-        `Run \`systemctl --user disable ${legacyUnit}\`, remove that file, then \`systemctl --user daemon-reload\`.`,
-      ],
-      status: healthCheck,
-    };
-  }
+  if (retirementStatus('disable') !== 0) return retirementRefused('disable');
   const removeFile = params.legacyUnitFileRemove ?? ((path: string) => rmSync(path, { force: true }));
-  let removeError: string | undefined;
+  let removed = false;
   try {
+    assertCurrent?.();
     removeFile(legacy.path);
-  } catch (error) {
-    removeError = summarizeError(error);
+    assertCurrent?.();
+    removed = true;
+  } catch { /* Keep the uncertain removal outcome explicit below. */ }
+  if (!removed) {
+    return { ok: false, exitCode: 1, status: healthCheck, lines: [
+      `migration incomplete: the new ${resolvedUnitName}.service unit is serving and ${legacyName} was stopped and disabled.`,
+      `Removal of the legacy unit definition at ${legacy.path} could not be confirmed; inspect it before retrying.`,
+      RETRY_NOTE,
+    ] };
   }
-  run('systemctl', ['--user', 'daemon-reload']);
-
-  const lines = [`migrated: the new ${resolvedUnitName}.service unit is installed, enabled, and running.`];
-  if (removeError) {
-    lines.push(`note: could not remove the install-script unit file at ${legacy.path}: ${removeError}; remove it by hand.`);
-  } else {
-    lines.push(`the install-script ${legacyUnit} unit has been stopped, disabled, and removed.`);
-  }
-  lines.push('ran `systemctl --user daemon-reload`.');
-  return { ok: true, exitCode: 0, lines, status: healthCheck };
+  const reloaded = retirementStatus('daemon-reload') === 0;
+  const lines = [
+    `${reloaded ? 'migrated' : 'migration incomplete'}: the new ${resolvedUnitName}.service unit is installed, enabled, and serving on ${params.host}:${params.port}.`,
+    `the install-script ${legacyName} unit has been stopped, disabled, and removed.`,
+    reloaded ? 'ran `systemctl --user daemon-reload`.'
+      : 'daemon-reload did not report success; verify with `systemctl --user daemon-reload` before treating the migration as complete.',
+  ];
+  if (!reloaded) lines.push('The legacy unit file is already gone, so migrate-service has nothing left to resume; the only remaining step is: systemctl --user daemon-reload');
+  return { ok: reloaded, exitCode: reloaded ? 0 : 1, lines, status: healthCheck };
 }

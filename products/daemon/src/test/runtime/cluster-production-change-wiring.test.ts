@@ -22,18 +22,18 @@ class ControlledSecrets extends SecretsManager {
   override async get(key: string) { const value = await super.get(key); await this.pauseRead?.(key); return value; }
 }
 function fixture() { return { root: makeOwnedTempDir('cluster-production-changes'), bus: new MemoryClusterBus(), clock: new FakeClusterClock() }; }
-function node(f: ReturnType<typeof fixture>, name: string, master: boolean, injected?: (transport: ClusterTransport) => ClusterTransport) {
+function node(f: ReturnType<typeof fixture>, name: string, injected?: (transport: ClusterTransport) => ClusterTransport) {
   const root = join(f.root, name), work = join(root, 'work'), home = join(root, 'home'); mkdirSync(work, { recursive: true }); mkdirSync(home);
   const config = new ConfigManager({ workingDir: work, homeDir: home, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT }); config.set('cluster.enabled', true);
   const secrets = new ControlledSecrets({ projectRoot: work, globalHome: home, daemonHome: home });
   const transport = f.bus.createTransport(name);
-  const composition = createClusterGroupComposition({ configManager: config, secretsManager: secrets, isMaster: () => master,
+  const composition = createClusterGroupComposition({ configManager: config, secretsManager: secrets,
     shellPaths: { resolveProjectPath: (...parts: string[]) => join(root, ...parts) } as ShellPathService,
     transport: injected?.(transport) ?? transport, clock: f.clock }); compositions.push(composition);
   return { root, config, secrets, composition, transport };
 }
 async function pair(f: ReturnType<typeof fixture>, beforeCreate?: (master: ReturnType<typeof node>) => Promise<void>) {
-  const master = node(f, 'master', true), standby = node(f, 'standby', false);
+  const master = node(f, 'master'), standby = node(f, 'standby');
   await beforeCreate?.(master); await master.composition.start(); await standby.composition.start();
   const created = await master.composition.verbs.create({ name: 'synthetic fixture group' }); if (!created.ok) throw Error(created.error);
   const joined = await standby.composition.verbs.join({ groupId: created.data.groupId, joinKey: created.data.joinKey }); if (!joined.ok) throw Error(joined.error);
@@ -65,7 +65,7 @@ test('remote applies do not echo/revise forever and ordinary housekeeping does n
   await master.composition.runtime.runHousekeeping();
   for (const sent of configTraffic(f)) expect(Buffer.byteLength(sent.raw)).toBeLessThanOrEqual(MAX_ENVELOPE_BYTES);
   await waitFor(() => master.composition.runtime.replicationStatus()?.revision === standby.composition.runtime.replicationStatus()?.revision);
-  const cold = node(f, 'cold', false); await cold.composition.start();
+  const cold = node(f, 'cold'); await cold.composition.start();
   const key = master.composition.verbs.key(); if (!key.ok) throw Error(key.error);
   const joined = await cold.composition.verbs.join({ groupId: master.composition.runtime.groupState!.groupId, joinKey: key.data.joinKey });
   if (!joined.ok) throw Error(joined.error);
@@ -98,9 +98,9 @@ test('stop unsubscribes immediately and drains an original paused secret read be
 });
 test('failed actual transport keeps a bounded original change for housekeeping retry', async () => {
   const f = fixture(); let fail = false;
-  const master = node(f, 'master', true, inner => ({ start: callback => inner.start(callback), stop: () => inner.stop(), describe: () => inner.describe(), async send(raw) {
+  const master = node(f, 'master', inner => ({ start: callback => inner.start(callback), stop: () => inner.stop(), describe: () => inner.describe(), async send(raw) {
     if (fail && (JSON.parse(raw) as { type?: string }).type === 'CONFIG_DELTA') throw Error('synthetic transport unavailable'); await inner.send(raw);
-  } })), standby = node(f, 'standby', false);
+  } })), standby = node(f, 'standby');
   await master.composition.start(); await standby.composition.start(); const created = await master.composition.verbs.create({}); if (!created.ok) throw Error(created.error);
   const joined = await standby.composition.verbs.join({ groupId: created.data.groupId, joinKey: created.data.joinKey }); if (!joined.ok) throw Error(joined.error);
   fail = true; master.config.set('automation.enabled', false); await new Promise<void>(done => setImmediate(done));
@@ -113,7 +113,7 @@ test('a literal credential in actual config is sealed, never public replica/log 
   master.config.set(credentialPath, literal); await waitFor(async () => await standby.secrets.get(credentialKey) === literal);
   await master.composition.runtime.runHousekeeping();
   expect(master.composition.runtime.replicaDocument()?.entries.find(entry => entry.path === credentialPath)?.secret).toBe(true);
-  const cold = node(f, 'cold', false); await cold.composition.start(); const key = master.composition.verbs.key(); if (!key.ok) throw Error(key.error);
+  const cold = node(f, 'cold'); await cold.composition.start(); const key = master.composition.verbs.key(); if (!key.ok) throw Error(key.error);
   const joined = await cold.composition.verbs.join({ groupId: master.composition.runtime.groupState!.groupId, joinKey: key.data.joinKey }); if (!joined.ok) throw Error(joined.error);
   await waitFor(async () => await cold.secrets.get(credentialKey) === literal);
   expect(f.bus.sent.map(row => row.raw).join('\n')).not.toContain(literal);

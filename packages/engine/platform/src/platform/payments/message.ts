@@ -371,6 +371,19 @@ export function renderRefundReport(input: {
   ].join('\n');
 }
 
+/**
+ * What a merchant's mail about a purchase reports: the order was confirmed,
+ * it shipped, or it was delivered. Each is reported to the owner once per purchase.
+ */
+export const ORDER_MAIL_KINDS = ['confirmed', 'shipped', 'delivered'] as const;
+export type OrderMailKind = typeof ORDER_MAIL_KINDS[number];
+
+const ORDER_MAIL_OPENING: Readonly<Record<OrderMailKind, string>> = {
+  confirmed: 'confirmed the order.',
+  shipped: 'shipped the order.',
+  delivered: 'says the order was delivered.',
+};
+
 export function renderConfirmationReport(input: {
   /** Only what the report prints; a stored purchase row carries all four. */
   readonly facts: Pick<PurchaseFacts, 'item' | 'totalMinorUnits' | 'currency' | 'cardLast4'>;
@@ -381,9 +394,12 @@ export function renderConfirmationReport(input: {
   };
   /** The registrable domain the mail actually came from, computed by us. */
   readonly senderDomain: string;
+  /** Absent reads as `confirmed`. */
+  readonly kind?: OrderMailKind | undefined;
 }): string {
+  const kind = input.kind ?? 'confirmed';
   const lines = [
-    `${renderMerchant(input.senderDomain)} confirmed the order.`,
+    `${renderMerchant(input.senderDomain)} ${ORDER_MAIL_OPENING[kind]}`,
     ``,
     `  ${renderItem(input.facts.item)}`,
     `  ${formatMinorUnits(input.facts.totalMinorUnits, input.facts.currency)} charged to the card ending `
@@ -391,7 +407,7 @@ export function renderConfirmationReport(input: {
   ];
   const { orderNumber, shipDate, trackingReference } = input.confirmation;
   if (orderNumber !== null) lines.push(`  Order number: ${sanitizeNoticeField(orderNumber, 40)}`);
-  if (shipDate !== null) lines.push(`  Ships: ${sanitizeNoticeField(shipDate, 40)}`);
+  if (shipDate !== null && kind !== 'delivered') lines.push(`  Ships: ${sanitizeNoticeField(shipDate, 40)}`);
   if (trackingReference !== null) lines.push(`  Tracking: ${sanitizeNoticeField(trackingReference, 60)}`);
   lines.push(``, `This is the order you approved. The amount above is the one I calculated, not the one the email states.`);
   return lines.join('\n');

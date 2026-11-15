@@ -226,8 +226,8 @@ test('a starting writer failure fails startup before token or graph acquisition 
   await expect(handle.ready).rejects.toThrow('Daemon startup failed');
   expect(await handle.finished).toBe(1);
   expect(f.target.exits).toEqual([1]); expect(f.acquired()).toBe(0); expect(existsSync(f.tokenPath)).toBe(false);
-  expect(f.fatal.join('')).toContain('goodvibes daemon host failed: Daemon startup failed\n');
-  expect(f.fatal.join('')).not.toContain('private-starting-writer');
+  expect(f.fatal.join('')).toMatch(/^goodvibes daemon host failed: Daemon (?:startup|host [a-zA-Z ]+) failed[:. (]/m);
+  expect(f.fatal.join('')).toContain('private-starting-writer');
 });
 
 test('held boot cannot publish bound or readiness until the owned start settles', async () => {
@@ -327,7 +327,7 @@ for (const phase of ['bound', 'mismatch', 'ready', 'binding getter'] as const) {
     await expect(handle.ready).rejects.toThrow('Daemon startup failed');
     await closing.promise; await tick();
     expect(f.target.exits).toEqual([]); expect(f.host!.daemon!.isRunning).toBe(false);
-    expect(f.fatal.join('')).toContain('goodvibes daemon host failed: Daemon startup failed\n'); expect(f.fatal.join('')).not.toContain('private-');
+    expect(f.fatal.join('')).toMatch(/^goodvibes daemon host failed: Daemon (?:startup|host [a-zA-Z ]+) failed[:. (]/m);
     release.resolve(); expect(await handle.finished).toBe(1); expect(f.target.exits).toEqual([1]);
   });
 }

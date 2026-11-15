@@ -4,7 +4,7 @@
  * already running elsewhere with a known token. Extracted from
  * onboarding-wizard-steps.ts to keep that file under the architecture line cap.
  */
-import { legacyUnitNote, MANAGED_SERVICE_NAME } from '../../runtime/legacy-daemon-migration.ts';
+import { legacyUnitNote, MANAGED_SERVICE_NAME } from '@goodvibes-jev/engine/terminal-shell/legacy-daemon-migration';
 import { normalizeText } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 import type { OnboardingWizardFieldDefinition } from './onboarding-wizard-types.ts';
@@ -87,7 +87,7 @@ export function pushDaemonAdoptionFields(
  * existing one.
  *
  * Visible ONLY when the runtime snapshot's read-only `legacyDaemon` detection
- * (collected via `detectLegacyUnit`, see `../../runtime/legacy-daemon-migration.ts`)
+ * (collected via `detectLegacyUnit`, see the shared `legacy-daemon-migration` engine)
  * found a unit file present, never rendered speculatively. Confirm-gated on
  * top of the engine's own consent requirement: a checklist toggle must be
  * checked before the action executes the real migration (`confirmMigration:

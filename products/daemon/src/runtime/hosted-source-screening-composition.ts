@@ -1,6 +1,5 @@
 /** Native consent and credential lifetime for the two explicitly approved hosted services. */
 import { randomUUID } from 'node:crypto';
-import { types } from 'node:util';
 import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { SecretsManager } from '../config/secrets.js';
@@ -15,8 +14,7 @@ export interface HostedInboxScreeningAcquisition {
   readonly options: ProtectedSourceOwnerOptions;
   close(): Promise<void>;
 }
-type ConfigOwner = Pick<ConfigManager, 'get' | 'getIngestionQuarantine' | 'getConfigurationIncarnation' | 'captureDurableConfigurationIncarnation'
-  | 'getDurableConfigurationIncarnation' | 'onDidChangeIncarnation' | 'onDidInvalidate'>;
+type ConfigOwner = Pick<ConfigManager, 'get' | 'getIngestionQuarantine' | 'getConfigurationIncarnation' | 'onDidChangeIncarnation' | 'onDidInvalidate'>;
 type CredentialOwner = Pick<SecretsManager, 'resolveLocalCredentialSnapshot' | 'captureLocalCredentialReadset' | 'getCredentialMutationState' | 'onDidInvalidateCredentials'>;
 export interface HostedInboxScreeningHost {
   readonly config: ConfigOwner;
@@ -57,9 +55,9 @@ export async function acquireHostedInboxScreening(host: HostedInboxScreeningHost
   source: HostedInboxScreeningSource, operation: HostedInboxScreeningOperation): Promise<HostedInboxScreeningAcquisition> {
   if (!['discord-bot-dms', 'slack-inbox', 'email-inbox'].includes(source)) throw new Error('Hosted inbox screening source is unavailable');
   const { config, secrets } = host;
-  const hostSignal = host.signal, operationSignal = operation.signal, accountCurrent = operation.assertCurrent;
+  const accountCurrent = operation.assertCurrent;
   const lifetime = new AbortController();
-  const signal = AbortSignal.any([hostSignal, operationSignal, lifetime.signal]);
+  const signal = AbortSignal.any([host.signal, operation.signal, lifetime.signal]);
   const subscriptions: Array<() => void> = [];
   let closed = false;
   const retire = () => lifetime.abort();
@@ -77,42 +75,27 @@ export async function acquireHostedInboxScreening(host: HostedInboxScreeningHost
     subscriptions.push(secrets.onDidInvalidateCredentials(retire));
     const incarnation = config.getConfigurationIncarnation();
     const assertCredentials = secrets.captureLocalCredentialReadset();
-    const nativeMethods = [config.get, config.getIngestionQuarantine, config.getConfigurationIncarnation,
-      config.captureDurableConfigurationIncarnation, config.getDurableConfigurationIncarnation,
-      secrets.resolveLocalCredentialSnapshot, secrets.getCredentialMutationState, secrets.captureLocalCredentialReadset];
-    let durableIncarnation: string | undefined;
+    // The subscriptions above abort `signal` on any settings or credential
+    // change, including one noticed from another process; the incarnation is
+    // the config owner's own counter. What is left to compare is integers and
+    // the one fact a subscription cannot show: a quarantined consent section.
     const assertNative = (): void => {
       signal.throwIfAborted();
-      const quarantine = config.getIngestionQuarantine();
-      const reader: { get(key: string): unknown } = config;
-      if (reader.get('surfaces.hostedInboxScreening') !== 'abacus-typesafe-provider-managed') {
-        throw new InboxAdmissionRefusal('consent-missing', 'Hosted inbox screening consent or source changed');
-      }
-      if (closed || host.config !== config || host.secrets !== secrets || host.signal !== hostSignal
-        || operation.signal !== operationSignal || operation.assertCurrent !== accountCurrent
-        || config.getConfigurationIncarnation() !== incarnation || secrets.getCredentialMutationState().pending
-        || nativeMethods.some((method, index) => method !== [config.get, config.getIngestionQuarantine,
-          config.getConfigurationIncarnation, config.captureDurableConfigurationIncarnation, config.getDurableConfigurationIncarnation,
-          secrets.resolveLocalCredentialSnapshot, secrets.getCredentialMutationState,
-          secrets.captureLocalCredentialReadset][index])
-        || (durableIncarnation !== undefined && config.getDurableConfigurationIncarnation() !== durableIncarnation)
-        || quarantine.some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
+      if (closed || config.getConfigurationIncarnation() !== incarnation || secrets.getCredentialMutationState().pending
+        || config.getIngestionQuarantine().some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
           || entry.key === 'surfaces.hostedInboxScreening')) throw new Error('Hosted inbox screening consent or source changed');
       assertCredentials();
     };
-    assertNative();
-    durableIncarnation = config.captureDurableConfigurationIncarnation();
+    const reader: { get(key: string): unknown } = config;
+    if (reader.get('surfaces.hostedInboxScreening') !== 'abacus-typesafe-provider-managed') {
+      throw new InboxAdmissionRefusal('consent-missing', 'Hosted inbox screening consent or source changed');
+    }
     assertNative();
     const abacus = captureCredential('ABACUSAI_API_KEY', secrets);
     const typesafe = captureCredential('TYPESAFE_API_KEY', secrets);
     const assertCurrent = (): void => {
       assertNative(); abacus.assertCurrent(); typesafe.assertCurrent();
-      const result: unknown = accountCurrent();
-      if (result !== undefined) {
-        if (types.isPromise(result)) void result.catch(() => {});
-        throw new Error('Hosted inbox screening requires synchronous account currentness');
-      }
-      assertNative(); abacus.assertCurrent(); typesafe.assertCurrent();
+      accountCurrent();
     };
     assertCurrent();
     const options: ProtectedSourceOwnerOptions = Object.freeze({ kind: 'hosted',

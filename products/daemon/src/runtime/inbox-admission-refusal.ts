@@ -1,3 +1,5 @@
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+
 /**
  * Why a configured inbox account could not be admitted, as a fixed token.
  *
@@ -21,10 +23,21 @@ export const INBOX_ADMISSION_ACTIONS: Readonly<Record<InboxAdmissionReason, stri
   unavailable: 'check the daemon log for the provider and retry by editing its settings',
 });
 
-export class InboxAdmissionRefusal extends Error {
+/**
+ * An inbox account that cannot be admitted, in the one refusal shape: the
+ * provider alone degrades (its reads say unavailable with the reason), the
+ * other providers keep serving, and the next step is the fixed action above.
+ */
+export class InboxAdmissionRefusal extends RefusalError {
   readonly reason: InboxAdmissionReason;
   constructor(reason: InboxAdmissionReason, message: string) {
-    super(message);
+    super(refusal({
+      code: `INBOX_${reason.toUpperCase().replace(/-/g, '_')}`,
+      state: 'the inbox account is not admitted',
+      reason: message,
+      next: [INBOX_ADMISSION_ACTIONS[reason]],
+      retryable: reason === 'settings-changing',
+    }));
     this.name = 'InboxAdmissionRefusal';
     this.reason = reason;
   }

@@ -107,6 +107,7 @@ describe('owned daemon process runner', () => {
     const fx = fixture(() => ({ async start() {}, close() { closeCalls++; return drain.promise; } }));
     await fx.handle.ready;
     fx.process.emit('SIGTERM');
+    await Promise.resolve();
     expect(closeCalls).toBe(1);
     const first = fx.handle.shutdown();
     fx.process.emit('SIGINT');
@@ -134,6 +135,7 @@ describe('owned daemon process runner', () => {
     }));
     await entered.promise;
     fx.process.emit('SIGTERM');
+    await Promise.resolve();
     expect(closed).toBe(true);
     await setImmediate();
     expect(fx.process.exits).toEqual([]);
@@ -236,6 +238,7 @@ describe('owned daemon process runner', () => {
     const fx = fixture(() => ({ async start() {}, close() { return drain.promise; } }), 1);
     await fx.handle.ready;
     void fx.handle.shutdown();
+    await Promise.resolve();
     fx.timers.expire();
     expect(await fx.handle.finished).toBe(1);
     drain.reject(new Error('PRIVATE_LATE_CLOSE_DETAILS'));
@@ -348,7 +351,7 @@ describe('real Bun process signal ownership', () => {
     } finally { await fx.cleanup(); }
   }, 10_000);
 
-  test('startup failure still drains before a value-free nonzero exit', async () => {
+  test('startup failure still drains before a nonzero exit that names the reason and masks credentials', async () => {
     const fx = childFixture('startup-failure');
     try {
       await fx.waitFor('CLOSING');
@@ -356,22 +359,21 @@ describe('real Bun process signal ownership', () => {
       fx.release('close');
       expect(await fx.done).toEqual({ code: 1, signal: null });
       expect(fx.output().stdout).toContain('CLOSED\nEXIT:1:0:0');
-      expect(fx.output().stderr).toContain('goodvibes daemon host failed: Daemon startup failed\n');
-      expect(fx.output().stderr).not.toContain('PRIVATE_PROCESS_FAILURE_SENTINEL');
-      expect(fx.output().stderr).not.toContain('process-lifecycle-child');
+      expect(fx.output().stderr).toContain('goodvibes daemon host failed: Daemon startup failed: Port 3421 is already in use');
+      expect(fx.output().stderr).toContain('(EADDRINUSE). ');
+      expect(fx.output().stderr).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789');
     } finally { await fx.cleanup(); }
   }, 10_000);
 
   for (const mode of ['factory-failure', 'close-failure', 'timeout']) {
-    test(`${mode} exits nonzero with cleaned signal ownership and no private error`, async () => {
+    test(`${mode} exits nonzero with cleaned signal ownership, names the reason and masks credentials`, async () => {
       const fx = childFixture(mode);
       try {
         if (mode !== 'factory-failure') { await fx.waitFor('READY'); fx.child.kill('SIGTERM'); }
         expect(await fx.done).toEqual({ code: 1, signal: null });
         expect(fx.output().stdout).toContain('EXIT:1:0:0');
-        expect(fx.output().stderr).toContain(`goodvibes daemon host failed: ${mode === 'factory-failure' ? 'Daemon startup failed' : mode === 'close-failure' ? 'Daemon shutdown failed' : 'Daemon shutdown deadline exceeded'}\n`);
-        expect(fx.output().stderr).not.toContain('PRIVATE_PROCESS_FAILURE_SENTINEL');
-        expect(fx.output().stderr).not.toContain('process-lifecycle-child');
+        expect(fx.output().stderr).toContain(`goodvibes daemon host failed: ${mode === 'factory-failure' ? 'Daemon startup failed: Port 3421 is already in use' : mode === 'close-failure' ? 'Daemon shutdown failed: Store did not close' : 'Daemon shutdown deadline exceeded\n'}`);
+        expect(fx.output().stderr).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789');
       } finally { await fx.cleanup(); }
     }, 10_000);
   }

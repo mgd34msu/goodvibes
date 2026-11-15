@@ -2,12 +2,10 @@ import { attachDaemonInboxTagging, type DaemonTriageTaggingActivation } from './
 import { createMultiOwnerDaemonInboxFactory } from './multiowner-inbox-composition.js';
 import { createInboxRouteResolver } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
-import { ownInboxEligibility } from './inbox-eligibility.js';
+import { ownAccountInboxStore } from './account-inbox-store.js';
 /** Explicit single-account mail inbox; does not enable all-provider default serve. */
 import { realpath } from 'node:fs/promises';
-import { join } from 'node:path';
 import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
-import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { createEmailInboxOwner, acquireAccountInboxIdentity, resolveAccountInboxElectionScope, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
   type EmailInboxAccount, type EmailInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
@@ -21,6 +19,11 @@ export interface EmailDaemonInboxOptions {
   /** Expected TLS endpoint/account/mailbox established by the trusted host. */
   readonly account: EmailInboxAccount;
   readonly screening: ProtectedSourceOwnerOptions;
+  /**
+   * The selected account's lifetime: aborted by the selector's setting and
+   * credential subscriptions. With it, that is the only currentness check.
+   */
+  readonly operation?: { readonly signal: AbortSignal; assertCurrent(): void } | undefined;
 }
 export interface EmailDaemonInboxFactories {
   readonly createOwner?: (...args: Parameters<typeof createEmailInboxOwner>) => EmailInboxOwner;
@@ -72,7 +75,8 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
     const mailConfig = createSurfaceEmailInboxConfigReader(configReaderWithOrigins(context.configManager));
     const clustered = context.configManager.get('cluster.enabled') === true;
     if (clustered && !controls.gatePollingOwned) throw new Error('Clustered inbox requires owned gate retirement');
-    const current = (): void => {
+    const selected = options.operation;
+    const current = selected ? (): void => { selected.assertCurrent(); } : (): void => {
       if ((context.configManager.get('cluster.enabled') === true) !== clustered
         || mailConfig('email.enabled') !== true) throw new Error('Email inbox requires enabled stable cluster mode');
     };
@@ -81,14 +85,11 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
     const workingDirectory = await realpath(context.workingDirectory);
     current();
     const mail = controls.createEmailService();
-    let eligibility: ReturnType<typeof ownInboxEligibility> | undefined;
-    let owner: EmailInboxOwner | undefined;
-    let release: (() => void) | undefined;
+    let owner: EmailInboxOwner;
+    let identity: Awaited<ReturnType<typeof acquireAccountInboxIdentity>>;
     let surface: T | undefined;
-    const constructed = Promise.withResolvers<T>();
-    void constructed.promise.catch(() => {});
     try {
-      const identity = await acquireAccountInboxIdentity({ workingDirectory, assertCurrent: current,
+      identity = await acquireAccountInboxIdentity({ workingDirectory, assertCurrent: current,
         beforeWrite: controls.beforeAccountIdentityWrite }, { provider: 'email', account: options.account });
       current();
       owner = (factories.createOwner ?? createEmailInboxOwner)({ identity, account: options.account, service: mail.service,
@@ -98,59 +99,25 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
           if (!surface?.getImapCheckpoint) throw new Error('Email inbox checkpoint storage is unavailable');
           return surface.getImapCheckpoint('email');
         } });
-      if (clustered && typeof owner.verifyEligibility !== 'function') throw new Error('Clustered email inbox requires an eligible owner');
-      current();
-      const electionScope = clustered ? resolveAccountInboxElectionScope(identity) : owner.scopeId;
-      const storeFileName = `inbox-email-${owner.scopeId}.sqlite`;
-      release = await acquireCrossProcessLock(join(workingDirectory, '.goodvibes', 'tui', 'operator', `${storeFileName}.owner.lock`),
-        { strictOwnership: true, totalTimeoutMs: 100 });
-      current();
-      const selectedOwner = owner;
-      surface = await register({ ...context, workingDirectory }, {
-        adapters: new Map([['email', selectedOwner.adapter]]), beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, storeFileName, ...(clustered ? { awaitInitialPoll: false } : {}),
-        acquireReadLease: () => selectedOwner.acquireReadLease(),
-        gatePolling: (_provider, control) => {
-          if (!clustered) return controls.gatePolling(`email:${electionScope}`, control);
-          eligibility = ownInboxEligibility({ verify: async () => {
-            const registration = await constructed.promise;
-            await registration.ready;
-            return selectedOwner.verifyEligibility!();
-          }, control,
-            ...(factories.eligibilityClock ? { clock: factories.eligibilityClock } : {}),
-            register: gated => controls.gatePollingOwned!(`email:${electionScope}`, gated),
-          });
-          return () => eligibility!.close();
-        },
-      }, selectedOwner, controls.beforeInboxTriageIdentityWrite, controls.beforeInboxTriageReceiptWrite);
-      constructed.resolve(surface);
-    } catch {
-      constructed.reject(new Error('Email inbox source construction failed'));
-      try { await Promise.all([owner?.close(), eligibility?.close()]); } finally { try { mail.close(); } finally { release?.(); } }
-      throw new Error('Email inbox composition could not acquire its owned account and storage');
+    } catch (error) {
+      try { mail.close(); } catch { /* The acquisition failure is the error reported. */ }
+      throw new Error('The email inbox could not acquire its owned account and storage', { cause: error });
     }
-    const registration = surface;
-    const selectedOwner = owner;
-    const unlock = release;
-    let closing: Promise<void> | undefined;
-    const close = (): Promise<void> => {
-      if (!closing) {
-        closing = Promise.resolve().then(async () => {
-          const results = await Promise.allSettled([registration.close(), selectedOwner.close()]);
-          let mailFailure = false;
-          try { mail.close(); } catch { mailFailure = true; }
-          // Storage retirement failure retains the lifetime lease.
-          if (results[0]!.status === 'fulfilled') unlock();
-          if (mailFailure || results.some(result => result.status === 'rejected')) throw new Error('Email inbox composition did not close cleanly');
-        });
-      }
-      return closing;
-    };
-    const result = {
-      ...registration,
-      unregister() { void close().catch(() => {}); },
-      ready: Promise.all([registration.ready, eligibility?.ready]).then(() => {}),
-      close,
-    };
+    const selectedOwner = owner, electionIdentity = identity;
+    const result = await ownAccountInboxStore({
+      provider: 'email', controls, workingDirectory, clustered, owner: selectedOwner, assertCurrent: current,
+      ...(factories.eligibilityClock ? { eligibilityClock: factories.eligibilityClock } : {}),
+      prepare: current,
+      electionScope: () => clustered ? resolveAccountInboxElectionScope(electionIdentity) : selectedOwner.scopeId,
+      register: async store => {
+        surface = await register({ ...context, workingDirectory }, {
+          adapters: new Map([['email', selectedOwner.adapter]]), beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, ...store,
+          acquireReadLease: () => selectedOwner.acquireReadLease(),
+        }, selectedOwner, controls.beforeInboxTriageIdentityWrite, controls.beforeInboxTriageReceiptWrite);
+        return surface;
+      },
+      releaseExtras: () => mail.close(),
+    });
     return triageTagging ? attachDaemonInboxTagging(result, triageTagging, controls, {
       provider: 'email', accountScopeId: selectedOwner.scopeId, assertCurrent: current,
       imap: { host: selectedOwner.account.host, port: selectedOwner.account.port, user: selectedOwner.account.username, mailbox: selectedOwner.account.mailbox },

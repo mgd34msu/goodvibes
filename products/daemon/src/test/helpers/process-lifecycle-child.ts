@@ -4,7 +4,9 @@ import { createInterface } from 'node:readline';
 import { runDaemonProcess } from '../../daemon/process-lifecycle.js';
 
 const mode = process.argv[2];
-const marker = 'PRIVATE_PROCESS_FAILURE_SENTINEL';
+// A credential-shaped value: the report must name the reason and mask this.
+const marker = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+const busyPort = () => Object.assign(new Error(`Port 3421 is already in use (token ${marker})`), { code: 'EADDRINUSE' });
 const events = (event: string) => { writeSync(1, `${event}\n`); };
 let releaseStart!: () => void;
 let releaseClose!: () => void;
@@ -21,12 +23,12 @@ process.on('exit', (code) => {
 
 runDaemonProcess(() => {
   events('ACQUIRED');
-  if (mode === 'factory-failure') throw new Error(marker);
+  if (mode === 'factory-failure') throw busyPort();
   return {
     async start() {
       events('STARTING');
       if (mode === 'held-start') await startGate;
-      if (mode === 'startup-failure') throw new Error(marker);
+      if (mode === 'startup-failure') throw busyPort();
       events('READY');
     },
     async close() {
@@ -38,7 +40,7 @@ runDaemonProcess(() => {
       }
       if (mode === 'held-start') await startGate;
       if (mode === 'delayed-close' || mode === 'held-start' || mode === 'startup-failure') await closeGate;
-      if (mode === 'close-failure') throw new Error(marker);
+      if (mode === 'close-failure') throw new Error(`Store did not close (token ${marker})`);
       events('CLOSED');
       input.close();
       process.stdin.pause();

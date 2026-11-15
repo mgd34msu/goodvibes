@@ -5,7 +5,7 @@ export type { BootDaemonOptions, BootedDaemon } from './boot.js';
 // replaced process.stdout/stderr and to exit-time truncation. Both the TUI
 // and the agent vendored this as an identical local mirror because the
 // published platform predated this export path; this is the one implementation.
-export { reportFatalBootFailure, writeExitingStdoutLine, writeFatalLine } from './fatal-boot-report.js';
+export { describeFatalFailure, reportFatalBootFailure, writeExitingStdoutLine, writeFatalLine } from './fatal-boot-report.js';
 // Port-conflict-honest Bun.serve wrapper: bounds a thrown request-handler
 // failure to a stack-free JSON 500 without swallowing a real bind-time
 // failure (e.g. EADDRINUSE), which still propagates to the caller.

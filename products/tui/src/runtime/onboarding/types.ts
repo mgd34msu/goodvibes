@@ -102,7 +102,7 @@ export interface OnboardingBindSettingsSnapshot {
 
 /**
  * Wizard wiring: read-only detection of a legacy `goodvibes-daemon.service`
- * systemd unit (see `../legacy-daemon-migration.ts`'s `LegacyUnitInfo`), carried
+ * systemd unit (see the shared `legacy-daemon-migration` engine's `LegacyUnitInfo`), carried
  * on the snapshot so the Network step can show the guided migration action only
  * when there is actually something to migrate. Never implies anything was
  * touched, detection only.
@@ -114,7 +114,7 @@ export interface OnboardingLegacyDaemonSnapshot {
   /**
    * Follow-up: the unit name this tool actually manages on this host,
    * resolved from the `service.serviceName` config key at snapshot-collection
-   * time (`resolveConfiguredServiceName`, `../legacy-daemon-migration.ts`),
+   * time (`resolveConfiguredServiceName`, the shared `legacy-daemon-migration` engine),
    * so the wizard's detection banner names the real unit instead of the
    * hardcoded default. Optional so snapshots built without config access
    * (fallbacks, older fixtures) stay valid; readers fall back to

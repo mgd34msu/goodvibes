@@ -14,9 +14,6 @@ import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/sto
 // The exact writer recipe is used only to construct actual old saved fixtures.
 const savedDefaultId = (path: string) => `${normalizeSpaceComponent(basename(path))}-${createHash('sha256').update(path).digest('hex').slice(0,10)}`;
 import { findCardNumberShapes } from '../platform/src/platform/security/card-shapes.ts';
-import { planningGoalSpecified } from '../platform/src/platform/knowledge/project-planning/batteries/readiness.ts';
-import { installJudgmentPort } from '../errors/src/judgment-port.ts';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { AgentConfigManager } from '../../../products/agent/src/config/host-settings.ts';
 import { TuiConfigManager } from '../../../products/tui/src/config/host-settings.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
@@ -177,41 +174,3 @@ test('native creation rejects caller options accessors and proxies before either
   expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory, proxy)).toThrow(JudgmentInputError);
   expect(calls).toBe(0);
 });
-
-for (const operation of ['evaluate', 'upsertState'] as const) {
-  for (const retirement of ['selected-default', 'composition-tail'] as const) {
-    test(`${operation} retains its native ${retirement} through an actual readiness reading`, async () => {
-      const f = await fixture(ConfigManager, true, false), before = f.bytes();
-      const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-      const facts = { goal: 'Verify the isolated native read', scope: 'Read only', knownContext: [], constraints: [], assumptions: [],
-        tasks: [], answeredQuestions: [], decisions: [] };
-      const fake = fakePort((name, question, state) => {
-        expect(name).toBe('specified'); expect(question).toEqual(planningGoalSpecified.items.specified.question);
-        expect(state).toEqual(facts); return noulAnswer(0.99);
-      });
-      const previous = installJudgmentPort({ ...fake.port, async ask(request) {
-        const result = await fake.port.ask(request); entered.resolve(); await release.promise; return result;
-      } });
-      cleanup.push(() => { installJudgmentPort(previous); });
-      const options = { extra: { note: 'Ordinary composition input' }, waitForStartup: async () => undefined };
-      const { service } = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory, options);
-      const target = service;
-      const key = 'defaultProjectId';
-      const original = Object.getOwnPropertyDescriptor(target, key);
-      if (!original || !('value' in original)) throw new Error('Missing native owner slot');
-      const pending = service[operation]({ state: { goal: facts.goal, scope: facts.scope, createdAt: 1 } });
-      const observed = pending.then(() => 'published', () => 'held');
-      try {
-        const started = await Promise.race([entered.promise.then(() => 'entered'), observed.then(() => 'completed-before-read')]);
-        expect(started).toBe('entered');
-        if (retirement === 'composition-tail') options.extra.note = 'Changed composition input';
-        else Object.defineProperty(target, key, { ...original, value: join(f.root, 'retired-native-owner') });
-        release.resolve();
-        const outcome = await observed;
-        expect(fake.requests).toHaveLength(1);
-        expect(f.bytes()).toEqual(before);
-        expect(outcome).toBe('held');
-      } finally { release.resolve(); Object.defineProperty(target, key, original); await observed; }
-    }, 10000);
-  }
-}

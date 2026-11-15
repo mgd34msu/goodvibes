@@ -53,10 +53,13 @@ export async function runHomeGraphSyncSelfImprovementRound(
     logger.info('Home Graph sync self-improvement pump stopped: background knowledge work is paused for memory pressure', { spaceId, round });
     return undefined;
   }
+  // An automatic producer never forces: a gap inside its retry window, or with
+  // a final task, is skipped from what is stored, so an unrepairable gap is not
+  // searched again every round.
   const result = await runtime.semanticService.selfImprove({
     knowledgeSpaceId: spaceId,
     reason: 'homegraph-sync',
-    force: round > 0,
+    force: false,
     signal,
   }, { stopWhenPaused: true });
   if (signal.aborted) return undefined;
@@ -214,27 +217,26 @@ export async function refreshHomeGraphDevicePagesForSourceIds(
   }
 }
 
+/**
+ * Another round runs only when this one changed something that can open more
+ * work (a gap closed, a source accepted, a fact promoted, a gap created) or it
+ * stopped early with gaps left unread (truncated or out of budget). A gap that
+ * was attempted and is still open is waiting out its retry window; it is not a
+ * reason to go again.
+ */
 export function shouldContinueHomeGraphSyncSelfImprovement(result: {
   readonly createdGaps?: number | undefined;
   readonly truncated?: boolean | undefined;
   readonly budgetExhausted?: boolean | undefined;
-  readonly processedGaps?: number | undefined;
-  readonly repairableGaps: number;
-  readonly queuedTasks: number;
   readonly closedGaps: number;
   readonly acceptedSourceIds?: readonly string[] | undefined;
   readonly promotedFactCount?: number | undefined;
-  readonly taskIds: readonly string[];
 }): boolean {
-  const madeProgress = result.closedGaps > 0
+  if (result.truncated === true || result.budgetExhausted === true) return true;
+  return result.closedGaps > 0
     || (result.createdGaps ?? 0) > 0
-    || result.queuedTasks > 0
-    || result.taskIds.length > 0
     || (result.acceptedSourceIds?.length ?? 0) > 0
-    || (result.promotedFactCount ?? 0) > 0
-    || (result.processedGaps ?? 0) > 0;
-  if (!madeProgress) return false;
-  return result.truncated === true || result.budgetExhausted === true || result.repairableGaps > 0 || result.queuedTasks > 0;
+    || (result.promotedFactCount ?? 0) > 0;
 }
 
 export function readHomeGraphInstallationIdFromSpace(spaceId: string): string | undefined {

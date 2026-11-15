@@ -858,6 +858,8 @@ export interface KnowledgeMapResult {
   readonly edgeCount: number;
   readonly totalNodeCount?: number | undefined;
   readonly totalEdgeCount?: number | undefined;
+  /** Present when more records matched than this map shows: pass it back as `cursor` for the next slice. */
+  readonly nextCursor?: string | undefined;
   readonly facets?: KnowledgeMapFacets | undefined;
   readonly nodes: readonly KnowledgeMapNode[];
   readonly edges: readonly KnowledgeMapEdge[];

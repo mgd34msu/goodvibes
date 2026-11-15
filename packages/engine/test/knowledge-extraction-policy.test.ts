@@ -7,7 +7,7 @@ import {
   hasUsefulKnowledgeExtractionText,
   knowledgeExtractionNeedsRefresh,
 } from '../platform/src/platform/knowledge/extraction-policy.js';
-import { extractionReadability, pdfTextDecoding } from '../platform/src/platform/knowledge/batteries/extraction-readability.js';
+import { extractionReadability } from '../platform/src/platform/knowledge/batteries/extraction-readability.js';
 import { registry } from '../platform/src/platform/knowledge/extraction/judgment-registry.js';
 import type { KnowledgeExtractionRecord } from '../platform/src/platform/knowledge/types.js';
 
@@ -31,9 +31,8 @@ function extraction(overrides: Partial<KnowledgeExtractionRecord>): KnowledgeExt
 }
 
 describe('knowledge extraction refresh policy', () => {
-  test('registers both decisions and runs the synthetic labelled readability fixtures', async () => {
+  test('registers the readability decision and runs the synthetic labelled readability fixtures', async () => {
     expect(registry.list()).toContain(extractionReadability);
-    expect(registry.list()).toContain(pdfTextDecoding);
     for (const fixture of extractionReadability.fixtures) {
       const sample = (fixture.state as { sample: string }).sample;
       const fake = answer(fixture.expect.readable === 'yes' ? 0.99 : 0.01);

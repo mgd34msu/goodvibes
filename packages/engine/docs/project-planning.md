@@ -1,56 +1,17 @@
 # Project planning
 
-Project Planning is the platform support layer for the TUI's conversational planning
-loop. It stores project-scoped planning artifacts in the knowledge system and
-can evaluate whether a plan is ready to execute, but it does not start,
-resume, or drive planning conversations.
+Project Planning holds the project's **work plan**: the durable task checklist
+that agent tools, the web SDK, the session briefing and `/workstream` read and
+write. The work plan is the one plan.
+
+The same space also keeps the **planning state** and **project language**
+records written by the retired planning interview. They are read-only history:
+nothing writes, evaluates, answers or approves them any more, and a saved
+approval authorises no work. Their write routes answer `410` with code
+`PLANNING_STATE_READ_ONLY`. New planning starts from native intake and the work
+plan; decision records are still written.
 
 Accessible via `@goodvibes-jev/engine/platform/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
-
-## Boundary
-
-The platform never decides what to ask or when to ask it; it only stores what the
-conversation produces and reports whether the result is ready to execute. The
-TUI is what actually runs the planning conversation, and it owns:
-
-- **Detecting planning intent.** Recognizing, from ordinary conversation, that
-  the user wants to plan something rather than just chat or make a one-off
-  request.
-- **Inspecting the project.** Reading the repo, its docs, its settings, and
-  existing knowledge records before asking the user anything, so questions
-  are informed rather than generic.
-- **The interview loop.** Driving the back-and-forth that turns a vague ask
-  into a goal, a scope, and a list of open questions.
-- **Asking one question at a time.** Keeping the conversation disciplined
-  rather than dumping a checklist on the user at once.
-- **The passive planning panel.** Rendering the state the platform returns as a
-  visible plan the user can watch build up.
-- **Execution approval.** Deciding when a plan is actually ready to hand to
-  agents, which the platform can recommend against but never force.
-- **Agent assignment UX.** Presenting which agent would take which task and
-  letting the user confirm or change it.
-
-The platform owns the passive infrastructure underneath that experience:
-
-- **Shared TypeScript types and operator contracts** that the TUI, webui, and
-  daemon all use to agree on the shape of a plan.
-- **Project-scoped durable planning artifacts**, the actual records described
-  below, persisted so a plan survives a restart.
-- **Project-language and ambiguity records**, so a term the user has already
-  clarified is not re-litigated in a later conversation or by a different
-  agent.
-- **Decision records**, for choices worth remembering beyond the code itself.
-- **Task, dependency, verification, and agent-assignment metadata**, the
-  structured pieces a plan decomposes into once it has a goal.
-- **Readiness evaluation**, which inspects a plan and returns concrete gaps
-  and a next question rather than a bare yes/no.
-- **Knowledge and wiki storage helpers**, since planning artifacts are stored
-  as ordinary knowledge records rather than a separate persistence system.
-
-The daemon never initiates planning on its own. It exposes storage and
-evaluation routes only. Home Assistant, companion apps, ntfy, Slack, webhooks,
-and other programmatic surfaces are not routed into planning loops by this
-feature.
 
 ## Work plans
 
@@ -82,12 +43,9 @@ route and a task patch that sets `status` follow the same rule and emit the same
 status-changed event. A status change without a `reason` clears the previous
 `statusReason` and sets or clears `completedAt` for the new status.
 
-Tasks derived from a planning state (`source` of `planning`) follow the planning
-state only where it changed: publishing the same state again does not undo a
-status, order, owner, notes or priority an operator set on the work-plan task. A
-planning task that disappears from the state is tagged `planning-removed` rather
-than deleted, and a task an operator deletes or clears from the work plan is not
-brought back by a later publication.
+Tasks with `source` of `planning` were copied from a planning state by the
+retired interview. They are ordinary work-plan tasks now: nothing updates them
+from a planning state again.
 
 | Status | What it means |
 | --- | --- |
@@ -175,9 +133,9 @@ Artifact kinds:
 
 | Kind | Purpose |
 |---|---|
-| `state` | Live planning state for the current project conversation |
+| `state` | Saved planning state from the retired interview (read-only history) |
 | `decision` | Durable decision record for meaningful choices |
-| `language` | Canonical project vocabulary and resolved ambiguities |
+| `language` | Saved project vocabulary and resolved ambiguities (read-only history) |
 | `work-plan` | Shared durable project task list; persisted as a planning artifact (see Work Plans above) |
 
 This keeps planning integrated with the knowledge/wiki store without adding a
@@ -185,8 +143,7 @@ separate persistence system.
 
 ## Planning state
 
-The planning state shape is designed for the TUI planning panel and execution
-handoff:
+A saved planning state, as `projectPlanning.state.get` returns it:
 
 ```ts
 {
@@ -214,43 +171,8 @@ handoff:
 }
 ```
 
-The platform does not decide what the TUI should ask next by itself. It returns gaps
-and a suggested `nextQuestion` so the TUI can keep the conversation disciplined
-while preserving conversational control.
-
-## Readiness evaluation
-
-`ProjectPlanningService.evaluate()` and
-`POST /api/projects/planning/evaluate` do not persist state unless the caller
-separately upserts state. They can call the configured judgment model.
-
-The evaluator checks for:
-
-- missing goal
-- missing scope or constraints
-- unresolved questions
-- an unclear goal, read by the judgment model from the whole state (there is no
-  word list). In Classic mode no model reading is made, so this check is skipped
-  and the result says so
-- missing task decomposition
-- missing dependency graph for multi-task plans (an advisory gap; dependencies
-  listed on the tasks count)
-- missing verification gates
-- missing user approval before execution
-
-The output contains:
-
-- `readiness`: `needs-user-input` while any gap is blocking, otherwise
-  `executable`. An advisory gap is reported in `gaps` but does not change
-  readiness
-- `gaps`, including a blocking `readiness-unavailable` gap when the model
-  reading is unavailable or inconclusive
-- `readinessAssessment`: what the readiness rests on (`semantic-and-native`, or
-  `native-structure-and-owner-approval` when the model reading was skipped)
-- `operationProvenance` (`classic`) and `semanticAssessment` (`not-evaluated`)
-  when the model reading was skipped
-- `nextQuestion` when a gap has a concrete question
-- the normalized state with the evaluated readiness
+`readiness` and `executionApproved` are what the record held when it was saved.
+Nothing re-evaluates them, and neither one starts or permits work.
 
 ## Decision records
 
@@ -271,8 +193,8 @@ Stored fields include:
 
 ## Project language
 
-Project language records prevent future TUI turns and agents from re-litigating
-terminology. They can store:
+Saved project language records hold the vocabulary the retired interview
+collected. They are read-only and can hold:
 
 - canonical terms
 - terms to avoid because they are ambiguous
@@ -306,13 +228,10 @@ Example:
 | Route | Method | Admin | Purpose |
 |---|---|---:|---|
 | `/api/projects/planning/status` | `GET` | no | Return artifact counts and passive capabilities |
-| `/api/projects/planning/state` | `GET` | no | Read the current planning state |
-| `/api/projects/planning/state` | `POST` | yes | Persist planning state and evaluated readiness |
-| `/api/projects/planning/evaluate` | `POST` | no | Evaluate inline or stored state without mutating |
+| `/api/projects/planning/state` | `GET` | no | Read a saved planning state |
 | `/api/projects/planning/decisions` | `GET` | no | List project decisions |
 | `/api/projects/planning/decisions` | `POST` | yes | Record a project decision |
-| `/api/projects/planning/language` | `GET` | no | Read project vocabulary and ambiguity records |
-| `/api/projects/planning/language` | `POST` | yes | Update project vocabulary and ambiguity records |
+| `/api/projects/planning/language` | `GET` | no | Read saved project vocabulary and ambiguity records |
 | `/api/projects/planning/work-plan` | `GET` | no | Read the work-plan snapshot |
 | `/api/projects/planning/work-plan/tasks` | `GET` | no | Read the work-plan snapshot (task view) |
 | `/api/projects/planning/work-plan/tasks` | `POST` | yes | Create a work-plan task |
@@ -323,20 +242,17 @@ Example:
 | `/api/projects/planning/work-plan/tasks/:taskId` | `DELETE` | yes | Delete a work-plan task |
 | `/api/projects/planning/work-plan/tasks/:taskId/status` | `POST` | yes | Set a work-plan task status |
 
-Each operator method mirrors one of the routes above; the planning methods
-manage the interview and decision artifacts, and the work-plan methods manage
-durable tasks.
+Each operator method mirrors one of the routes above; the planning-state and
+language methods read the saved interview records, the decision methods keep
+decision records, and the work-plan methods manage the live task checklist.
 
 | Method | What it does |
 | --- | --- |
 | `projectPlanning.status` | Return passive planning artifact counts and capabilities without starting a planning loop |
-| `projectPlanning.state.get` | Return the current project-scoped planning state artifact |
-| `projectPlanning.state.upsert` | Persist planning state from the interview loop and evaluate readiness |
-| `projectPlanning.evaluate` | Validate planning state and return gaps and next-question hints without mutating anything |
+| `projectPlanning.state.get` | Return a saved planning state record |
 | `projectPlanning.decisions.list` | Return durable decision records from the project planning space |
 | `projectPlanning.decisions.record` | Persist a meaningful project decision for future context |
-| `projectPlanning.language.get` | Return canonical project vocabulary and resolved ambiguity records |
-| `projectPlanning.language.upsert` | Persist vocabulary and ambiguity resolutions without touching live sessions |
+| `projectPlanning.language.get` | Return saved project vocabulary and resolved ambiguity records |
 | `projectPlanning.workPlan.snapshot` | Return the durable work-plan snapshot with tasks and status counts |
 | `projectPlanning.workPlan.tasks.list` | List tasks with optional status, owner, parent, or contract filters |
 | `projectPlanning.workPlan.task.create` | Create a durable work-plan task |
@@ -347,22 +263,12 @@ durable tasks.
 | `projectPlanning.workPlan.tasks.reorder` | Replace the work plan's task ordering |
 | `projectPlanning.workPlan.clearCompleted` | Remove completed tasks, clearing `done` only by default |
 
-## TUI integration shape
+## Terminal integration
 
-The TUI should use this feature as a passive backing store:
-
-1. Detect planning intent in a normal conversation.
-2. Inspect code, docs, settings, and existing project knowledge before asking.
-3. Upsert planning state as context is discovered.
-4. Call `projectPlanning.evaluate` for readiness gaps.
-5. Ask one precise question at a time in the normal conversation.
-6. Update project language and decision records as answers resolve ambiguity.
-7. Decompose tasks, dependencies, verification gates, and agent assignments.
-8. Request user approval before execution.
-9. Execute locally or delegate agents only after approval.
-
-The planning panel can render the same state returned by the platform. The daemon
-does not own panel state or conversational transitions.
+The terminal apps show saved planning state records as read-only history
+(`/project-plan history` and the planning modal) and drive real work through
+the work plan and `/workstream`. `/project-plan approve` and `answer` are
+retired: they change nothing and say so.
 
 ## Next reads
 

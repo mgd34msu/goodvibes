@@ -4,25 +4,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore, ProjectPlanningService } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { ConfigModal } from '../../../input/config-modal.ts';
 import { createPlanningModalSurface, type PlanningModalService } from '../../../views/modals/planning-modal.ts';
 import { actionCtx, viewText } from './modal-surface-test-helpers.ts';
+import { seedHistoricalPlanningState } from '../../helpers/planning-history.ts';
 
 const roots: string[] = [];
 const stores: KnowledgeStore[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;
 let judgment: ReturnType<typeof fakePort>;
 beforeEach(() => {
-  judgment = fakePort((name, question, state) => {
-    if (name !== 'specified' || question.type !== 'noul' || !state || typeof state !== 'object' || Array.isArray(state)
-      || state.goal !== 'Inspect historical retries' || state.scope !== 'Only retry helpers') throw new Error('Unexpected saved goal validation');
-    return noulAnswer(0.99);
-  });
-  previous = installJudgmentPort({ ...judgment.port, ask: request => {
-    if (request.context?.battery !== 'engine.knowledge.planning-goal-specified') throw new Error('Unexpected saved planning reading');
-    return judgment.port.ask(request);
-  } });
+  // Reading saved history never asks the model; any request fails the test.
+  judgment = fakePort(() => { throw new Error('Unexpected model request while reading saved planning'); });
+  previous = installJudgmentPort(judgment.port);
 });
 afterEach(async () => {
   installJudgmentPort(previous);
@@ -45,21 +40,17 @@ function passiveService(service: ProjectPlanningService): PlanningModalService {
 async function savedRecord(openQuestions: boolean, approved: boolean) {
   const root = mkdtempSync(join(tmpdir(), 'planning-modal-store-')); roots.push(root);
   const path = join(root, 'planning.sqlite');
-  const { store, service } = openStore(path);
-  await service.upsertState({ projectId: 'fixture', state: {
+  const { store } = openStore(path);
+  await seedHistoricalPlanningState(store, 'fixture', {
     goal: 'Inspect historical retries', scope: 'Only retry helpers', knownContext: ['Keep requests local'],
     openQuestions: openQuestions ? [{ id: '2', prompt: 'Which saved retry helpers belong in scope?', status: 'open', recommendedAnswer: 'Saved recommendation only' }] : [],
     answeredQuestions: [{ id: 'answered', prompt: 'Keep the original record?', answer: 'Yes, exactly. 界 e\u0301 😀', status: 'answered', answeredAt: 123 }],
     tasks: [{ id: 'inspect', title: 'Inspect retry behavior', status: 'completed', verification: ['Run retry tests'] }],
     verificationGates: [{ id: 'tests', description: 'Retry tests pass' }], executionApproved: approved,
     metadata: { active: true, approvedAt: approved ? 456 : null, approvedFrom: approved ? 'saved-operator' : null, opaqueHistory: ['preserve', { tail: 'exact-source-tail' }] },
-  } });
+  });
   await store.close();
   const reopened = openStore(path); await reopened.store.init();
-  // Creating the fixture validates its goal; subsequent history views only read it.
-  expect(judgment.requests).toHaveLength(1);
-  expect(judgment.requests[0]?.context?.battery).toBe('engine.knowledge.planning-goal-specified');
-  judgment.requests.length = 0;
   return { path, ...reopened };
 }
 async function record(store: KnowledgeStore, service: ProjectPlanningService) {
@@ -70,9 +61,6 @@ for (const questions of [true, false]) for (const approved of [true, false]) {
   test(`saved ${questions ? 'question' : 'no-question'} history, approval ${approved}, is read-only across open, refresh, close and restart`, async () => {
     const f = await savedRecord(questions, approved);
     const before = await record(f.store, f.service); const bytes = readFileSync(f.path);
-    const evaluate = spyOn(f.service, 'evaluate');
-    const stateWrite = spyOn(f.service, 'upsertState');
-    const apply = spyOn(f.service, 'applyStateAction');
     const sourceWrite = spyOn(f.store, 'upsertSource');
     const sourceReplace = spyOn(f.store, 'replaceSourceRecord');
     const conditionalWrite = spyOn(f.store, 'upsertSourceIfCurrent');
@@ -94,8 +82,8 @@ for (const questions of [true, false]) for (const approved of [true, false]) {
       for (const action of ['submit', 'approve', 'dismiss']) surface.onAction?.(action, actionCtx({ id: 'answer:1:approve-execution', label: 'Approve execution' }, context));
       for (let count = 0; count < 2; count++) { expect(modal.fireAction('r', context)).toBe(true); await flush(); }
       modal.close(); modal.open(surface); await flush(); modal.close();
-      expect(evaluate).not.toHaveBeenCalled(); expect(judgment.requests).toEqual([]);
-      for (const write of [stateWrite, apply, sourceWrite, sourceReplace, conditionalWrite]) expect(write).not.toHaveBeenCalled();
+      expect(judgment.requests).toEqual([]);
+      for (const write of [sourceWrite, sourceReplace, conditionalWrite]) expect(write).not.toHaveBeenCalled();
       expect(commands).toEqual([]); expect(nativeInputs).toEqual([]);
       expect(readFileSync(f.path)).toEqual(bytes);
       expect(await record(f.store, f.service)).toEqual(before);
@@ -112,7 +100,7 @@ for (const questions of [true, false]) for (const approved of [true, false]) {
       expect(readFileSync(f.path)).toEqual(bytes); expect(judgment.requests).toEqual([]);
     } finally {
       modal.close();
-      for (const spy of [evaluate, stateWrite, apply, sourceWrite, sourceReplace, conditionalWrite]) spy.mockRestore();
+      for (const spy of [sourceWrite, sourceReplace, conditionalWrite]) spy.mockRestore();
     }
   });
 }

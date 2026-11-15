@@ -1,21 +1,15 @@
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KnowledgeStore, ProjectPlanningService, type ProjectPlanningStateUpsertInput } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { KnowledgeStore, ProjectPlanningService } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
-import { selectedPlanningTarget } from '../../input/commands/planning-action-target.ts';
 import { registerPlanningRuntimeCommands } from '../../input/commands/planning-runtime.ts';
-import { judgmentInputCardProblem } from '@goodvibes-jev/engine/platform/platform/gate';
+import { seedHistoricalPlanningState } from '../helpers/planning-history.ts';
 
 const roots: string[] = [];
 const stores: KnowledgeStore[] = [];
-let previous: ReturnType<typeof installJudgmentPort>;
-beforeEach(() => { previous = installJudgmentPort(fakePort(name => noulAnswer(name === 'scope' || name === 'approval' ? 0.99 : 0.01)).port); });
 afterEach(async () => {
-  installJudgmentPort(previous);
   // Close every opened sqlite handle before its directory is removed.
   for (const store of stores.splice(0)) await store.close();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -25,102 +19,38 @@ async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'planning-record-command-')); roots.push(root);
   const path = join(root, 'planning.sqlite');
   const store = new KnowledgeStore({ dbPath: path }); stores.push(store);
+  await seedHistoricalPlanningState(store, 'fixture', {
+    goal: 'Inspect retries', openQuestions: [{ id: '2', prompt: 'Which retry helpers belong in scope?', status: 'open' }],
+    executionApproved: true, metadata: { savedOwner: 'historical fixture' },
+  });
   const service = new ProjectPlanningService(store);
-  const authored: ProjectPlanningStateUpsertInput['state'] = {
-    goal: '  Inspect retries\nwithout widening scope  ', scope: 'Only retry helpers', knownContext: ['Keep requests local'],
-    openQuestions: [{ id: '2', prompt: 'Which retry helpers belong in scope?', status: 'open' }, { id: 'other', prompt: 'Which tests should run?', status: 'open' }],
-    tasks: [{ id: 'inspect', title: 'Inspect retry behavior', verification: ['Run retry tests'] }],
-    verificationGates: [{ id: 'tests', description: 'Retry tests pass' }], executionApproved: false,
-    metadata: { savedOwner: 'historical fixture', custom: { retain: true } },
-  };
-  await service.upsertState({ projectId: 'fixture', state: authored });
   const registry = new CommandRegistry(); registerPlanningRuntimeCommands(registry);
   const output: string[] = []; const opened: string[] = [];
   const ctx = {
     print: (message: string) => output.push(message), openModal: (name: string) => { opened.push(name); },
     workspace: { projectPlanningService: service, projectPlanningProjectId: 'fixture' },
-    dispatchNativeIntakeTurn: async () => { throw new Error('Historical record edits cannot dispatch native intake'); },
+    dispatchNativeIntakeTurn: async () => { throw new Error('Saved planning history cannot dispatch native intake'); },
   } as unknown as CommandContext;
   const execute = (args: string[]) => registry.execute('project-plan', args, ctx);
-  return { path, store, service, execute, output, opened, authored };
+  return { path, execute, output, opened };
 }
 
-async function reopened(path: string) {
-  const store = new KnowledgeStore({ dbPath: path }); stores.push(store); await store.init();
-  return { sources: store.listSources(1000).sort((a, b) => a.id.localeCompare(b.id)), state: await new ProjectPlanningService(store).getState({ projectId: 'fixture' }) };
-}
-
-/** Real persisted comparison tokens for ordinary stale-source fixture cases. */
-async function ordinaryPlanningRevision(store: KnowledgeStore, service: ProjectPlanningService) {
-  let selected = await service.getState({ projectId: 'fixture' });
-  for (let attempt = 0; attempt < 32; attempt++) {
-    if (!selected.source || !selected.revision) throw new Error('Expected an actual persisted planning revision');
-    if (judgmentInputCardProblem(selected.revision.generation) === undefined) return selected;
-    // Change setup metadata through the real writer; never fabricate a revision
-    // or relax the privacy floor for an unmatched selected comparison token.
-    await store.upsertSource({ ...selected.source,
-      metadata: { ...selected.source.metadata, ordinaryFixtureRevision: `fixture-${attempt}` },
-    });
-    selected = await service.getState({ projectId: 'fixture' });
-  }
-  throw new Error('Could not select an ordinary persisted planning revision');
-}
-
-for (const action of ['approve', 'answer']) {
-  test(`explicit historical ${action} rejects a replaced revision without changing saved bytes`, async () => {
-    const clock = spyOn(Date, 'now').mockReturnValue(70_000);
-    try {
-      const f = await fixture();
-      // This case exercises stale-source refusal, not protected-token admission.
-      // Select a genuine ordinary persisted revision; dedicated platform cases
-      // retain explicit PAN-shaped and caller-forged generation coverage.
-      const selected = await ordinaryPlanningRevision(f.store, f.service);
-      await f.service.upsertState({ projectId: 'fixture', state: { ...f.authored, goal: 'A replacement goal', executionApproved: true,
-        metadata: { ...f.authored.metadata, approvedAt: 42, approvedFrom: 'previous-owner' } } });
-      const before = await reopened(f.path); const bytes = readFileSync(f.path);
-      expect(before.state.state!.updatedAt).toBe(selected.state!.updatedAt);
-      expect(before.state.revision).not.toEqual(selected.revision);
-      await f.execute([action, ...selectedPlanningTarget(selected.state!.id, selected.revision!), ...(action === 'answer' ? ['2', 'Too late'] : [])]);
-      expect(f.output.join('\n')).toContain('Planning changed.');
-      expect(f.opened).toEqual([]);
-      expect(readFileSync(f.path)).toEqual(bytes);
-      expect(await reopened(f.path)).toEqual(before);
-    } finally { clock.mockRestore(); }
-  });
-}
-
-test('selected numeric IDs and explicit current indexes still edit saved questions without reopening an interview', async () => {
+test('retired approve and answer change nothing and say where work is tracked', async () => {
   const f = await fixture();
-  const selected = await f.service.getState({ projectId: 'fixture' });
-  const evaluate = spyOn(f.service, 'evaluate').mockImplementation(async () => { throw new Error('No fresh interview evaluation'); });
-  try {
-    await f.execute(['answer', ...selectedPlanningTarget(selected.state!.id, selected.revision!), '2', 'Only retry helpers.']);
-    const afterSelected = await f.service.getState({ projectId: 'fixture' });
-    expect(afterSelected.state!.answeredQuestions.map(question => question.id)).toEqual(['2']);
-    expect(afterSelected.state!.openQuestions.map(question => question.id)).toEqual(['other']);
-    await f.execute(['answer', '1', 'Run the remaining tests.']);
-    const answered = await f.service.getState({ projectId: 'fixture' });
-    await f.execute(['approve', ...selectedPlanningTarget(answered.state!.id, answered.revision!)]);
-    const restored = (await reopened(f.path)).state;
-    expect(restored.state!.answeredQuestions.map(question => [question.id, question.answer])).toEqual([
-      ['2', 'Only retry helpers.'], ['other', 'Run the remaining tests.'],
-    ]);
-    expect(restored.state!.openQuestions).toEqual([]);
-    expect(restored.state!.executionApproved).toBe(true);
-    expect(restored.state!.metadata).toMatchObject({ savedOwner: 'historical fixture', custom: { retain: true }, approvedFrom: 'plan-command' });
-    expect(restored.state!.goal).toBe(selected.state!.goal);
-    expect(f.output.join('\n')).toContain('Historical planning approval recorded; no native work authorized.');
-    expect(f.output.join('\n')).not.toContain('Next question:');
-    expect(f.output.join('\n')).not.toContain('Readiness:');
-    expect(evaluate).not.toHaveBeenCalled();
-  } finally { evaluate.mockRestore(); }
+  const bytes = readFileSync(f.path);
+  await f.execute(['approve']);
+  await f.execute(['answer', '1', 'Only retry helpers']);
+  expect(f.output.join('\n')).toContain('"/project-plan approve" is retired');
+  expect(f.output.join('\n')).toContain('"/project-plan answer" is retired');
+  expect(f.output.join('\n')).toContain('/workstream');
+  expect(f.opened).toEqual([]);
+  expect(readFileSync(f.path)).toEqual(bytes);
 });
 
-test('history and native recovery view commands preserve saved approval metadata and file bytes', async () => {
-  const f = await fixture(); await f.execute(['approve']);
-  const before = await reopened(f.path); const bytes = readFileSync(f.path);
+test('history and native recovery view commands leave saved planning bytes unchanged', async () => {
+  const f = await fixture();
+  const bytes = readFileSync(f.path);
   await f.execute(['history']); await f.execute(['panel']); await f.execute([]);
-  expect(f.opened.slice(-3)).toEqual(['planning-modal', 'native-work-ledger-modal', 'native-work-ledger-modal']);
+  expect(f.opened).toEqual(['planning-modal', 'native-work-ledger-modal', 'native-work-ledger-modal']);
   expect(readFileSync(f.path)).toEqual(bytes);
-  expect(await reopened(f.path)).toEqual(before);
 });

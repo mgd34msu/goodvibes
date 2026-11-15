@@ -271,7 +271,7 @@ test('reopened native store conservatively retriages saved fingerprints once wit
   const f = await fixture(), fake = readings('review'); let reopened: KnowledgeStore | undefined;
   try {
     await f.run(); const saved = f.store.getIssue(f.issues[0]!.id)!.metadata.triage;
-    expect(saved).toHaveProperty('cacheReference'); expect(saved).not.toHaveProperty('providerIdentity');
+    expect(saved).toHaveProperty('inputHash'); expect(saved).not.toHaveProperty('providerIdentity');
     reopened = await f.reload();
     const run = () => runHomeGraphIssueTriage({ store: reopened!, knowledgeSpaceId: spaceId });
     expect((await run()).reviewed).toBe(1); expect(fake.requests).toHaveLength(2);
@@ -281,7 +281,7 @@ test('reopened native store conservatively retriages saved fingerprints once wit
 
 test('application rejects an asynchronous or throwing source restriction before any ordinary write', async () => {
   const f = await fixture(), before = f.snapshot();
-  const application = { issue: f.issues[0]!, node: f.node, cacheReference: () => 'actual-answered-reference',
+  const application = { issue: f.issues[0]!, node: f.node, inputHash: 'actual-answered-reference',
     plan: { reference: 'issue-1', action: 'review' as const, probability: 0.97, facts: {}, decisionIds: [],
       model: 'jev-1.13.0', requestedModel: 'jev-latest', origin: 'automatic-judgment' as const, batteries: [] } };
   try {
@@ -307,7 +307,7 @@ test('a thrown rejected readback after acknowledged commit is drained without hi
   });
   try {
     expect((await f.run()).reviewed).toBe(1);
-    expect(read(f.issues[0]!.id)!.metadata.triage).toHaveProperty('cacheReference');
+    expect(read(f.issues[0]!.id)!.metadata.triage).toHaveProperty('inputHash');
     expect((await f.run()).reviewed).toBe(1); expect(fake.requests).toHaveLength(2);
     expect((await f.run()).skipped).toBe(1);
   } finally { readback.mockRestore(); publication.mockRestore(); await f.store.close(); }

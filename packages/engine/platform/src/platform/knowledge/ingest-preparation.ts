@@ -1,7 +1,6 @@
 import { snapshotNodeInput } from './activation/projection.js';
-import { KnowledgeEntityAliasHoldError } from './entity-aliases.js';
 import type { KnowledgeIngestContext } from './ingest-context.js';
-import { observeKnowledgeValue } from './local-value-observation.js';
+import { KnowledgeIngestStoppedError } from './ingest-stopped.js';
 import { prepareKnowledgeSourceRecord } from './store-evidence-writes.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from './types.js';
 
@@ -11,13 +10,23 @@ export function stageKnowledgePendingSource(context: KnowledgeIngestContext,
   return snapshotNodeInput(prepareKnowledgeSourceRecord(input, context.store.getSource(input.id)));
 }
 
-/** Bind asynchronous preparation to retained state, including a newly reserved URI. */
+/**
+ * The one guard of an ingest: the stored source row, its extraction and the
+ * owner of the canonical URI, compared by store generation (integers, no copy
+ * of the rows). An abort is a cancellation; a moved row is a change.
+ */
 export function knowledgeIngestGuard(context: KnowledgeIngestContext, sourceId: string,
   canonicalUri?: string, signal?: AbortSignal): () => void {
-  const read = () => ({ source: context.store.getSource(sourceId), extraction: context.store.getExtractionBySourceId(sourceId),
-    canonicalSource: canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined });
-  const expected = observeKnowledgeValue(read());
+  const store = context.store;
+  const read = () => {
+    const extractionId = store.getExtractionBySourceId(sourceId)?.id;
+    const generations = store.getRecordGenerations(extractionId === undefined ? [{ kind: 'source', id: sourceId }]
+      : [{ kind: 'source', id: sourceId }, { kind: 'extraction', id: extractionId }]);
+    return `${extractionId ?? ''}|${generations.join('|')}|${canonicalUri ? store.getSourceByCanonicalUri(canonicalUri)?.id ?? '' : ''}`;
+  };
+  const expected = read();
   return () => {
-    if (signal?.aborted || !expected.matches(read())) throw new KnowledgeEntityAliasHoldError();
+    if (signal?.aborted) throw new KnowledgeIngestStoppedError('cancelled', undefined, { cause: signal.reason });
+    if (read() !== expected) throw new KnowledgeIngestStoppedError('changed', `source ${sourceId} was written by another operation`);
   };
 }

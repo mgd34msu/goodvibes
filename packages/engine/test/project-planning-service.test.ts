@@ -14,6 +14,7 @@ import {
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { seedHistoricalPlanningLanguage, seedHistoricalPlanningState } from './_helpers/planning-history.ts';
 import type { PlannerEvent } from '../platform/src/events/planner.js';
 
 let previousPort: JudgmentPort | undefined;
@@ -29,83 +30,40 @@ afterEach(() => {
 });
 
 describe('project planning service', () => {
-  test('stores planning artifacts in isolated project knowledge spaces', async () => {
-    const service = createService();
-    await service.upsertState({
-      projectId: 'alpha',
-      state: {
-        goal: 'Add conversational planning support',
-        scope: 'platform contracts only',
-        tasks: [{
-          id: 'contracts',
-          title: 'Add passive planning contracts',
-          verification: ['bun test test/project-planning-service.test.ts'],
-        }],
-        verificationGates: [{
-          id: 'unit-tests',
-          description: 'Project planning tests pass',
-          required: true,
-        }],
-        executionApproved: true,
-      },
+  test('saved planning records stay readable in isolated project knowledge spaces', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'goodvibes-project-planning-'));
+    tmpRoots.push(root);
+    const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+    const service = new ProjectPlanningService(store, { defaultProjectId: 'default-project' });
+    await seedHistoricalPlanningState(store, 'alpha', {
+      goal: 'Add conversational planning support',
+      tasks: [{ id: 'contracts', title: 'Add passive planning contracts' }],
+      readiness: 'executable',
+      executionApproved: true,
+    });
+    await seedHistoricalPlanningLanguage(store, 'alpha', {
+      terms: [{ term: 'Surface', definition: 'A user-facing channel where GoodVibes receives or sends interaction.' }],
+      ambiguities: [],
     });
     await service.recordDecision({
       projectId: 'alpha',
-      decision: {
-        title: 'Planning loop remains TUI-owned',
-        decision: 'The daemon stores/evaluates planning artifacts but never drives the interview.',
-        reasoning: 'Programmatic surfaces should not enter conversational planning loops.',
-      },
-    });
-    await service.upsertLanguage({
-      projectId: 'alpha',
-      language: {
-        terms: [{
-          term: 'Surface',
-          definition: 'A user-facing channel where GoodVibes receives or sends interaction.',
-          avoid: ['client'],
-        }],
-        ambiguities: [{
-          phrase: 'agent channel',
-          resolution: 'Split into chat and background agent routes.',
-        }],
-      },
+      decision: { title: 'Work plan is the plan', decision: 'Tasks live in the work plan; planning state is history.' },
     });
 
     const alpha = await service.getState({ projectId: 'alpha' });
     const beta = await service.getState({ projectId: 'beta' });
     const status = await service.status({ projectId: 'alpha' });
-    const decisions = await service.listDecisions({ projectId: 'alpha' });
-    const language = await service.getLanguage({ projectId: 'alpha' });
 
     expect(alpha.knowledgeSpaceId).toBe(projectKnowledgeSpaceId('alpha'));
-    expect(alpha.state?.readiness).toBe('executable');
+    expect(alpha.state?.goal).toBe('Add conversational planning support');
+    expect(alpha.revision?.sourceId).toBe(alpha.source?.id);
     expect(beta.state).toBeNull();
-    expect(status.counts).toEqual({ states: 1, decisions: 1, languageArtifacts: 1, workPlans: 1, workPlanTasks: 1 });
+    expect(status.counts).toEqual({ states: 1, decisions: 1, languageArtifacts: 1, workPlans: 0, workPlanTasks: 0 });
     expect(status.passiveOnly).toBe(true);
-    expect(decisions.decisions[0]?.title).toBe('Planning loop remains TUI-owned');
-    expect(language.language?.terms[0]?.term).toBe('Surface');
-    const workPlan = await service.getWorkPlanSnapshot({ projectId: 'alpha' });
-    expect(workPlan.tasks[0]?.source).toBe('planning');
-    expect(workPlan.tasks[0]?.metadata?.planningTaskId).toBe('contracts');
-  });
-
-  test('evaluates gaps and next questions without mutating stored state', async () => {
-    installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
-    const service = createService();
-    const evaluation = await service.evaluate({
-      projectId: 'alpha',
-      state: {
-        goal: 'Improve setup',
-      },
-    });
-    const status = await service.status({ projectId: 'alpha' });
-
-    expect(evaluation.readiness).toBe('needs-user-input');
-    expect(evaluation.gaps.map((gap) => gap.kind)).toContain('missing-scope');
-    expect(evaluation.gaps.map((gap) => gap.kind)).toContain('ambiguous-language');
-    expect(evaluation.nextQuestion?.prompt).toContain('scope');
-    expect(status.counts.states).toBe(0);
+    expect((await service.listDecisions({ projectId: 'alpha' })).decisions[0]?.title).toBe('Work plan is the plan');
+    expect((await service.getLanguage({ projectId: 'alpha' })).language?.terms[0]?.term).toBe('Surface');
+    // Saved planning tasks are history; they do not create work-plan tasks.
+    expect((await service.getWorkPlanSnapshot({ projectId: 'alpha' })).tasks).toEqual([]);
   });
 
   test('stores durable work-plan tasks and emits task deltas plus snapshot invalidations', async () => {

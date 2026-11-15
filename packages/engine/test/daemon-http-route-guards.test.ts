@@ -158,7 +158,7 @@ describe('planning and home graph routes answer body failures with the body\'s o
       parseOptionalJsonBody: parseOptionalDaemonJsonBody,
       requireAdmin: allowAdmin,
     });
-    const response = await routes.handle(post('/api/projects/planning/state', undefined, { rawBody: '{not json' }));
+    const response = await routes.handle(post('/api/projects/planning/decisions', undefined, { rawBody: '{not json' }));
     expect(response?.status).toBe(400);
     expect(await response!.json()).toMatchObject({ error: 'Invalid JSON body' });
   });

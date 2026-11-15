@@ -556,16 +556,28 @@ for review. The Home Graph wrappers are:
 
 The base knowledge API exposes the same task model under
 `/api/knowledge/refinement/*`. Home Graph status reports one readiness state,
-computed in a fixed precedence order, plus open issue and active refinement
-task counts. Panels should display these fields instead of inferring
-refinement progress from reindex duration or issue totals.
+which says whether the home can be asked about, plus open issue, active
+refinement task and pending source counts beside it. Open questions and running
+repairs never make a home wait. Panels should display these fields instead of
+inferring refinement progress from reindex duration or issue totals.
 
 | Readiness state | When it is reported |
 | --- | --- |
 | `empty` | The space has no sources and no nodes yet |
-| `repairing` | At least one refinement task is actively running |
-| `needs_sources` | No refinement task is running but open issues remain, typically missing manuals or sources (see the retired `needs_review` state in `knowledge.md`) |
-| `ready` | Nothing is running, waiting, or open |
+| `needs_sources` | No snapshot has been synced yet, or ingested documents are still waiting to be read (`pendingSourceCount`) |
+| `ready` | Otherwise; `openIssueCount` and `activeRefinementTaskCount` say what is still open or running |
+
+A snapshot sync answers once its rows are written. Linking documents to
+devices, the quality report and the generated pages run after it in the
+background (`quality.status: "queued"`, `enrichment: "queued"`, and
+`enrichmentPending: true` in status until they finish). When nothing those
+passes read has changed since they last ran (a resent snapshot of an unchanged
+home), the sync reports `quality.status: "unchanged"` and makes no model
+request. When only some devices changed, the quality questions (battery and
+manual applicability, passport fields) are asked again only for those devices:
+answers for a device whose details, entities and facts are unchanged are kept
+on the installation's snapshot source and reused. `created.issues` counts open
+issues the sync created (0 when the pass is queued).
 
 The refinement run response includes `candidateGaps`, `processedGaps`,
 `requestedLimit`, `effectiveLimit`, `truncated`, and `budgetExhausted`; Home

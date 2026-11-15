@@ -1,17 +1,14 @@
-import { assertKnowledgeRestriction } from './extraction-ownership.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { knowledgeRawRepresentation } from './store-record-representation.js';
 import { knowledgeClockIso } from './store-record-representation.js';
 import { createKnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import { KnowledgeUriCanonicalizationHeldError } from './uri-canonicalization/reader.js';
-import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 import { KnowledgeNodeMutationHeldError } from './store-node-authority.js';
-import { KnowledgeEntityAliasHoldError } from './entity-aliases.js';
 import { knowledgeIngestGuard, stageKnowledgePendingSource } from './ingest-preparation.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
-import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
-import { prepareKnowledgeExtraction, type PreparedKnowledgeExtraction } from './prepared-extraction.js';
+import { KnowledgeIngestStoppedError, knowledgeIngestStop } from './ingest-stopped.js';
+import { prepareKnowledgeExtraction, type PreparedKnowledgeExtraction, type UnchangedKnowledgeContent } from './prepared-extraction.js';
 import { readFile } from 'node:fs/promises';
 import {
   emitKnowledgeIngestCompleted,
@@ -69,23 +66,15 @@ export async function ingestKnowledgeUrl(
     readonly signal?: AbortSignal | undefined;
     readonly allowPrivateHosts?: boolean | undefined;
     readonly metadata?: Record<string, unknown> | undefined;
+    /** A scheduled refresh: identical bytes only update the crawl time. */
+    readonly refresh?: boolean | undefined;
   },
   ownership: KnowledgeIngestOwnership = {},
-): Promise<{ source: KnowledgeSourceRecord; artifactId?: string; extraction?: KnowledgeExtractionRecord; issues: readonly KnowledgeIssueRecord[] }> {
+): Promise<{ source: KnowledgeSourceRecord; artifactId?: string; extraction?: KnowledgeExtractionRecord; issues: readonly KnowledgeIssueRecord[]; unchanged?: boolean }> {
   return withConfiguredDecisionModelPolicy(async () => {
-    const { assertCurrent: callerCurrent, signal: callerSignal, onCommitted, deferSemanticEnrichment } = ownership;
-    const { signal: inputSignal, ...values } = input;
-    const signal = ownership.signal && inputSignal ? AbortSignal.any([ownership.signal, inputSignal]) : ownership.signal ?? inputSignal;
-    const assertOwned = () => {
-      try {
-        if (ownership.assertCurrent !== callerCurrent || ownership.signal !== callerSignal || ownership.onCommitted !== onCommitted
-          || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new Error('retired');
-        signal?.throwIfAborted(); assertKnowledgeRestriction(callerCurrent);
-      }
-      catch { throw new KnowledgeEntityAliasHoldError(); }
-    };
+    const signal = ownership.signal && input.signal ? AbortSignal.any([ownership.signal, input.signal]) : ownership.signal ?? input.signal;
+    const assertOwned = ingestOwnerCheck(ownership, signal);
     assertOwned();
-    input = { ...snapshotNodeInput(values), signal };
     await context.store.init();
     assertOwned();
     const uris = createKnowledgeIngestUriCanonicalizer(context, ownership, assertOwned, signal);
@@ -104,9 +93,12 @@ export async function ingestKnowledgeUrl(
       }, { signal, assertCurrent });
       assertCurrent();
       uris.attachArtifact(artifact.id);
-      return prepareKnowledgeExtraction(context, sourceId, artifact.id, uris, { signal, assertCurrent });
+      return prepareKnowledgeExtraction(context, sourceId, artifact.id, uris, { signal, assertCurrent, skipUnchanged: input.refresh === true });
     });
-    assertCurrent();
+    if (preparation.ready && preparation.token.kind === 'unchanged') {
+      assertCurrent();
+      return await recordUnchangedRefresh(context, preparation.token);
+    }
     // Remember an allow-private-hosts fetch on the source itself so a later refresh repeats it,
     // whichever entry point (API, HTTP route, batch import) made the request.
     const metadata = withPrivateHostIntent(input.metadata, input.allowPrivateHosts);
@@ -131,10 +123,11 @@ export async function ingestKnowledgeUrl(
     }), pending.sessionId);
     try {
       if (!preparation.ready) throw preparation.error;
+      const prepared = preparation.token as PreparedKnowledgeExtraction;
       const result = await finalizeKnowledgeIngestedSource(context, {
         sourceId: pending.id,
-        artifactId: preparation.token.artifactId,
-        preparedExtraction: preparation.token,
+        artifactId: prepared.artifactId,
+        preparedExtraction: prepared,
         signal,
         inputTitle: input.title,
         sourceType: input.sourceType ?? pending.sourceType,
@@ -156,14 +149,14 @@ export async function ingestKnowledgeUrl(
       }), result.source.sessionId);
       return { ...result, issues };
     } catch (error) {
-      if (ownership.assertCurrent || ownership.onCommitted || ownership.signal) throw error;
-      if (error instanceof KnowledgeUriCanonicalizationHeldError || error instanceof KnowledgeEntityAliasHoldError || error instanceof KnowledgeExtractionJudgmentHoldError || error instanceof KnowledgeNodeActivationHeldError || error instanceof KnowledgeNodeMutationHeldError || error instanceof JudgmentInputError) throw error;
+      const stopped = await settleStoppedIngest(context, pending, error, signal, ownership, 'Knowledge ingest failed.');
+      if (stopped) return stopped;
       const store = context.store, artifactStore = context.artifactStore;
       const sourceGuard = createSemanticWriteGuard(store);
       sourceGuard.source(pending.id);
       const assertDiagnosticCurrent = () => {
         assertCurrent(); sourceGuard.assertCurrent();
-        if (context.store !== store || context.artifactStore !== artifactStore) throw new KnowledgeEntityAliasHoldError();
+        if (context.store !== store || context.artifactStore !== artifactStore) throw new KnowledgeIngestStoppedError('changed');
       };
       const diagnostic = await readNormalizedError(error, { site: 'engine.knowledge.ingest-failure', signal, assertCurrent: assertDiagnosticCurrent });
       assertDiagnosticCurrent();
@@ -209,19 +202,9 @@ export async function ingestKnowledgeArtifact(
   ownership: KnowledgeIngestOwnership = {},
 ): Promise<{ source: KnowledgeSourceRecord; artifactId?: string; extraction?: KnowledgeExtractionRecord; issues: readonly KnowledgeIssueRecord[] }> {
   return withConfiguredDecisionModelPolicy(async () => {
-    const { signal: inputSignal, ...values } = input;
-    const { assertCurrent: callerCurrent, signal: callerSignal, onCommitted, deferSemanticEnrichment } = ownership;
-    const signal = callerSignal && inputSignal ? AbortSignal.any([callerSignal, inputSignal]) : callerSignal ?? inputSignal;
-    const assertOwned = () => {
-      try {
-        if (ownership.assertCurrent !== callerCurrent || ownership.signal !== callerSignal || ownership.onCommitted !== onCommitted
-          || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new Error('retired');
-        signal?.throwIfAborted(); assertKnowledgeRestriction(callerCurrent);
-      }
-      catch { throw new KnowledgeEntityAliasHoldError(); }
-    };
+    const signal = ownership.signal && input.signal ? AbortSignal.any([ownership.signal, input.signal]) : ownership.signal ?? input.signal;
+    const assertOwned = ingestOwnerCheck(ownership, signal);
     assertOwned();
-    input = { ...snapshotNodeInput(values), signal };
     await context.store.init();
     assertOwned();
     const uris = createKnowledgeIngestUriCanonicalizer(context, ownership, assertOwned, signal);
@@ -260,9 +243,7 @@ export async function ingestKnowledgeArtifact(
     const record = context.artifactStore.getRecord(artifactId);
     if (!record) throw Object.assign(new Error(`Unknown artifact: ${artifactId}`), { status: 400 });
     sourceUri ??= record.sourceUri;
-    const recordBefore = JSON.stringify(record);
     const canonicalUri = await uris.canonicalize(sourceUri ?? '') ?? undefined;
-    if (JSON.stringify(context.artifactStore.getRecord(artifactId)) !== recordBefore) throw new KnowledgeUriCanonicalizationHeldError('stale');
     const sourceId = reserveSourceId(context, canonicalUri);
     uris.reserveSource(sourceId, canonicalUri);
     const sourceCurrent = knowledgeIngestGuard(context, sourceId, canonicalUri, signal);
@@ -270,7 +251,7 @@ export async function ingestKnowledgeArtifact(
     assertCurrent();
     uris.attachArtifact(artifactId);
     const preparation = await capturePreparation(() => prepareKnowledgeExtraction(context, sourceId, artifactId, uris, { signal, assertCurrent }));
-    assertCurrent();
+    const resolvedArtifactId = artifactId;
     const pending = stageKnowledgePendingSource(context, {
       id: sourceId,
       connectorId: input.connectorId ?? 'artifact',
@@ -297,8 +278,8 @@ export async function ingestKnowledgeArtifact(
       if (!preparation.ready) throw preparation.error;
       const result = await finalizeKnowledgeIngestedSource(context, {
         sourceId: pending.id,
-        artifactId,
-        preparedExtraction: preparation.token,
+        artifactId: resolvedArtifactId,
+        preparedExtraction: preparation.token as PreparedKnowledgeExtraction,
         signal,
         inputTitle: input.title,
         sourceType: pending.sourceType,
@@ -320,16 +301,14 @@ export async function ingestKnowledgeArtifact(
       }), result.source.sessionId);
       return { ...result, issues };
     } catch (error) {
-      // Host-owned operations never turn a revoked/precommit failure into a new
-      // failed-source write, or overwrite a committed receipt after bookkeeping fails.
-      if (ownership.assertCurrent || ownership.onCommitted || ownership.signal) throw error;
-      if (error instanceof KnowledgeUriCanonicalizationHeldError || error instanceof KnowledgeEntityAliasHoldError || error instanceof KnowledgeExtractionJudgmentHoldError || error instanceof KnowledgeNodeActivationHeldError || error instanceof KnowledgeNodeMutationHeldError || error instanceof JudgmentInputError) throw error;
+      const stopped = await settleStoppedIngest(context, pending, error, signal, ownership, 'Artifact ingest failed.');
+      if (stopped) return stopped;
       const store = context.store, artifactStore = context.artifactStore;
       const sourceGuard = createSemanticWriteGuard(store);
       sourceGuard.source(pending.id);
       const assertDiagnosticCurrent = () => {
         assertCurrent(); sourceGuard.assertCurrent();
-        if (context.store !== store || context.artifactStore !== artifactStore) throw new KnowledgeEntityAliasHoldError();
+        if (context.store !== store || context.artifactStore !== artifactStore) throw new KnowledgeIngestStoppedError('changed');
       };
       const diagnostic = await readNormalizedError(error, { site: 'engine.knowledge.ingest-failure', signal, assertCurrent: assertDiagnosticCurrent });
       assertDiagnosticCurrent();
@@ -401,8 +380,10 @@ export async function ingestKnowledgeBookmarkSeeds(
         metadata: metadata || seed.metadata ? { ...seed.metadata, ...metadata } : undefined,
       });
       sources.push(result.source);
-      if (result.source.status === 'failed') failed += 1;
-      else imported += 1;
+      if (result.source.status === 'failed' || result.source.metadata.ingestHold !== undefined && result.source.status === 'pending') {
+        failed += 1;
+        if (result.source.status === 'pending') errors.push(`${seed.url}: ${result.source.crawlError ?? 'held'}`);
+      } else imported += 1;
     } catch (error) {
       failed += 1;
       errors.push(`${seed.url}: ${summarizeError(error)}`);
@@ -470,6 +451,7 @@ export async function refreshKnowledgeSources(context: KnowledgeIngestContext, s
         sourceType: source.sourceType,
         connectorId: source.connectorId,
         allowPrivateHosts: sourceAllowsPrivateHosts(source),
+        refresh: true,
         metadata: {
           ...knowledgeRawRepresentation(source.metadata),
           refreshedAt: knowledgeClockIso(Date.now()),
@@ -513,7 +495,7 @@ export function pickKnowledgeRefreshCandidates(
   } else {
     sources = sources.filter((source) => (
       !(source.status === 'stale' && !explicitIds?.length && isForgottenSource(source))
-      && (source.status === 'stale' || source.status === 'failed' || isSourcePastRefreshWindow(source))
+      && (source.status === 'stale' || source.status === 'failed' || isHeldIngest(source) || isSourcePastRefreshWindow(source))
     ));
   }
   return sources.filter((source) => isHttpUri(source.sourceUri)).slice(0, max);
@@ -595,14 +577,85 @@ function reserveSourceId(context: KnowledgeIngestContext, canonicalUri: string |
 }
 
 type ExtractionPreparation =
-  | { readonly ready: true; readonly token: PreparedKnowledgeExtraction }
+  | { readonly ready: true; readonly token: PreparedKnowledgeExtraction | UnchangedKnowledgeContent }
   | { readonly ready: false; readonly error: unknown };
 
-/** Operational parse/fetch errors keep their existing failed-record path; holds do not. */
-async function capturePreparation(read: () => Promise<PreparedKnowledgeExtraction>): Promise<ExtractionPreparation> {
+/**
+ * Every preparation outcome reaches the ingest's one settle step, after the
+ * pending source exists, so a stop or failure always gets a record and a
+ * terminal event.
+ */
+async function capturePreparation(read: () => Promise<PreparedKnowledgeExtraction | UnchangedKnowledgeContent>): Promise<ExtractionPreparation> {
   try { return { ready: true, token: await read() }; }
-  catch (error) {
-    if (error instanceof KnowledgeUriCanonicalizationHeldError || error instanceof KnowledgeExtractionJudgmentHoldError || error instanceof JudgmentInputError) throw error;
-    return { ready: false, error };
+  catch (error) { return { ready: false, error }; }
+}
+
+/** The caller's own check and the abort signal, with the reason each stop stands for. */
+function ingestOwnerCheck(ownership: KnowledgeIngestOwnership, signal: AbortSignal | undefined): () => void {
+  return () => {
+    if (signal?.aborted) throw new KnowledgeIngestStoppedError('cancelled', undefined, { cause: signal.reason });
+    try { ownership.assertCurrent?.(); }
+    catch (error) {
+      if (error instanceof KnowledgeIngestStoppedError) throw error;
+      throw new KnowledgeIngestStoppedError('changed', undefined, { cause: error });
+    }
+  };
+}
+
+/** A held ingest: the source kept pending with why, so a refresh reads it again. */
+function isHeldIngest(source: KnowledgeSourceRecord): boolean {
+  return source.status === 'pending' && typeof source.metadata.ingestHold === 'object' && source.metadata.ingestHold !== null;
+}
+
+/**
+ * Identical bytes on a scheduled refresh: the crawl time moves and nothing is
+ * read, compiled or linted again. The duplicate fetched artifact is dropped.
+ */
+async function recordUnchangedRefresh(context: KnowledgeIngestContext, unchanged: UnchangedKnowledgeContent): Promise<{
+  source: KnowledgeSourceRecord; artifactId: string; extraction: KnowledgeExtractionRecord; issues: readonly KnowledgeIssueRecord[]; unchanged: true;
+}> {
+  const { source, extraction } = unchanged;
+  const updated = await context.store.upsertSource({
+    id: source.id, connectorId: source.connectorId, sourceType: source.sourceType, status: 'indexed',
+    lastCrawledAt: Date.now(),
+    metadata: { ...knowledgeRawRepresentation(source.metadata), lastCrawlUnchangedAt: knowledgeClockIso(Date.now()) },
+  });
+  if (unchanged.artifactId !== source.artifactId) context.artifactStore.delete(unchanged.artifactId);
+  return { source: updated, artifactId: source.artifactId ?? unchanged.artifactId, extraction, issues: [], unchanged: true };
+}
+
+/**
+ * Settles an ingest that stopped: every started ingest gets a terminal event.
+ * A cancellation, a host-owned operation and a refusal of the content rethrow;
+ * a hold (model unsure or unavailable, or the source changed) keeps the source
+ * pending with the reason. Returns undefined for an ordinary failure.
+ */
+async function settleStoppedIngest(context: KnowledgeIngestContext, pending: KnowledgeSourceRecord, error: unknown,
+  signal: AbortSignal | undefined, ownership: KnowledgeIngestOwnership, failedText: string,
+): Promise<{ source: KnowledgeSourceRecord; issues: readonly KnowledgeIssueRecord[] } | undefined> {
+  const stop = knowledgeIngestStop(error, signal);
+  const emitFailed = (message: string) => context.emitIfReady((bus, ctx) => emitKnowledgeIngestFailed(bus, ctx, {
+    sourceId: pending.id, error: message,
+  }), pending.sessionId);
+  const refused = error instanceof KnowledgeUriCanonicalizationHeldError || error instanceof KnowledgeNodeActivationHeldError
+    || error instanceof KnowledgeNodeMutationHeldError || error instanceof JudgmentInputError;
+  // Host-owned operations never turn a revoked/precommit failure into a new
+  // failed-source write, or overwrite a committed receipt after bookkeeping fails.
+  if (ownership.assertCurrent || ownership.onCommitted || ownership.signal || refused || stop?.reason === 'cancelled') {
+    emitFailed(stop?.message ?? (summarizeError(error) || failedText));
+    throw stop?.reason === 'cancelled' ? stop : error;
   }
+  if (!stop) return undefined;
+  const existing = context.store.getSource(pending.id);
+  const held = await context.store.upsertSource({
+    id: pending.id, connectorId: pending.connectorId, sourceType: pending.sourceType, title: pending.title,
+    sourceUri: pending.sourceUri, canonicalUri: pending.canonicalUri, tags: pending.tags, folderPath: pending.folderPath,
+    sessionId: pending.sessionId, crawlError: stop.message,
+    // Indexed content stays indexed; a source never indexed waits as pending.
+    status: existing?.status === 'indexed' ? 'indexed' : 'pending',
+    metadata: { ...knowledgeRawRepresentation(pending.metadata),
+      ingestHold: { reason: stop.reason, ...(stop.detail ? { detail: stop.detail } : {}), at: knowledgeClockIso(Date.now()) } },
+  });
+  emitFailed(stop.message);
+  return { source: held, issues: [] };
 }

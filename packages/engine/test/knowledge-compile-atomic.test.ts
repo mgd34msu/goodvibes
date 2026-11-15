@@ -9,7 +9,7 @@ import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/connectors.js';
 import { compileKnowledgeSource, compileKnowledgeStructuredEntityHints, recompileKnowledgeSource } from '../platform/src/platform/knowledge/ingest-compile.js';
-import { KnowledgeEntityAliasHoldError } from '../platform/src/platform/knowledge/entity-aliases.js';
+import { KnowledgeIngestStoppedError } from '../platform/src/platform/knowledge/ingest-stopped.js';
 import { KnowledgeNodeActivationHeldError } from '../platform/src/platform/knowledge/activation/types.js';
 import { createKnowledgeNodeOperatorMutation, KnowledgeNodeMutationHeldError } from '../platform/src/platform/knowledge/store-node-authority.js';
 import { getKnowledgeNodeObservation } from '../platform/src/platform/knowledge/store-node-observation.js';
@@ -155,7 +155,7 @@ describe('atomic knowledge compilation', () => {
           return answer.ask(request);
         } });
         await expect(run(controller.signal)).rejects.toBeInstanceOf(phase === 'serve'
-          ? KnowledgeNodeActivationHeldError : KnowledgeEntityAliasHoldError);
+          ? KnowledgeNodeActivationHeldError : KnowledgeIngestStoppedError);
         expect(changed).toBe(true);
         expect(state(ctx.store)).toEqual(expected); expect(readFileSync(dbPath)).toEqual(bytes); expect(await reopen()).toEqual(expected);
       });
@@ -167,7 +167,7 @@ describe('atomic knowledge compilation', () => {
       const { ctx, edited, reopen } = await fixture(route);
       const stale = { ...edited, tags: [...edited.tags, 'fabricated-topic'] }, before = state(ctx.store), fake = settled();
       await expect(route === 'compile' ? compileKnowledgeSource(ctx, stale) : compileKnowledgeStructuredEntityHints(ctx, stale))
-        .rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
+        .rejects.toBeInstanceOf(KnowledgeIngestStoppedError);
       expect(fake.requests).toHaveLength(0); expect(state(ctx.store)).toEqual(before); expect(await reopen()).toEqual(before);
     });
 
@@ -232,7 +232,7 @@ describe('atomic knowledge compilation', () => {
       await reading;
       expect(receivedSignal).toBeDefined(); expect(receivedSignal?.aborted).toBe(false);
       controller.abort();
-      expect(await outcome).toBeInstanceOf(KnowledgeEntityAliasHoldError);
+      expect(await outcome).toBeInstanceOf(KnowledgeIngestStoppedError);
       expect(receivedSignal?.aborted).toBe(true); expect(calls).toBe(1);
       expect(state(ctx.store)).toEqual(before);
     } finally { release(); await drained.promise; await outcome; }

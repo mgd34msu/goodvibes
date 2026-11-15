@@ -482,7 +482,7 @@ export const knowledgeCommand: SlashCommand = {
             path,
             content,
             sessionId: context.session.runtime.sessionId,
-            allowPrivateHosts: rest.includes('--allow-private-hosts'),
+            fetchMode: rest.includes('--allow-private-hosts') ? 'allow-private-hosts' : 'public-only',
           });
           ingest.assertCurrent();
           print(`[knowledge] Imported connector input: ${result.imported} ok, ${result.failed} failed`);

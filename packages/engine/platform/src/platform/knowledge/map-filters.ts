@@ -2,8 +2,6 @@ import {
   isGeneratedKnowledgeSource,
 } from './generated-projections.js';
 import type { KnowledgeScopeSelection } from './scope-selection.js';
-import { captureStrictRepairJson } from './semantic/web-gap-repair/admission.js';
-import { knowledgeRecordVersion } from './store-record-representation.js';
 import type {
   KnowledgeEdgeRecord,
   KnowledgeIssueRecord,
@@ -34,9 +32,9 @@ export function applyKnowledgeMapFilters(
   const filters = normalizeKnowledgeMapFilters(options);
   const linkedIds = new Set(filters.linkedToIds);
   selection.assertCurrent();
-  const retainedEdges = new Map(selection.edges.map((edge) => [edge.id, knowledgeRecordVersion(captureStrictRepairJson(edge))]));
-  const stateEdges = state.edges.filter((edge) => retainedEdges.get(edge.id) === knowledgeRecordVersion(captureStrictRepairJson(edge)));
-  const assertEdges = selection.retainEdges(stateEdges);
+  // The selection already chose the edges in scope; the map keeps those by id.
+  const selectedEdgeIds = new Set(selection.edges.map((edge) => edge.id));
+  const stateEdges = state.edges.filter((edge) => selectedEdgeIds.has(edge.id));
   const linkedRecordIds = linkedIds.size > 0 ? recordIdsLinkedTo(stateEdges, linkedIds) : new Set<string>();
   const query = filters.query?.toLowerCase();
   const recordKinds = filters.recordKinds;
@@ -111,7 +109,6 @@ export function applyKnowledgeMapFilters(
     .filter((edge) => visibleIds.has(edge.fromId) && visibleIds.has(edge.toId));
 
   selection.assertCurrent();
-  assertEdges();
   return { sources, nodes, edges, issues };
 }
 

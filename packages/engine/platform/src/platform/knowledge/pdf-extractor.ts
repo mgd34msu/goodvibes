@@ -1,15 +1,10 @@
-import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { inflateSync } from 'node:zlib';
 import { createKnowledgeExtractionOwner, type KnowledgeExtractionOwner } from './extraction-ownership.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
-import { pdfTextDecoding } from './batteries/extraction-readability.js';
 import type { KnowledgeExtractionResult } from './extractors.js';
 import {
   KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS,
-  KNOWLEDGE_EXTRACTION_SAMPLE_CHARS,
-  KnowledgeExtractionJudgmentHoldError,
   hasUsefulKnowledgeExtractionText,
-  requireExtractionJudgment,
 } from './extraction-policy.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -85,16 +80,39 @@ function uniqueStrings(values: Iterable<string>, limit: number): string[] {
   return result;
 }
 
-/**
- * An untrusted PDF can carry any number of hex strings; each distinct one is a
- * model judgment. Judge a bounded number of distinct strings, and bound how
- * many raw candidates reach the readability pass.
- */
-const MAX_RAW_PDF_HEX_STRINGS = 256;
+/** Local work bound on raw-stream strings kept for the one readability reading. */
 const MAX_RAW_PDF_TEXT_CANDIDATES = 2048;
+/** Headings kept from a PDF outline. */
+const MAX_PDF_OUTLINE_SECTIONS = 64;
 
-interface RawPdfHexBudget {
-  readonly seen: Set<string>;
+/** A link is kept when it parses as an http(s) URL; no reading per link. */
+function pdfLinks(text: string): string[] {
+  const links: string[] = [];
+  for (const match of text.matchAll(/\bhttps?:\/\/[^\s)>\]]+/g)) {
+    const candidate = match[0].replace(/[.,;:!?'"]+$/, '');
+    try {
+      const url = new URL(candidate);
+      if ((url.protocol === 'http:' || url.protocol === 'https:') && url.hostname) links.push(candidate);
+    } catch { /* not a URL */ }
+  }
+  return uniqueStrings(links, 50);
+}
+
+interface PdfOutlineNode { readonly title?: unknown; readonly items?: readonly unknown[] }
+
+/** Headings from the document's own outline (bookmarks), depth first. */
+function outlineTitles(outline: readonly unknown[] | null | undefined): string[] {
+  const titles: string[] = [];
+  const visit = (nodes: readonly unknown[]): void => {
+    for (const node of nodes) {
+      if (titles.length >= MAX_PDF_OUTLINE_SECTIONS) return;
+      const record = unknownRecord(node) as PdfOutlineNode;
+      if (typeof record.title === 'string' && record.title.trim()) titles.push(record.title);
+      if (Array.isArray(record.items)) visit(record.items);
+    }
+  };
+  visit(outline ?? []);
+  return uniqueStrings(titles, MAX_PDF_OUTLINE_SECTIONS);
 }
 
 interface PdfJsExtractionAttempt {
@@ -117,6 +135,8 @@ export async function extractPdf(buffer: Buffer, owner: KnowledgeExtractionOwner
 
 async function extractPdfWithPdfJs(buffer: Buffer, owner: KnowledgeExtractionOwner): Promise<PdfJsExtractionAttempt> {
   let pageCount: number;
+  let sections: string[] = [];
+  let documentTitle: string | undefined;
   const pageTexts: string[] = [];
   try {
     owner.assertCurrent();
@@ -130,6 +150,12 @@ async function extractPdfWithPdfJs(buffer: Buffer, owner: KnowledgeExtractionOwn
       const document = await loadingTask.promise;
       owner.assertCurrent();
       pageCount = document.numPages;
+      // Sections are the author's outline, and the title the document's own
+      // Title entry: neither is guessed from leading lines.
+      sections = outlineTitles(await document.getOutline().catch(() => null));
+      const info = unknownRecord((await document.getMetadata().catch(() => undefined))?.info);
+      documentTitle = typeof info.Title === 'string' && info.Title.trim() ? cleanText(info.Title) : undefined;
+      owner.assertCurrent();
       for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
         owner.assertCurrent();
         const page = await document.getPage(pageNumber);
@@ -161,11 +187,11 @@ async function extractPdfWithPdfJs(buffer: Buffer, owner: KnowledgeExtractionOwn
     result: {
       extractorId: 'pdfjs',
       format: 'pdf',
-      title: firstNonEmptyLine(text) ?? 'PDF document',
+      title: documentTitle ?? firstNonEmptyLine(text) ?? 'PDF document',
       summary: summarizeText(text) ?? 'PDF document.',
       excerpt: excerptText(text),
-      sections: uniqueStrings(text.split(/\n+/), 24),
-      links: uniqueStrings(Array.from(text.matchAll(/\bhttps?:\/\/[^\s)]+/g), (match) => match[0]), 50),
+      sections,
+      links: pdfLinks(text),
       estimatedTokens: estimateTokens(text),
       structure: { pageCount, extractedTextChars: text.length, ...search },
       metadata: { limitations: ['PDF text extraction does not perform OCR for scanned images.'], readable: true },
@@ -196,7 +222,7 @@ function unknownRecord(value: unknown): Record<string, unknown> {
 async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly string[], owner: KnowledgeExtractionOwner): Promise<KnowledgeExtractionResult | undefined> {
   const body = buffer.toString('latin1');
   const texts: string[] = [];
-  const hexBudget: RawPdfHexBudget = { seen: new Set() };
+  const seenHex = new Set<string>();
   const diagnostics: RawPdfExtractionDiagnostics = { failedFlateDecodeStreams: 0 };
   const streamRe = /(<<[\s\S]{0,4096}?>>)\s*stream\r?\n([\s\S]*?)\r?\nendstream/g;
   let match: RegExpExecArray | null;
@@ -204,7 +230,7 @@ async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly st
     const dictionary = match[1]! ?? '';
     const rawChunk = match[2]! ?? '';
     const chunk = decodePdfStreamChunk(dictionary, rawChunk, diagnostics);
-    texts.push(...await extractPdfTextStrings(chunk, owner, hexBudget));
+    texts.push(...extractLiteralStrings(chunk), ...extractHexStrings(chunk, seenHex));
     if (texts.length >= MAX_RAW_PDF_TEXT_CANDIDATES) break;
   }
   texts.length = Math.min(texts.length, MAX_RAW_PDF_TEXT_CANDIDATES);
@@ -227,8 +253,9 @@ async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly st
     title: firstNonEmptyLine(combined) ?? 'PDF document',
     summary: summarizeText(combined) ?? 'PDF document text extracted from raw streams.',
     excerpt: excerptText(combined),
-    sections: uniqueStrings(combined.split(/\n+/), 8),
-    links: uniqueStrings(Array.from(combined.matchAll(/\bhttps?:\/\/[^\s)]+/g), (linkMatch) => linkMatch[0]), 50),
+    // Raw streams carry no outline, so there are no headings to report.
+    sections: [],
+    links: pdfLinks(searchable),
     estimatedTokens: estimateTokens(combined),
     structure: {
       extractedStringCount: texts.length,
@@ -258,13 +285,6 @@ function decodePdfStreamChunk(
     diagnostics.firstFlateDecodeError ??= summarizeError(error);
     return '';
   }
-}
-
-async function extractPdfTextStrings(chunk: string, owner: KnowledgeExtractionOwner, hexBudget: RawPdfHexBudget): Promise<string[]> {
-  return [
-    ...extractLiteralStrings(chunk),
-    ...await extractHexStrings(chunk, owner, hexBudget),
-  ];
 }
 
 function extractLiteralStrings(chunk: string): string[] {
@@ -344,23 +364,28 @@ function decodePdfEscape(char: string, following: string): { readonly value: str
   }
 }
 
-async function extractHexStrings(chunk: string, owner: KnowledgeExtractionOwner, hexBudget: RawPdfHexBudget): Promise<string[]> {
+function extractHexStrings(chunk: string, seen: Set<string>): string[] {
   const values: string[] = [];
   const hexRe = /(?<!<)<([0-9A-Fa-f\s]*)>(?!>)/g;
   let match: RegExpExecArray | null;
   while ((match = hexRe.exec(chunk)) !== null) {
     const key = (match[1] ?? '').replace(/\s+/g, '').toLowerCase();
-    if (hexBudget.seen.has(key)) continue;
-    if (hexBudget.seen.size >= MAX_RAW_PDF_HEX_STRINGS) break;
-    hexBudget.seen.add(key);
-    const text = await decodeHexPdfString(match[1] ?? '', owner);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const text = decodeHexPdfString(key);
     if (text) values.push(text);
   }
   return values;
 }
 
-async function decodeHexPdfString(value: string, owner: KnowledgeExtractionOwner): Promise<string | undefined> {
-  const hex = value.replace(/\s+/g, '');
+/**
+ * Decodes one hex string by its bytes: a UTF-16BE byte-order mark is
+ * authoritative; otherwise printable ASCII is single-byte text and printable
+ * UTF-16BE is the two-byte reading. Anything else (glyph ids of a font without
+ * its map) is left out; the whole text then gets the document's one
+ * readability reading.
+ */
+function decodeHexPdfString(hex: string): string | undefined {
   // Preserve the parser's complete-byte rule, not the old two-byte text floor.
   if (hex.length === 0 || hex.length % 2 !== 0) return undefined;
   const bytes = Buffer.from(hex, 'hex');
@@ -369,33 +394,9 @@ async function decodeHexPdfString(value: string, owner: KnowledgeExtractionOwner
     return decodeUtf16Be(bytes.subarray(2));
   }
   const singleByte = bytes.toString('latin1');
-  const utf16be = bytes.length % 2 === 0 ? decodeUtf16Be(bytes) : null;
-  // Both full interpretations are inspected before either bounded candidate leaves.
-  assertJudgmentInput({ singleByte, utf16be });
-  return requireExtractionJudgment(() => decisionOrClassic(async () => {
-    const run = await pdfTextDecoding.run(owner.port('knowledge.extraction.pdf-decoding'), {
-      singleByte: singleByte.slice(0, KNOWLEDGE_EXTRACTION_SAMPLE_CHARS),
-      utf16be: utf16be?.slice(0, KNOWLEDGE_EXTRACTION_SAMPLE_CHARS) ?? null,
-    }, { site: 'knowledge.extraction.pdf-decoding', ...(owner.signal ? { signal: owner.signal } : {}), beforeAttempt: owner.assertCurrent });
-    owner.assertCurrent();
-    const reading = run.readings.decoding;
-    if (reading.outcome !== 'act' || reading.choice === 'unknown' || (reading.choice === 'utf16be' && utf16be === null)) {
-      run.recordAction('hold');
-      throw new KnowledgeExtractionJudgmentHoldError();
-    }
-    run.recordAction(reading.choice);
-    switch (reading.choice) {
-      case 'neither': return undefined;
-      case 'utf16be': return utf16be ?? undefined;
-      case 'singleByte': return singleByte;
-      default: throw new KnowledgeExtractionJudgmentHoldError();
-    }
-  }, () => {
-    owner.assertCurrent();
-    // Explicit BOM decoding above is authoritative. Otherwise keep only
-    // unambiguous ASCII bytes; ambiguous raw-stream encodings are omitted.
-    return /^[\x09\x0a\x0d\x20-\x7e]*$/.test(singleByte) ? singleByte : undefined;
-  }));
+  if (/^[\x09\x0a\x0d\x20-\x7e]*$/.test(singleByte) && /[A-Za-z0-9]/.test(singleByte)) return singleByte;
+  const utf16be = bytes.length % 2 === 0 ? decodeUtf16Be(bytes) : undefined;
+  return utf16be !== undefined && isPrintableText(utf16be) ? utf16be : undefined;
 }
 
 function decodeUtf16Be(bytes: Buffer): string {

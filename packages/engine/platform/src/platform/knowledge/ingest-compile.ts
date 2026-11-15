@@ -1,17 +1,15 @@
 import { notifyKnowledgeCommitted } from './commit-notification.js';
 import { assertKnowledgeRestriction } from './extraction-ownership.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
-import { createKnowledgeIngestUriCanonicalizer, assertKnowledgeIngestUriOperation, retireKnowledgeIngestUriOperation, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
+import { createKnowledgeIngestUriCanonicalizer, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import type { KnowledgeUriCanonicalizer } from './uri-canonicalization/reader.js';
 import { knowledgeSourceCrawledNow } from './store-record-representation.js';
 import { prepareKnowledgeSourceRecord, prepareKnowledgeExtractionRecord } from './store-evidence-writes.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { snapshotNodeInput } from './activation/projection.js';
 import { knowledgeIngestGuard } from './ingest-preparation.js';
-import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
 import { stableText } from './store-schema.js';
 import { prepareStagedObservedKnowledgeNodeInput, type KnowledgeObservationOrigin } from './store-node-observation.js';
-import { observeKnowledgeValue } from './local-value-observation.js';
 import {
   emitKnowledgeCompileCompleted,
   emitKnowledgeExtractionCompleted,
@@ -19,7 +17,8 @@ import {
 } from '../runtime/emitters/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { prepareKnowledgeExtraction, consumeKnowledgeExtraction, type PreparedKnowledgeExtraction } from './prepared-extraction.js';
+import { prepareKnowledgeExtraction, type PreparedKnowledgeExtraction } from './prepared-extraction.js';
+import { KnowledgeIngestStoppedError } from './ingest-stopped.js';
 import { knowledgeExtractionNeedsRefresh } from './extraction-policy.js';
 import {
   extractTaggedValues,
@@ -28,7 +27,7 @@ import {
   slugify,
 } from './shared.js';
 import type { KnowledgeIngestContext, KnowledgeIngestOwnership } from './ingest-context.js';
-import { KnowledgeEntityAliasHoldError, readKnowledgeEntityAliases } from './entity-aliases.js';
+import { readKnowledgeEntityAliases } from './entity-aliases.js';
 import type {
   KnowledgeExtractionRecord,
   KnowledgeExtractionUpsertInput,
@@ -39,10 +38,14 @@ import type {
   KnowledgeEdgeUpsertInput,
 } from './types.js';
 import { getKnowledgeSpaceId, knowledgeSpaceMetadata } from './spaces.js';
+import { knowledgeTopicSlug } from './topic-slug.js';
 
-const MAX_EXTRACTION_SECTION_NODES = Number.POSITIVE_INFINITY;
-const MAX_EXTRACTION_LINK_EDGES = Number.POSITIVE_INFINITY;
-const MAX_ENTITY_HINT_VALUES_PER_KIND = Number.POSITIVE_INFINITY;
+/** Heading topics one document may add (only headings that name a fact of it). */
+const MAX_EXTRACTION_SECTION_NODES = 24;
+/** Links from one document to sources already in the store. */
+const MAX_EXTRACTION_LINK_EDGES = 200;
+/** Tagged entity hints per kind from one document. */
+const MAX_ENTITY_HINT_VALUES_PER_KIND = 32;
 
 export async function finalizeKnowledgeIngestedSource(
   context: KnowledgeIngestContext,
@@ -62,26 +65,26 @@ export async function finalizeKnowledgeIngestedSource(
   uris: KnowledgeIngestUriCanonicalizer,
   ownership: KnowledgeIngestOwnership = {},
 ): Promise<{ source: KnowledgeSourceRecord; artifactId: string; extraction: KnowledgeExtractionRecord }> {
-  assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId, input.preparedExtraction);
-  const { preparedExtraction, signal, ...values } = input;
-  input = { ...snapshotNodeInput(values), preparedExtraction, signal };
+  const { signal } = input;
   await context.store.init();
-  const recordBeforeCanonicalization = context.artifactStore.getRecord(input.artifactId);
-  if (!recordBeforeCanonicalization) throw new KnowledgeExtractionJudgmentHoldError();
-  const retainedRecord = observeKnowledgeValue(recordBeforeCanonicalization);
-  const sourceCurrent = knowledgeIngestGuard(context, input.sourceId, undefined, signal);
-  const canonicalUri = await uris.canonicalize(context.artifactStore.getRecord(input.artifactId)?.sourceUri ?? '');
-  sourceCurrent(); uris.assertCurrent(); assertKnowledgeRestriction(ownership.assertCurrent);
-  if (!retainedRecord.matches(context.artifactStore.getRecord(input.artifactId))) throw new KnowledgeExtractionJudgmentHoldError();
-  const canonicalCurrent = knowledgeIngestGuard(context, input.sourceId, canonicalUri ?? undefined, signal);
-  const assertCurrent = () => { assertKnowledgeRestriction(ownership.assertCurrent); assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId); sourceCurrent(); canonicalCurrent(); };
+  const artifactRecord = context.artifactStore.getRecord(input.artifactId);
+  if (!artifactRecord) throw new KnowledgeIngestStoppedError('changed', `artifact ${input.artifactId} is no longer stored`);
+  const canonicalUri = await uris.canonicalize(artifactRecord.sourceUri ?? '');
+  // One guard: the stored source row (and the owner of its canonical URI) by
+  // generation, plus the caller's own check and the abort signal.
+  const sourceCurrent = knowledgeIngestGuard(context, input.sourceId, canonicalUri ?? undefined, signal);
+  const assertCurrent = () => { assertKnowledgeRestriction(ownership.assertCurrent); uris.assertCurrent(); sourceCurrent(); };
   assertCurrent();
-  let consumed = false, published = false;
+  let published = false;
   let committed = undefined as { source: KnowledgeSourceRecord; extraction: KnowledgeExtractionRecord } | undefined;
   try {
-    const token = input.preparedExtraction ?? await prepareKnowledgeExtraction(context, input.sourceId, input.artifactId, uris, { signal, assertCurrent });
-    const { record, extracted, assertCurrent: assertExtractionCurrent } = consumeKnowledgeExtraction(context, token, input.sourceId, input.artifactId, uris);
-    consumed = true;
+    let prepared = input.preparedExtraction;
+    if (!prepared) {
+      const read = await prepareKnowledgeExtraction(context, input.sourceId, input.artifactId, uris, { signal, assertCurrent });
+      if (read.kind !== 'extracted') throw new KnowledgeIngestStoppedError('changed', 'the artifact was not extracted');
+      prepared = read;
+    }
+    const { record, extracted, contentHash } = prepared;
     const previousExtraction = context.store.getExtractionBySourceId(input.sourceId);
     const extractionEvidence = {
       title: stableText(extracted.title) ?? previousExtraction?.title,
@@ -91,10 +94,7 @@ export async function finalizeKnowledgeIngestedSource(
     let compiled = { nodeCount: 0, edgeCount: 0 };
     let assertAliasesCurrent = () => {};
     const assertPrepared = () => {
-      assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId, token);
-      assertKnowledgeRestriction(ownership.assertCurrent);
       assertCurrent();
-      assertExtractionCurrent();
       assertAliasesCurrent();
     };
     const sourceInput = {
@@ -103,8 +103,9 @@ export async function finalizeKnowledgeIngestedSource(
       sourceUri: record.sourceUri, canonicalUri: canonicalUri ?? undefined,
       summary: extractionEvidence.summary, description: stableText(extracted.excerpt) ?? previousExtraction?.excerpt,
       tags: input.tags, folderPath: input.folderPath, status: 'indexed' as const, artifactId: input.artifactId,
-      contentHash: record.sha256, sessionId: input.sessionId,
-      metadata: { ...input.metadata, contentType: record.mimeType, extractionId,
+      contentHash, sessionId: input.sessionId,
+      // A published ingest ends any earlier hold on this source.
+      metadata: { ...input.metadata, ingestHold: undefined, contentType: record.mimeType, extractionId,
         extractionFormat: extracted.format, outboundLinks: extracted.links },
     };
     const extractionInput = { id: extractionId, sourceId: input.sourceId, artifactId: input.artifactId,
@@ -117,7 +118,7 @@ export async function finalizeKnowledgeIngestedSource(
     const prospectiveSource = prepareKnowledgeSourceRecord(sourceInput, context.store.getSource(input.sourceId));
     const prospectiveExtraction = prepareKnowledgeExtractionRecord(extractionInput, previousExtraction, prospectiveSource);
     const entityHints = await prepareKnowledgeStructuredEntityHints(prospectiveSource, prospectiveExtraction, signal,
-      (guard) => { assertAliasesCurrent = guard; }, () => { assertKnowledgeRestriction(ownership.assertCurrent); assertCurrent(); assertExtractionCurrent(); });
+      (guard) => { assertAliasesCurrent = guard; }, assertCurrent);
     assertPrepared();
     await context.store.applyPreparedIngest({
       sources: [knowledgeSourceCrawledNow({ ...sourceInput, metadata: { ...sourceInput.metadata,
@@ -170,7 +171,7 @@ export async function finalizeKnowledgeIngestedSource(
       error: summarizeError(error),
     }), input.sessionId);
     throw error;
-  } finally { if (consumed) retireKnowledgeIngestUriOperation(uris); }
+  }
 }
 
 function readKnowledgeSpaceId(metadata: Record<string, unknown>): string | undefined {
@@ -190,20 +191,14 @@ export async function recompileKnowledgeSource(context: KnowledgeIngestContext, 
   const uris = createKnowledgeIngestUriCanonicalizer(context, options, sourceCurrent);
   const assertCurrent = () => { sourceCurrent(); uris.assertCurrent(); };
   let refreshed: KnowledgeExtractionUpsertInput | undefined;
-  let assertExtractionCurrent = () => {};
   if (source.artifactId && knowledgeExtractionNeedsRefresh(extraction)) {
     assertCurrent();
-    uris.reserveSource(source.id);
     uris.attachArtifact(source.artifactId);
-    const token = await abortableCompileRead(prepareKnowledgeExtraction(context, source.id, source.artifactId, uris, { signal, assertCurrent }), signal);
-    const prepared = consumeKnowledgeExtraction(context, token, source.id, source.artifactId, uris);
-    assertExtractionCurrent = prepared.assertCurrent;
-    refreshed = { ...prepared.extracted, sourceId: source.id, artifactId: source.artifactId };
+    const prepared = await abortableCompileRead(prepareKnowledgeExtraction(context, source.id, source.artifactId, uris, { signal, assertCurrent }), signal);
+    if (prepared.kind === 'extracted') refreshed = { ...prepared.extracted, sourceId: source.id, artifactId: source.artifactId };
   }
-  const check = () => { assertCurrent(); assertExtractionCurrent(); };
-  check();
-  try { await commitKnowledgeCompilation(context, source, extraction, false, signal, check, uris, refreshed); }
-  finally { retireKnowledgeIngestUriOperation(uris); }
+  assertCurrent();
+  await commitKnowledgeCompilation(context, source, extraction, false, signal, assertCurrent, uris, refreshed);
 }
 
 export async function compileKnowledgeSource(
@@ -222,12 +217,14 @@ export async function compileKnowledgeSource(
     () => { sourceCurrent(); uris.assertCurrent(); }, uris);
 }
 
-/** Caller snapshots must still describe retained evidence before gaining observation authority. */
+/** The caller's rows must be the stored ones (same write time) before compiling from them. */
 function knowledgeCompileGuard(context: KnowledgeIngestContext, source: KnowledgeSourceRecord,
   extraction: KnowledgeExtractionRecord | null | undefined, signal?: AbortSignal): () => void {
-  if (!observeKnowledgeValue(source).matches(context.store.getSource(source.id))
-    || (extraction && !observeKnowledgeValue(extraction).matches(context.store.getExtractionBySourceId(source.id)))) {
-    throw new KnowledgeEntityAliasHoldError();
+  const storedSource = context.store.getSource(source.id);
+  const storedExtraction = extraction ? context.store.getExtractionBySourceId(source.id) : undefined;
+  if (!storedSource || storedSource.updatedAt !== source.updatedAt
+    || (extraction && (!storedExtraction || storedExtraction.id !== extraction.id || storedExtraction.updatedAt !== extraction.updatedAt))) {
+    throw new KnowledgeIngestStoppedError('changed', `source ${source.id} was written after it was read`);
   }
   const check = knowledgeIngestGuard(context, source.id, source.canonicalUri, signal);
   check();
@@ -239,7 +236,7 @@ async function abortableCompileRead<T>(read: Promise<T>, signal?: AbortSignal): 
   if (!signal) return read;
   let abort = () => {};
   const stopped = new Promise<never>((_resolve, reject) => {
-    abort = () => reject(new KnowledgeEntityAliasHoldError());
+    abort = () => reject(new KnowledgeIngestStoppedError('cancelled', undefined, { cause: signal.reason }));
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
   });
@@ -388,7 +385,7 @@ async function compileKnowledgeSourceRecords(
   for (const tag of source.tags) {
     const topicNode = await writer.observed({
       kind: 'topic',
-      slug: slugify(`${spaceId}-${tag}`),
+      slug: knowledgeTopicSlug(spaceId, tag),
       title: tag,
       summary: `Topic tag ${tag}.`,
       aliases: [tag],
@@ -410,9 +407,12 @@ async function compileKnowledgeSourceRecords(
     const tagSlugs = new Set(source.tags.map((tag) => slugify(tag)));
     const sectionTitles: string[] = [];
     const seenSectionSlugs = new Set<string>();
+    // A heading is a topic only when it names a fact read from this document;
+    // "Introduction" or a cover line stays searchable text in the extraction.
+    const factNames = extraction.sections.length > 0 ? sourceFactNames(context, source.id, spaceId) : new Set<string>();
     for (const section of extraction.sections.map((entry) => entry.trim()).filter((entry) => entry.length > 0)) {
       const sectionSlug = slugify(section);
-      if (!sectionSlug || seenSectionSlugs.has(sectionSlug)) continue;
+      if (!sectionSlug || seenSectionSlugs.has(sectionSlug) || !factNames.has(sectionSlug)) continue;
       seenSectionSlugs.add(sectionSlug);
       sectionTitles.push(section);
       if (sectionTitles.length >= MAX_EXTRACTION_SECTION_NODES) break;
@@ -421,7 +421,7 @@ async function compileKnowledgeSourceRecords(
       if (tagSlugs.has(slugify(section))) continue;
       const topicNode = await writer.observed({
         kind: 'topic',
-        slug: slugify(`${spaceId}-${section}`),
+        slug: knowledgeTopicSlug(spaceId, section),
         title: section,
         summary: `Compiled section or concept from source ${source.id}.`,
         aliases: [section],
@@ -467,6 +467,21 @@ async function compileKnowledgeSourceRecords(
       metadata: knowledgeSpaceMetadata(spaceId),
     });
   }
+}
+
+/** Slugged titles and labels of the facts the store holds for one source. */
+function sourceFactNames(context: KnowledgeIngestContext, sourceId: string, spaceId: string): Set<string> {
+  const names = new Set<string>();
+  for (const node of context.store.listNodesInSpace(spaceId)) {
+    if (node.kind !== 'fact' || node.status !== 'active') continue;
+    const sourceIds = node.metadata.sourceIds;
+    if (node.sourceId !== sourceId && !(Array.isArray(sourceIds) && sourceIds.includes(sourceId))) continue;
+    for (const name of [node.title, ...node.aliases]) {
+      const slug = slugify(name);
+      if (slug) names.add(slug);
+    }
+  }
+  return names;
 }
 
 export async function compileKnowledgeStructuredEntityHints(

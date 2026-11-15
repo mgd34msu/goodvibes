@@ -124,6 +124,7 @@ test('ordinary precommit extraction failure still emits the actual failed event 
   try {
     const uris = createKnowledgeIngestUriCanonicalizer(context); uris.reserveSource(original.id); uris.attachArtifact(artifact.id);
     const token = await prepareKnowledgeExtraction(context, original.id, artifact.id, uris);
+    if (token.kind !== 'extracted') throw new Error('expected an extraction');
     await expect(finalizeKnowledgeIngestedSource(context, { sourceId: original.id, artifactId: artifact.id, preparedExtraction: token,
       sourceType: 'document', connectorId: 'manual', tags: [], metadata: {} }, uris)).rejects.toThrow('Synthetic precommit failure');
     expect(failure).toHaveBeenCalledTimes(1);

@@ -13,6 +13,7 @@ import { captureHomeGraphRows } from './rows-current.js';
 import { preserveLegacyQualityAuthority } from './quality/fingerprint.js';
 import { createQualityRevisionPlans, readQualitySubjectState, type QualityRevisionPlan } from './quality/revision.js';
 import { projectHomeGraphQualityInput, readHomeGraphDeclaredBoolean } from './quality/projection.js';
+import type { HomeGraphQualityAnswerMemo } from './quality-answer-memo.js';
 
 const QUALITY_NAMESPACE_PREFIX = 'homegraph';
 export function homeGraphQualityNamespace(spaceId: string): string {
@@ -32,7 +33,7 @@ export async function refreshHomeGraphQualityReport(
   store: KnowledgeStore,
   spaceId: string,
   installationId: string,
-  options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined } = {},
+  options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly answers?: HomeGraphQualityAnswerMemo | undefined } = {},
 ): Promise<{ readonly issues: readonly KnowledgeIssueRecord[]; readonly retainedLegacyIssues: number; readonly unansweredDeviceIds: readonly string[] }> {
   requireDecisionFeature('semantic Home Graph quality assessment');
   await store.init();
@@ -114,7 +115,9 @@ export async function refreshHomeGraphQualityReport(
     if (error instanceof SQLiteObservationRetiredError || error instanceof SemanticIdentityHeldError || error instanceof KnowledgeRecordAdmissionHeldError) throw new HomeGraphQualityHeldError('stale');
     throw error;
   }
-  const readings = await readHomeGraphQuality(selected.map(({ input }) => input), { ...options, assertCurrent: aborted, leaveUnsettledUnanswered: true });
+  const readingOptions = { signal: options.signal, timeoutMs: options.timeoutMs, assertCurrent: aborted, leaveUnsettledUnanswered: true };
+  const inputs = selected.map(({ input }) => input);
+  const readings = options.answers ? await options.answers.read(inputs, readingOptions) : await readHomeGraphQuality(inputs, readingOptions);
   const issues: KnowledgeIssueUpsertInput[] = [];
   const unansweredDeviceIds: string[] = [];
   try { store.assertRecordSnapshotFrame(() => {

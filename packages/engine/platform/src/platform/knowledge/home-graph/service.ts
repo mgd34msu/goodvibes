@@ -80,7 +80,7 @@ import {
 } from './sync-self-improvement.js';
 import { readHomeGraphSearchSelection } from './search-judgments.js';
 import { resolveHomeGraphResetSpace, resolveReadableHomeGraphSpace, resolveWritableHomeGraphSpace } from './space-selection.js';
-import { runHomeGraphSnapshotSync } from './sync.js';
+import { runHomeGraphSnapshotSync, runHomeGraphSyncEnrichment } from './sync.js';
 import { autoLinkExistingHomeGraphSources, extractHomeGraphArtifact, prepareHomeGraphArtifactExtraction, storeHomeGraphArtifactExtraction } from './extraction.js';
 import type {
   HomeGraphAskInput, HomeGraphAskResult, HomeGraphDevicePassportResult, HomeGraphExport,
@@ -93,6 +93,7 @@ import type {
 
 /** Queue item of the post-sync improvement rounds of a space. */
 const SYNC_IMPROVE_ITEM = 'sync-improve';
+const SYNC_ENRICH_ITEM = 'sync-enrich';
 /** How long a device passport request may spend enriching its own linked sources that were never enriched. */
 const PASSPORT_ENRICHMENT_BUDGET_MS = 20_000;
 
@@ -149,7 +150,8 @@ export class HomeGraphService {
 
   async status(input: { readonly installationId?: string; readonly knowledgeSpaceId?: string } = {}): Promise<HomeGraphStatus> {
     return this.ownForegroundOperation(async () => {
-      return getHomeGraphStatus(this.store, input);
+      const status = await getHomeGraphStatus(this.store, input);
+      return this.work.has(status.spaceId, SYNC_ENRICH_ITEM) ? { ...status, enrichmentPending: true } : status;
     });
   }
 
@@ -171,6 +173,8 @@ export class HomeGraphService {
           artifactStore: this.artifactStore,
           snapshot: { ...input, knowledgeSpaceId: target.spaceId },
           signal: this.autoLinkController.signal,
+          // The sync answers once its rows are written; links, quality and pages follow in the background.
+          deferEnrichment: true,
         });
       });
       const tail = turn.then(() => undefined, () => undefined);
@@ -179,7 +183,9 @@ export class HomeGraphService {
       try { result = await turn; }
       finally { if (this.syncTails.get(target.spaceId) === tail) this.syncTails.delete(target.spaceId); }
       this.autoLinkController.signal.throwIfAborted();
-      this.scheduleSyncSelfImprovement(result.spaceId, result.installationId);
+      // An unchanged home has nothing new for gap repair either.
+      if (result.enrichment === 'queued') this.queueSyncEnrichment(result.spaceId, result.installationId, { ...input, knowledgeSpaceId: target.spaceId });
+      else if (result.enrichment === 'done') this.scheduleSyncSelfImprovement(result.spaceId, result.installationId);
       return result;
     }));
   }
@@ -979,6 +985,24 @@ export class HomeGraphService {
         if (next !== undefined && !signal.aborted) this.scheduleSyncSelfImprovement(spaceId, installationId, round + 1, next);
       },
     }, delayMs);
+  }
+
+  /**
+   * The model-read part of a sync, after the sync returned. One pass per space
+   * is queued at a time and reads the stored state when it runs, so it covers
+   * any newer sync; gap repair follows a finished pass.
+   */
+  private queueSyncEnrichment(spaceId: string, installationId: string, snapshot: HomeGraphSnapshotInput): void {
+    if (this.autoLinkController.signal.aborted) return;
+    this.work.enqueue(spaceId, {
+      key: SYNC_ENRICH_ITEM,
+      run: async (signal) => {
+        await withConfiguredDecisionModelPolicy(() => runHomeGraphSyncEnrichment({
+          store: this.store, artifactStore: this.artifactStore, spaceId, installationId, snapshot, signal,
+        }));
+        if (!signal.aborted) this.scheduleSyncSelfImprovement(spaceId, installationId);
+      },
+    });
   }
 
   private queueIngestEnrichment(spaceId: string, sourceId: string): void {

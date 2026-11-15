@@ -228,14 +228,21 @@ export interface HomeGraphStatus {
   readonly issueCount: number;
   readonly extractionCount: number;
   readonly lastSnapshotAt?: number | undefined;
+  /**
+   * Whether the home can be asked about. `empty`: nothing synced or ingested;
+   * `needs_sources`: no snapshot yet, or documents still waiting to be read;
+   * `ready` otherwise. Open questions and running repairs are counts beside it,
+   * never a reason to wait.
+   */
   readonly readiness: {
-    /** `needs_review` is deprecated and never reported; it stays in the type for older clients. */
-    readonly state: 'ready' | 'repairing' | 'needs_review' | 'needs_sources' | 'empty';
+    readonly state: 'ready' | 'needs_sources' | 'empty';
     readonly openIssueCount: number;
     readonly activeRefinementTaskCount: number;
-    /** @deprecated Always 0; no task enters `needs_review`. */
-    readonly needsReviewTaskCount: number;
+    /** Documents ingested but not yet extracted, or held pending. */
+    readonly pendingSourceCount: number;
   };
+  /** A sync's links, quality report and pages are still queued or running. */
+  readonly enrichmentPending?: boolean | undefined;
   readonly capabilities: readonly string[];
 }
 
@@ -246,13 +253,20 @@ export interface HomeGraphSyncResult {
   readonly installationId: string;
   readonly source: KnowledgeSourceRecord;
   readonly home: KnowledgeNodeRecord;
+  /** Records this sync added; `issues` counts open issues it created (0 until a queued pass runs). */
   readonly created: {
     readonly nodes: number;
     readonly edges: number;
     readonly issues: number;
   };
-  /** Structural snapshot import succeeded even when derived quality could not settle. */
-  readonly quality?: { readonly status: 'refreshed' | 'held' | 'partial'; readonly reason?: string | undefined; readonly retainedLegacyIssues?: number | undefined } | undefined;
+  /**
+   * The quality report of this sync. `unchanged`: nothing it reads changed since
+   * it was made, so no model request was made; `queued`: it runs in the
+   * background after this result (Home Graph status shows `enrichmentPending`).
+   */
+  readonly quality?: { readonly status: 'refreshed' | 'held' | 'partial' | 'unchanged' | 'queued'; readonly reason?: string | undefined; readonly retainedLegacyIssues?: number | undefined } | undefined;
+  /** Where the model-read part of the sync (links, quality, pages) stands. */
+  readonly enrichment?: 'done' | 'queued' | 'unchanged' | undefined;
   readonly generated: HomeGraphGeneratedPagesSummary;
   /** How the documents of this sync were linked to devices: counts per outcome. */
   readonly autoLink?: Readonly<Record<'linked' | 'none' | 'ambiguous' | 'unread', number>> | undefined;
@@ -393,6 +407,8 @@ export interface HomeGraphAskResult {
 
 export interface HomeGraphMapInput extends HomeGraphSpaceInput {
   readonly limit?: number | undefined;
+  /** `nextCursor` of an earlier map of the same request. */
+  readonly cursor?: string | undefined;
   readonly includeSources?: boolean | undefined;
   readonly includeIssues?: boolean | undefined;
   readonly includeGenerated?: boolean | undefined;

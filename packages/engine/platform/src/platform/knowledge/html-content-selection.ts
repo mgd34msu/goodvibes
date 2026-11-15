@@ -5,7 +5,7 @@ import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { PAGE_CONTENT_BAND } from '../tools/batteries/page-content.js';
 import { pageBlocks, pageUnits } from '../tools/fetch/page-blocks.js';
 import { htmlDocumentTitle, htmlMainContent } from './batteries/html-content.js';
-import { KnowledgeExtractionJudgmentHoldError, requireExtractionJudgment } from './extraction-policy.js';
+import { requireExtractionJudgment } from './extraction-policy.js';
 
 const TITLE_GROUP_SIZE = 32;
 const TITLE_SAMPLE_CHARS = 512;
@@ -16,9 +16,15 @@ interface SelectedHtmlContent {
   readonly title?: string | undefined;
   readonly headings: readonly string[];
   readonly paragraphSamples: readonly string[];
+  /** Blocks the model could not settle; they are kept, and counted here. */
+  readonly unsureBlockCount?: number | undefined;
 }
 
-/** HTML grammar supplies blocks; only recorded judgments decide which are document content. */
+/**
+ * HTML grammar supplies blocks; a block is dropped only on a settled "not
+ * content" reading. A block the model is unsure about is kept and counted, so
+ * one uncertain block never holds the whole document.
+ */
 export async function selectHtmlContent(html: string, documentTitle: string, metadataTitles: readonly string[] = [], owner: KnowledgeExtractionOwner = createKnowledgeExtractionOwner()): Promise<SelectedHtmlContent | null> {
   owner.assertCurrent();
   assertJudgmentInput(html);
@@ -43,18 +49,23 @@ export async function selectHtmlContent(html: string, documentTitle: string, met
     } };
     const readings = await htmlMainContent.read(observed, documentTitle.slice(0, TITLE_SAMPLE_CHARS), blocks, { site: 'knowledge.extraction.html-content', ...(owner.signal ? { signal: owner.signal } : {}), beforeAttempt: owner.assertCurrent });
     owner.assertCurrent();
+    const dropped = (number: number): boolean => {
+      const reading = readings.get(number);
+      return reading !== undefined && reading.outcome === 'act' && reading.verdict === 'no';
+    };
+    let unsureBlockCount = 0;
     for (const block of blocks) {
       const reading = readings.get(block.number);
-      if (!reading || reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new KnowledgeExtractionJudgmentHoldError();
-      if (reading.verdict === 'no') rejectedContent = true;
+      if (dropped(block.number)) rejectedContent = true;
+      else if (!reading || reading.outcome !== 'act' || reading.verdict !== 'yes') unsureBlockCount += 1;
     }
-    const kept = blocks.filter((block) => readings.get(block.number)?.verdict === 'yes');
+    const kept = blocks.filter((block) => !dropped(block.number));
     if (kept.length === 0) return null;
     let blockNumber = 0;
     let previousPath: string | undefined;
     const keptUnits = units.filter((unit) => {
       if (unit.path !== previousPath) { blockNumber += 1; previousPath = unit.path; }
-      return readings.get(blockNumber)?.verdict === 'yes';
+      return !dropped(blockNumber);
     });
     const textContent = kept.map((block) => block.text).join('\n\n');
     const candidates: Candidate[] = titles.map((text, index) => ({ id: `title-${index + 1}`, content: text.slice(0, TITLE_SAMPLE_CHARS) }));
@@ -65,6 +76,7 @@ export async function selectHtmlContent(html: string, documentTitle: string, met
       ...(titleIndex >= 0 ? { title: titles[titleIndex] } : {}),
       headings: [...new Set(keptUnits.filter((unit) => unit.headingLevel !== undefined).map((unit) => unit.text))].slice(0, 24),
       paragraphSamples: [...new Set(keptUnits.filter((unit) => unit.headingLevel === undefined).map((unit) => unit.text))].slice(0, 12),
+      ...(unsureBlockCount > 0 ? { unsureBlockCount } : {}),
     };
   }, () => {
     owner.assertCurrent();
@@ -74,7 +86,7 @@ export async function selectHtmlContent(html: string, documentTitle: string, met
       headings: [...new Set(units.filter(unit => unit.headingLevel !== undefined).map(unit => unit.text))].slice(0, 24),
       paragraphSamples: [...new Set(units.filter(unit => unit.headingLevel === undefined).map(unit => unit.text))].slice(0, 12),
     };
-  }, () => !rejectedContent));
+  }, () => !rejectedContent), owner.signal);
 }
 
 /** Large candidate lists use the foundation's selection pattern in bounded tournaments. */
@@ -85,12 +97,14 @@ async function chooseTitle(content: string, candidates: readonly Candidate[], ow
     const group = candidates.slice(start, start + TITLE_GROUP_SIZE);
     const selection = await htmlDocumentTitle.select(owner.port('knowledge.extraction.html-title'), { content: content.slice(0, TITLE_CONTEXT_CHARS) }, group, { site: 'knowledge.extraction.html-title', ...(owner.signal ? { signal: owner.signal } : {}), beforeAttempt: owner.assertCurrent });
     owner.assertCurrent();
+    // An unsettled title choice leaves this group without a finalist; the
+    // document keeps its own <title> rather than holding the ingest.
     if (selection.outcome !== 'act') {
-      selection.recordAction('hold');
-      throw new KnowledgeExtractionJudgmentHoldError();
+      selection.recordAction('no-settled-title');
+      continue;
     }
     const chosen = group.find((candidate) => candidate.id === selection.chosen);
-    if (selection.chosen !== undefined && !chosen) throw new KnowledgeExtractionJudgmentHoldError();
+    if (selection.chosen !== undefined && !chosen) { selection.recordAction('unknown-candidate'); continue; }
     selection.recordAction(chosen ? `selected:${chosen.id}` : 'no-document-title');
     if (chosen) finalists.push(chosen);
   }

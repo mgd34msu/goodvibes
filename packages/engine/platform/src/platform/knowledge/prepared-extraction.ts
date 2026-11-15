@@ -1,108 +1,78 @@
+import { createHash } from 'node:crypto';
 import { createKnowledgeExtractionOwner } from './extraction-ownership.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
-import { isDeepStrictEqual } from 'node:util';
-import { snapshotNodeInput } from './activation/projection.js';
-import { assertKnowledgeIngestUriOperation, beginKnowledgeUriPreparation, completeKnowledgeUriPreparation, cancelKnowledgeUriPreparation, consumeKnowledgeUriPreparation, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
+import type { KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import type { ArtifactRecord } from '../artifacts/types.js';
 import { extractKnowledgeArtifact, type KnowledgeExtractionResult } from './extractors.js';
-import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
+import { knowledgeExtractionNeedsRefresh } from './extraction-policy.js';
+import { KnowledgeIngestStoppedError, knowledgeIngestStop } from './ingest-stopped.js';
 import type { KnowledgeIngestContext } from './ingest-context.js';
+import type { KnowledgeExtractionRecord, KnowledgeSourceRecord } from './types.js';
 
-/** One-shot preparation, bound to one source and the exact retained artifact bytes. */
+/** An artifact read and extracted for one source: a plain value handed to the compile step. */
 export interface PreparedKnowledgeExtraction {
+  readonly kind: 'extracted';
   readonly sourceId: string;
   readonly artifactId: string;
-}
-
-interface PreparedContent {
   readonly record: ArtifactRecord;
   readonly extracted: KnowledgeExtractionResult;
-  readonly assertCurrent: () => void;
-  readonly uris: KnowledgeIngestUriCanonicalizer;
-  readonly context: KnowledgeIngestContext;
+  /** sha256 of the artifact bytes; stored on the source as `contentHash`. */
+  readonly contentHash: string;
 }
 
-// Callers cannot supply fabricated results or mutate the prepared extraction.
-const prepared = new WeakMap<PreparedKnowledgeExtraction, PreparedContent>();
+/** The fetched bytes equal what the indexed source was built from: nothing to read again. */
+export interface UnchangedKnowledgeContent {
+  readonly kind: 'unchanged';
+  readonly sourceId: string;
+  readonly artifactId: string;
+  readonly contentHash: string;
+  readonly source: KnowledgeSourceRecord;
+  readonly extraction: KnowledgeExtractionRecord;
+}
 
+/**
+ * Reads the artifact once and extracts it. With `skipUnchanged`, bytes whose
+ * hash equals the indexed source's `contentHash` (and whose extraction is
+ * current) return `unchanged` before any extraction reading. The caller's
+ * `assertCurrent` (the ingest guard over the stored source row) is the one check.
+ */
 export async function prepareKnowledgeExtraction(
   context: KnowledgeIngestContext,
   sourceId: string,
   artifactId: string,
   uris: KnowledgeIngestUriCanonicalizer,
-  ownership: KnowledgeIngestOwnership = {},
-): Promise<PreparedKnowledgeExtraction> {
-  beginKnowledgeUriPreparation(context, uris, sourceId, artifactId);
-  try {
-    const caller = createKnowledgeExtractionOwner(ownership);
-    const signal = ownership.signal ? AbortSignal.any([ownership.signal, uris.signal]) : uris.signal;
-    const owner = createKnowledgeExtractionOwner({ signal, assertCurrent: () => {
-      caller.assertCurrent(); assertKnowledgeIngestUriOperation(context, uris, sourceId, artifactId);
-    } });
-    owner.assertCurrent();
-    await context.store.init();
-    owner.assertCurrent();
-    const readRetained = () => ({ source: context.store.getSource(sourceId), extraction: context.store.getExtractionBySourceId(sourceId) });
-    const retained = snapshotNodeInput(readRetained());
-    let content: Awaited<ReturnType<typeof context.artifactStore.readContent>>;
-    try { content = await context.artifactStore.readContent(artifactId); }
-    catch (error) {
-      // Original artifact/record custody can retire before the first read as
-      // well as after it. It is an admission hold, never a parse failure or a
-      // source of borrowed filesystem/private diagnostics for consumers.
-      drainOwned(error);
-      throw new KnowledgeExtractionJudgmentHoldError();
-    }
-    owner.assertCurrent();
-    const record = snapshotNodeInput(content.record);
-    const { buffer } = content;
-    const readCurrent = content.assertCurrent?.bind(content);
-    if (readCurrent) owner.retain(() => { try { readCurrent(); } catch { throw new KnowledgeExtractionJudgmentHoldError(); } });
-    if (record.id !== artifactId || buffer.byteLength !== record.sizeBytes) {
-      throw new KnowledgeExtractionJudgmentHoldError();
-    }
-    const canonicalUri = await uris.canonicalize(record.sourceUri ?? '');
-    owner.assertCurrent();
-    const unchanged = () => isDeepStrictEqual(snapshotNodeInput(readRetained()), retained)
-      && isDeepStrictEqual(snapshotNodeInput(context.artifactStore.getRecord(artifactId)), record);
-    if (!unchanged()) {
-      throw new KnowledgeExtractionJudgmentHoldError();
-    }
-    const canonicalSource = canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined;
-    const assertCurrent = () => {
-      owner.assertCurrent();
-      if (!unchanged()
-        || (canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined) !== canonicalSource) {
-        throw new KnowledgeExtractionJudgmentHoldError();
-      }
-    };
-    const extracted = snapshotNodeInput(await extractKnowledgeArtifact(record, buffer, owner));
-    assertCurrent();
-    const token = Object.freeze({ sourceId, artifactId });
-    completeKnowledgeUriPreparation(context, uris, sourceId, artifactId, token);
-    prepared.set(token, { record, extracted, assertCurrent, uris, context });
-    return token;
-  } catch (error) { cancelKnowledgeUriPreparation(uris); throw error; }
-}
-
-/** Consume once; changing the retained source or original artifact owner holds. */
-export function consumeKnowledgeExtraction(
-  context: KnowledgeIngestContext,
-  token: PreparedKnowledgeExtraction,
-  sourceId: string,
-  artifactId: string,
-  uris: KnowledgeIngestUriCanonicalizer,
-): PreparedContent {
-  assertKnowledgeIngestUriOperation(context, uris, sourceId, artifactId, token);
-  const value = prepared.get(token);
-  const record = context.artifactStore.getRecord(artifactId);
-  if (!value || value.uris !== uris || value.context !== context || token.sourceId !== sourceId || token.artifactId !== artifactId
-    || !record) {
-    throw new KnowledgeExtractionJudgmentHoldError();
+  ownership: KnowledgeIngestOwnership & { readonly skipUnchanged?: boolean | undefined } = {},
+): Promise<PreparedKnowledgeExtraction | UnchangedKnowledgeContent> {
+  const signal = ownership.signal ? AbortSignal.any([ownership.signal, uris.signal]) : uris.signal;
+  const owner = createKnowledgeExtractionOwner({ signal, assertCurrent: () => { ownership.assertCurrent?.(); uris.assertCurrent(); } });
+  owner.assertCurrent();
+  await context.store.init();
+  let content: Awaited<ReturnType<typeof context.artifactStore.readContent>>;
+  try { content = await context.artifactStore.readContent(artifactId); }
+  catch (error) {
+    throw knowledgeIngestStop(error, signal) ?? new KnowledgeIngestStoppedError('changed', `artifact ${artifactId} could not be read`, { cause: error });
   }
-  value.assertCurrent();
-  consumeKnowledgeUriPreparation(context, uris, sourceId, artifactId, token);
-  prepared.delete(token);
-  return value;
+  owner.assertCurrent();
+  const { record, buffer } = content;
+  if (record.id !== artifactId || buffer.byteLength !== record.sizeBytes) {
+    throw new KnowledgeIngestStoppedError('changed', `artifact ${artifactId} does not match its stored record`);
+  }
+  if (content.assertCurrent) {
+    const readCurrent = content.assertCurrent.bind(content);
+    owner.retain(() => {
+      try { readCurrent(); }
+      catch (error) { throw new KnowledgeIngestStoppedError('changed', `artifact ${artifactId} changed while it was read`, { cause: error }); }
+    });
+  }
+  const contentHash = createHash('sha256').update(buffer).digest('hex');
+  if (ownership.skipUnchanged) {
+    const source = context.store.getSource(sourceId);
+    const extraction = context.store.getExtractionBySourceId(sourceId);
+    if (source?.status === 'indexed' && source.contentHash === contentHash && extraction && !knowledgeExtractionNeedsRefresh(extraction)) {
+      return Object.freeze({ kind: 'unchanged', sourceId, artifactId, contentHash, source, extraction });
+    }
+  }
+  const extracted = await extractKnowledgeArtifact(record, buffer, owner);
+  owner.assertCurrent();
+  return Object.freeze({ kind: 'extracted', sourceId, artifactId, record, extracted, contentHash });
 }

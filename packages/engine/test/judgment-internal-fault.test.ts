@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { JudgmentError, noul, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
-import { installJudgmentPort, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import { browserJudgmentRefusal } from '../daemon-api/src/browser-judgment-contract.ts';
 import { decisionOrClassic, withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
@@ -51,18 +51,4 @@ test('unknown browser errors and contract failures report a client fault instead
   expect(failureFromError(new JudgmentError('internal', PRIVATE))).toEqual({ kind: 'other',
     reason: 'The decision client failed internally. The operation has stopped.' });
   expect(JSON.stringify(browser)).not.toContain(PRIVATE);
-});
-
-
-test('planning readiness cannot turn an internal client fault into unavailable readiness or Preferred fallback', async () => {
-  const { readPlanningSemanticFacts } = await import('../platform/src/platform/knowledge/project-planning/readiness.ts');
-  let calls = 0;
-  const previous = installJudgmentPort({ model: 'jev-latest', async ask() { calls++; throw new JudgmentError('internal', PRIVATE); } });
-  try {
-    await withDecisionModelPolicy(() => 'Preferred', async () => {
-      await expect(readPlanningSemanticFacts({ goal: 'Synthetic explicit planning outcome' })).rejects.toMatchObject({ kind: 'internal' });
-      expect(decisionModelPolicyState().operation).toBe('decision');
-    });
-    expect(calls).toBe(1);
-  } finally { installJudgmentPort(previous); }
 });

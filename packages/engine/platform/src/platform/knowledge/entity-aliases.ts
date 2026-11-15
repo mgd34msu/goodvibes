@@ -2,7 +2,7 @@ import { judge } from '../runtime/judge.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { ENTITY_ALIAS_SLOTS, entityAlias } from './batteries/entity-alias.js';
 import { splitKnowledgePassages } from './passages.js';
-import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
+import { KnowledgeIngestStoppedError, type KnowledgeIngestStopReason } from './ingest-stopped.js';
 
 /** Names nominated per entity; one request reads them all. */
 export const MAX_ENTITY_ALIAS_CANDIDATES = ENTITY_ALIAS_SLOTS.length;
@@ -26,9 +26,9 @@ interface AliasEvidence {
 }
 
 /** The caller stopped wanting the aliases (aborted or its source moved); nothing is kept. */
-export class KnowledgeEntityAliasHoldError extends Error {
-  constructor() {
-    super('Knowledge entity aliases are on hold: the ingest that asked for them was cancelled or its source changed.');
+export class KnowledgeEntityAliasHoldError extends KnowledgeIngestStoppedError {
+  constructor(reason: KnowledgeIngestStopReason = 'changed', detail?: string, options?: { readonly cause?: unknown }) {
+    super(reason, detail, options);
     this.name = 'KnowledgeEntityAliasHoldError';
   }
 }
@@ -90,9 +90,9 @@ export async function readKnowledgeEntityAliases(
   ownerCurrent?: () => void,
 ): Promise<readonly (readonly string[])[]> {
   const current = () => {
-    if (signal?.aborted) throw new KnowledgeEntityAliasHoldError();
+    if (signal?.aborted) throw new KnowledgeEntityAliasHoldError('cancelled');
     // The host's own extraction hold keeps its kind; any other owner failure is this hold, without its detail.
-    try { ownerCurrent?.(); } catch (error) { if (error instanceof KnowledgeExtractionJudgmentHoldError) throw error; throw new KnowledgeEntityAliasHoldError(); }
+    try { ownerCurrent?.(); } catch (error) { if (error instanceof KnowledgeIngestStoppedError) throw error; throw new KnowledgeEntityAliasHoldError('changed', undefined, { cause: error }); }
   };
   current();
   if (entities.length === 0) return [];
@@ -134,7 +134,7 @@ export async function readKnowledgeEntityAliases(
     return outcome.value;
   })).catch((error: unknown) => {
     // Only the caller's abort rejects `judge`; report it as this hold.
-    if (signal?.aborted) throw new KnowledgeEntityAliasHoldError();
+    if (signal?.aborted) throw new KnowledgeEntityAliasHoldError('cancelled');
     throw error;
   });
   current();

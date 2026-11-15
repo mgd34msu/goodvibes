@@ -3,7 +3,6 @@ import { routeNativeConversationInput } from '../../runtime/native-conversation-
 import { captureNativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
 import { openModalCommand, requirePlanManager } from './runtime-services.ts';
 import { isPlanMode, togglePlanMode, permissionModeLabel, type PermissionModeValue } from '../../core/permission-mode.ts';
-import { parsePlanningActionTarget } from './planning-action-target.ts';
 
 /**
  * The closed set of /project-plan subcommands and how many words each takes
@@ -13,8 +12,6 @@ import { parsePlanningActionTarget } from './planning-action-target.ts';
 const PLANNING_SUBCOMMANDS: ReadonlyMap<string, { readonly min: number; readonly max: number; readonly usage: string }> = new Map([
   ['panel', { min: 0, max: 0, usage: 'panel' }],
   ['history', { min: 0, max: 0, usage: 'history' }],
-  ['approve', { min: 0, max: 0, usage: 'approve' }],
-  ['answer', { min: 2, max: Number.POSITIVE_INFINITY, usage: 'answer <n> <text>' }],
   ['list', { min: 0, max: 0, usage: 'list' }],
   ['show', { min: 1, max: 1, usage: 'show <plan-id>' }],
   ['dismiss', { min: 0, max: 0, usage: 'dismiss' }],
@@ -25,21 +22,30 @@ const PLANNING_SUBCOMMANDS: ReadonlyMap<string, { readonly min: number; readonly
   ['clear', { min: 0, max: 0, usage: 'clear' }],
 ]);
 const PLANNER_RUNTIME_SUBCOMMANDS = new Set(['mode', 'explain', 'override', 'status', 'clear']);
+/** Retired with the planning interview: saved planning records are read-only history. */
+const RETIRED_SUBCOMMANDS = new Set(['approve', 'answer']);
 
 export function registerPlanningRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'project-plan',
     aliases: ['planning'],
     description: 'Submit a native work request, inspect recovery, or review historical planning',
-    usage: '[panel | history | approve | dismiss | answer <n> <text> | list | show <id> | mode | explain | override <strategy> | status | clear | <planning goal> | -- <goal that starts with one of these words>]',
+    usage: '[panel | history | dismiss | list | show <id> | mode | explain | override <strategy> | status | clear | <planning goal> | -- <goal that starts with one of these words>]',
     argsHint: '[panel|history|<goal>|-- <goal>]',
     async handler(rawArgs, ctx) {
       const first = rawArgs[0]?.toLowerCase();
       const explicitGoal = first === '--';
       const subcommand = !explicitGoal && first !== undefined ? PLANNING_SUBCOMMANDS.get(first) : undefined;
+      if (!explicitGoal && first !== undefined && RETIRED_SUBCOMMANDS.has(first)) {
+        ctx.print([
+          `"/project-plan ${first}" is retired: saved planning records are read-only and nothing was changed.`,
+          '  Track work in the work plan (/work-plan) and run it with /workstream.',
+          `  To submit this text as a goal: /project-plan -- ${rawArgs.join(' ')}`,
+        ].join('\n'));
+        return;
+      }
       if (subcommand) {
-        // A selected-revision target (the flag and its three values) comes from the history view, not typed text.
-        const extra = rawArgs.length - 1 - (rawArgs[1] === '--selected-revision' ? 4 : 0);
+        const extra = rawArgs.length - 1;
         if (extra < subcommand.min || extra > subcommand.max) {
           const words = rawArgs.join(' ');
           ctx.print([
@@ -59,8 +65,6 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      const projectPlanningService = ctx.workspace.projectPlanningService;
-      const projectId = ctx.workspace.projectPlanningProjectId;
       const openProjectPlanningModal = () => openModalCommand(ctx, 'planning-modal');
 
       if (args.length === 0 || (subcommand && args[0] === 'panel')) {
@@ -71,29 +75,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
 
       if (subcommand && args[0] === 'history') {
         openProjectPlanningModal();
-        ctx.print('Opened saved historical project planning. The planning interview is retired; saved answers and approvals do not authorize native work.');
-        return;
-      }
-
-      if (subcommand && args[0] === 'approve') {
-        if (!projectPlanningService || !projectId) {
-          ctx.print('Project planning service is not available in this runtime.');
-          return;
-        }
-        const target = parsePlanningActionTarget(args.slice(1));
-        if (!target.valid || target.args.length) {
-          ctx.print('Invalid planning selection. Reload saved history before retrying the explicit historical approval command.');
-          return;
-        }
-        const result = await projectPlanningService.applyStateAction({
-          projectId, expected: target.expected, ...(target.planningId ? { planningId: target.planningId } : {}), action: { kind: 'approve' },
-        });
-        if (!result.applied) {
-          ctx.print(result.reason === 'no-state' ? 'No historical project planning state exists to approve.' : 'Planning changed. Reload saved history before retrying the explicit historical approval command.');
-          return;
-        }
-        openProjectPlanningModal();
-        ctx.print(`Historical planning approval recorded; no native work authorized. State: ${result.state.id}.`);
+        ctx.print('Opened saved historical project planning (read-only). The work plan and /workstream are the live plan.');
         return;
       }
 
@@ -128,7 +110,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      // Explicit historical archival only. The current native request and its
+      // Archives the active execution plan. The current native request and its
       // retained recovery source are untouched; mid-execution is refused.
       if (subcommand && args[0] === 'dismiss') {
         const planManager = requirePlanManager(ctx);
@@ -140,83 +122,14 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
           );
           return;
         }
-        let planningNote = '';
-        if (projectPlanningService && projectId) {
-          const current = await projectPlanningService.getState({ projectId });
-          if (current.state && current.state.metadata?.['active'] === true) {
-            if (!current.revision) {
-              planningNote = ' Historical project planning record was not changed because its revision is unavailable. Refresh and retry.';
-            } else {
-              const result = await projectPlanningService.applyStateAction({ projectId,
-                planningId: current.state.id, expected: { kind: 'revision', revision: current.revision },
-                action: { kind: 'dismiss' },
-              });
-              planningNote = result.applied
-                ? ' Historical project planning record marked inactive.'
-                : ` Historical project planning record was not changed (${result.reason}); refresh and retry.`;
-            }
-          }
-        }
         if (dismissal.outcome === 'dismissed') {
           ctx.print(
             `Dismissed plan "${dismissal.plan?.title ?? 'active plan'}" ` +
-            `(archived as dismissed; retained in /project-plan list).${planningNote}`,
+            '(archived as dismissed; retained in /project-plan list).',
           );
-        } else if (planningNote) {
-          ctx.print(`No active execution plan to dismiss.${planningNote}`);
         } else {
-          ctx.print('No active plan or planning state to dismiss.');
+          ctx.print('No active plan to dismiss.');
         }
-        return;
-      }
-
-      // Explicit historical record editing only. The platform guards the selected
-      // source revision; its evaluation hints never reopen an interview here.
-      if (subcommand && args[0] === 'answer') {
-        if (!projectPlanningService || !projectId) {
-          ctx.print('Project planning service is not available in this runtime.');
-          return;
-        }
-        const target = parsePlanningActionTarget(args.slice(1));
-        if (!target.valid) {
-          ctx.print('Invalid planning selection. Reload saved history before retrying the explicit historical answer command.');
-          return;
-        }
-        const ref = target.args[0];
-        const answerText = target.args.slice(1).join(' ').trim();
-        if (!ref || !answerText) {
-          ctx.print('Usage: /project-plan answer <question-number|question-id> <your answer>');
-          return;
-        }
-        const asNum = Number(ref);
-        const selector = !target.selected && Number.isInteger(asNum) && asNum >= 1
-          ? { questionIndex: asNum - 1 }
-          : { questionId: ref };
-        const answerResult = await projectPlanningService.applyStateAction({
-          projectId, expected: target.expected, ...(target.planningId ? { planningId: target.planningId } : {}),
-          action: { kind: 'answer', ...selector, answer: answerText },
-        });
-        if (!answerResult.applied) {
-          if (answerResult.reason === 'no-state') {
-            ctx.print('No historical project planning state exists to answer. New goals use native intake with /project-plan <goal>.');
-          } else if (answerResult.reason === 'state-changed') {
-            ctx.print('Planning changed. Reload saved history before retrying the explicit historical answer command.');
-          } else if (answerResult.reason === 'question-not-found') {
-            const open = answerResult.state?.openQuestions ?? [];
-            const listing = open.length > 0
-              ? open.map((question, index) => `  ${index + 1}. ${question.prompt} (${question.id})`).join('\n')
-              : '  (no open questions)';
-            ctx.print(`No open question matched "${ref}". Open questions:\n${listing}`);
-          } else {
-            ctx.print('Usage: /project-plan answer <question-number|question-id> <your answer>');
-          }
-          return;
-        }
-        openProjectPlanningModal();
-        ctx.print(
-          `Recorded historical answer to: ${answerResult.question?.prompt ?? 'question'}\n` +
-          'The planning interview is retired; no native work authorized.',
-        );
         return;
       }
 

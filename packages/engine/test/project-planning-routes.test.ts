@@ -1,17 +1,10 @@
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { ProjectPlanningRoutes } from '../platform/src/platform/daemon/http/project-planning-routes.js';
 import { ProjectPlanningService } from '../platform/src/platform/knowledge/index.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
-
-let previousPort: JudgmentPort | undefined;
-beforeEach(() => { previousPort = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); });
-afterEach(() => { installJudgmentPort(previousPort); });
 
 const tmpRoots: string[] = [];
 
@@ -22,47 +15,16 @@ afterEach(() => {
 });
 
 describe('project planning routes', () => {
-  test('requires admin for writes and allows passive evaluation reads', async () => {
-    installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
-    const routes = createRoutes({ admin: false });
-    const write = await routes.handle(jsonRequest('/api/projects/planning/state', {
-      projectId: 'alpha',
-      state: { goal: 'Add feature' },
-    }));
-    const evaluate = await routes.handle(jsonRequest('/api/projects/planning/evaluate', {
-      projectId: 'alpha',
-      state: { goal: 'Improve setup' },
-    }));
-
-    expect(write?.status).toBe(403);
-    expect(evaluate?.status).toBe(200);
-    const body = await evaluate!.json() as { readonly readiness: string; readonly gaps: readonly { readonly kind: string }[] };
-    expect(body.readiness).toBe('needs-user-input');
-    expect(body.gaps.some((gap) => gap.kind === 'ambiguous-language')).toBe(true);
-  });
-
-  test('persists state through the daemon route when admin is present', async () => {
+  test('saved planning state is read-only: the retired write routes refuse and point at the work plan', async () => {
     const routes = createRoutes({ admin: true });
-    const saved = await routes.handle(jsonRequest('/api/projects/planning/state', {
-      projectId: 'alpha',
-      state: {
-        goal: 'Add planning support',
-        scope: 'platform passive storage',
-        tasks: [{ id: 'service', title: 'Build service', verification: ['unit tests'] }],
-        verificationGates: [{ id: 'tests', description: 'Tests pass' }],
-        executionApproved: true,
-      },
-    }));
+    for (const path of ['/api/projects/planning/state', '/api/projects/planning/evaluate', '/api/projects/planning/language']) {
+      const response = await routes.handle(jsonRequest(path, { projectId: 'alpha', state: { goal: 'Add feature' } }));
+      expect(response?.status).toBe(410);
+      expect(await response!.json()).toMatchObject({ code: 'PLANNING_STATE_READ_ONLY' });
+    }
     const loaded = await routes.handle(new Request('http://daemon.local/api/projects/planning/state?projectId=alpha'));
-
-    expect(saved?.status).toBe(200);
     expect(loaded?.status).toBe(200);
-    const body = await loaded!.json() as { readonly state: { readonly readiness: string; readonly goal: string }; readonly source: { readonly id: string }; readonly revision: { readonly sourceId: string; readonly generation: string } };
-    expect(body.revision.sourceId).toBe(body.source.id);
-    // Native row revisions are opaque SQLite-issued CAS tokens, not content hashes.
-    expect(body.revision.generation).toMatch(/^kr-[a-f0-9]{32}$/);
-    expect(body.state.goal).toBe('Add planning support');
-    expect(body.state.readiness).toBe('executable');
+    expect(await loaded!.json()).toMatchObject({ state: null });
   });
 
   test('exposes shared work-plan task routes with admin write protection', async () => {
@@ -127,25 +89,3 @@ function jsonRequest(path: string, body: unknown): Request {
     body: JSON.stringify(body),
   });
 }
-
-
-test('an aborted HTTP planning request cannot publish a late semantic result', async () => {
-  const routes = createRoutes({ admin: true });
-  const fake = fakePort(() => noulAnswer(0.99));
-  let entered!: () => void, release!: () => void;
-  const started = new Promise<void>(resolve => { entered = resolve; });
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  installJudgmentPort({ ...fake.port, async ask(request) { entered(); await gate; return fake.port.ask(request); } });
-  const controller = new AbortController();
-  const request = new Request(jsonRequest('/api/projects/planning/state', {
-    projectId: 'alpha', state: { goal: 'Cap retry delay at 30 seconds', scope: 'Retry helper', executionApproved: true,
-      tasks: [{ id: 'retry', title: 'Cap delay', verification: ['Run retry tests'] }] },
-  }), { signal: controller.signal });
-  const pending = routes.handle(request);
-  await started; controller.abort(); release();
-  // A service failure on the admin POST path is answered as an error response, never left as a rejection.
-  const response = await pending;
-  expect(response?.ok).toBe(false);
-  const status = await routes.handle(new Request('http://daemon.local/api/projects/planning/status?projectId=alpha'));
-  expect(await status!.json()).toMatchObject({ counts: { states: 0, workPlans: 0 } });
-});

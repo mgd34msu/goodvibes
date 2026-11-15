@@ -27,6 +27,7 @@ import {
 } from './helpers.js';
 import { linkHomeGraphSnapshotObjectReferences } from './link-node.js';
 import { refreshHomeGraphQualityReport } from './quality.js';
+import { HomeGraphQualityAnswerMemo } from './quality-answer-memo.js';
 import { HomeGraphQualityHeldError } from './quality/reader.js';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
 import { resolveWritableHomeGraphSpace } from './space-selection.js';
@@ -50,6 +51,8 @@ export async function runHomeGraphSnapshotSync(input: {
   readonly artifactStore: ArtifactStore;
   readonly snapshot: HomeGraphSnapshotInput;
   readonly signal?: AbortSignal | undefined;
+  /** Return once the snapshot rows are written; the caller runs `runHomeGraphSyncEnrichment` in the background. */
+  readonly deferEnrichment?: boolean | undefined;
 }): Promise<HomeGraphSyncResult> {
   return withConfiguredDecisionModelPolicy(async () => {
     const { store, artifactStore } = input;
@@ -80,6 +83,10 @@ export async function runHomeGraphSnapshotSync(input: {
       ? reusedSnapshotIdentity(store, installationSource, spaceId)
       : sourcePlanner.prepare({ spaceId, role: 'snapshot', ...(snapshot.capturedAt === undefined ? {} : { capturedAt: snapshot.capturedAt }) });
     const { id: sourceId, canonicalUri } = sourceIdentity;
+    // Read before anything of this sync is written, so `created` counts what this sync added.
+    const beforeState = readHomeGraphState(store, spaceId);
+    const beforeNodeIds = new Set(beforeState.nodes.map((node) => node.id));
+    const beforeEdgeIds = new Set(beforeState.edges.map((edge) => edge.id));
     const captured = await store.batch(async () => {
       const sourceInput = {
         id: sourceId,
@@ -103,69 +110,128 @@ export async function runHomeGraphSnapshotSync(input: {
         : sourceInput, sourceIdentity.assertCurrent);
       registerGeneratedKnowledgeSourceReferences(store, source, { id: sourceId, canonicalUri });
       const home = await upsertHomeNode(store, spaceId, installationId, snapshot, nodeIdentities);
-      const beforeState = readHomeGraphState(store, spaceId);
-      const beforeNodeIds = new Set(beforeState.nodes.map((node) => node.id));
-      const beforeEdgeIds = new Set(beforeState.edges.map((edge) => edge.id));
       const activeSnapshotNodeIds = new Set([home.id]);
       const counts = await upsertSnapshotObjects(store, spaceId, installationId, snapshotMembership, home.id, source.id, activeSnapshotNodeIds, nodeIdentities);
       await retireMissingSnapshotRecords(store, spaceId, installationId, source.id, activeSnapshotNodeIds, snapshotMembership);
-      return { source, home, beforeNodeIds, beforeEdgeIds, groups: counts };
+      return { source, home, groups: counts };
     });
     // batch() is a deferred save, not a rollback transaction, so it covers only
     // the synchronous snapshot writes above. The quality report and generated
     // pages wait on model readings; a write anyone makes meanwhile (this sync's
     // own pages, a note, a review) must be on disk when it returns, so no batch
     // is held open across them.
-    const { source, home, beforeNodeIds, beforeEdgeIds, groups } = captured;
-    const autoLink = await autoLinkExistingSources(store, spaceId, installationId, input.signal);
-    return await (async () => {
-      let issueCount = 0;
-      let quality: NonNullable<HomeGraphSyncResult['quality']>;
-      if (isClassicOperation()) quality = { status: 'held', reason: 'decision-model-disabled' };
-      else try {
-        const report = await refreshHomeGraphQualityReport(store, spaceId, installationId, { signal: input.signal });
-        issueCount = report.issues.length;
-        quality = report.unansweredDeviceIds.length
-          ? { status: 'partial', reason: `unsettled-devices:${report.unansweredDeviceIds.join(',')}`, ...(report.retainedLegacyIssues ? { retainedLegacyIssues: report.retainedLegacyIssues } : {}) }
-          : report.retainedLegacyIssues
-            ? { status: 'partial', reason: 'legacy-reviewed-state-retained', retainedLegacyIssues: report.retainedLegacyIssues }
-            : { status: 'refreshed' };
-      } catch (error) {
-        if (input.signal?.aborted) throw error;
-        if (!(error instanceof HomeGraphQualityHeldError) && !(error instanceof JudgmentInputError)) throw error;
-        quality = { status: 'held', reason: error instanceof HomeGraphQualityHeldError ? error.reason : error.problem === 'unsupported-input' ? 'malformed' : 'protected-input' };
-      }
-      const generated = await generateAutomaticHomeGraphPages({
-        store,
-        artifactStore,
-        spaceId,
-        installationId,
-        input: snapshot,
-        signal: input.signal,
-      });
+    const { source, home, groups } = captured;
+    const created = () => {
       const after = readHomeGraphState(store, spaceId);
-      const result = {
-        ok: true as const,
-        ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
-        spaceId,
-        installationId,
-        source,
-        home,
-        created: {
-          nodes: after.nodes.filter((node) => !beforeNodeIds.has(node.id)).length,
-          edges: after.edges.filter((edge) => !beforeEdgeIds.has(edge.id)).length,
-          issues: issueCount,
-        },
-        generated,
-        quality,
-        counts: groups,
-        // How documents were linked to devices on this sync: linked, none (nothing
-        // in the home matched), ambiguous, or unread (with the reason on the source).
-        autoLink: autoLink.counts,
-      };
-      return result;
-    })();
+      return { nodes: after.nodes.filter((node) => !beforeNodeIds.has(node.id)).length,
+        edges: after.edges.filter((edge) => !beforeEdgeIds.has(edge.id)).length };
+    };
+    const base = {
+      ok: true as const,
+      ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
+      spaceId,
+      installationId,
+      source,
+      home,
+      counts: groups,
+    };
+    // Quality and pages are read from the devices, documents, extractions and
+    // facts of the space. When none of them changed since they were last made,
+    // a resent snapshot costs no model request.
+    if (source.metadata.homeGraphEnrichmentInputs === homeGraphEnrichmentInputs(store, spaceId)) {
+      return { ...base, created: { ...created(), issues: 0 }, enrichment: 'unchanged' as const, quality: { status: 'unchanged' as const }, generated: emptyGeneratedPages() };
+    }
+    if (input.deferEnrichment) {
+      return { ...base, created: { ...created(), issues: 0 }, enrichment: 'queued' as const, quality: { status: 'queued' as const }, generated: emptyGeneratedPages() };
+    }
+    const enriched = await runHomeGraphSyncEnrichment({ store, artifactStore, spaceId, installationId, snapshot, signal: input.signal });
+    return { ...base, created: { ...created(), issues: enriched.createdIssues }, enrichment: 'done' as const,
+      quality: enriched.quality, generated: enriched.generated, autoLink: enriched.autoLink };
   });
+}
+
+export interface HomeGraphSyncEnrichmentResult {
+  readonly quality: NonNullable<HomeGraphSyncResult['quality']>;
+  readonly generated: HomeGraphSyncResult['generated'];
+  readonly autoLink: NonNullable<HomeGraphSyncResult['autoLink']>;
+  /** Open issues that did not exist before this pass. */
+  readonly createdIssues: number;
+}
+
+/**
+ * The model-read part of a sync: link documents to devices, the quality report
+ * and the generated pages. Records what it read from on the snapshot source, so
+ * the next sync of an unchanged home skips it.
+ */
+export async function runHomeGraphSyncEnrichment(input: {
+  readonly store: KnowledgeStore;
+  readonly artifactStore: ArtifactStore;
+  readonly spaceId: string;
+  readonly installationId: string;
+  readonly snapshot: HomeGraphSnapshotInput;
+  readonly signal?: AbortSignal | undefined;
+}): Promise<HomeGraphSyncEnrichmentResult> {
+  const { store, artifactStore, spaceId, installationId, signal } = input;
+  const issuesBefore = new Set(store.listIssuesInSpace(spaceId).map((issue) => issue.id));
+  // Devices whose content did not change since the last pass keep their quality answers.
+  const qualityAnswers = HomeGraphQualityAnswerMemo.fromMetadata(
+    currentInstallationSnapshotSource(store, spaceId, installationId)?.metadata.homeGraphQualityAnswers);
+  const autoLink = await autoLinkExistingSources(store, spaceId, installationId, signal);
+  let quality: NonNullable<HomeGraphSyncResult['quality']>;
+  if (isClassicOperation()) quality = { status: 'held', reason: 'decision-model-disabled' };
+  else try {
+    const report = await refreshHomeGraphQualityReport(store, spaceId, installationId, { signal, answers: qualityAnswers });
+    quality = report.unansweredDeviceIds.length
+      ? { status: 'partial', reason: `unsettled-devices:${report.unansweredDeviceIds.join(',')}`, ...(report.retainedLegacyIssues ? { retainedLegacyIssues: report.retainedLegacyIssues } : {}) }
+      : report.retainedLegacyIssues
+        ? { status: 'partial', reason: 'legacy-reviewed-state-retained', retainedLegacyIssues: report.retainedLegacyIssues }
+        : { status: 'refreshed' };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (!(error instanceof HomeGraphQualityHeldError) && !(error instanceof JudgmentInputError)) throw error;
+    quality = { status: 'held', reason: error instanceof HomeGraphQualityHeldError ? error.reason : error.problem === 'unsupported-input' ? 'malformed' : 'protected-input' };
+  }
+  const generated = await generateAutomaticHomeGraphPages({ store, artifactStore, spaceId, installationId, input: input.snapshot, signal, qualityAnswers });
+  const createdIssues = store.listIssuesInSpace(spaceId).filter((issue) => issue.status === 'open' && !issuesBefore.has(issue.id)).length;
+  // Only a complete pass is remembered as done; a held or partial one runs again
+  // next sync. Settled answers are kept either way, so that rerun asks only what is new.
+  const complete = quality.status === 'refreshed' && generated.errors.length === 0 && !generated.truncated && !signal?.aborted;
+  const answers = signal?.aborted ? undefined : qualityAnswers.toMetadata();
+  if (complete || answers) {
+    const snapshotSource = currentInstallationSnapshotSource(store, spaceId, installationId);
+    if (snapshotSource) {
+      await store.upsertSource({ id: snapshotSource.id, connectorId: snapshotSource.connectorId, sourceType: snapshotSource.sourceType,
+        status: snapshotSource.status, metadata: {
+          ...(answers ? { homeGraphQualityAnswers: answers } : {}),
+          ...(complete ? { homeGraphEnrichmentInputs: homeGraphEnrichmentInputs(store, spaceId) } : {}),
+        } });
+    }
+  }
+  return { quality, generated, autoLink: autoLink.counts, createdIssues };
+}
+
+/**
+ * What quality and pages are read from, as one hash: the documents of the
+ * space (not generated pages, not the snapshot source itself), their
+ * extractions, the facts, and each snapshot object's input hash.
+ */
+function homeGraphEnrichmentInputs(store: KnowledgeStore, spaceId: string): string {
+  const parts: string[] = [];
+  for (const source of store.listSourcesInSpace(spaceId)) {
+    if (source.status === 'stale' || isGeneratedPageSource(source) || source.metadata.homeGraphSourceKind === 'snapshot') continue;
+    parts.push(`s:${source.id}:${source.status}:${source.updatedAt}`);
+  }
+  for (const node of store.listNodesInSpace(spaceId)) {
+    if (node.status === 'stale') continue;
+    if (node.kind === 'fact') parts.push(`f:${node.id}:${node.updatedAt}`);
+    else if (typeof node.metadata.homeGraphInputHash === 'string') parts.push(`n:${node.id}:${node.metadata.homeGraphInputHash}`);
+  }
+  for (const extraction of store.listExtractionsInSpace(spaceId)) parts.push(`e:${extraction.id}:${extraction.updatedAt}`);
+  return knowledgeRecordVersion(parts.sort());
+}
+
+function emptyGeneratedPages(): HomeGraphSyncResult['generated'] {
+  return { devicePassports: 0, roomPages: 0, artifacts: 0, sources: 0, errors: [] };
 }
 
 async function autoLinkExistingSources(

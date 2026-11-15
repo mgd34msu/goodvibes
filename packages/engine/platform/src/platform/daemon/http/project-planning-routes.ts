@@ -1,9 +1,6 @@
 import type {
   ProjectPlanningDecisionRecordInput,
-  ProjectPlanningEvaluateInput,
-  ProjectPlanningLanguageUpsertInput,
   ProjectPlanningService,
-  ProjectPlanningStateUpsertInput,
   ProjectWorkPlanClearCompletedInput,
   ProjectWorkPlanTaskCreateInput,
   ProjectWorkPlanTaskDeleteInput,
@@ -13,6 +10,7 @@ import type {
   ProjectWorkPlanTaskStatusInput,
   ProjectWorkPlanTaskUpdateInput,
 } from '../../knowledge/index.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { requireParsedBody, routeFailureResponse } from './route-helpers.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -32,12 +30,9 @@ interface ProjectPlanningRouteContext {
 export const PROJECT_PLANNING_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
   { method: 'GET', path: '/api/projects/planning/status' },
   { method: 'GET', path: '/api/projects/planning/state' },
-  { method: 'POST', path: '/api/projects/planning/state' },
-  { method: 'POST', path: '/api/projects/planning/evaluate' },
   { method: 'GET', path: '/api/projects/planning/decisions' },
   { method: 'POST', path: '/api/projects/planning/decisions' },
   { method: 'GET', path: '/api/projects/planning/language' },
-  { method: 'POST', path: '/api/projects/planning/language' },
   { method: 'GET', path: '/api/projects/planning/work-plan' },
   { method: 'GET', path: '/api/projects/planning/work-plan/tasks' },
   { method: 'POST', path: '/api/projects/planning/work-plan/tasks' },
@@ -65,13 +60,15 @@ export class ProjectPlanningRoutes {
           planningId: url.searchParams.get('planningId') ?? undefined,
         }));
       }
-      if (url.pathname === '/api/projects/planning/state' && req.method === 'POST') {
-        return await this.admin(req, async () => Response.json(
-          await this.context.projectPlanningService.upsertState(await this.readBody<ProjectPlanningStateUpsertInput>(req), { signal: req.signal }),
-        ));
-      }
-      if (url.pathname === '/api/projects/planning/evaluate' && req.method === 'POST') {
-        return Response.json(await this.context.projectPlanningService.evaluate(await this.readOptionalBody<ProjectPlanningEvaluateInput>(req), { signal: req.signal }));
+      if (req.method === 'POST' && (url.pathname === '/api/projects/planning/state'
+        || url.pathname === '/api/projects/planning/evaluate' || url.pathname === '/api/projects/planning/language')) {
+        throw new RefusalError(refusal({
+          code: 'PLANNING_STATE_READ_ONLY',
+          state: 'saved planning state and project language are read-only history',
+          reason: 'The planning interview is retired; nothing reads a planning state or its readiness to start work',
+          next: ['Add or change tasks in the work plan: POST /api/projects/planning/work-plan/tasks'],
+          status: 410,
+        }));
       }
       if (url.pathname === '/api/projects/planning/decisions' && req.method === 'GET') {
         return Response.json(await this.context.projectPlanningService.listDecisions(readProjectSpaceFromUrl(url)));
@@ -83,11 +80,6 @@ export class ProjectPlanningRoutes {
       }
       if (url.pathname === '/api/projects/planning/language' && req.method === 'GET') {
         return Response.json(await this.context.projectPlanningService.getLanguage(readProjectSpaceFromUrl(url)));
-      }
-      if (url.pathname === '/api/projects/planning/language' && req.method === 'POST') {
-        return await this.admin(req, async () => Response.json(
-          await this.context.projectPlanningService.upsertLanguage(await this.readBody<ProjectPlanningLanguageUpsertInput>(req)),
-        ));
       }
       if (url.pathname === '/api/projects/planning/work-plan' && req.method === 'GET') {
         return Response.json(await this.context.projectPlanningService.getWorkPlanSnapshot(readWorkPlanQuery(url)));

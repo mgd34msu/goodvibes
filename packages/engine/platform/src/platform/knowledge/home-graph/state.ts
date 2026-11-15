@@ -11,6 +11,7 @@ import { belongsToSpace, edgeIsActive, factSourceIds, readRecord, readStringArra
 import type { HomeGraphRenderState } from './rendering.js';
 import { readHomeGraphQuality, HomeGraphQualityHeldError, type HomeGraphQualityQuestion } from './quality/reader.js';
 import { projectHomeGraphQualityInput, readHomeGraphDeclaredBoolean } from './quality/projection.js';
+import type { HomeGraphQualityAnswerMemo } from './quality-answer-memo.js';
 
 export interface HomeGraphState extends Omit<HomeGraphRenderState, 'title'> {
   readonly extractions: readonly KnowledgeExtractionRecord[];
@@ -150,7 +151,7 @@ export async function missingDevicePassportFields(
   device: KnowledgeNodeRecord,
   sources: readonly KnowledgeSourceRecord[],
   facts: readonly KnowledgeNodeRecord[] = [],
-  options: { readonly entities?: readonly KnowledgeNodeRecord[] | undefined; readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly assertCurrent?: (() => void) | undefined; readonly retainCurrent?: ((check: () => void) => void) | undefined } = {},
+  options: { readonly entities?: readonly KnowledgeNodeRecord[] | undefined; readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly assertCurrent?: (() => void) | undefined; readonly retainCurrent?: ((check: () => void) => void) | undefined; readonly answers?: HomeGraphQualityAnswerMemo | undefined } = {},
 ): Promise<string[]> {
   const manufacturer = typeof device.metadata.manufacturer === 'string';
   const model = typeof device.metadata.model === 'string';
@@ -164,7 +165,8 @@ export async function missingDevicePassportFields(
   if (options.signal?.aborted) throw new HomeGraphQualityHeldError('aborted');
   if (!questions.length) return [manufacturer ? '' : 'manufacturer', model ? '' : 'model', battery ? 'battery type' : '', sources.length ? '' : 'manual/source'].filter(Boolean);
   const input = projectHomeGraphQualityInput('device-1', device, options.entities ?? [], facts, questions);
-  const [reading] = await readHomeGraphQuality([input], options);
+  const readingOptions = { signal: options.signal, timeoutMs: options.timeoutMs, assertCurrent: options.assertCurrent };
+  const [reading] = options.answers ? await options.answers.read([input], readingOptions) : await readHomeGraphQuality([input], readingOptions);
   reading!.assertCurrent();
   options.retainCurrent?.(reading!.assertCurrent);
   return [

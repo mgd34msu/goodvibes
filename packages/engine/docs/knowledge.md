@@ -87,6 +87,20 @@ id such as `knowledge.ingest.bookmarks` is not a callable platform method. Call
 `KnowledgeService` methods `ingestUrl()`, `ingestArtifact()`,
 `syncBrowserHistory()`, `importBookmarksFromFile()`, `importUrlsFromFile()`,
 `ingestBookmarkSeeds()`, `ingestWithConnector()`, and `ingestConnectorInput()`.
+Every platform ingest helper takes the same fetch setting, `fetchMode`
+(`public-only` or `allow-private-hosts`), and stamps the same
+`metadata.knowledgeIntent` on the sources it creates; `bookmarkSeeds()` takes one
+input object (`seeds`, `sessionId`, `sourceType`, `connectorId`, `fetchMode`,
+`metadata`) and `withConnector()` takes `(connectorId, input, options)`.
+
+An ingest that is cancelled publishes nothing and emits
+`KNOWLEDGE_INGEST_FAILED` for its `KNOWLEDGE_INGEST_STARTED`. An ingest that
+stops for another reason (the decision model could not settle a reading or
+could not be reached, or the source changed while it was read) keeps the source
+pending with `metadata.ingestHold` (`reason`, `detail`, `at`) and the reason in
+`crawlError`, emits the failed event, and is picked up by the `refresh-stale`
+job; a source that already had indexed content stays indexed. An HTML block the
+model is unsure about is kept, not used to hold the document.
 
 The daemon route `POST /api/knowledge/ingest/artifact` accepts normal JSON
 requests when the caller already has an `artifactId`, a daemon-local `path`, or
@@ -105,7 +119,14 @@ the artifact store and enforce the same artifact cap before extraction.
 HTML extraction uses Mozilla Readability through `jsdom` first and falls back to
 the lightweight extractor for malformed or hostile HTML. PDF extraction uses
 PDF.js for text-layer parsing and falls back to a lightweight raw-stream reader
-only when the dedicated parser cannot load the file. The raw PDF fallback
+only when the dedicated parser cannot load the file. A PDF costs one
+readability request for its whole text: its sections are the document's own
+outline (none when it has no outline), its title is the document's Title entry
+when it has one, links are kept when they parse as http(s) URLs, and raw-stream
+hex strings are decoded by their bytes (a UTF-16 byte-order mark, printable
+ASCII, or printable UTF-16) without a request per string. A document heading
+becomes a topic node only when it names a fact read from that document, at most
+24 per document; the same tag on a memory and a document is one topic. The raw PDF fallback
 inflates Flate-compressed streams before extracting text literals and rejects
 binary-like stream data, so compressed PDF bytes are not stored as searchable
 text, summaries, sections, or wiki page material. If neither parser can produce
@@ -749,34 +770,24 @@ daemon routes and operator method ids.
 
 ## Project planning
 
-Project Planning is a passive platform-backed knowledge feature for the TUI's
-conversational planning loop. The TUI owns intent detection, repo/doc
-inspection, the relentless one-question-at-a-time interview, the planning
-panel, user approval, and agent execution handoff. The daemon stores and
-evaluates artifacts only; it never starts or resumes a planning conversation,
-and non-TUI surfaces are not pulled into planning loops.
+Project Planning keeps the project's work plan, the durable task checklist that
+agent tools, the web SDK and `/workstream` read and write, together with project
+decision records. Planning artifacts are stored as knowledge sources in project
+spaces:
 
-Planning artifacts are stored as knowledge sources in project spaces:
-
-- `state`: goal, known context, open and answered questions, assumptions,
-  constraints, risks, tasks, dependency edges, verification gates, agent
-  assignments, readiness, and execution approval
+- `work-plan`: the live task checklist
 - `decision`: durable project decisions with context, rejected alternatives,
   reasoning, consequences, and status
-- `language`: canonical project terms, avoid terms, aliases, relationships,
-  examples, and resolved ambiguities
-
-The readiness evaluator checks for missing goals, scope gaps, open questions,
-ambiguous language, missing tasks, missing dependency data, missing
-verification gates, and missing execution approval. It returns gaps plus a
-suggested next question, but it does not mutate state unless the client calls
-the state upsert route.
+- `state` and `language`: records saved by the retired planning interview
+  (goal, questions, readiness, approval; project vocabulary). They are
+  read-only history: nothing evaluates, answers or approves them, and a saved
+  approval authorises no work
 
 Daemon routes live under `/api/projects/planning/*`, and operator method ids
 are `projectPlanning.status`, `projectPlanning.state.get`,
-`projectPlanning.state.upsert`, `projectPlanning.evaluate`,
-`projectPlanning.decisions.list`, `projectPlanning.decisions.record`,
-`projectPlanning.language.get`, and `projectPlanning.language.upsert`.
+`projectPlanning.decisions.list`, `projectPlanning.decisions.record` and
+`projectPlanning.language.get`. Saved planning state and language are read-only
+history from the retired planning interview.
 
 The work-plan task board adds nine more ids over
 `/api/projects/planning/work-plan/*`: `projectPlanning.workPlan.snapshot`,
@@ -799,16 +810,16 @@ token-bounded context bundles for agents:
 - `knowledge.packet` (operator id)
 - `knowledge.graph.items.search()` (async platform)
 - `knowledge.packets.build()` and `knowledge.packets.buildPrompt()` (async platform)
-- `knowledge.packets.preparePrompt()` (async platform preparation)
-- `readPreparedKnowledgePromptPacket()` (synchronous rendering of the exact prepared handle)
+- `knowledge.packets.preparePrompt()` (async platform preparation; returns `{ task, writeScope, prompt }`)
 
 `KnowledgeService.search()` and `searchScoped()` now return promises. The old
 `buildPacketSync()`, `buildPromptPacketSync()`, grouped `buildSync()` /
 `buildPromptSync()`, and `buildCuratedKnowledgePromptSync()` helper are retired.
 Await retrieval directly, or await `preparePromptPacket()` before synchronous
-prompt assembly. Prepared handles are local and opaque, bound to the original
-task, write scope, read-set, and reader configuration. Forged or stale handles
-fail explicitly. A missing reading is never represented as an empty match set.
+prompt assembly and read its `prompt` field. The prepared packet is a plain
+value: it carries the task and write scope it was built for and the rendered
+prompt (`null` when nothing was selected). A missing reading is never
+represented as an empty match set.
 
 Packet items include source/node identity, summary, URI, related labels,
 evidence snippets, score, estimated tokens, and metadata.
@@ -859,9 +870,18 @@ of the base structured knowledge graph. The response includes:
 - `svg`: an embeddable static SVG rendering
 - counts, dimensions, and generation metadata
 
-Query options are `limit`, `includeSources`, `includeIssues`, and
-`includeGenerated`. The map also accepts shared multi-select filters, each
-narrowing one axis of the rendered record set before layout.
+Query options are `limit` (default 500, at most 1,000), `cursor`,
+`includeSources`, `includeIssues`, and `includeGenerated`. When more records
+match than `limit`, the map shows the most relevant ones and returns
+`nextCursor`; pass it back as `cursor` for the next slice. Relevance is decided
+in code: within each record kind (every node kind, documents, issues) the
+records named by `ids` or `linkedToIds` come first, then their neighbours, then
+the most connected records; the kinds take turns, so documents and every node
+kind always have a share of a slice. The layout puts the focus records (or the
+most connected record) at the centre and each further ring one link away, with
+rings and canvas sized so labels do not overlap. The map also accepts shared
+multi-select filters, each narrowing one axis of the rendered record set before
+layout.
 
 | Filter | What it narrows |
 | --- | --- |
@@ -921,7 +941,7 @@ value and maps to one concrete maintenance routine.
 | --- | --- |
 | `lint` | Scan the store for integrity issues and report them |
 | `reindex` | Rebuild the search index over sources, nodes, and edges |
-| `refresh-stale` | Re-fetch sources whose content has gone stale; a source that already has indexed content stays indexed when its re-fetch fails, with `crawlError` and `metadata.lastCrawlFailedAt` recorded |
+| `refresh-stale` | Re-fetch sources whose content has gone stale, and sources held pending by an earlier ingest; when the fetched bytes hash to the stored `contentHash` only `lastCrawledAt` (and `metadata.lastCrawlUnchangedAt`) moves, with no model request, recompile or lint; a source that already has indexed content stays indexed when its re-fetch fails, with `crawlError` and `metadata.lastCrawlFailedAt` recorded |
 | `refresh-bookmarks` | Re-fetch bookmark-backed sources |
 | `sync-browser-history` | Pull new browser-history entries into the store |
 | `rebuild-projections` | Re-materialize the overview and bundle projections |
@@ -1023,6 +1043,6 @@ run reset again.
 - A knowledge store whose publication outcome could not be confirmed no longer refuses writes until restart: the next operation adopts the published image from disk and continues. While a batch still holds unsaved rows the reload waits and the write is refused with the fence named.
 - Cancelling a refinement task that is already `closed` or `suppressed` is refused with the task's state ("Nothing was changed"); the daemon route answers 409 with code `KNOWLEDGE_REFINEMENT_TASK_REFUSED`. Cancelling an already cancelled task stays idempotent.
 - A repair abandoned by its caller keeps its task active until the next run settles it; Home Graph readiness stops counting an active task as repairing once it has been untouched for 10 minutes.
-- `extracting` and `needs_review` refinement states are retired. They stay in the type for older rows and clients but nothing moves a task into them, and readiness never reports `needs_review` (`needsReviewTaskCount` is always 0).
+- `extracting` and `needs_review` refinement states are retired. They stay in the task type for older rows but nothing moves a task into them; Home Graph readiness no longer has a `needs_review` state or a `needsReviewTaskCount` field.
 - Work that was admitted before a store closed reports "KnowledgeStore is closed". Reads after close still return the last loaded records.
 - Refused native intake, execution intent and execution record moves name the current state, the proposed state and the legal moves.

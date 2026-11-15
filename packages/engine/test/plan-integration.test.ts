@@ -5,15 +5,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import {
-  ProjectPlanningService,
-} from '../platform/src/platform/knowledge/index.js';
-import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { ExecutionPlanManager } from '../platform/src/platform/core/execution-plan.js';
 import {
   assemblePlanProposal,
   planProposalToExecutionPlanItems,
-  planProposalToPlanningState,
   type RawDecomposition,
 } from '../platform/src/platform/core/plan-proposal.js';
 
@@ -39,12 +34,6 @@ function createTmpRoot(prefix: string): string {
   return root;
 }
 
-function createPlanningService(): ProjectPlanningService {
-  const root = createTmpRoot('plan-integration-');
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
-  return new ProjectPlanningService(store, { defaultProjectId: 'planning-project' });
-}
-
 function buildProposal() {
   const raw: RawDecomposition = {
     phases: [{ title: 'Design' }, { title: 'Build' }],
@@ -68,36 +57,6 @@ function buildProposal() {
   expect(issues).toEqual([]);
   return proposal;
 }
-
-describe('proposal -> planning-state approval seam (readiness gate)', () => {
-  test('needs-user-input (unapproved) before approval, executable after: mirrors /plan approve', async () => {
-    const service = createPlanningService();
-    const projectId = 'planning-project';
-    const proposal = buildProposal();
-    const partialState = planProposalToPlanningState(proposal);
-
-    await service.upsertState({ projectId, state: partialState });
-
-    const evalBefore = await service.evaluate({ projectId });
-    expect(evalBefore.readiness).toBe('needs-user-input');
-    expect(evalBefore.gaps.map((g) => g.kind)).toEqual(['unapproved-execution']);
-
-    // Mirrors the TUI's approval action, bound to its observed revision.
-    const current = await service.getState({ projectId });
-    expect(current.state).not.toBeNull();
-    if (!current.revision) throw new Error('Planning state revision is missing');
-    const approved = await service.applyStateAction({
-      projectId,
-      expected: { kind: 'revision', revision: current.revision },
-      action: { kind: 'approve' },
-    });
-    expect(approved.applied).toBe(true);
-
-    const evalAfter = await service.evaluate({ projectId });
-    expect(evalAfter.gaps).toEqual([]);
-    expect(evalAfter.readiness).toBe('executable');
-  });
-});
 
 describe('proposal -> ExecutionPlanManager persistence (reuse, no duplicate scheduler)', () => {
   test('create + replaceItems resolves dependencies; getNextItems gates on them; updateItem unblocks downstream', () => {

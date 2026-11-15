@@ -6,14 +6,6 @@ export {
   projectPlanningCanonicalUri,
   resolveProjectPlanningSpace,
 } from './helpers.js';
-export { evaluateProjectPlanningReadiness } from './readiness.js';
-export { readProjectPlanningAnswerActions, buildProjectPlanningAnswerActions } from './answer-actions.js';
-export type {
-  ProjectPlanningAnswerAction,
-  ProjectPlanningAnswerQuestion,
-  ProjectPlanningAnswerActionsReading,
-  ProjectPlanningAnswerReadOptions,
-} from './answer-actions.js';
 export type {
   ProjectPlanningAgentAssignment,
   ProjectPlanningAmbiguity,
@@ -23,15 +15,9 @@ export type {
   ProjectPlanningDecisionsResult,
   ProjectPlanningDecisionStatus,
   ProjectPlanningDependency,
-  ProjectPlanningEvaluateInput,
-  ProjectPlanningEvaluation,
-  ProjectPlanningGap,
-  ProjectPlanningGapKind,
-  ProjectPlanningGapSeverity,
   ProjectPlanningGateStatus,
   ProjectPlanningLanguageArtifact,
   ProjectPlanningLanguageResult,
-  ProjectPlanningLanguageUpsertInput,
   ProjectPlanningQuestion,
   ProjectPlanningQuestionStatus,
   ProjectPlanningReadiness,
@@ -40,11 +26,6 @@ export type {
   ProjectPlanningState,
   ProjectPlanningStateResult,
   ProjectPlanningRevision,
-  ProjectPlanningStateExpectation,
-  ProjectPlanningStateAction,
-  ProjectPlanningStateActionInput,
-  ProjectPlanningStateActionResult,
-  ProjectPlanningStateUpsertInput,
   ProjectPlanningStatus,
   ProjectPlanningTask,
   ProjectPlanningTaskStatus,

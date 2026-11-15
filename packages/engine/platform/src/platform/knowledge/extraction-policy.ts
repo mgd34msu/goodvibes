@@ -3,6 +3,9 @@ import { createKnowledgeExtractionOwner, type KnowledgeExtractionOwner } from '.
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { extractionReadability } from './batteries/extraction-readability.js';
 import type { KnowledgeExtractionRecord } from './types.js';
+import { KnowledgeIngestStoppedError, knowledgeIngestStop, type KnowledgeIngestStopReason } from './ingest-stopped.js';
+
+export { KnowledgeIngestStoppedError, type KnowledgeIngestStopReason } from './ingest-stopped.js';
 
 /**
  * The current extractor generation. Stamped onto every extraction's metadata at
@@ -25,10 +28,10 @@ export const KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS = 128 * 1024;
 /** Transport budget only; no length or character-ratio readability threshold. */
 export const KNOWLEDGE_EXTRACTION_SAMPLE_CHARS = 4_096;
 
-/** No classification or mutation may proceed on an unresolved reading. */
-export class KnowledgeExtractionJudgmentHoldError extends Error {
-  constructor() {
-    super('Knowledge extraction is on hold: a required extraction judgment did not reach an actionable conclusion.');
+/** An extraction stopped; `reason` says why (by default the model could not settle a reading). */
+export class KnowledgeExtractionJudgmentHoldError extends KnowledgeIngestStoppedError {
+  constructor(reason: KnowledgeIngestStopReason = 'model-unsure', detail?: string, options?: { readonly cause?: unknown }) {
+    super(reason, detail, options);
     this.name = 'KnowledgeExtractionJudgmentHoldError';
   }
 }
@@ -105,7 +108,7 @@ export function hasUsefulKnowledgeExtractionText(value: string | undefined, owne
 /** Shared readability operation with caller-owned cancellation. */
 export async function readKnowledgeExtractionTextUsability(value: string | undefined, signal?: AbortSignal, owner: KnowledgeExtractionOwner = createKnowledgeExtractionOwner({ signal })): Promise<boolean> {
   owner.assertCurrent();
-  if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError();
+  if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError('cancelled');
   if (!value?.trim()) return false;
   assertJudgmentInput(value);
   const normalized = value.toLowerCase();
@@ -116,11 +119,11 @@ export async function readKnowledgeExtractionTextUsability(value: string | undef
       sample: value.slice(0, KNOWLEDGE_EXTRACTION_SAMPLE_CHARS),
     }, { site: 'knowledge.extraction.readability', ...(signal ? { signal } : {}), beforeAttempt: owner.assertCurrent });
     owner.assertCurrent();
-    if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError();
+    if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError('cancelled');
     const reading = run.readings.readable;
     if (reading.outcome !== 'act' || reading.verdict === 'uncertain') {
       run.recordAction('hold');
-      throw new KnowledgeExtractionJudgmentHoldError();
+      throw new KnowledgeExtractionJudgmentHoldError('model-unsure', 'text readability');
     }
     run.recordAction(reading.verdict === 'yes' ? 'keep-readable-text' : 'reject-unreadable-text');
     return reading.verdict === 'yes';
@@ -129,13 +132,19 @@ export async function readKnowledgeExtractionTextUsability(value: string | undef
     // Classic retains nonempty parser output. This is text presence, not a
     // semantic readability certificate; extraction metadata records that limit.
     return Boolean(value.trim());
-  }));
+  }), signal);
 }
 
-/** Normalize all port failures to an explicit, value-free hold for ingest callers. */
-export async function requireExtractionJudgment<T>(read: () => Promise<T>): Promise<T> {
+/**
+ * A stop keeps its own reason; an abort is a cancellation; any other failure of
+ * the reading is the model being unavailable, with the failure kept as `cause`.
+ */
+export async function requireExtractionJudgment<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   try { return await read(); }
-  catch { throw new KnowledgeExtractionJudgmentHoldError(); }
+  catch (error) {
+    if (error instanceof JudgmentInputError) throw error;
+    throw knowledgeIngestStop(error, signal) ?? new KnowledgeExtractionJudgmentHoldError('model-unavailable', undefined, { cause: error });
+  }
 }
 
 /** Preflight document content, not database ids, timestamps or unrelated bookkeeping. */

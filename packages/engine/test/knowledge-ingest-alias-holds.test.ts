@@ -9,7 +9,7 @@ import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/connectors.js';
 import { ingestKnowledgeArtifact, ingestKnowledgeUrl } from '../platform/src/platform/knowledge/ingest-inputs.js';
-import { KnowledgeEntityAliasHoldError } from '../platform/src/platform/knowledge/entity-aliases.js';
+import { KnowledgeIngestStoppedError } from '../platform/src/platform/knowledge/ingest-stopped.js';
 import { KnowledgeNodeActivationHeldError } from '../platform/src/platform/knowledge/activation/types.js';
 import { getKnowledgeNodeObservation, prepareStagedObservedKnowledgeNodeInput } from '../platform/src/platform/knowledge/store-node-observation.js';
 import { createCompressedPdfBuffer } from './_helpers/homegraph-service-fixtures.js';
@@ -81,7 +81,7 @@ for (const route of routes) describe(`${route} aliases before source publication
         }
         return answers.ask(request);
       } });
-      await expect(ingest()).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
+      await expect(ingest()).rejects.toBeInstanceOf(KnowledgeIngestStoppedError);
       expect(ctx.store.listSources().map((source) => source.id)).toEqual(['competing-source']);
       expect(ctx.store.listExtractions()).toHaveLength(0);
       expect(ctx.store.listNodes()).toHaveLength(0);
@@ -189,7 +189,7 @@ for (const route of routes) describe(`${route} aliases before source publication
       const attempt = ingest(true, controller.signal);
       await reading;
       controller.abort();
-      await expect(attempt).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
+      await expect(attempt).rejects.toBeInstanceOf(KnowledgeIngestStoppedError);
       release();
       await drained.promise;
       await settleEvents();
@@ -225,7 +225,7 @@ for (const route of routes) describe(`${route} aliases before source publication
           return answer.ask(request);
         } };
         installJudgmentPort(port);
-        await expect(ingest(true, controller.signal)).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
+        await expect(ingest(true, controller.signal)).rejects.toBeInstanceOf(KnowledgeIngestStoppedError);
         expect(changed).toBe(true);
         expect(snapshot(ctx.store)).toEqual(expected);
         expect(await reopen()).toEqual(expected);

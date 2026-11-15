@@ -57,6 +57,7 @@ import { repairProfileNodeInput, repairProfileEdgeInputs } from '../semantic/rep
 import { createSemanticNodeSlugPlanner } from '../semantic/node-slug.js';
 import { buildDevicePageProfileFacts, devicePageProfileFactInput } from './page-profile-facts.js';
 import { createHomeGraphPageSourceReader, type HomeGraphPageSourceReader, type HomeGraphPageFactReader, isHomeGraphPageFactCandidate, createHomeGraphPageFactReader } from './page-quality.js';
+import type { HomeGraphQualityAnswerMemo } from './quality-answer-memo.js';
 import type {
   HomeGraphDevicePassportResult,
   HomeGraphGeneratedPagesSummary,
@@ -72,6 +73,8 @@ export interface HomeGraphPageContext {
   readonly spaceId: string;
   readonly installationId: string;
   readonly signal?: AbortSignal | undefined;
+  /** Device quality answers already read for unchanged content (a sync's enrichment pass). */
+  readonly qualityAnswers?: HomeGraphQualityAnswerMemo | undefined;
 }
 
 export const HOME_GRAPH_PAGE_POLICY_VERSION = 'homegraph-pages-v9';
@@ -147,6 +150,9 @@ async function generateHomeGraphPagesWithinBudget(
     );
     const devices = limitRecords(allDevices, effectiveOptions.maxDevicePassports);
     summary.deferredDevicePassports += Math.max(0, allDevices.length - devices.length);
+    // One read of the space and one source lookup serve every device of the
+    // run; each passport reads only its own device's rows from them.
+    const sourceLookup = buildDevicePassportSourceLookup(state.sources, state.nodes, state.edges);
     for (const [index, device] of devices.entries()) {
       if (context.signal?.aborted || deadlineReached(deadlineAt)) {
         summary.deferredDevicePassports += devices.length - index;
@@ -157,6 +163,8 @@ async function generateHomeGraphPagesWithinBudget(
       try {
         const page = await refreshHomeGraphDevicePassport({
           ...context,
+          state,
+          sourceLookup,
           input: {
             knowledgeSpaceId: context.spaceId,
             deviceId,
@@ -377,7 +385,7 @@ async function refreshHomeGraphDevicePassportNow(
   const issues = filterDevicePassportIssues(issuesForScope(state.issues, state.edges, scopedNodeIds, sources), sources);
   for (const issue of issues) writeGuard.watch(`page-issue:${issue.id}`, () => store.getIssue(issue.id), issue);
   const qualityGuards: Array<() => void> = [];
-  const missingFields = await missingDevicePassportFields(device, sources, semanticFacts, { entities, signal: context.signal, assertCurrent: assertPageCurrent, retainCurrent: check => qualityGuards.push(check) });
+  const missingFields = await missingDevicePassportFields(device, sources, semanticFacts, { entities, signal: context.signal, assertCurrent: assertPageCurrent, retainCurrent: check => qualityGuards.push(check), answers: context.qualityAnswers });
   const markdown = renderDevicePassportPage({ spaceId, device, entities, sources, issues, missingFields, semanticFacts, factPlan });
   const passportId = passportIdentity.id;
   const assertPublicationCurrent = () => {

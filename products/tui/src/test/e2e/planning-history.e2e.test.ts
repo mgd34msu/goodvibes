@@ -1,10 +1,11 @@
 /** The built TUI in a real PTY: passive historical records survive a process restart. */
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { KnowledgeStore, ProjectPlanningService, prepareConfiguredProjectContext, createConfiguredPlanningStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { KnowledgeStore, prepareConfiguredProjectContext, createConfiguredPlanningStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { readPlanningSourceSnapshots } from '../helpers/planning-source-snapshot.ts';
+import { seedHistoricalPlanningState } from '../helpers/planning-history.ts';
 import { closeE2EFixture, inputAreaVisible, launchTui, makeHome, screenText, startStubModel, type TuiSession } from './harness.ts';
 
 const goal = 'Retained PTY retry history';
@@ -24,21 +25,20 @@ test('built terminal history refresh, native view and restart retain saved quest
     if (!context.projectId) throw new Error('Missing activated project context');
     store = createConfiguredPlanningStore(config);
     const dbPath = store.storagePath; const projectId = context.projectId;
-    const service = new ProjectPlanningService(store);
-    await service.upsertState({ projectId, state: {
+    await seedHistoricalPlanningState(store, projectId, {
       goal, scope: 'Historical fixture only', executionApproved: true,
       openQuestions: [{ id: 'saved-question', prompt: question, status: 'open' }],
       answeredQuestions: [{ id: 'saved-answer', prompt: 'Retain the original answer?', answer: 'Yes, retain it exactly.', status: 'answered', answeredAt: 123 }],
       metadata: { approvedAt: 456, approvedFrom: 'saved-operator', active: true, opaque: 'exact-pty-history' },
       tasks: [{ id: 'saved-task', title: 'Historical task claim', status: 'completed' }],
-    } });
+    });
     await store.close();
     // TUI startup creates/reconciles unrelated bootstrap knowledge_schedules.
     // Retain every raw column and native generation of the planning source set
     // instead of freezing the entire multi-owner SQLite file. This catches raw
     // JSON/provenance changes, replacement, deletion, and added planning rows.
     const sources = await readPlanningSourceSnapshots(dbPath, projectId);
-    expect(sources).toHaveLength(2);
+    expect(sources).toHaveLength(1);
     for (const snapshot of sources) {
       expect(snapshot.source).not.toBeNull(); expect(snapshot.raw).not.toBeNull();
       expect(snapshot.generation).toMatch(/^kr-[0-9a-f]{32}$/);

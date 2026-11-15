@@ -3,6 +3,7 @@ import type { MemoryRecord, MemoryRegistry } from '../state/index.js';
 import { DEFAULT_KNOWLEDGE_SPACE_ID, knowledgeSpaceMetadata } from './spaces.js';
 import type { KnowledgeStore } from './store.js';
 import { slugify } from './shared.js';
+import { knowledgeTopicSlug } from './topic-slug.js';
 import type { KnowledgeEdgeRecord, KnowledgeNodeRecord } from './types.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -78,7 +79,7 @@ async function upsertKnowledgeMemoryNode(store: KnowledgeStore, record: MemoryRe
   const existing = store.getNode(input.id);
   const node = mirrorCurrent(existing, input) ? existing : await upsertObservedKnowledgeNode(store, input, 'memory-mirror', record, readCurrent);
 
-  const wantedTags = new Set(record.tags.map(slugify));
+  const wantedTags = new Set(record.tags.map((tag) => knowledgeTopicSlug(DEFAULT_KNOWLEDGE_SPACE_ID, tag)));
   const wantedSessions = new Set(record.provenance.filter(item => item.kind === 'session').map(item => item.ref));
   for (const edge of edgesByFrom.get(node.id) ?? []) {
     if ((edge.relation === 'memory_tagged_with' && edge.toKind === 'node' && !wantedTags.has(store.getNode(edge.toId)?.slug ?? ''))
@@ -88,10 +89,11 @@ async function upsertKnowledgeMemoryNode(store: KnowledgeStore, record: MemoryRe
   }
 
   for (const tag of record.tags) {
-    const existingTopic = store.getNodeByKindAndSlug('topic', slugify(tag));
+    const slug = knowledgeTopicSlug(DEFAULT_KNOWLEDGE_SPACE_ID, tag);
+    const existingTopic = store.getNodeByKindAndSlug('topic', slug);
     const topicNode = existingTopic && existingTopic.title === tag ? existingTopic : await upsertObservedKnowledgeNode(store, {
       kind: 'topic',
-      slug: slugify(tag),
+      slug,
       title: tag,
       summary: `Topic tag ${tag}.`,
       aliases: [tag],
@@ -104,6 +106,7 @@ async function upsertKnowledgeMemoryNode(store: KnowledgeStore, record: MemoryRe
       toId: topicNode.id,
       relation: 'memory_tagged_with',
     });
+    await retireLegacyMemoryTopic(store, tag, slug);
   }
 
   for (const provenance of record.provenance) {
@@ -116,4 +119,19 @@ async function upsertKnowledgeMemoryNode(store: KnowledgeStore, record: MemoryRe
       relation: 'derived_from_session',
     });
   }
+}
+
+/**
+ * Memory tags used to get a topic slugged without the space, so the same tag on
+ * a document made a second topic. Once the memory edge points at the shared
+ * topic, the old one is removed when nothing but memory edges ever used it.
+ */
+async function retireLegacyMemoryTopic(store: KnowledgeStore, tag: string, slug: string): Promise<void> {
+  const legacySlug = slugify(tag);
+  if (legacySlug === slug) return;
+  const legacy = store.getNodeByKindAndSlug('topic', legacySlug);
+  if (!legacy || legacy.metadata.tag !== tag) return;
+  const edges = store.edgesFor('node', legacy.id);
+  if (edges.some((edge) => edge.relation !== 'memory_tagged_with')) return;
+  await store.deleteNode(legacy.id);
 }

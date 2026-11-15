@@ -26,8 +26,10 @@ async function fixture() {
   return { store, service: new ProjectPlanningService(store), path: store.storagePath };
 }
 
-const state = { id: 'current', goal: 'Keep the project plan discoverable' };
-const identity = { spaceId: projectKnowledgeSpaceId('alpha'), kind: 'state' as const, artifactId: 'current' };
+const identity = { spaceId: projectKnowledgeSpaceId('alpha'), kind: 'decision' as const, artifactId: 'keep-plan' };
+function record(service: ProjectPlanningService, decision = 'Keep the project plan discoverable') {
+  return service.recordDecision({ projectId: 'alpha', decision: { id: identity.artifactId, title: 'Plan location', decision } });
+}
 
 function sourceInput(source: KnowledgeSourceRecord) {
   // Stored host clocks are not caller input to a semantic publication.
@@ -37,41 +39,39 @@ function sourceInput(source: KnowledgeSourceRecord) {
 
 test('fresh source identity is minted once and resolved by its persisted tuple across updates and restart', async () => {
   const f = await fixture();
-  const first = await f.service.upsertState({ projectId: 'alpha', state });
-  const sourceId = first.source?.id;
-  expect(sourceId).toMatch(/^project-planning-state-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  const first = await record(f.service);
+  const sourceId = first.source.id;
+  expect(sourceId).toMatch(/^project-planning-decision-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   expect(f.store.getPlanningSourceSnapshot(identity).source?.id).toBe(sourceId);
-  expect((await f.service.getState({ projectId: 'alpha' })).source?.id).toBe(sourceId);
-  expect((await f.service.upsertState({ projectId: 'alpha', state: { ...state, goal: 'A revised goal' } })).source?.id).toBe(sourceId);
+  expect((await record(f.service, 'A revised decision')).source.id).toBe(sourceId);
   const reopened = new KnowledgeStore({ dbPath: f.path }); cleanup.push(() => reopened.close());
-  const service = new ProjectPlanningService(reopened);
-  expect((await service.getState({ projectId: 'alpha' })).source?.id).toBe(sourceId);
-  expect((await service.upsertState({ projectId: 'alpha', state })).source?.id).toBe(sourceId);
+  await reopened.init();
+  expect(reopened.getPlanningSourceSnapshot(identity).source?.id).toBe(sourceId);
+  expect((await record(new ProjectPlanningService(reopened))).source.id).toBe(sourceId);
 });
 
 test('historical hashed source without canonical URI is found from durable metadata and updated in place', async () => {
   const f = await fixture();
-  const seeded = await f.service.upsertState({ projectId: 'alpha', state });
+  const seeded = await record(f.service);
   // Fixed independently recorded deployed-format fixture, not a live derivation.
-  const oldId = 'project-planning-state-4b7a24906e974844';
+  const oldId = 'project-planning-decision-4b7a24906e974844';
   const raw = new SQLiteStore(f.path);
   await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
-  raw.run('UPDATE knowledge_sources SET id = ?, canonical_uri = NULL WHERE id = ?', [oldId, seeded.source!.id]);
+  raw.run('UPDATE knowledge_sources SET id = ?, canonical_uri = NULL WHERE id = ?', [oldId, seeded.source.id]);
   await raw.save(); raw.close();
   const reopened = new KnowledgeStore({ dbPath: f.path }); cleanup.push(() => reopened.close());
-  const service = new ProjectPlanningService(reopened);
-  expect((await service.getState({ projectId: 'alpha' })).source?.id).toBe(oldId);
-  const saved = await service.upsertState({ projectId: 'alpha', state: { ...state, goal: 'Updated historical plan' } });
-  expect(saved.source?.id).toBe(oldId);
+  await reopened.init();
+  expect(reopened.getPlanningSourceSnapshot(identity).source?.id).toBe(oldId);
+  const saved = await record(new ProjectPlanningService(reopened), 'Updated historical decision');
+  expect(saved.source.id).toBe(oldId);
   expect(reopened.getPlanningSourceSnapshot(identity).source?.canonicalUri)
     .toBe(helpers.projectPlanningCanonicalUri(identity.spaceId, identity.kind, identity.artifactId));
-  expect(reopened.listSources(100).filter(source => source.metadata['planningArtifactKind'] === 'state')).toHaveLength(1);
+  expect(reopened.listSources(100).filter(source => source.metadata['planningArtifactKind'] === 'decision')).toHaveLength(1);
 });
 
 test('owned publication refuses a second opaque ID for an already committed planning tuple', async () => {
   const f = await fixture();
-  const first = await f.service.upsertState({ projectId: 'alpha', state });
-  const source = first.source!;
+  const source = (await record(f.service)).source;
   await expect(f.store.upsertOwnedCanonicalSources([{
     input: { ...sourceInput(source), id: 'competing-new-source' }, generation: null,
   }], () => {}, () => {})).rejects.toMatchObject({ reason: 'state-changed' });
@@ -81,22 +81,21 @@ test('owned publication refuses a second opaque ID for an already committed plan
 
 test('ambiguous persisted planning identities are refused rather than selected by row order', async () => {
   const f = await fixture();
-  const seeded = await f.service.upsertState({ projectId: 'alpha', state });
-  await f.store.upsertSource({ ...seeded.source!, id: 'historical-duplicate-source', canonicalUri: undefined });
-  await expect(f.service.getState({ projectId: 'alpha' })).rejects.toMatchObject({ reason: 'state-changed' });
+  const seeded = await record(f.service);
+  await f.store.upsertSource({ ...seeded.source, id: 'historical-duplicate-source', canonicalUri: undefined });
+  await expect(record(f.service)).rejects.toMatchObject({ reason: 'state-changed' });
 });
 
 test('a single batch cannot publish duplicate absent tuples or overwrite one selected source twice', async () => {
   const f = await fixture();
-  const seeded = await f.service.upsertState({ projectId: 'alpha', state });
-  const source = seeded.source!;
-  const metadata = { ...source.metadata, planningArtifactId: 'new-state' };
-  const input = { ...sourceInput(source), metadata, canonicalUri: helpers.projectPlanningCanonicalUri(identity.spaceId, 'state', 'new-state') };
+  const source = (await record(f.service)).source;
+  const metadata = { ...source.metadata, planningArtifactId: 'new-decision' };
+  const input = { ...sourceInput(source), metadata, canonicalUri: helpers.projectPlanningCanonicalUri(identity.spaceId, 'decision', 'new-decision') };
   await expect(f.store.upsertOwnedCanonicalSources([
     { input: { ...input, id: 'first-new-source' }, generation: null },
     { input: { ...input, id: 'second-new-source' }, generation: null },
   ], () => {}, () => {})).rejects.toMatchObject({ reason: 'state-changed' });
-  expect(f.store.getPlanningSourceSnapshot({ ...identity, artifactId: 'new-state' }).source).toBeNull();
+  expect(f.store.getPlanningSourceSnapshot({ ...identity, artifactId: 'new-decision' }).source).toBeNull();
   expect(f.store.getSourceSnapshot({ id: 'first-new-source' }).source).toBeNull();
   expect(f.store.getSourceSnapshot({ id: 'second-new-source' }).source).toBeNull();
   const original = f.store.getPlanningSourceSnapshot(identity);
@@ -109,13 +108,13 @@ test('a single batch cannot publish duplicate absent tuples or overwrite one sel
 
 test('schema twelve migrates source identities and revisions unchanged and refuses old writers before their schema runs', async () => {
   const f = await fixture();
-  const seeded = await f.service.upsertState({ projectId: 'alpha', state });
+  const seeded = await record(f.service);
   // Actual old saved source identity, retained without a runtime hash formatter.
-  const historicalId = 'project-planning-state-4b7a24906e974844';
+  const historicalId = 'project-planning-decision-4b7a24906e974844';
   await f.store.close();
   const raw = new SQLiteStore(f.path);
   await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
-  raw.run('UPDATE knowledge_sources SET id = ?, canonical_uri = NULL WHERE id = ?', [historicalId, seeded.source!.id]);
+  raw.run('UPDATE knowledge_sources SET id = ?, canonical_uri = NULL WHERE id = ?', [historicalId, seeded.source.id]);
   const before = raw.exec('SELECT * FROM knowledge_sources ORDER BY id');
   raw.run('PRAGMA user_version = 11'); await raw.save(); raw.close();
   const alreadyOpenOldWriter = new SQLiteStore(f.path);

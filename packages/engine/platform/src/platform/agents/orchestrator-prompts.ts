@@ -8,7 +8,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 import { logger } from '../utils/logger.js';
 import { openTierContextBlock } from '../owner-profile/context-block.js';
 import { CONVERSATIONAL_DIAGNOSIS_SECTION } from './conversational-contract.js';
-import { readPreparedKnowledgePromptPacket, type PreparedKnowledgePromptPacket } from '../knowledge/packet.js';
+import type { PreparedKnowledgePromptPacket } from '../knowledge/packet.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import { KnowledgeEvidenceRelevanceHeldError } from '../knowledge/semantic/evidence-ranking/reader.js';
 import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
@@ -75,17 +75,15 @@ async function prepareDecisionOrchestratorPromptContext(record: AgentRecord, dep
   return { ...deps, preparedKnowledgePrompt };
 }
 
-/** Revalidate again after intervening awaits and immediately before provider
- * transmission. A changed read-set cannot reuse a previously rendered string.
+/**
+ * Before provider transmission: a configured knowledge service must have
+ * prepared this agent's packet. The packet is a plain value read once; it is
+ * not read again.
  */
-export function assertOrchestratorKnowledgeCurrent(record: AgentRecord, deps?: PromptContextDeps): void {
+export function assertOrchestratorKnowledgeCurrent(_record: AgentRecord, deps?: PromptContextDeps): void {
   deps?.projectFramework?.assertCurrent();
   if (isClassicOperation()) return;
-  if (deps?.preparedKnowledgePrompt) {
-    readPreparedKnowledgePromptPacket(deps.preparedKnowledgePrompt, knowledgePromptTask(record), record.writeScope ?? []);
-  } else if (deps?.knowledgeService) {
-    throw new KnowledgeEvidenceRelevanceHeldError('malformed');
-  }
+  if (!deps?.preparedKnowledgePrompt && deps?.knowledgeService) throw new KnowledgeEvidenceRelevanceHeldError('malformed');
 }
 
 function buildProjectContext(workingDirectory: string, observation?: ProjectFrameworkObservation): string | null {
@@ -411,9 +409,7 @@ ${conversational ? `${CONVERSATIONAL_OUTPUT_SECTION}\n\n${CONVERSATIONAL_DIAGNOS
     parts.push(knowledgePrompt);
   }
   assertOrchestratorKnowledgeCurrent(record, deps);
-  const curatedKnowledgePrompt = !isClassicOperation() && deps?.preparedKnowledgePrompt
-    ? readPreparedKnowledgePromptPacket(deps.preparedKnowledgePrompt, knowledgePromptTask(record), record.writeScope ?? [])
-    : null;
+  const curatedKnowledgePrompt = !isClassicOperation() ? deps?.preparedKnowledgePrompt?.prompt ?? null : null;
   if (curatedKnowledgePrompt) {
     parts.push(curatedKnowledgePrompt);
   }

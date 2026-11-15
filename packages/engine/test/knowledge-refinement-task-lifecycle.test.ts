@@ -65,19 +65,17 @@ describe('knowledge refinement task lifecycle', () => {
     const { store, spaceId, gap, source } = await fixture();
     await upsertRefinementTaskForGap(store, spaceId, { gap, sources: [source], linkedObjects: [] }, 'scheduled', 'blocked', 'Synthetic blocked repair');
     const status = await getHomeGraphStatus(store, { knowledgeSpaceId: spaceId } as never);
-    expect(status.readiness.state).not.toBe('needs_review');
-    expect(status.readiness.needsReviewTaskCount).toBe(0);
+    expect(status.readiness.activeRefinementTaskCount).toBe(0);
   });
 
   test('a repair abandoned by its caller stops reading as repairing once its task is stale', async () => {
     const { store, spaceId, gap, source } = await fixture();
     await upsertRefinementTaskForGap(store, spaceId, { gap, sources: [source], linkedObjects: [] }, 'scheduled', 'searching', 'Synthetic abandoned search');
-    expect((await getHomeGraphStatus(store, { knowledgeSpaceId: spaceId } as never)).readiness.state).toBe('repairing');
+    expect((await getHomeGraphStatus(store, { knowledgeSpaceId: spaceId } as never)).readiness.activeRefinementTaskCount).toBe(1);
     const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 60 * 60 * 1000);
     try {
       const status = await getHomeGraphStatus(store, { knowledgeSpaceId: spaceId } as never);
       expect(status.readiness.activeRefinementTaskCount).toBe(0);
-      expect(status.readiness.state).not.toBe('repairing');
     } finally { clock.mockRestore(); }
   });
 });

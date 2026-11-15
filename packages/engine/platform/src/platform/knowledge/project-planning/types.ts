@@ -6,7 +6,6 @@ export type ProjectPlanningQuestionStatus = 'open' | 'answered' | 'skipped';
 export type ProjectPlanningTaskStatus = 'pending' | 'in-progress' | 'blocked' | 'completed' | 'deferred';
 export type ProjectPlanningGateStatus = 'pending' | 'passed' | 'failed' | 'skipped';
 export type ProjectPlanningDecisionStatus = 'proposed' | 'accepted' | 'superseded' | 'rejected';
-export type ProjectPlanningGapSeverity = 'blocking' | 'advisory';
 export type ProjectWorkPlanTaskStatus = 'pending' | 'in_progress' | 'blocked' | 'done' | 'failed' | 'cancelled';
 export type ProjectWorkPlanTaskMutationSource =
   | 'user'
@@ -17,17 +16,6 @@ export type ProjectWorkPlanTaskMutationSource =
   | 'migration'
   | 'api'
   | string;
-export type ProjectPlanningGapKind =
-  | 'missing-goal'
-  | 'missing-scope'
-  | 'open-question'
-  | 'ambiguous-language'
-  | 'readiness-unavailable'
-  | 'missing-tasks'
-  | 'missing-dependencies'
-  | 'missing-verification'
-  | 'unapproved-execution';
-
 export interface ProjectPlanningSpaceInput {
   readonly projectId?: string | undefined;
   readonly knowledgeSpaceId?: string | undefined;
@@ -310,29 +298,6 @@ export interface ProjectPlanningState {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
-export interface ProjectPlanningGap {
-  readonly id: string;
-  readonly kind: ProjectPlanningGapKind;
-  readonly severity: ProjectPlanningGapSeverity;
-  readonly message: string;
-  readonly question?: ProjectPlanningQuestion | undefined;
-  readonly relatedTaskIds?: readonly string[] | undefined;
-  readonly metadata?: Record<string, unknown> | undefined;
-}
-
-export interface ProjectPlanningEvaluation {
-  readonly operationProvenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
-  readonly readinessAssessment?: ProjectPlanningReadinessAssessment;
-  readonly ok: true;
-  readonly projectId: string;
-  readonly knowledgeSpaceId: string;
-  readonly readiness: ProjectPlanningReadiness;
-  readonly gaps: readonly ProjectPlanningGap[];
-  readonly nextQuestion?: ProjectPlanningQuestion | undefined;
-  readonly state: ProjectPlanningState;
-}
-
 export interface ProjectPlanningStatus {
   readonly ok: true;
   readonly projectId: string;
@@ -348,89 +313,20 @@ export interface ProjectPlanningStatus {
   readonly capabilities: readonly string[];
 }
 
-export interface ProjectPlanningStateUpsertInput extends ProjectPlanningSpaceInput {
-  readonly state: Partial<ProjectPlanningState> & { readonly goal?: string };
-}
-
-export interface ProjectPlanningEvaluateInput extends ProjectPlanningSpaceInput {
-  readonly state?: Partial<ProjectPlanningState> & { readonly goal?: string } | undefined;
-  readonly planningId?: string | undefined;
-}
-
 /** Opaque complete-source binding; a revision is a precondition, not authority. */
 export interface ProjectPlanningRevision {
   readonly sourceId: string;
   readonly generation: string;
 }
 
-export type ProjectPlanningStateExpectation =
-  | { readonly kind: 'revision'; readonly revision: ProjectPlanningRevision }
-  | { readonly kind: 'current' };
-
-export type ProjectPlanningStateAction =
-  | { readonly kind: 'approve' }
-  | { readonly kind: 'dismiss' }
-  | { readonly kind: 'answer'; readonly questionId?: string | undefined; readonly questionIndex?: number | undefined; readonly answer: string };
-
-export interface ProjectPlanningStateActionInput extends ProjectPlanningSpaceInput {
-  readonly planningId?: string | undefined;
-  readonly expected: ProjectPlanningStateExpectation;
-  readonly action: ProjectPlanningStateAction;
-}
-
-export type ProjectPlanningStateActionResult =
-  | { readonly ok: true; readonly applied: true; readonly state: ProjectPlanningState; readonly revision: ProjectPlanningRevision; readonly evaluation: ProjectPlanningEvaluation; readonly question?: ProjectPlanningQuestion | undefined }
-  | { readonly ok: true; readonly applied: false; readonly reason: 'state-changed' | 'pending-local-changes' | ProjectPlanningAnswerFailureReason; readonly state: ProjectPlanningState | null; readonly revision?: ProjectPlanningRevision | undefined };
-
 export interface ProjectPlanningStateResult {
-  /** Absent on legacy readers; view-selected mutations must require it. */
+  /** The stored row's generation when a saved state exists. */
   readonly revision?: ProjectPlanningRevision | undefined;
   readonly ok: true;
   readonly projectId: string;
   readonly knowledgeSpaceId: string;
   readonly state: ProjectPlanningState | null;
   readonly source?: KnowledgeSourceRecord | undefined;
-}
-
-/**
- * Record a user answer to an open planning question. Identify the question
- * either by its `questionId` or by a zero-based `questionIndex` into the
- * current `openQuestions` list (id wins when both are supplied). The answered
- * question moves from `openQuestions` to `answeredQuestions` with the answer
- * text, `status: 'answered'`, and an `answeredAt` timestamp, and the open-question
- * readiness gap for it clears on the next evaluation.
- */
-export interface ProjectPlanningAnswerInput extends ProjectPlanningSpaceInput {
-  readonly planningId?: string | undefined;
-  readonly questionId?: string | undefined;
-  readonly questionIndex?: number | undefined;
-  readonly answer: string;
-}
-
-export type ProjectPlanningAnswerFailureReason =
-  | 'no-state'
-  | 'empty-answer'
-  | 'missing-selector'
-  | 'question-not-found'
-  | 'state-changed'
-  | 'pending-local-changes';
-
-export interface ProjectPlanningAnswerResult {
-  readonly ok: true;
-  readonly projectId: string;
-  readonly knowledgeSpaceId: string;
-  /** True when a question was located and its answer recorded. */
-  readonly answered: boolean;
-  /** The recorded question (with answer/status/answeredAt) when `answered`. */
-  readonly question?: ProjectPlanningQuestion | undefined;
-  /** Why the answer could not be recorded (only when `!answered`). */
-  readonly reason?: ProjectPlanningAnswerFailureReason | undefined;
-  /** Open questions still awaiting an answer after this call. */
-  readonly openQuestions: readonly ProjectPlanningQuestion[];
-  /** The persisted state after recording (or the current state when unchanged). */
-  readonly state: ProjectPlanningState | null;
-  /** Readiness re-evaluated against the post-answer state. */
-  readonly evaluation: ProjectPlanningEvaluation;
 }
 
 export interface ProjectPlanningDecisionRecordInput extends ProjectPlanningSpaceInput {
@@ -453,13 +349,6 @@ export interface ProjectPlanningDecisionsResult {
   readonly projectId: string;
   readonly knowledgeSpaceId: string;
   readonly decisions: readonly ProjectPlanningDecision[];
-}
-
-export interface ProjectPlanningLanguageUpsertInput extends ProjectPlanningSpaceInput {
-  readonly language: Partial<ProjectPlanningLanguageArtifact> & {
-    readonly terms?: readonly ProjectPlanningTerm[] | undefined;
-    readonly ambiguities?: readonly ProjectPlanningAmbiguity[] | undefined;
-  };
 }
 
 export interface ProjectPlanningLanguageResult {

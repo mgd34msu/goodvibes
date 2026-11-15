@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { deflateSync } from 'node:zlib';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { extractPdf } from '../platform/src/platform/knowledge/pdf-extractor.js';
 import { KnowledgeExtractionJudgmentHoldError } from '../platform/src/platform/knowledge/extraction-policy.js';
 import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
-import { extractionReadability, pdfTextDecoding } from '../platform/src/platform/knowledge/batteries/extraction-readability.js';
+import { extractionReadability } from '../platform/src/platform/knowledge/batteries/extraction-readability.js';
 import { createCompressedPdfBuffer } from './_helpers/homegraph-service-fixtures.js';
 // The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
 const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as Record<string, unknown> } } };
@@ -25,10 +25,9 @@ function rawPdf(content: string, compressed = false): Buffer {
   ]);
 }
 
-function textPort(p = 0.99, decoding: keyof typeof pdfTextDecoding.items.decoding.question.criteria = 'singleByte', confidence = 0.99) {
+function textPort(p = 0.99) {
   const fake = fakePort((name, question) => {
     if (name === 'readable' && question.type === 'noul' && question.instructions === extractionReadability.items.readable.question.instructions) return noulAnswer(p);
-    if (name === 'decoding' && question.type === 'choice' && question.instructions === pdfTextDecoding.items.decoding.question.instructions) return choiceAnswer(question, decoding, confidence);
     throw new Error(`Unexpected PDF fixture contract: ${name}`);
   });
   installJudgmentPort(fake.port);
@@ -36,7 +35,7 @@ function textPort(p = 0.99, decoding: keyof typeof pdfTextDecoding.items.decodin
 }
 function extractionRequests(fake: ReturnType<typeof textPort>) {
   for (const request of fake.requests) {
-    if (request.context?.battery === extractionReadability.name || request.context?.battery === pdfTextDecoding.name) continue;
+    if (request.context?.battery === extractionReadability.name) continue;
     if (request.context?.battery === redactionCredential.name) {
       expect(request.questions).toEqual({ lineHasCredential: redactionCredential.items.lineHasCredential.question,
         spanIsCredential: redactionCredential.items.spanIsCredential.question });
@@ -47,10 +46,10 @@ function extractionRequests(fake: ReturnType<typeof textPort>) {
     expect(request.questions as unknown).toEqual({ kind: fieldKind.items.kind.question });
     expect(request.state).toEqual({ field: 'error' });
   }
-  return fake.requests.filter(request => request.context?.battery === extractionReadability.name || request.context?.battery === pdfTextDecoding.name);
+  return fake.requests.filter(request => request.context?.battery === extractionReadability.name);
 }
 
-describe('PDF readability and decoding judgments', () => {
+describe('PDF readability judgment', () => {
   test('empty or image-only PDF content asks nothing and requires OCR rather than guessing', async () => {
     const fake = textPort();
     await expect(extractPdf(createCompressedPdfBuffer(''))).rejects.toThrow('PDF extraction failed');
@@ -71,7 +70,8 @@ describe('PDF readability and decoding judgments', () => {
     const result = await extractPdf(rawPdf('BT (A) Tj (Hello \\(nested\\) \\101) Tj (A) Tj ET', true));
     expect(result.extractorId).toBe('pdf-raw');
     expect(result.structure.searchText).toBe('A\nHello (nested) A');
-    expect(result.sections).toEqual(['A', 'Hello (nested) A']);
+    // Raw streams have no outline: no leading line becomes a heading.
+    expect(result.sections).toEqual([]);
   });
 
   test('accepts readable prose explaining PDF tokens instead of treating tokens as binary', async () => {
@@ -85,15 +85,18 @@ describe('PDF readability and decoding judgments', () => {
     const fake = textPort();
     const result = await extractPdf(rawPdf('BT <FEFF65E5672C> Tj ET'));
     expect(result.structure.searchText).toBe('日本');
-    expect(extractionRequests(fake).every((request) => request.context?.battery !== pdfTextDecoding.name)).toBe(true);
+    expect(extractionRequests(fake)).toHaveLength(1);
   });
 
-  test('chooses unmarked UTF-16BE via judgment rather than zero-byte ratios', async () => {
-    const fake = textPort(0.99, 'utf16be');
-    const result = await extractPdf(rawPdf('BT <65E5672C> Tj ET'));
-    expect(result.structure.searchText).toBe('日本');
-    expect(extractionRequests(fake)[0]?.context?.battery).toBe(pdfTextDecoding.name);
-    expect(extractionRequests(fake)[0]?.state).toEqual({ singleByte: 'eåg,', utf16be: '日本' });
+  test('decodes unmarked hex strings by their bytes: one readability request for the whole document', async () => {
+    const fake = textPort();
+    const hex = (text: string) => `<${Buffer.from(text, 'latin1').toString('hex')}>`;
+    const strings = Array.from({ length: 5000 }, (_, index) => hex(`Readable label number ${index}`));
+    const result = await extractPdf(rawPdf(`BT ${strings.join(' Tj ')} Tj <65E5672C> Tj <0001> Tj ET`));
+    expect(result.extractorId).toBe('pdf-raw');
+    expect(String(result.structure.searchText)).toContain('Readable label number 0');
+    expect(extractionRequests(fake)).toHaveLength(1);
+    expect((await extractPdf(rawPdf('BT <65E5672C> Tj ET'))).structure.searchText).toBe('日本');
   });
 
   test('retains a single-byte hex label, but rejects malformed odd-byte hex syntax', async () => {
@@ -104,13 +107,10 @@ describe('PDF readability and decoding judgments', () => {
     expect(extractionRequests(fake)).toHaveLength(0);
   });
 
-  test('holds on unknown or non-actionable decoding, but a definite neither rejects', async () => {
-    for (const [decoding, confidence] of [['unknown', 0.99], ['singleByte', 0.5]] as const) {
-      textPort(0.99, decoding, confidence);
-      await expect(extractPdf(rawPdf('BT <4142> Tj ET'))).rejects.toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
-    }
-    textPort(0.99, 'neither');
+  test('hex bytes that are neither text encoding are left out', async () => {
+    const fake = textPort();
     await expect(extractPdf(rawPdf('BT <0001> Tj ET'))).rejects.toThrow('PDF extraction failed');
+    expect(extractionRequests(fake)).toHaveLength(0);
   });
 
   test('does not turn a pdfjs judgment hold into raw-parser fallback', async () => {

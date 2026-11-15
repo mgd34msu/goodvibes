@@ -2,20 +2,22 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { KnowledgeStore, ProjectPlanningService } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { readPlanningSourceSnapshots } from './planning-source-snapshot.ts';
+import { seedHistoricalPlanningLanguage, seedHistoricalPlanningState } from './planning-history.ts';
 
 const projectId = 'planning-snapshot-fixture';
 async function fixture(run: (store: KnowledgeStore, path: string) => Promise<void>) {
   const root = mkdtempSync(join(tmpdir(), 'planning-source-snapshot-'));
   const path = join(root, 'knowledge-wiki.sqlite'); const store = new KnowledgeStore({ dbPath: path });
   try {
-    await new ProjectPlanningService(store).upsertState({ projectId, state: {
+    await seedHistoricalPlanningState(store, projectId, {
       goal: 'Retain original planning bytes', executionApproved: true,
       openQuestions: [{ id: 'saved', prompt: 'Which saved helper?', status: 'open' }],
       tasks: [{ id: 'task', title: 'Saved completed task', status: 'completed' }],
       metadata: { approvedFrom: 'saved-owner', approvedAt: 123, opaque: { original: 'exactly' } },
-    } });
+    });
+    await seedHistoricalPlanningLanguage(store, projectId, { terms: [{ term: 'Retry', definition: 'A saved term' }], ambiguities: [] });
     await run(store, path);
   } finally { await store.close(); rmSync(root, { recursive: true, force: true }); }
 }

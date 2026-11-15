@@ -4,8 +4,7 @@ import type { KnowledgeScopeSelectionOptions } from './scope-selection.js';
 import type { KnowledgePacket, KnowledgePacketDetail, KnowledgePacketItem, KnowledgeSearchResult, KnowledgeUsageRecord } from './types.js';
 import { emitKnowledgePacketBuilt } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
-import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
-import { snapshotNodeInput } from './activation/projection.js';
+import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { KnowledgeEvidenceRelevanceHeldError as Held } from './semantic/evidence-ranking/reader.js';
 import { freezeSupport } from './semantic/verification/projection.js';
 import { readPublicKnowledgeSelection } from './public-retrieval.js';
@@ -60,78 +59,46 @@ export async function buildKnowledgePacket(context: KnowledgePacketContext, task
 
 export async function buildKnowledgePromptPacket(context: KnowledgePacketContext, task: string, writeScope: readonly string[] = [],
   limit = DEFAULT_PACKET_LIMIT, options: PacketOptions = {}): Promise<string | null> {
-  const prepared = await prepareKnowledgePromptPacket(context, task, writeScope, limit, options);
-  return readPreparedKnowledgePromptPacket(prepared, task, writeScope);
+  return (await prepareKnowledgePromptPacket(context, task, writeScope, limit, options)).prompt;
 }
 
-declare const preparedKnowledgePromptBrand: unique symbol;
-/** Opaque request-bound result of an awaited packet reading, never serializable authority. */
-export interface PreparedKnowledgePromptPacket { readonly [preparedKnowledgePromptBrand]: true; }
-const preparedPrompts = new WeakMap<PreparedKnowledgePromptPacket, {
+/** A rendered prompt packet and the request it answers: a plain value the caller passes on. */
+export interface PreparedKnowledgePromptPacket {
   readonly task: string;
-  readonly writeScope: string;
+  readonly writeScope: readonly string[];
   readonly prompt: string | null;
-  readonly assertCurrent: () => void;
-}>();
+}
 
 /** Prepare at an actual asynchronous execution boundary before synchronous layout. */
 export async function prepareKnowledgePromptPacket(context: KnowledgePacketContext, task: string, writeScope: readonly string[] = [],
   limit = DEFAULT_PACKET_LIMIT, options: PacketOptions = {}): Promise<PreparedKnowledgePromptPacket> {
   const selection = await preparePacket(context, task, writeScope, limit, options);
   selection.assertCurrent();
-  const handle = Object.freeze({}) as PreparedKnowledgePromptPacket;
-  preparedPrompts.set(handle, { task, writeScope: JSON.stringify(selection.packet.writeScope),
-    prompt: renderPacket(selection.packet.items, selection.packet), assertCurrent: selection.assertCurrent });
-  return handle;
-}
-
-/** Only a real settled reading for this exact request can enter synchronous composition. */
-export function readPreparedKnowledgePromptPacket(prepared: PreparedKnowledgePromptPacket, task: string,
-  writeScope: readonly string[] = []): string | null {
-  const known = preparedPrompts.get(prepared);
-  if (!known) throw new Held('malformed');
-  const scopes = snapshotNodeInput(writeScope);
-  if (known.task !== task || known.writeScope !== JSON.stringify(scopes)) throw new Held('stale');
-  known.assertCurrent();
-  return known.prompt;
+  return Object.freeze({ task, writeScope: Object.freeze([...selection.packet.writeScope]),
+    prompt: renderPacket(selection.packet.items, selection.packet) });
 }
 
 function requestSnapshot(task: string, writeScope: readonly string[], limit: number, options: PacketOptions) {
-  if (!options || typeof options !== 'object' || Array.isArray(options)
-    || ![Object.prototype, null].includes(Object.getPrototypeOf(options)) || Object.getOwnPropertySymbols(options).length) {
-    throw new JudgmentInputError('unsupported-input');
-  }
-  const fields = Object.getOwnPropertyDescriptors(options);
-  const ownershipFields = new Set(['signal', 'assertCurrent', 'shouldStop']);
-  if (Object.entries(fields).some(([key, field]) => !('value' in field)
-    || (typeof field.value === 'function' && !ownershipFields.has(key)))) throw new JudgmentInputError('unsupported-input');
-  if ((options.assertCurrent !== undefined && typeof options.assertCurrent !== 'function')
-    || (options.shouldStop !== undefined && typeof options.shouldStop !== 'function')
-    || (options.signal !== undefined && !(options.signal instanceof AbortSignal))) throw new JudgmentInputError('unsupported-input');
-  const data = snapshotNodeInput(Object.fromEntries(Object.entries(fields).filter(([key]) => !ownershipFields.has(key))
-    .map(([key, field]) => [key, field.value]))) as Omit<PacketOptions, keyof ScopeOptions>;
-  const detail = data.detail ?? 'standard';
+  const detail = options.detail ?? 'standard';
   if (!['compact', 'standard', 'detailed'].includes(detail) || !Number.isFinite(limit)
-    || (data.budgetLimit !== undefined && !Number.isFinite(data.budgetLimit))) throw new Held('malformed');
-  const request = snapshotNodeInput({ task, writeScope, limit, options: data });
+    || (options.budgetLimit !== undefined && !Number.isFinite(options.budgetLimit))) throw new Held('malformed');
+  const request = { task, writeScope: [...writeScope], knowledgeSpaceId: options.knowledgeSpaceId, includeAllSpaces: options.includeAllSpaces };
   assertJudgmentInput({ task: request.task, writeScope: request.writeScope });
-  return { request, detail, budgetLimit: Math.max(80, data.budgetLimit ?? DEFAULT_PACKET_BUDGET[detail]),
+  return { request, detail, budgetLimit: Math.max(80, options.budgetLimit ?? DEFAULT_PACKET_BUDGET[detail]),
     signal: options.signal, assertCurrent: options.assertCurrent, shouldStop: options.shouldStop };
 }
 
 async function preparePacket(context: KnowledgePacketContext, task: string, writeScope: readonly string[], limit: number, options: PacketOptions) {
   const captured = requestSnapshot(task, writeScope, limit, options);
-  const version = JSON.stringify(captured.request);
+  // The request is read once into plain values; only the caller's own signal
+  // and checks can say it is no longer wanted.
   const assertRequestCurrent = () => {
-    const current = requestSnapshot(task, writeScope, limit, options);
-    if (current.signal !== captured.signal || current.assertCurrent !== captured.assertCurrent
-      || current.shouldStop !== captured.shouldStop || JSON.stringify(current.request) !== version) throw new Held('stale');
     if (captured.signal?.aborted || captured.shouldStop?.()) throw new Held('aborted');
     captured.assertCurrent?.();
   };
   const selection = await readPublicKnowledgeSelection(context.store, {
     query: task, writeScope: captured.request.writeScope, mode: 'packet',
-    scope: { knowledgeSpaceId: captured.request.options.knowledgeSpaceId, includeAllSpaces: captured.request.options.includeAllSpaces },
+    scope: { knowledgeSpaceId: captured.request.knowledgeSpaceId, includeAllSpaces: captured.request.includeAllSpaces },
     ...(captured.signal ? { signal: captured.signal } : {}),
   }, { signal: captured.signal, shouldStop: captured.shouldStop, assertCurrent: assertRequestCurrent });
   const assertCurrent = () => { assertRequestCurrent(); selection.assertCurrent(); };

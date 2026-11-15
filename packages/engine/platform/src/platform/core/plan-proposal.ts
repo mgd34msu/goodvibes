@@ -9,22 +9,15 @@
  * a rich, structured artifact that an orchestration engine can render for
  * human approval and (once approved) instantiate.
  *
- * A `PlanProposal` is DATA. It is never instantiated on its own, approval
- * flows through the existing `ProjectPlanningState.executionApproved` gate
- * (see `planProposalToPlanningState` below), and durable persistence reuses
- * `ExecutionPlanManager` (see `planProposalToExecutionPlanItems` below).
- * Neither adapter performs any I/O itself; they only shape data for callers
- * that do.
+ * A `PlanProposal` is DATA. It is never instantiated on its own; durable
+ * persistence reuses `ExecutionPlanManager` (see
+ * `planProposalToExecutionPlanItems` below), which performs no I/O itself and
+ * only shapes data for callers that do.
  */
 
 import { randomUUID } from 'node:crypto';
 import type { ExecutionStrategy } from './adaptive-planner.js';
 import type { PlanItem } from './execution-plan.js';
-import type {
-  ProjectPlanningDependency,
-  ProjectPlanningState,
-  ProjectPlanningTask,
-} from '../knowledge/project-planning/types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,9 +29,8 @@ export type WorkItemArchetype = 'engineer' | 'reviewer' | 'tester' | 'researcher
 /**
  * A single unit of work inside a proposal.
  *
- * Field shapes deliberately mirror three existing types so downstream bridges
+ * Field shapes deliberately mirror existing types so downstream bridges
  * are near-1:1 maps rather than translations:
- *   - knowledge `ProjectPlanningTask` (approval-render bridge)
  *   - knowledge `ProjectWorkPlanTask` (phaseId/dependency naming)
  *   - core `PlanItem` (persistence bridge)
  */
@@ -387,75 +379,14 @@ export function singleItemProposal(task: string): PlanProposal {
 }
 
 // ---------------------------------------------------------------------------
-// Approval-seam adapter: PlanProposal -> ProjectPlanningState
-// ---------------------------------------------------------------------------
-
-/**
- * Project a `PlanProposal` into the existing `/plan approve` seam. This is
- * data-only, no store is written here. The caller feeds the result into
- * `ProjectPlanningService.upsertState` (or an equivalent), which is what
- * actually persists it and evaluates readiness.
- *
- * Direction convention for the emitted `ProjectPlanningDependency` records
- * (this type has no prior producer in the codebase to inherit a convention
- * from, so it is fixed here): `fromTaskId` depends on `toTaskId`, i.e. the
- * edge reads "fromTaskId depends on toTaskId" the same way `WorkItem.dependsOn`
- * reads "this item depends on these ids".
- *
- * `ProjectPlanningTask` has no first-class phase concept, so phase
- * membership is preserved in `metadata` rather than dropped silently.
- *
- * `executionApproved` is always `false` here, approval is a separate,
- * explicit step owned by `/plan approve` (planning-runtime.ts), never implied
- * by proposing.
- */
-export function planProposalToPlanningState(proposal: PlanProposal): Partial<ProjectPlanningState> {
-  const phaseTitleById = new Map(proposal.phases.map((phase) => [phase.id, phase.title] as const));
-
-  const tasks: ProjectPlanningTask[] = proposal.workItems.map((item) => ({
-    id: item.id,
-    title: item.title,
-    why: item.brief,
-    status: 'pending',
-    ...(item.dependsOn.length > 0 ? { dependencies: item.dependsOn } : {}),
-    ...(item.likelyFiles ? { likelyFiles: item.likelyFiles } : {}),
-    ...(item.verification ? { verification: item.verification } : {}),
-    ...(item.canRunConcurrently !== undefined ? { canRunConcurrently: item.canRunConcurrently } : {}),
-    ...(item.needsReview !== undefined ? { needsReview: item.needsReview } : {}),
-    ...(item.suggestedArchetype ? { recommendedAgent: item.suggestedArchetype } : {}),
-    metadata: {
-      phaseId: item.phaseId,
-      ...(phaseTitleById.has(item.phaseId) ? { phaseTitle: phaseTitleById.get(item.phaseId) } : {}),
-    },
-  }));
-
-  const dependencies: ProjectPlanningDependency[] = proposal.workItems.flatMap((item) =>
-    item.dependsOn.map((toTaskId) => ({ fromTaskId: item.id, toTaskId })),
-  );
-
-  const scope = proposal.phases.length > 0
-    ? `Phases: ${proposal.phases.map((phase) => phase.title).join(', ')}`
-    : undefined;
-
-  return {
-    goal: proposal.task,
-    ...(scope ? { scope } : {}),
-    ...(proposal.rationale ? { assumptions: [proposal.rationale] } : {}),
-    tasks,
-    dependencies,
-    executionApproved: false,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Persistence adapter: PlanProposal -> ExecutionPlanManager's PlanItem shape
 // ---------------------------------------------------------------------------
 
 /**
  * Project a `PlanProposal` into the plain items `ExecutionPlanManager` deals
  * in. This is a deliberately lossy projection: `PlanItem` has no room for
- * verification/likelyFiles/suggestedArchetype, and those stay in the
- * full-fidelity `ProjectPlanningState` render above. It exists purely so a
+ * verification/likelyFiles/suggestedArchetype, and those stay on the
+ * proposal itself. It exists purely so a
  * caller can hand a proposal's items to `ExecutionPlanManager` without
  * re-deriving the phase/description/dependency shape by hand.
  *

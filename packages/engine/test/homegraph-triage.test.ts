@@ -152,7 +152,7 @@ describe('Home Graph judgment issue triage', () => {
         const cached = open.metadata.triage as Record<string, unknown>;
         expect(cached.action).toBe('review');
         expect(cached.confidence).toBe(96);
-        expect(typeof cached.cacheReference).toBe('string');
+        expect(typeof cached.inputHash).toBe('string');
       }
 
       const firstRunCalls = calls.length;

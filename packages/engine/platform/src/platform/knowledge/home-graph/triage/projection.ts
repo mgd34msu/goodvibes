@@ -52,8 +52,7 @@ function copyString(target: Record<string, JsonValue>, record: Record<string, un
   if (typeof record[key] !== 'string') throw new Held('malformed');
   target[key] = record[key];
 }
-/** Local comparison only. The caller ties this value to its original live
- * issue and node with weak ownership; no private prompt is persisted. */
+/** What a triage reading is read from; the caller stores its hash (never the prompt) on the issue. */
 export function triageCacheSnapshot(input: TriageReadInput, issue: KnowledgeIssueRecord, node: KnowledgeNodeRecord | undefined, policy: { model: string; minConfidence: number; category?: string | undefined }) {
   return captureStrictJudgmentJson({
     issue: input.issue, subject: input.subject, guidance: input.ruleGuidance, policy,

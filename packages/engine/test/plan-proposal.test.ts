@@ -6,7 +6,6 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { ExecutionPlanManager } from '../platform/src/platform/core/execution-plan.js';
 import {
   assemblePlanProposal,
-  planProposalToPlanningState,
   singleItemProposal,
   type RawDecomposition,
 } from '../platform/src/platform/core/plan-proposal.js';
@@ -205,46 +204,6 @@ describe('assemblePlanProposal: honest partials', () => {
     expect(issues).toEqual([
       expect.objectContaining({ kind: 'unresolved-phase', workItemTitle: 'Orphan' }),
     ]);
-  });
-});
-
-describe('planProposalToPlanningState', () => {
-  test('maps phases+workItems -> tasks, dependsOn -> dependencies, executionApproved:false', () => {
-    const raw: RawDecomposition = {
-      phases: [{ title: 'Setup' }, { title: 'Build' }],
-      workItems: [
-        {
-          title: 'Prep',
-          brief: 'Get ready',
-          phase: 'Setup',
-          likelyFiles: ['src/a.ts'],
-          verification: ['bun test'],
-          canRunConcurrently: true,
-          needsReview: false,
-          suggestedArchetype: 'engineer',
-        },
-        { title: 'Build it', brief: 'Do the build', phase: 'Build', dependsOn: ['Prep'] },
-      ],
-    };
-    const { proposal } = assemblePlanProposal('Ship it', 'cohort', raw);
-    const state = planProposalToPlanningState(proposal);
-
-    expect(state.goal).toBe('Ship it');
-    expect(state.executionApproved).toBe(false);
-    expect(state.tasks).toHaveLength(2);
-
-    const prepTask = state.tasks!.find((t) => t.title === 'Prep')!;
-    expect(prepTask.why).toBe('Get ready');
-    expect(prepTask.likelyFiles).toEqual(['src/a.ts']);
-    expect(prepTask.verification).toEqual(['bun test']);
-    expect(prepTask.canRunConcurrently).toBe(true);
-    expect(prepTask.needsReview).toBe(false);
-    expect(prepTask.recommendedAgent).toBe('engineer');
-
-    const buildTask = state.tasks!.find((t) => t.title === 'Build it')!;
-    expect(buildTask.dependencies).toEqual([prepTask.id]);
-
-    expect(state.dependencies).toEqual([{ fromTaskId: buildTask.id, toTaskId: prepTask.id }]);
   });
 });
 

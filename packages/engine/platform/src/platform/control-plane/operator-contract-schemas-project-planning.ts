@@ -189,16 +189,6 @@ export const PROJECT_WORK_PLAN_MUTATION_OUTPUT_SCHEMA = objectSchema({
   snapshot: PROJECT_WORK_PLAN_SNAPSHOT_SCHEMA,
 }, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'snapshot'], { additionalProperties: true });
 
-const PROJECT_PLANNING_GAP_SCHEMA = objectSchema({
-  id: STRING_SCHEMA,
-  kind: STRING_SCHEMA,
-  severity: STRING_SCHEMA,
-  message: STRING_SCHEMA,
-  question: PROJECT_PLANNING_QUESTION_SCHEMA,
-  relatedTaskIds: STRING_LIST_SCHEMA,
-  metadata: METADATA_SCHEMA,
-}, ['id', 'kind', 'severity', 'message'], { additionalProperties: true });
-
 export const PROJECT_PLANNING_STATUS_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,
   projectId: STRING_SCHEMA,
@@ -216,19 +206,6 @@ export const PROJECT_PLANNING_STATE_OUTPUT_SCHEMA = objectSchema({
   revision: objectSchema({ sourceId: STRING_SCHEMA, generation: STRING_SCHEMA }, ['sourceId', 'generation']),
   source: KNOWLEDGE_SOURCE_SCHEMA,
 }, ['ok', 'projectId', 'knowledgeSpaceId'], { additionalProperties: true });
-
-export const PROJECT_PLANNING_EVALUATION_SCHEMA = objectSchema({
-  operationProvenance: enumSchema(['classic']),
-  semanticAssessment: enumSchema(['not-evaluated']),
-  readinessAssessment: PROJECT_PLANNING_READINESS_ASSESSMENT_SCHEMA,
-  ok: BOOLEAN_SCHEMA,
-  projectId: STRING_SCHEMA,
-  knowledgeSpaceId: STRING_SCHEMA,
-  readiness: STRING_SCHEMA,
-  gaps: arraySchema(PROJECT_PLANNING_GAP_SCHEMA),
-  nextQuestion: PROJECT_PLANNING_QUESTION_SCHEMA,
-  state: PROJECT_PLANNING_STATE_SCHEMA,
-}, ['ok', 'projectId', 'knowledgeSpaceId', 'readiness', 'gaps', 'state'], { additionalProperties: true });
 
 export const PROJECT_PLANNING_DECISIONS_OUTPUT_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,

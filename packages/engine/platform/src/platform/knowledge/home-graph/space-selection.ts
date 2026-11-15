@@ -1,8 +1,9 @@
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeStore } from '../store.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { homeAssistantSpaceComponent, resolveHomeGraphSpace, sameHomeAssistantSpace } from './helpers.js';
 import type { HomeGraphSpaceInput } from './types.js';
+import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 
 /**
  * The one rule every Home Graph verb uses to pick a space.
@@ -19,6 +20,9 @@ export function resolveReadableHomeGraphSpace(
   readonly installationId: string;
 } {
   const resolved = resolveHomeGraphSpace(input);
+  // A space named by the caller that holds records is used as named: no scan
+  // of the other spaces is needed to find it.
+  if (hasExplicitSpace(input) && spaceHasRecords(store, resolved.spaceId)) return resolved;
   const candidates = listHomeGraphSpaces(store);
   const pick = (spaceId: string | undefined) => spaceId === undefined ? resolved : {
     spaceId,
@@ -52,12 +56,17 @@ export function resolveHomeGraphResetSpace(
   store: KnowledgeStore,
   input: HomeGraphSpaceInput & { readonly dryRun?: boolean | undefined } = {},
 ): { readonly spaceId: string; readonly installationId: string } {
+  // A reset deletes what cannot be recovered, so its target is a fact the caller
+  // states, never a guess. One field check; the space list is read only to word the refusal.
   if (input.dryRun !== true && !hasExplicitSpace(input)) {
     const known = listHomeGraphSpaces(store);
-    throw new GoodVibesError(
-      `Home Graph reset needs installationId or knowledgeSpaceId so the target is never guessed${known.length ? `; Home Assistant spaces present: ${known.join(', ')}` : ''}. Pass dryRun: true to preview.`,
-      { category: 'bad_request', source: 'runtime', operation: 'homegraph.reset', recoverable: true },
-    );
+    throw new RefusalError(refusal({
+      code: 'HOMEGRAPH_RESET_SPACE_REQUIRED',
+      state: known.length ? `Home Assistant spaces present: ${known.join(', ')}` : 'no Home Assistant space holds records',
+      reason: 'A Home Graph reset deletes records and needs installationId or knowledgeSpaceId so its target is never guessed',
+      next: ['Pass installationId or knowledgeSpaceId', 'Pass dryRun: true to preview which space would be reset'],
+      status: 400,
+    }));
   }
   return resolveReadableHomeGraphSpace(store, input);
 }
@@ -73,19 +82,23 @@ function hasExplicitSpace(input: HomeGraphSpaceInput): boolean {
   return hasText(input.installationId) || hasText(input.knowledgeSpaceId);
 }
 
-/** Home Assistant spaces holding records, newest update first. */
+function spaceHasRecords(store: KnowledgeStore, spaceId: string): boolean {
+  return store.listSourcesInSpace(spaceId).length > 0 || store.listNodesInSpace(spaceId).length > 0;
+}
+
+/**
+ * Home Assistant spaces holding records, newest update first. Sources and
+ * nodes carry every space (issues and extractions hang off them).
+ */
 function listHomeGraphSpaces(store: KnowledgeStore): string[] {
   const candidates = new Map<string, number>();
-  for (const record of [
-    ...store.listSources(Number.MAX_SAFE_INTEGER),
-    ...store.listNodes(Number.MAX_SAFE_INTEGER),
-    ...store.listIssues(Number.MAX_SAFE_INTEGER),
-    ...store.listExtractions(Number.MAX_SAFE_INTEGER),
-  ]) {
+  const visit = (record: KnowledgeSourceRecord | KnowledgeNodeRecord) => {
     const spaceId = getKnowledgeSpaceId(record);
-    if (!homeAssistantSpaceComponent(spaceId)) continue;
-    candidates.set(spaceId, Math.max(candidates.get(spaceId) ?? 0, record.updatedAt ?? record.createdAt ?? 0));
-  }
+    if (!homeAssistantSpaceComponent(spaceId)) return;
+    candidates.set(spaceId, Math.max(candidates.get(spaceId) ?? 0, record.updatedAt));
+  };
+  for (const source of store.listSources(Number.MAX_SAFE_INTEGER)) visit(source);
+  for (const node of store.iterateNodes()) visit(node);
   return [...candidates.entries()]
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
     .map(([spaceId]) => spaceId);

@@ -1,6 +1,7 @@
 import type { KnowledgeStore } from '../store.js';
 import { resolveReadableHomeGraphSpace } from './space-selection.js';
 import { readHomeGraphState } from './state.js';
+import { isGeneratedPageSource } from './helpers.js';
 import { HOME_GRAPH_CAPABILITIES, type HomeGraphSpaceInput, type HomeGraphStatus } from './types.js';
 import { ACTIVE_REFINEMENT_STATES, STALE_ACTIVE_TASK_MS } from '../types.js';
 
@@ -18,16 +19,15 @@ export async function getHomeGraphStatus(
   const refinementTasks = store.listRefinementTasks(10_000, { spaceId });
   const openIssueCount = state.issues.filter((issue) => issue.status === 'open').length;
   const activeRefinementTaskCount = refinementTasks.filter((task) => ACTIVE_REFINEMENT_STATES.has(task.state) && now - task.updatedAt < STALE_ACTIVE_TASK_MS).length;
-  // No task is ever moved into `needs_review`, so readiness never reports it.
-  const needsReviewTaskCount = 0;
-  const readinessState =
-    state.sources.length === 0 && state.nodes.length === 0
-      ? 'empty'
-      : activeRefinementTaskCount > 0
-        ? 'repairing'
-        : openIssueCount > 0
-          ? 'needs_sources'
-          : 'ready';
+  const extracted = new Set(state.extractions.map((extraction) => extraction.sourceId));
+  const pendingSourceCount = state.sources.filter((source) => source.metadata.homeGraphSourceKind !== 'snapshot'
+    && !isGeneratedPageSource(source) && (source.status === 'pending' || (source.status === 'indexed' && !!source.artifactId && !extracted.has(source.id)))).length;
+  // Readiness is what blocks an answer: no snapshot yet, or documents not yet read.
+  const readinessState = state.sources.length === 0 && state.nodes.length === 0
+    ? 'empty'
+    : snapshotSources.length === 0 || pendingSourceCount > 0
+      ? 'needs_sources'
+      : 'ready';
   return {
     ok: true,
     spaceId,
@@ -42,7 +42,7 @@ export async function getHomeGraphStatus(
       state: readinessState,
       openIssueCount,
       activeRefinementTaskCount,
-      needsReviewTaskCount,
+      pendingSourceCount,
     },
     ...(snapshotSources[0]?.lastCrawledAt ? { lastSnapshotAt: snapshotSources[0].lastCrawledAt } : {}),
   };

@@ -4,7 +4,6 @@ import type { KnowledgeStore } from '../store.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { homeGraphIdentitySpace, HomeGraphIdentityHeldError as Held } from '../store-homegraph-node-selector.js';
 import { homeGraphSourceSelector, homeGraphSourceMatches, type HomeGraphSourceSelector } from '../store-homegraph-source-selector.js';
-const apply = Reflect.apply, get = Map.prototype.get, set = Map.prototype.set;
 export interface HomeGraphSourceIdentity {
   readonly id: string;
   readonly canonicalUri: string;
@@ -20,7 +19,7 @@ export function createHomeGraphSourceIdentityPlanner(store: KnowledgeStore) {
     lookup(input: HomeGraphSourceSelector) { const rows = candidates(homeGraphSourceSelector(input)); if (rows.length > 1) throw new Held('ambiguous'); return rows[0]; },
     prepare(input: HomeGraphSourceSelector): HomeGraphSourceIdentity {
       const selector = homeGraphSourceSelector(input), key = JSON.stringify(selector);
-      const previous = apply(get, pending, [key]) as HomeGraphSourceIdentity | undefined;
+      const previous = pending.get(key);
       if (previous) { previous.assertCurrent(); return previous; }
       const rows = candidates(selector); if (rows.length > 1) throw new Held('ambiguous'); const saved = rows[0];
       const token = !saved || !saved.canonicalUri && selector.role !== 'documentation-candidate' ? crypto.randomUUID() : undefined, id = saved?.id ?? `hg-src-${token!}`;
@@ -40,7 +39,7 @@ export function createHomeGraphSourceIdentityPlanner(store: KnowledgeStore) {
           ? current.connectorId !== 'homeassistant' || homeGraphIdentitySpace(getKnowledgeSpaceId(current)) !== selector.spaceId || current.metadata.homeGraphSourceKind !== 'snapshot'
           : !homeGraphSourceMatches(current, selector)) || candidates(selector).some(source => source.id !== id)) throw new Held('stale');
       } });
-      apply(set, pending, [key, identity]); labels.add(id); return identity;
+      pending.set(key, identity); labels.add(id); return identity;
     },
   });
 }

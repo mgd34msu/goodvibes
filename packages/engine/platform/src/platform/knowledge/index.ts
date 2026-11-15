@@ -130,9 +130,6 @@ export type {
 export { HomeGraphService, HOME_GRAPH_KNOWLEDGE_EXTENSION, HOME_GRAPH_NODE_KINDS, HOME_GRAPH_RELATIONS, MACHINE_WRITTEN_HOME_GRAPH_RELATIONS, REPAIRS_GAP_RELATION } from './home-graph/index.js';
 export {
   ProjectPlanningService,
-  evaluateProjectPlanningReadiness,
-  readProjectPlanningAnswerActions,
-  buildProjectPlanningAnswerActions,
   projectPlanningCanonicalUri,
   resolveProjectPlanningSpace,
 } from './project-planning/index.js';
@@ -145,20 +142,10 @@ export type {
   ProjectPlanningDecisionsResult,
   ProjectPlanningDecisionStatus,
   ProjectPlanningDependency,
-  ProjectPlanningEvaluateInput,
-  ProjectPlanningEvaluation,
-  ProjectPlanningGap,
-  ProjectPlanningGapKind,
-  ProjectPlanningGapSeverity,
   ProjectPlanningGateStatus,
   ProjectPlanningLanguageArtifact,
   ProjectPlanningLanguageResult,
-  ProjectPlanningLanguageUpsertInput,
   ProjectPlanningQuestion,
-  ProjectPlanningAnswerAction,
-  ProjectPlanningAnswerQuestion,
-  ProjectPlanningAnswerActionsReading,
-  ProjectPlanningAnswerReadOptions,
   ProjectPlanningQuestionStatus,
   ProjectPlanningReadiness,
   ProjectPlanningReadinessAssessment,
@@ -167,11 +154,6 @@ export type {
   ProjectPlanningState,
   ProjectPlanningStateResult,
   ProjectPlanningRevision,
-  ProjectPlanningStateExpectation,
-  ProjectPlanningStateAction,
-  ProjectPlanningStateActionInput,
-  ProjectPlanningStateActionResult,
-  ProjectPlanningStateUpsertInput,
   ProjectPlanningStatus,
   ProjectPlanningTask,
   ProjectPlanningTaskStatus,
@@ -269,7 +251,6 @@ export type { KnowledgeGuardedNodeIssueWrites } from './store-node-issue-writes.
 export { createKnowledgeNodeOperatorMutation, KnowledgeNodeMutationHeldError } from './store-node-authority.js';
 export type { KnowledgeNodeMutationContext, KnowledgeNodeFieldCorrection } from './store-node-authority.js';
 export { KnowledgeService } from './service.js';
-export { readPreparedKnowledgePromptPacket } from './packet.js';
 export type { PreparedKnowledgePromptPacket } from './packet.js';
 export type {
   KnowledgeBatchIngestResult,

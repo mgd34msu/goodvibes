@@ -9,9 +9,15 @@
  *  the next turn used to start from nothing, and a gateway replays "recent
  *  traffic" to a client claiming no position, which hands the new stream the
  *  tail of the previous turn, terminal frames included. The connector now keeps
- *  the last event id it saw per URL and presents it as `Last-Event-ID` on every
+ *  the last event id it saw and presents it as `Last-Event-ID` on every
  *  (re)establishment, so the gateway replays only what this connector has not
- *  already been given.
+ *  already been given. The same position recovers frames the daemon (`gap`) or
+ *  the relay (`relay-overflow`) dropped for a slow client: the stream is
+ *  reopened from it and the gateway replays them.
+ *
+ *  ONE STREAM. Every domain the connector's feeds listen to is carried on one
+ *  stream (`domains=a,b,c`, shared-connection.ts); a changed set reopens it
+ *  from the current position.
  *
  *  TURN IDENTITY. Second line, for the replays we cannot prevent, a gateway
  *  that cannot resolve the position, a server that predates the resume, a frame
@@ -21,11 +27,7 @@
  *  `turnScope: 'off'` opts out, `{ turnId }` pins the connection to one turn.
  */
 
-import {
-  SerializedEventEnvelopeSchema,
-  type RuntimeEventDomain,
-  type RuntimeEventRecord,
-} from '@goodvibes-jev/engine/contracts';
+import type { RuntimeEventDomain, RuntimeEventRecord } from '@goodvibes-jev/engine/contracts';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import {
   buildUrl,
@@ -38,7 +40,9 @@ import {
   invokeTransportObserver,
   transportErrorFromUnknown,
 } from '@goodvibes-jev/engine/transport-core';
-import type { DomainEventConnector, SerializedEventEnvelope } from './domain-events.js';
+import type { DomainEventConnector } from './domain-events.js';
+import { readEventEnvelope } from './envelope.js';
+import { createSharedDomainConnector } from './shared-connection.js';
 import {
   createTurnLifecycleGate,
   readTurnLifecycleFrame,
@@ -57,14 +61,23 @@ export function buildGate(scope: RuntimeEventTurnScope | undefined): TurnLifecyc
   return createTurnLifecycleGate();
 }
 
+/** The stream URL for one domain, or for several carried on the same stream. */
 export function buildEventSourceUrl(
   baseUrl: string,
-  domain: RuntimeEventDomain,
+  domains: RuntimeEventDomain | readonly RuntimeEventDomain[],
 ): string {
   const url = new URL(buildUrl(baseUrl, '/api/control-plane/events'));
-  url.searchParams.set('domains', domain);
+  url.searchParams.set('domains', typeof domains === 'string' ? domains : domains.join(','));
   return url.toString();
 }
+
+/** The notices that say frames were dropped between the daemon and this client, and how to word each. */
+const LOST_FRAME_NOTICES: ReadonlyMap<string, (count: string) => string> = new Map([
+  // The daemon's own stream fell behind this consumer.
+  ['gap', (count: string) => `The daemon dropped ${count} event(s)`],
+  // The relay's send buffer for this client overflowed.
+  ['relay-overflow', (count: string) => `The relay dropped ${count} event chunk(s)`],
+]);
 
 export function createEventSourceConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(
   baseUrl: string,
@@ -74,13 +87,20 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
 ): DomainEventConnector<RuntimeEventDomain, TEvent> {
   const { observer } = options;
   const handleError = options.onError;
-  // Position per URL, held for the life of the connector rather than the life
-  // of one stream: that is the whole point, a NEW stream for the next turn
-  // resumes where the closed one stopped.
-  const resumePositions = new Map<string, string>();
-  // One gate per connector, not per domain: tool frames and turn frames arrive
-  // on separate streams and must be judged against the same binding.
+  const getAuthToken = normalizeAuthToken(token ?? undefined);
+  // The last event id this connector was handed, held for the life of the
+  // connector rather than of one stream: a NEW stream (for the next turn, or
+  // for a changed set of domains) resumes where the closed one stopped. The
+  // daemon numbers its events in one sequence across every domain, so one
+  // position serves whichever domains the next stream carries.
+  let position: string | null = null;
+  // One gate per connector: turn and tool frames are judged against the same binding.
   const gate = buildGate(options.turnScope);
+
+  const report = (error: Error): void => {
+    invokeTransportObserver(() => observer?.onError?.(error), observer?.onObserverError);
+    handleError?.(error);
+  };
 
   /**
    * The gateway's `ready` frame states what became of a presented
@@ -89,10 +109,10 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
    * position (the next connect starts from the catch-up window) and unbind the
    * gate, whose binding may name a turn this connection never saw start.
    */
-  const handleResume = (url: string, ready: unknown, report: (error: Error) => void): void => {
+  const handleResume = (ready: unknown): void => {
     const resume = (ready as { resume?: { resume?: unknown } } | null)?.resume?.resume;
     if (resume !== 'unresolved') return;
-    resumePositions.delete(url);
+    position = null;
     gate?.reset();
     report(new GoodVibesError('The gateway could not resume the event stream from its last position, so events since then were not replayed.', {
       category: 'protocol',
@@ -102,63 +122,77 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
     }));
   };
 
-  return async (domain, onEnvelope, onEnded) => {
-    const url = buildEventSourceUrl(baseUrl, domain);
-    const getAuthToken = normalizeAuthToken(token ?? undefined);
-    // Inject W3C traceparent if OTel is active (async probe for SSE cold-start).
-    const sseHeaders: Record<string, string> = {};
-    await injectTraceparentAsync(sseHeaders);
-    // Notify observer of outbound SSE connection attempt.
-    invokeTransportObserver(() => observer?.onTransportActivity?.({ direction: 'send', url, kind: 'sse' }), observer?.onObserverError);
-    try {
-      const reportStreamFailure = (streamError: Error): void => {
-        invokeTransportObserver(() => observer?.onError?.(streamError), observer?.onObserverError);
-        handleError?.(streamError);
-      };
-      return await openServerSentEventStream(fetchImpl, url, {
-        onEventId: (id) => { resumePositions.set(url, id); },
-        onReady: (ready) => handleResume(url, ready, reportStreamFailure),
+  // Every domain the connector's feeds listen to rides one stream; a changed
+  // set of domains reopens it from the current position.
+  return createSharedDomainConnector<RuntimeEventDomain, TEvent>(async (domains, sink) => {
+    const url = buildEventSourceUrl(baseUrl, domains);
+    const carried = new Set<string>(domains);
+    let closed = false;
+    // Numbers the raw streams this connection opens; frames from a replaced one are ignored.
+    let streamNumber = 0;
+    let closeStream: (() => void) | null = null;
+    // The position the last recovery resumed from. A second loss before any
+    // frame arrived past it means the replay itself overflowed: not chased again.
+    let recoveredFrom: string | null = null;
+
+    const onLostFrames = (notice: string, payload: unknown): void => {
+      const from = position;
+      if (from !== null && from !== recoveredFrom) {
+        // Reopen from the last frame this client holds: the daemon replays the
+        // dropped frames from its recent-event window, so nothing is lost.
+        recoveredFrom = from;
+        reopen();
+        return;
+      }
+      // The frames cannot be had back. Forget the position, which would resume
+      // past them, and unbind the gate, whose binding may name a turn whose
+      // start or end was among them.
+      position = null;
+      gate?.reset();
+      const dropped = (payload as { dropped?: unknown } | null)?.dropped;
+      const lead = LOST_FRAME_NOTICES.get(notice)!(typeof dropped === 'number' ? String(dropped) : 'some');
+      report(new GoodVibesError(
+        `${lead} because this client was too slow; events, possibly including a turn's end, were lost.`,
+        { category: 'protocol', source: 'transport', recoverable: true, hint: 'Re-read current state instead of waiting for events that may already have happened.' },
+      ));
+    };
+
+    const openStream = async (): Promise<void> => {
+      const number = ++streamNumber;
+      const live = (): boolean => number === streamNumber && !closed;
+      // Inject W3C traceparent if OTel is active (async probe for SSE cold-start).
+      const sseHeaders: Record<string, string> = {};
+      await injectTraceparentAsync(sseHeaders);
+      if (!live()) return;
+      invokeTransportObserver(() => observer?.onTransportActivity?.({ direction: 'send', url, kind: 'sse' }), observer?.onObserverError);
+      const close = await openServerSentEventStream(fetchImpl, url, {
+        onEventId: (id) => { if (live()) position = id; },
+        onReady: (ready) => { if (live()) handleResume(ready); },
         onEvent: (eventName, payload) => {
-          if (eventName === 'relay-overflow') {
-            // The relay's daemon dropped event chunks for a slow consumer. They
-            // are gone from the stream, so the stored position would resume past
-            // them without ever replaying them: forget it.
-            resumePositions.delete(url);
-            const dropped = (payload as { dropped?: unknown } | null)?.dropped;
-            reportStreamFailure(new GoodVibesError(
-              `The relay dropped ${typeof dropped === 'number' ? dropped : 'some'} event chunk(s) because this client was too slow; events, possibly including a turn's end, were lost.`,
-              { category: 'protocol', source: 'transport', recoverable: true, hint: 'Re-read current state instead of waiting for events that may already have happened.' },
-            ));
+          if (!live()) return;
+          if (LOST_FRAME_NOTICES.has(eventName)) {
+            onLostFrames(eventName, payload);
             return;
           }
-          if (eventName !== domain) return;
+          if (!carried.has(eventName)) return;
           if (!payload || typeof payload !== 'object') return;
-          // Validate the inbound envelope STRUCTURE at the transport boundary, mirroring
-          // the WebSocket connector. Use the base envelope schema (payload: unknown): the
-          // discriminant lives on the OUTER `type`, and the `payload` carries event-specific
-          // data with NO inner `type` field, so the typed-payload schema would reject every
-          // real frame. Event-specific payload validation happens at each domain boundary.
-          // Unlike the WS path we must NOT throw here (the SSE flush loop has no try/catch
-          // around onEvent), so route validation failures through the error channels and
-          // drop the frame instead of delivering an unvalidated envelope to typed consumers.
-          const parsed = SerializedEventEnvelopeSchema.safeParse(payload);
-          if (!parsed.success) {
-            const validationError = new GoodVibesError('SSE runtime event payload failed schema validation.', {
+          // The shared envelope reader (envelope.ts). Unlike the WS path this must NOT
+          // throw (the SSE flush loop has no try/catch around onEvent), so a frame that
+          // is not an envelope is reported and dropped.
+          const envelope = readEventEnvelope<TEvent>(payload);
+          if (!envelope) {
+            report(new GoodVibesError('An SSE runtime event frame is not an event envelope: it needs a type and a payload.', {
               category: 'protocol',
               source: 'transport',
               recoverable: true,
-              cause: parsed.error,
-            });
-            invokeTransportObserver(() => observer?.onError?.(validationError), observer?.onObserverError);
-            handleError?.(validationError);
+            }));
             return;
           }
-          const envelope = parsed.data as SerializedEventEnvelope<TEvent>;
           if (gate) {
             const frame = readTurnLifecycleFrame(envelope.sessionId, envelope.payload);
             if (frame && !gate.accepts(frame)) return;
           }
-          onEnvelope(envelope);
+          sink.deliver(eventName as RuntimeEventDomain, envelope);
           // Notify observer of inbound event.
           invokeTransportObserver(() => {
             observer?.onTransportActivity?.({ direction: 'recv', url, kind: 'sse' });
@@ -170,27 +204,60 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
           }
         },
         onError: (err) => {
-          reportStreamFailure(transportErrorFromUnknown(err, 'SSE runtime event stream error'));
+          if (live()) report(transportErrorFromUnknown(err, 'SSE runtime event stream error'));
         },
         // The stream ended and is not coming back by itself (closed with
-        // reconnect off, or a failure no reconnect clears). Tell the feed,
-        // which opens a new one unless the daemon's answer was final (a
+        // reconnect off, or a failure no reconnect clears). Tell the feeds,
+        // which open a new one unless the daemon's answer was final (a
         // refused credential).
-        onClose: () => onEnded?.({ final: false }),
-        onTerminate: ({ final }) => onEnded?.({ final: final === true }),
+        onClose: () => { if (live()) sink.ended({ final: false }); },
+        onTerminate: ({ final }) => { if (live()) sink.ended({ final: final === true }); },
       }, {
         // On unless the caller turns it off, with no attempt limit by default:
         // a daemon restart or a sleep must not end the feed.
         reconnect: { ...options.reconnect, enabled: options.reconnect?.enabled ?? true },
         getAuthToken,
         headers: Object.keys(sseHeaders).length > 0 ? sseHeaders : undefined,
-        lastEventId: resumePositions.get(url) ?? null,
+        lastEventId: position,
       });
+      if (!live()) {
+        close();
+        return;
+      }
+      closeStream = close;
+    };
+
+    /** Replace the raw stream with one that resumes from the current position. */
+    const reopen = (): void => {
+      const previous = closeStream;
+      closeStream = null;
+      // Starting the new stream first numbers it, so whatever the old one still
+      // parses from its last read is ignored.
+      const opened = openStream();
+      previous?.();
+      opened.catch((error: unknown) => {
+        if (closed) return;
+        const failure = transportErrorFromUnknown(error, 'SSE runtime event connection failed');
+        report(failure);
+        sink.ended({ final: (failure as { recoverable?: unknown }).recoverable === false });
+      });
+    };
+
+    try {
+      await openStream();
     } catch (error) {
       const connectionError = transportErrorFromUnknown(error, 'SSE runtime event connection failed');
-      invokeTransportObserver(() => observer?.onError?.(connectionError), observer?.onObserverError);
-      handleError?.(connectionError);
+      report(connectionError);
       throw connectionError;
     }
-  };
+    return {
+      close: () => {
+        closed = true;
+        streamNumber += 1;
+        const close = closeStream;
+        closeStream = null;
+        close?.();
+      },
+    };
+  });
 }

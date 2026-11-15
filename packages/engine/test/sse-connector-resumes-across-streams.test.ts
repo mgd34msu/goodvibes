@@ -28,8 +28,12 @@ function sseRecorder(options: { readonly closes?: boolean } = {}): {
 } {
   const encoder = new TextEncoder();
   const drains: Promise<void>[] = [];
+  // The connector opens its stream on a later turn of the event loop.
+  let markResponded: () => void = () => {};
+  const responded = new Promise<void>((resolve) => { markResponded = resolve; });
   return {
     respond(chunks) {
+      markResponded();
       let next = 0;
       let markDrained: () => void = () => {};
       drains.push(new Promise<void>((resolve) => { markDrained = resolve; }));
@@ -46,6 +50,7 @@ function sseRecorder(options: { readonly closes?: boolean } = {}): {
       }, { highWaterMark: 0 }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     },
     async consumed() {
+      await responded;
       await Promise.all(drains);
       // One macrotask turn so envelopes dispatched from the last frame have run.
       await new Promise<void>((resolve) => { setImmediate(resolve); });
@@ -101,35 +106,34 @@ describe('the connector resumes across stream lifetimes, not just across reconne
     expect(presented).toEqual([null, 'evt-1']);
   });
 
-  test('each URL keeps its own position: one domain does not resume from another', async () => {
-    const presented: Array<{ url: string; id: string | null }> = [];
+  test('every domain a client listens to rides one stream, and a changed set resumes from the shared position', async () => {
+    const opened: Array<{ url: string; id: string | null }> = [];
     const connector = createEventSourceConnector(
       'http://127.0.0.1:3210',
       null,
       fetchStub(async (input, init) => {
-        const url = String(input);
-        presented.push({ url, id: new Headers(init?.headers).get('last-event-id') });
-        return sse.respond([
-          url.includes('domains=turn')
-            ? turnFrame('turn-evt-1', 'STREAM_DELTA', 'turn-1')
-            : `id: tools-evt-1\nevent: tools\ndata: ${JSON.stringify({ type: 'TOOL_RECEIVED', payload: {} })}\n\n`,
-        ]);
+        opened.push({ url: decodeURIComponent(String(input)), id: new Headers(init?.headers).get('last-event-id') });
+        return sse.respond([turnFrame(`evt-${opened.length}`, 'STREAM_DELTA', 'turn-1')]);
       }),
       { reconnect: { enabled: false } },
     );
+    const events = createRemoteRuntimeEvents(connector);
+    const domains = ['turn', 'tools', 'agents', 'session', 'gate', 'fleet', 'config', 'ops', 'tasks'] as const;
+    const offs = domains.map((domain) => events[domain].on('STREAM_DELTA' as never, (() => {}) as never));
+    await sse.consumed();
 
-    const closeTurn = closer(await connector('turn', () => {}));
-    await sse.consumed();
-    closeTurn();
-    const closeTools = closer(await connector('tools', () => {}));
-    await sse.consumed();
-    closeTools();
-    const closeTurnAgain = closer(await connector('turn', () => {}));
-    await sse.consumed();
-    closeTurnAgain();
+    // Nine domains, one stream.
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.url).toContain(`domains=${[...domains].sort().join(',')}`);
 
-    expect(presented.map((entry) => entry.id)).toEqual([null, null, 'turn-evt-1']);
-    expect(presented[2]!.url).toContain('domains=turn');
+    // Dropping a domain reopens with the smaller set, resuming from the position the first stream reached.
+    offs[8]!();
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    await sse.consumed();
+    expect(opened).toHaveLength(2);
+    expect(opened[1]!.url).not.toContain('tasks');
+    expect(opened[1]!.id).toBe('evt-1');
+    for (const off of offs.slice(0, 8)) off();
   });
 });
 

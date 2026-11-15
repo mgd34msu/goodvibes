@@ -26,13 +26,18 @@
  *       - `TURN_SUBMITTED` binds this session to that turn and is accepted. A
  *         turn STARTING is never foreign; it is the turn now being rendered,
  *         and it replaces whichever turn came before.
- *       - While bound, a frame is accepted only if its `turnId` matches.
- *       - While UNBOUND, a terminal frame (`TURN_COMPLETED`, `TURN_ERROR`,
- *         `TURN_CANCEL`, `PREFLIGHT_FAIL`) is ignored and does not bind: a
- *         consumer that never saw a turn run has no turn to finish, and this
- *         is exactly the replayed tail.
- *       - While unbound, a NON-terminal frame binds and is accepted, so a
- *         client that attaches to a session mid-turn still renders it.
+ *       - While bound to a turn that is still running, a frame is accepted
+ *         only if its `turnId` matches.
+ *       - While UNBOUND, or bound to a turn that has ended, a terminal frame
+ *         (`TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, `PREFLIGHT_FAIL`) of
+ *         another turn is ignored and does not bind: a consumer that never saw
+ *         that turn run has no turn to finish, and this is exactly the
+ *         replayed tail.
+ *       - In the same state, a NON-terminal frame of a turn not seen complete
+ *         binds and is accepted, so a client that attaches to a session
+ *         mid-turn still renders it, and so does a client whose copy of the
+ *         next turn's `TURN_SUBMITTED` was lost (a relay overflow, a reconnect
+ *         past the replay window).
  *
  *  4. A turn this gate has already seen COMPLETE is finished for good: a
  *     replayed `TURN_SUBMITTED` for it does not rebind the session, and a
@@ -129,7 +134,7 @@ export function readTurnLifecycleFrame(
 export function createTurnLifecycleGate(options: TurnLifecycleGateOptions = {}): TurnLifecycleGate {
   const pinnedTurnId = options.turnId;
   const maxTracked = Math.max(1, options.maxTrackedSessions ?? DEFAULT_MAX_TRACKED_SESSIONS);
-  const boundBySession = new Map<string, string>();
+  const boundBySession = new Map<string, { readonly turnId: string; ended: boolean }>();
   const finishedTurns = new Set<string>();
 
   const keyFor = (sessionId: string | undefined): string => sessionId ?? UNSCOPED_SESSION_KEY;
@@ -137,7 +142,7 @@ export function createTurnLifecycleGate(options: TurnLifecycleGateOptions = {}):
   const bind = (key: string, turnId: string): void => {
     // Re-insert so the most recently active session is the last to be evicted.
     boundBySession.delete(key);
-    boundBySession.set(key, turnId);
+    boundBySession.set(key, { turnId, ended: false });
     while (boundBySession.size > maxTracked) {
       const oldest = boundBySession.keys().next();
       if (oldest.done) break;
@@ -169,20 +174,27 @@ export function createTurnLifecycleGate(options: TurnLifecycleGateOptions = {}):
         return true;
       }
       const bound = boundBySession.get(key);
-      if (bound !== undefined) {
-        if (bound !== turnId) return false;
+      const terminal = TERMINAL_TURN_EVENT_TYPES.includes(frame.type);
+      if (bound !== undefined && bound.turnId === turnId) {
         if (frame.type === 'TURN_COMPLETED') {
           if (finished) return false;
           markFinished(key, turnId);
         }
+        if (terminal) bound.ended = true;
         return true;
       }
-      if (TERMINAL_TURN_EVENT_TYPES.includes(frame.type)) return false;
+      // Another turn's frame. While the bound turn runs it is not this
+      // consumer's. Once the bound turn has ended, the session is as good as
+      // unbound: the next turn's start frame may have been lost (a relay
+      // overflow, a reconnect past the replay window), and its other frames
+      // must still bind, or that turn never appears and never finishes.
+      if (bound !== undefined && !bound.ended) return false;
+      if (terminal || finished) return false;
       bind(key, turnId);
       return true;
     },
     boundTurnId(sessionId?: string | undefined): string | undefined {
-      return pinnedTurnId ?? boundBySession.get(keyFor(sessionId));
+      return pinnedTurnId ?? boundBySession.get(keyFor(sessionId))?.turnId;
     },
     reset(): void {
       boundBySession.clear();

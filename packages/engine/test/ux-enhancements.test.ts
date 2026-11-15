@@ -1,7 +1,7 @@
 /**
  * Tests for UX-first enhancements:
  *  Connection-state events and reconnect metadata from the WebSocket connector
- *  Outbound queue retention (no implicit count or byte limit)
+ *  Outbound queue: kept in order across reconnects, bounded, dropped when the connection ends
  *  WS error envelope parity (createWebSocketRemoteError)
  *  Transport events dispatched by the connector
  */
@@ -16,7 +16,6 @@ import {
   type ReconnectAttemptInfo,
   type RuntimeEventConnectorOptions,
 } from '../transport-realtime/src/runtime-events.ts';
-import { WebSocketMessageAssembler } from '../transport-core/src/websocket-messages.ts';
 import { waitFor } from './_helpers/test-timeout.js';
 
 // ---------------------------------------------------------------------------
@@ -147,10 +146,11 @@ describe('connection-state events', () => {
     expect(instances).toHaveLength(1);
 
     await open(firstInstance(instances));
+    // The auth frame is sent, but the daemon has not accepted it yet.
+    expect(states).toEqual(['connecting']);
+    acceptAuth(firstInstance(instances));
 
-    // Exact sequence: connecting (from connect()) then connected (once the auth frame is sent).
-    // onOpen must NOT emit 'connecting', that would be a dedup-suppressed no-op
-    // but semantically wrong. The sequence must be exactly [connecting, connected].
+    // Exact sequence: connecting (from connect()) then connected (once the daemon accepted the credential).
     expect(states).toEqual(['connecting', 'connected']);
 
     stopOrThrow(stop);
@@ -169,6 +169,7 @@ describe('connection-state events', () => {
     const stop = await connector('agents', () => {});
 
     await open(firstInstance(instances));
+    acceptAuth(firstInstance(instances));
     firstInstance(instances).simulateClose(1006); // abnormal close
     await waitFor(() => states.includes('reconnecting'));
 
@@ -216,10 +217,11 @@ describe('connection-state events', () => {
     const stop = await connector('agents', () => {}, () => { ended += 1; });
 
     await open(firstInstance(instances));
-    expect(states).toEqual(['connecting', 'connected']);
+    expect(states).toEqual(['connecting']);
     firstInstance(instances).simulateMessage(JSON.stringify({ type: 'auth', ok: false, error: 'token revoked' }));
 
-    expect(states).toEqual(['connecting', 'connected', 'failed']);
+    // Never 'connected': the credential was not accepted.
+    expect(states).toEqual(['connecting', 'failed']);
     expect(ended).toBe(1);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toBeInstanceOf(WebSocketTransportError);
@@ -275,79 +277,88 @@ describe('connection-state events', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Outbound queue retention
+// Outbound queue: order across reconnects, limits, end of the connection
 // ---------------------------------------------------------------------------
-describe('outbound queue retention', () => {
-  test('a disconnected queue retains every message without an implicit count limit', async () => {
+describe('outbound queue', () => {
+  test('a full queue refuses the newest message and says so on every channel', async () => {
     const { MockWebSocket, instances } = createMockWebSocketClass();
     const bpEvents: BackpressureInfo[] = [];
-    const messages = Array.from({ length: 1025 }, (_, index) => JSON.stringify({ type: 'x', index }));
+    const events: ConnectorTransportEvent[] = [];
+    const errors: Array<{ code?: string }> = [];
     const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', MockWebSocket, {
+      maxQueuedMessages: 3,
       onBackpressure: info => bpEvents.push(info),
-      onEmitter: emit => { for (const message of messages) emit(message); },
+      onTransportEvent: event => events.push(event),
+      onError: error => errors.push(error as { code?: string }),
+      onEmitter: emit => { for (let i = 0; i < 5; i++) emit(`message-${i}`); },
     });
     const pending = connector('agents', () => {});
     const ws = await socketNumber(instances, 1);
-    expect(bpEvents).toEqual([]);
     await open(ws);
     acceptAuth(ws);
     const stop = await pending;
-    await waitFor(() => ws.sentMessages.length >= messages.length + 1);
-    expect(ws.sentMessages.slice(-messages.length)).toEqual(messages);
-    expect(bpEvents).toEqual([]);
+    await waitFor(() => ws.sentMessages.filter(message => message.startsWith('message-')).length === 3);
+    expect(ws.sentMessages.filter(message => message.startsWith('message-'))).toEqual(['message-0', 'message-1', 'message-2']);
+    expect(bpEvents).toEqual([{ droppedCount: 1, queueLength: 3, queueBytes: 27, reason: 'queue_full' }]);
+    expect(events.filter(event => event.type === 'TRANSPORT_BACKPRESSURE')).toHaveLength(1);
+    expect(errors.map(error => error.code)).toEqual(['WS_QUEUE_OVERFLOW']);
     stopOrThrow(stop);
   });
 
-  test('a large queued message is delivered in full without an implicit byte limit', async () => {
-    const { MockWebSocket, instances } = createMockWebSocketClass();
+  test('a message larger than the byte limit is refused as too large', async () => {
+    const { MockWebSocket } = createMockWebSocketClass();
     const bpEvents: BackpressureInfo[] = [];
-    const payload = { type: 'large-fixture', text: 'x'.repeat(1048577) };
-    const message = JSON.stringify(payload);
+    const errors: Array<{ code?: string }> = [];
     const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', MockWebSocket, {
-      onBackpressure: info => bpEvents.push(info), onEmitter: emit => emit(message),
+      maxQueuedBytes: 8,
+      onBackpressure: info => bpEvents.push(info),
+      onError: error => errors.push(error as { code?: string }),
+      onEmitter: emit => emit('x'.repeat(9)),
     });
-    const pending = connector('agents', () => {});
-    const ws = await socketNumber(instances, 1);
-    await open(ws);
-    acceptAuth(ws);
-    const stop = await pending;
-    const received = (): unknown[] => {
-      const assembler = new WebSocketMessageAssembler();
-      return ws.sentMessages.map(frame => assembler.accept(JSON.parse(frame))).filter(value => value !== undefined);
-    };
-    await waitFor(() => received().length === 2);
-    expect(bpEvents).toEqual([]);
-    expect(received()).toEqual([{ type: 'auth', token: 'tok', domains: ['agents'] }, payload]);
-    stopOrThrow(stop);
+    stopOrThrow(await connector('agents', () => {}));
+    expect(bpEvents.map(info => info.reason)).toEqual(['message_too_large']);
+    expect(errors.map(error => error.code)).toEqual(['WS_FRAME_TOO_LARGE']);
   });
 
-  test('reconnection flushes the entire queued batch in order each time', async () => {
+  test('queued messages are sent in order on the socket a reconnect opens', async () => {
     const { MockWebSocket, instances } = createMockWebSocketClass();
-    const bpEvents: BackpressureInfo[] = [];
     let emit!: (data: string) => void;
     const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', MockWebSocket, {
       reconnect: { ...reconnectOnce, maxAttempts: 3 },
-      onBackpressure: info => bpEvents.push(info), onEmitter: fn => { emit = fn; },
+      onEmitter: fn => { emit = fn; },
     });
     const pending = connector('agents', () => {});
     const firstSocket = await socketNumber(instances, 1);
-    const first = Array.from({ length: 1025 }, (_, i) => `first-${i}`);
-    first.forEach(emit);
     await open(firstSocket);
     acceptAuth(firstSocket);
     const stop = await pending;
-    await waitFor(() => firstSocket.sentMessages.length >= first.length + 1);
-    expect(firstSocket.sentMessages.slice(-first.length)).toEqual(first);
     firstSocket.simulateClose(1006);
     const secondSocket = await socketNumber(instances, 2);
-    const second = Array.from({ length: 1025 }, (_, i) => `second-${i}`);
-    second.forEach(emit);
+    const held = ['second-0', 'second-1', 'second-2'];
+    held.forEach(emit);
     await open(secondSocket);
     acceptAuth(secondSocket);
-    await waitFor(() => secondSocket.sentMessages.length >= second.length + 1);
-    expect(secondSocket.sentMessages.slice(-second.length)).toEqual(second);
-    expect(instances).toHaveLength(2);
-    expect(bpEvents).toEqual([]);
+    await waitFor(() => secondSocket.sentMessages.length >= held.length + 1);
+    expect(secondSocket.sentMessages.slice(-held.length)).toEqual(held);
+    stopOrThrow(stop);
+  });
+
+  test('a connection that failed drops what it held and refuses new messages', async () => {
+    const { MockWebSocket, instances } = createMockWebSocketClass();
+    const errors: Array<{ code?: string }> = [];
+    let emit!: (data: string) => void;
+    const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', MockWebSocket, {
+      onError: error => errors.push(error as { code?: string }),
+      onEmitter: fn => { emit = fn; },
+    });
+    const stop = await connector('agents', () => {});
+    const ws = firstInstance(instances);
+    emit('held');
+    await open(ws);
+    ws.simulateMessage(JSON.stringify({ type: 'auth', ok: false, error: 'token revoked' }));
+    emit('after');
+    expect(ws.sentMessages.filter(message => message === 'held' || message === 'after')).toEqual([]);
+    expect(errors.map(error => error.code)).toEqual(['WS_REMOTE_ERROR', 'WEBSOCKET_TRANSPORT_ERROR']);
     stopOrThrow(stop);
   });
 });
@@ -436,6 +447,7 @@ describe('onTransportEvent typed event dispatch', () => {
     expect(stateEvents(events)).toEqual(['connecting']);
 
     await open(firstInstance(instances));
+    acceptAuth(firstInstance(instances));
 
     // Exact sequence pin: connecting then connected, no duplicates
     expect(stateEvents(events)).toEqual(['connecting', 'connected']);
@@ -466,23 +478,6 @@ describe('onTransportEvent typed event dispatch', () => {
     expect(reconnectEvents).toHaveLength(1);
     expect(reconnectEvents[0]).toMatchObject({ attempt: 1, maxAttempts: 5, delayMs: 0, reason: 'server error' });
 
-    stopOrThrow(stop);
-  });
-
-  test('onTransportEvent does not report backpressure for a fully retained queue', async () => {
-    const { MockWebSocket, instances } = createMockWebSocketClass();
-    const events: ConnectorTransportEvent[] = [];
-    const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', MockWebSocket, {
-      onTransportEvent: event => events.push(event),
-      onEmitter: emit => { for (let i = 0; i < 1025; i++) emit(`message-${i}`); },
-    });
-    const pending = connector('agents', () => {});
-    const ws = await socketNumber(instances, 1);
-    await open(ws);
-    acceptAuth(ws);
-    const stop = await pending;
-    await waitFor(() => ws.sentMessages.filter(message => message.startsWith('message-')).length === 1025);
-    expect(events.filter(event => event.type === 'TRANSPORT_BACKPRESSURE')).toEqual([]);
     stopOrThrow(stop);
   });
 
@@ -524,6 +519,7 @@ describe('onTransportEvent typed event dispatch', () => {
     const stop = await connector('agents', () => {});
 
     await open(firstInstance(instances));
+    acceptAuth(firstInstance(instances));
 
     // Simulate clean server-side close; the connector ends the connection synchronously.
     firstInstance(instances).simulateClose(1000, 'normal closure');

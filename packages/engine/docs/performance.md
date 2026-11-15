@@ -141,7 +141,7 @@ The control-plane gateway's SSE `ReadableStream` is constructed with a bounded `
 new ReadableStream(..., new CountQueuingStrategy({ highWaterMark: 256 }));
 ```
 
-When a subscriber falls behind, the stream stops queuing new chunks for it rather than buffering indefinitely: events that arrive while 256 chunks are already waiting are dropped for that subscriber only. Producers (the event bus) are not blocked and the connection stays open. Nothing is sent at the moment of the drop; the next frame that fits is preceded by a `gap` event (`{ dropped, afterId }`) giving the number of events missed and the id of the last event delivered before the gap. A client that sees `gap` should reconnect with `Last-Event-ID: <afterId>` (or refresh its state); the server replays what it still retains. The gateway logs the first drop of each stream.
+When a subscriber falls behind, the stream stops queuing new chunks for it rather than buffering indefinitely: events that arrive while 256 chunks are already waiting are dropped for that subscriber only. Producers (the event bus) are not blocked and the connection stays open. Nothing is sent at the moment of the drop; the next frame that fits is preceded by a `gap` event (`{ dropped, afterId }`) giving the number of events missed and the id of the last event delivered before the gap. A client that sees `gap` should reconnect with `Last-Event-ID: <afterId>` (or refresh its state); the server replays what it still retains. The platform's SSE connector does this itself: it reopens the stream from its last event id and the dropped events arrive in the replay. Only when the position cannot be replayed does it report a recoverable error asking you to re-read current state. The gateway logs the first drop of each stream.
 
 Startup events (initial snapshot, recent-event replay) are delivered before the `highWaterMark` gate engages in practice, but high-volume workloads should still prefer domain-filtered subscriptions to reduce the event rate per subscriber.
 
@@ -150,13 +150,15 @@ Startup events (initial snapshot, recent-event replay) are delivered before the 
 The control-plane strategy above governs the **server → client** SSE stream. The
 transport-realtime WebSocket connector applies separate **client → server**
 outbound queue. Messages enqueued while the socket is connecting, reconnecting
-or authenticating are held in an unbounded queue, kept in order across
-reconnects and flushed when the socket is ready. Nothing is dropped or
-rejected, whatever the number of the messages (a single message over 64M
-characters is refused when it is sent), so a client that sends
-during a long disconnect should bound what it sends. The connector's
-`onBackpressure(info)` hook is accepted but never called, and no
-`TRANSPORT_BACKPRESSURE` event is emitted.
+or authenticating are held in order across reconnects and flushed when the
+socket is ready, up to `maxQueuedMessages` (default 1024) and `maxQueuedBytes`
+(default 8 MiB). A message that does not fit is dropped: `queue_full` when the
+queue is at either limit, `message_too_large` when the message alone is over
+the byte limit. The connector reports it through `onBackpressure(info)` and a
+`TRANSPORT_BACKPRESSURE` event on the first drop since the queue drained and on
+every tenth after, and through `onError` (`WS_QUEUE_OVERFLOW` or
+`WS_FRAME_TOO_LARGE`) on the first. A connection that has ended drops what it
+held and refuses new messages; the next connection hands over a new sender.
 
 ### Token rotation on long-lived connections
 

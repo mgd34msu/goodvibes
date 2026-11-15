@@ -2,8 +2,9 @@
  * A realtime connection that ends, or never really starts, must say so and must
  * let the feed open a new one. Covers the WebSocket connector (refused
  * authentication, missing token, a socket that cannot be built, replayed turn
- * frames after a reconnect, which hosts may use plain ws://), the domain feed's handling of a connection that ended on its own, and
- * the SSE connector's reaction to lost-event notices.
+ * frames after a reconnect, which hosts may use plain ws://, one socket for
+ * every domain), the domain feed's handling of a connection that ended on its
+ * own, and the SSE connector's reaction to lost-event notices.
  */
 import { describe, expect, test } from 'bun:test';
 import { createRemoteDomainEvents } from '../transport-realtime/src/domain-events.ts';
@@ -56,11 +57,12 @@ describe('websocket connector: a connection that cannot work says so', () => {
     await connector('turn', () => {}, () => { ended += 1; });
     lastSocket().open();
     await flush();
-    expect(states[states.length - 1]).toBe('connected');
+    // The auth frame is sent; nothing is connected until the daemon accepts it.
+    expect(states).toEqual(['connecting']);
 
     lastSocket().receive({ type: 'auth', ok: false, error: 'Unauthorized' });
 
-    expect(states[states.length - 1]).toBe('failed');
+    expect(states).toEqual(['connecting', 'failed']);
     expect(errors).toHaveLength(1);
     expect((errors[0] as Error).message).toContain('Unauthorized');
     expect(ended).toBe(1);
@@ -103,6 +105,7 @@ describe('websocket connector: a connection that cannot work says so', () => {
     token = 'late-token';
     lastSocket().open();
     await flush();
+    lastSocket().receive({ type: 'auth', ok: true });
 
     expect(states[states.length - 1]).toBe('connected');
     expect(JSON.parse(lastSocket().sent[0]!).token).toBe('late-token');
@@ -178,6 +181,56 @@ describe('websocket connector: replayed turn frames', () => {
 
     expect(seen).toEqual(['TURN_SUBMITTED:t1', 'TURN_COMPLETED:t1', 'TURN_SUBMITTED:t2', 'TURN_COMPLETED:t2']);
     (stop as () => void)();
+  });
+
+  test('the next turn is delivered even when its start frame was lost after the previous turn finished', async () => {
+    MockSocket.instances = [];
+    const seen: string[] = [];
+    const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', Impl, { onError: () => {} });
+    const stop = await connector('turn', (envelope) => {
+      const payload = envelope.payload as RuntimeEventRecord & { turnId: string };
+      seen.push(`${envelope.type}:${payload.turnId}`);
+    });
+    lastSocket().open();
+    await flush();
+    lastSocket().receive(turnEnvelope('TURN_SUBMITTED', 't1'));
+    lastSocket().receive(turnEnvelope('TURN_COMPLETED', 't1'));
+    // t2's TURN_SUBMITTED never reached this client.
+    lastSocket().receive(turnEnvelope('STREAM_DELTA', 't2'));
+    lastSocket().receive(turnEnvelope('TURN_COMPLETED', 't2'));
+
+    expect(seen).toEqual(['TURN_SUBMITTED:t1', 'TURN_COMPLETED:t1', 'STREAM_DELTA:t2', 'TURN_COMPLETED:t2']);
+    (stop as () => void)();
+  });
+});
+
+describe('websocket connector: one socket for every domain', () => {
+  test('domains subscribed together share one socket, and a domain added later is a subscribe frame on it', async () => {
+    MockSocket.instances = [];
+    const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', Impl, { onError: () => {} });
+    const seen: string[] = [];
+    const stops = await Promise.all([
+      connector('turn', (envelope) => { seen.push(`turn:${envelope.type}`); }),
+      connector('tools', (envelope) => { seen.push(`tools:${envelope.type}`); }),
+    ]);
+    expect(MockSocket.instances).toHaveLength(1);
+    expect(decodeURIComponent(lastSocket().url)).toContain('domains=tools,turn');
+    lastSocket().open();
+    await flush();
+    expect(JSON.parse(lastSocket().sent[0]!).domains).toEqual(['tools', 'turn']);
+    lastSocket().receive({ type: 'auth', ok: true });
+
+    const stopGate = await connector('gate', (envelope) => { seen.push(`gate:${envelope.type}`); });
+    expect(MockSocket.instances).toHaveLength(1);
+    expect(JSON.parse(lastSocket().sent[1]!)).toEqual({ type: 'subscribe', domains: ['gate'] });
+    lastSocket().receive({ type: 'event', event: 'gate', payload: { type: 'GATE_DECIDED', payload: { type: 'GATE_DECIDED' } } });
+    lastSocket().receive({ type: 'event', event: 'tools', payload: { type: 'TOOL_RECEIVED', payload: { type: 'TOOL_RECEIVED' } } });
+    expect(seen).toEqual(['gate:GATE_DECIDED', 'tools:TOOL_RECEIVED']);
+
+    (stopGate as () => void)();
+    await flush();
+    expect(JSON.parse(lastSocket().sent[2]!)).toEqual({ type: 'unsubscribe', domains: ['gate'] });
+    for (const stop of stops) (stop as () => void)();
   });
 });
 
@@ -377,6 +430,38 @@ describe('SSE connector: lost-event notices', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]!.message).toContain('3');
     expect(errors[0]!.message).toContain('dropped');
+  });
+
+  test('frames the daemon dropped for a slow client are fetched again from the last position', async () => {
+    const presented: Array<string | null> = [];
+    const errors: Error[] = [];
+    const seen: string[] = [];
+    let call = 0;
+    const connector = createEventSourceConnector('http://127.0.0.1:3210', null, (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      presented.push(new Headers(init?.headers).get('last-event-id'));
+      call += 1;
+      if (call === 1) {
+        return sse([
+          turnFrame('evt-1', 'TURN_SUBMITTED', 'turn-1'),
+          `event: gap\ndata: {"dropped":2,"afterId":"evt-1"}\n\n`,
+          turnFrame('evt-4', 'STREAM_DELTA', 'turn-1'),
+        ]);
+      }
+      // The daemon replays what it dropped, from its recent-event window.
+      return sse([
+        turnFrame('evt-2', 'STREAM_DELTA', 'turn-1'),
+        turnFrame('evt-3', 'STREAM_DELTA', 'turn-1'),
+        turnFrame('evt-4', 'STREAM_DELTA', 'turn-1'),
+      ]);
+    }) as unknown as typeof fetch, { reconnect: { enabled: false }, onError: (e) => errors.push(e as Error) });
+
+    const close = await connector('turn', (envelope) => { seen.push(envelope.type); });
+    await flush();
+    (close as () => void)();
+
+    expect(presented).toEqual([null, 'evt-1']);
+    expect(seen).toEqual(['TURN_SUBMITTED', 'STREAM_DELTA', 'STREAM_DELTA', 'STREAM_DELTA']);
+    expect(errors).toEqual([]);
   });
 
   test('a stream that closes with reconnect off tells the feed, which reopens it for its listener', async () => {

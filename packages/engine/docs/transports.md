@@ -39,12 +39,17 @@ connector (`createWebSocketConnector`) adds connection-lifecycle hooks that the
 SSE connector (`createEventSourceConnector`) does not fire:
 
 - `onConnectionStateChange(state)`: `state` is one of `'connecting'`,
-  `'connected'`, `'reconnecting'`, `'disconnected'`, `'failed'`. `'failed'` is
+  `'connected'`, `'reconnecting'`, `'disconnected'`, `'failed'`. `'connected'`
+  comes when the daemon accepts the credential. `'failed'` is
   final: disposing a connector that has given up reconnecting does not emit
   `'disconnected'` afterwards.
 - `onReconnectAttempt(info)`: `info` is `{ attempt, maxAttempts, delayMs, reason }`.
   The legacy `onReconnect(attempt, delayMs)` is `@deprecated` but still fired.
-- `onOpen()` signals connect. `onBackpressure(info)` is accepted but never called: the outbound queue is unbounded.
+- `onOpen()` signals that the daemon accepted the credential. `onBackpressure(info)` reports a message dropped because the outbound queue was full (`maxQueuedMessages`, `maxQueuedBytes`).
+
+Either connector carries every domain its feeds listen to on one connection,
+so a client listening to many domains uses one stream or socket, not one per
+domain.
 
 ```ts
 import {

@@ -29,7 +29,7 @@ export type ConnectorTransportEvent =
  * Connection lifecycle state.
  *
  * - `connecting`    , the initial connection attempt is in flight.
- * - `connected`     , the connection is open and delivering events.
+ * - `connected`     , the daemon accepted the credential and the connection is delivering events.
  * - `reconnecting`  , the connection dropped and a retry is scheduled or in flight.
  * - `disconnected`  , the connection was closed by the caller or by a clean server close, or it dropped with reconnect switched off.
  * - `failed`        , the connection will not recover without a new connect: the maximum reconnect attempts were exhausted, the daemon refused the credential, or no auth token or socket could be had.
@@ -48,9 +48,9 @@ export interface ReconnectAttemptInfo {
   readonly reason: string;
 }
 
-/** Metadata emitted when the outbound queue saturates. */
+/** Metadata emitted when the outbound queue refuses a message. */
 export interface BackpressureInfo {
-  /** Number of messages dropped since the last successful flush. */
+  /** Number of messages dropped since the queue last drained. */
   readonly droppedCount: number;
   /** Current number of messages in the outbound queue. */
   readonly queueLength: number;
@@ -82,18 +82,25 @@ export interface RuntimeEventConnectorOptions {
   readonly onReconnect?: ((attempt: number, delayMs: number) => void) | undefined;
   /** Called on every reconnect attempt with structured metadata. */
   readonly onReconnectAttempt?: ((info: ReconnectAttemptInfo) => void) | undefined;
-  /** Called when the connection state changes. Subscribe to drive connection-state UI badges. */
+  /**
+   * Called when the connection state changes. Subscribe to drive connection-state UI badges.
+   * One connection carries every domain the connector's feeds listen to, so there is one state.
+   */
   readonly onConnectionStateChange?: ((state: ConnectionState) => void) | undefined;
   /**
-   * @deprecated Never called. The WebSocket connector's outbound queue keeps every message
-   * while the socket is down or unauthenticated and has no count or byte limit, so there is
-   * nothing to report; a caller that sends during a long outage should bound what it sends.
-   * The option and {@link BackpressureInfo} remain for compatibility.
-   *
-   * Intended semantics, should a limit ever be introduced: callbacks on the 1st overflow and
-   * every 10th thereafter, with `droppedCount` the cumulative total.
+   * WebSocket. Called when a message sent through the emitter is dropped instead of queued:
+   * the queue already holds {@link RuntimeEventConnectorOptions.maxQueuedMessages} messages or
+   * {@link RuntimeEventConnectorOptions.maxQueuedBytes} bytes (`queue_full`), or the message
+   * alone is larger than the byte limit (`message_too_large`). Called on the first drop since
+   * the queue last drained and on every tenth after it, with `droppedCount` the running total;
+   * the first drop is also reported through `onError` (`WS_QUEUE_OVERFLOW` or
+   * `WS_FRAME_TOO_LARGE`).
    */
   readonly onBackpressure?: ((info: BackpressureInfo) => void) | undefined;
+  /** WebSocket. Messages held while the socket is down or not yet authenticated. Default 1024. */
+  readonly maxQueuedMessages?: number | undefined;
+  /** WebSocket. UTF-8 bytes held while the socket is down or not yet authenticated, and the largest one message may be. Default 8 MiB. */
+  readonly maxQueuedBytes?: number | undefined;
   /**
    * Called when a typed {@link ConnectorTransportEvent} is dispatched by the connector.
    *
@@ -105,8 +112,10 @@ export interface RuntimeEventConnectorOptions {
   readonly onTransportEvent?: ((event: ConnectorTransportEvent) => void) | undefined;
   readonly observer?: TransportObserver | undefined;
   /**
-   * Called once the WebSocket connector is set up, providing an `emitLocal`
-   * function the caller can use to send messages over this connection.
+   * Called each time the WebSocket connector opens its connection, providing an
+   * `emitLocal` function the caller can use to send messages over it. Messages
+   * wait in order while the socket reconnects; once the connection has ended,
+   * the sender refuses them and the next connection hands over a new one.
    * Primarily for tests and local harnesses that need to inject outbound frames.
    */
   readonly onEmitter?: ((emitLocal: (data: string) => void) => void) | undefined;

@@ -1,7 +1,6 @@
 import { WebSocketMessageAssembler, sendWebSocketMessage } from '@goodvibes-jev/engine/transport-core';
 import {
   RUNTIME_EVENT_DOMAINS,
-  SerializedEventEnvelopeSchema,
   type RuntimeEventDomain,
   type RuntimeEventRecord,
 } from '@goodvibes-jev/engine/contracts';
@@ -32,6 +31,8 @@ import {
   type SerializedEventEnvelope,
 } from './domain-events.js';
 import { buildGate } from './event-source-connector.js';
+import { readEventEnvelope } from './envelope.js';
+import { createSharedDomainConnector } from './shared-connection.js';
 import { readTurnLifecycleFrame } from './turn-lifecycle-gate.js';
 
 export type SerializedRuntimeEnvelope<TEvent extends RuntimeEventRecord = RuntimeEventRecord> =
@@ -75,6 +76,7 @@ export { forSession as forSessionRuntime } from './domain-events.js';
 
 import type {
   AuthTokenSource,
+  BackpressureInfo,
   ConnectionState,
   RuntimeEventConnectorOptions,
 } from './connector-options.js';
@@ -320,6 +322,25 @@ export function buildWebSocketUrl(
   return url.toString();
 }
 
+/** Messages the WebSocket connector holds for sending while its socket is down or not yet authenticated. */
+const DEFAULT_WS_MAX_QUEUED_MESSAGES = 1024;
+/** Bytes (UTF-8) the WebSocket connector holds for sending, in total and for one message. */
+const DEFAULT_WS_MAX_QUEUED_BYTES = 8 * 1024 * 1024;
+
+function utf8Length(text: string): number {
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+      bytes += 4;
+      index += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
 export function createWebSocketConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(
   baseUrl: string,
   token: AuthTokenSource,
@@ -330,8 +351,16 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
   // One gate per connector, not per connection: it must outlive a reconnect, whose
   // replay of recent traffic is what it exists to filter.
   const gate = buildGate(options.turnScope);
-  return async (domain, onEnvelope, onEnded) => {
-    const url = buildWebSocketUrl(baseUrl, [domain]);
+  const maxQueuedMessages = Math.max(1, options.maxQueuedMessages ?? DEFAULT_WS_MAX_QUEUED_MESSAGES);
+  const maxQueuedBytes = Math.max(1, options.maxQueuedBytes ?? DEFAULT_WS_MAX_QUEUED_BYTES);
+  // Every domain the connector's feeds listen to rides one socket; a changed set
+  // is sent on it as subscribe and unsubscribe frames.
+  return createSharedDomainConnector<RuntimeEventDomain, TEvent>(async (domains, sink) => {
+    // The domains this connection carries, and what the daemon has been told on
+    // the current socket (its URL and auth frame, then subscription frames).
+    let carried = new Set<RuntimeEventDomain>(domains);
+    let told = new Set<RuntimeEventDomain>();
+    let url = buildWebSocketUrl(baseUrl, [...carried]);
     const reconnect = options.reconnect;
     // On unless the caller turns it off, with no attempt limit by default: a
     // refused credential ends the connection at once (see onMessage), so the
@@ -342,20 +371,14 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       maxAttempts: reconnect?.maxAttempts ?? DEFAULT_WS_MAX_ATTEMPTS,
     });
     let stopped = false;
+    // Set when the connection has ended on its own: nothing more is queued or sent on it.
+    let over = false;
     let reconnectAttempt = 0;
-    let hasReceivedMessage = false;
     let socket: WebSocket | null = null;
     let reconnectTimer: TimeoutHandle | null = null;
-    // Once a connection stays open this long past 'connected', treat it as
-    // proven-stable and reset the reconnect-attempt budget (see onOpen). This lets a
-    // healthy-but-idle domain (no inbound frames) recover its retry budget, while a
-    // flapping auth-reject loop that closes before the timer fires keeps counting.
-    const CONNECTION_STABILITY_MS = 10_000;
-    let stabilityTimer: TimeoutHandle | null = null;
     // Track last emitted connection state to avoid duplicate emissions.
     let lastConnectionState: ConnectionState | null = null;
-    // Derive a stable transportId from the WS URL hostname (same URL for
-    // the lifetime of this connector, so hostname is an appropriate stable key).
+    // The daemon's hostname: the same for every socket this connection opens.
     const transportId = (() => { try { return new URL(url).hostname; } catch { return url; } })();
 
     const emitConnectionState = (state: ConnectionState): void => {
@@ -364,15 +387,52 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       options.onConnectionStateChange?.(state);
       options.onTransportEvent?.({ type: 'TRANSPORT_CONNECTION_STATE', transportId, state });
     };
-    // The connection is over and will not recover without a new connect: say so on the
-    // state channel and tell the feed, which opens a fresh one unless `final` (the
-    // daemon refused or revoked the credential).
-    const terminate = (state: 'failed' | 'disconnected', final = false): void => {
-      emitConnectionState(state);
-      onEnded?.({ final });
+
+    // Messages waiting for an authenticated socket, kept across reconnects within
+    // a count and byte limit. Native writes use backpressure.
+    const outboundQueue: Array<{ readonly data: string; readonly bytes: number }> = [];
+    let queuedBytes = 0;
+    let droppedSinceFlush = 0;
+
+    const dropQueue = (): void => {
+      outboundQueue.length = 0;
+      queuedBytes = 0;
+      droppedSinceFlush = 0;
     };
-    // Retain pending logical messages across reconnects. Native writes use backpressure.
-    const outboundQueue: string[] = [];
+
+    // The connection is over and will not recover without a new connect: drop what
+    // it can no longer send, say so on the state channel and tell the feeds, which
+    // open a fresh connection (handing over a new sender) unless `final` (the daemon
+    // refused or revoked the credential).
+    const terminate = (state: 'failed' | 'disconnected', final = false): void => {
+      over = true;
+      dropQueue();
+      emitConnectionState(state);
+      sink.ended({ final });
+    };
+
+    const reportError = (error: Error): void => {
+      invokeTransportObserver(() => observer?.onError?.(error), observer?.onObserverError);
+      options.onError?.(error);
+    };
+
+    const reportOverflow = (reason: BackpressureInfo['reason']): void => {
+      droppedSinceFlush += 1;
+      // The first drop since the queue last drained, then every tenth.
+      if (droppedSinceFlush !== 1 && droppedSinceFlush % 10 !== 0) return;
+      const info: BackpressureInfo = { droppedCount: droppedSinceFlush, queueLength: outboundQueue.length, queueBytes: queuedBytes, reason };
+      options.onBackpressure?.(info);
+      options.onTransportEvent?.({ type: 'TRANSPORT_BACKPRESSURE', transportId, ...info });
+      if (droppedSinceFlush !== 1) return;
+      reportError(new WebSocketTransportError(reason === 'message_too_large'
+        ? `A message was not sent: it is larger than the ${maxQueuedBytes}-byte outbound limit.`
+        : `A message was not sent: ${outboundQueue.length} message(s), ${queuedBytes} bytes, are already waiting for the connection.`, {
+        code: reason === 'message_too_large' ? 'WS_FRAME_TOO_LARGE' : 'WS_QUEUE_OVERFLOW',
+        hint: reason === 'message_too_large'
+          ? 'Send it in smaller parts, or raise maxQueuedBytes.'
+          : 'Wait for the connection to report connected before sending more, or raise maxQueuedMessages / maxQueuedBytes.',
+      }));
+    };
 
     const assembler = new WebSocketMessageAssembler();
     let connectionAbort = new AbortController();
@@ -380,8 +440,26 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     let authenticated = false;
     const getAuthToken = normalizeAuthToken(token ?? undefined);
     const emitLocal = (data: string): void => {
+      // Checked before `stopped`: a connection that ended on its own is also disposed.
+      if (over) {
+        reportError(new WebSocketTransportError('A message was not sent: this connection has ended.', {
+          code: 'WEBSOCKET_TRANSPORT_ERROR',
+          hint: 'Send it with the sender handed over for the next connection (onEmitter).',
+        }));
+        return;
+      }
       if (stopped) return;
-      outboundQueue.push(data);
+      const bytes = utf8Length(data);
+      if (bytes > maxQueuedBytes) {
+        reportOverflow('message_too_large');
+        return;
+      }
+      if (outboundQueue.length >= maxQueuedMessages || queuedBytes + bytes > maxQueuedBytes) {
+        reportOverflow('queue_full');
+        return;
+      }
+      outboundQueue.push({ data, bytes });
+      queuedBytes += bytes;
       if (authenticated && socket && isSocketOpen(socket, WebSocketImpl)) flushOutboundQueue(socket);
     };
 
@@ -398,10 +476,6 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
-      }
-      if (stabilityTimer) {
-        clearTimeout(stabilityTimer);
-        stabilityTimer = null;
       }
       socket.removeEventListener('open', onOpen);
       socket.removeEventListener('message', onMessage);
@@ -456,9 +530,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     };
 
     const handleConnectFailure = (error: unknown): void => {
-      const connectionError = transportErrorFromUnknown(error, 'WebSocket runtime event connection failed');
-      invokeTransportObserver(() => observer?.onError?.(connectionError), observer?.onObserverError);
-      options.onError?.(connectionError);
+      reportError(transportErrorFromUnknown(error, 'WebSocket runtime event connection failed'));
       scheduleReconnect('could not open the socket', 'failed');
     };
 
@@ -469,9 +541,14 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       void (async () => {
         try {
           while (outboundQueue.length && !stopped && socket === openedSocket) {
-            await sendWebSocketMessage(openedSocket, outboundQueue[0]!, signal);
-            outboundQueue.shift();
+            const next = outboundQueue[0]!;
+            await sendWebSocketMessage(openedSocket, next.data, signal);
+            if (outboundQueue[0] === next) {
+              outboundQueue.shift();
+              queuedBytes -= next.bytes;
+            }
           }
+          if (outboundQueue.length === 0) droppedSinceFlush = 0;
         } catch (error) { if (!signal.aborted) options.onError?.(transportErrorFromUnknown(error, 'WebSocket send failed')); }
         finally {
           flushing = false;
@@ -480,11 +557,24 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       })();
     };
 
+    /** Tell the daemon which domains were added or dropped since it was last told, on this socket. */
+    const sendSubscriptionChanges = (target: WebSocket): void => {
+      const added = [...carried].filter((domain) => !told.has(domain));
+      const removed = [...told].filter((domain) => !carried.has(domain));
+      told = new Set(carried);
+      try {
+        if (added.length > 0) target.send(JSON.stringify({ type: 'subscribe', domains: added }));
+        if (removed.length > 0) target.send(JSON.stringify({ type: 'unsubscribe', domains: removed }));
+      } catch (error) {
+        // The socket is going away; its close reconnects with the current set in the URL.
+        reportError(transportErrorFromUnknown(error, 'WebSocket send failed'));
+      }
+    };
+
     const onOpen = async (event: Event) => {
       // NOTE: do NOT call emitConnectionState('connecting') here, connect()
-      // already emits it before creating the socket. Calling it here would
-      // be a dedup-suppressed no-op (lastConnectionState is already 'connecting')
-      // and is semantically wrong since the socket is now open, not connecting.
+      // already emits it before creating the socket. 'connected' waits for the
+      // daemon to accept the auth frame (see onMessage).
       const candidateSocket = event.currentTarget as WebSocket | null;
       const openedSocket = candidateSocket && typeof candidateSocket.send === 'function'
         ? candidateSocket
@@ -515,34 +605,13 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         openedSocket.send(JSON.stringify({
           type: 'auth',
           token: authToken,
-          domains: [domain],
+          domains: [...carried],
           ...(wsTraceHeaders['traceparent'] ? { traceparent: wsTraceHeaders['traceparent'] } : {}),
           ...(wsTraceHeaders['tracestate'] ? { tracestate: wsTraceHeaders['tracestate'] } : {}),
         }));
-
-        emitConnectionState('connected');
-        options.onOpen?.();
-        // Reset the reconnect-attempt budget only after the connection proves stable.
-        // 'connected' is emitted right after the auth frame is sent (before the server
-        // validates the token), so resetting here directly would defeat the auth-failure
-        // loop guard: an auth-reject that closes immediately must keep counting toward the
-        // give-up limit. A connection that survives CONNECTION_STABILITY_MS is treated as
-        // genuinely healthy and its budget restored, covering quiet/idle domains too.
-        if (stabilityTimer) {
-          clearTimeout(stabilityTimer);
-          stabilityTimer = null;
-        }
-        stabilityTimer = setTimeout(() => {
-          stabilityTimer = null;
-          if (!stopped && socket === openedSocket && isSocketOpen(openedSocket, WebSocketImpl)) {
-            reconnectAttempt = 0;
-          }
-        }, CONNECTION_STABILITY_MS) as TimeoutHandle;
-        stabilityTimer.unref?.();
+        told = new Set([...told, ...carried]);
       } catch (error) {
-        const sendError = transportErrorFromUnknown(error, 'WebSocket send failed');
-        invokeTransportObserver(() => observer?.onError?.(sendError), observer?.onObserverError);
-        options.onError?.(sendError);
+        reportError(transportErrorFromUnknown(error, 'WebSocket send failed'));
         closeSocket();
         scheduleReconnect('send failed', 'failed');
       }
@@ -557,9 +626,8 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         if (decoded === undefined) return;
         const frame = decoded as { type?: string; event?: string; payload?: unknown; ok?: boolean; error?: unknown };
         if (frame.type === 'auth' && frame.ok === false) {
-          // The daemon refuses the credential but leaves the socket open. Nothing will ever
-          // authenticate it, and the same token fails again on a reconnect, so end here and
-          // say why instead of sitting 'connected' with every queued frame stuck.
+          // The daemon refuses the credential. Nothing will ever authenticate this socket,
+          // and the same token fails again on a reconnect, so end here and say why.
           const reason = typeof frame.error === 'string' && frame.error.trim() ? frame.error.trim() : 'no reason given';
           const authError = new WebSocketTransportError(`The daemon refused the WebSocket authentication: ${reason}`, {
             code: 'WS_REMOTE_ERROR',
@@ -567,8 +635,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
             recoverable: false,
             hint: 'Check the auth token, or request a new one, then open a new connection.',
           });
-          invokeTransportObserver(() => observer?.onError?.(authError), observer?.onObserverError);
-          options.onError?.(authError);
+          reportError(authError);
           closeSocket();
           terminate('failed', true);
           return;
@@ -584,34 +651,38 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
             recoverable: false,
             hint: typeof closed.next === 'string' && closed.next.trim() ? closed.next.trim() : 'Sign in again, then open a new connection.',
           });
-          invokeTransportObserver(() => observer?.onError?.(revokedError), observer?.onObserverError);
-          options.onError?.(revokedError);
+          reportError(revokedError);
           closeSocket();
           terminate('failed', true);
           return;
         }
-        if (frame.type === 'auth' && frame.ok === true && socket) { authenticated = true; flushOutboundQueue(socket); }
-        if (!hasReceivedMessage) {
-          hasReceivedMessage = true;
+        if (frame.type === 'auth' && frame.ok === true && socket) {
+          // Connected means the daemon accepted the credential, so a stale token reads
+          // connecting then failed, never connected. It is also the proof the
+          // connection works, which starts a fresh reconnect budget.
+          authenticated = true;
           reconnectAttempt = 0;
+          emitConnectionState('connected');
+          options.onOpen?.();
+          sendSubscriptionChanges(socket);
+          flushOutboundQueue(socket);
+          return;
         }
-        if (frame.type === 'event' && frame.event === domain && frame.payload && typeof frame.payload === 'object') {
-          // Validate envelope structure only; the discriminant is the outer `type` and the
-          // `payload` carries event-specific data without an inner `type` (see SSE path).
-          const parsedPayload = SerializedEventEnvelopeSchema.safeParse(frame.payload);
-          if (!parsedPayload.success) {
-            throw new WebSocketTransportError('WebSocket runtime event payload failed schema validation.', {
+        if (frame.type === 'event' && typeof frame.event === 'string' && carried.has(frame.event as RuntimeEventDomain)
+          && frame.payload && typeof frame.payload === 'object') {
+          // The shared envelope reader (envelope.ts): unknown keys are ignored.
+          const wsPayload: SerializedRuntimeEnvelope<TEvent> | null = readEventEnvelope<TEvent>(frame.payload);
+          if (!wsPayload) {
+            throw new WebSocketTransportError('A WebSocket runtime event frame is not an event envelope: it needs a type and a payload.', {
               code: 'WS_EVENT_ERROR',
-              cause: parsedPayload.error,
             });
           }
-          const wsPayload = parsedPayload.data as SerializedRuntimeEnvelope<TEvent>;
           // A reconnect replays the domain's recent traffic, terminal turn frames included.
           if (gate) {
             const turnFrame = readTurnLifecycleFrame(wsPayload.sessionId, wsPayload.payload);
             if (turnFrame && !gate.accepts(turnFrame)) return;
           }
-          onEnvelope(wsPayload);
+          sink.deliver(frame.event as RuntimeEventDomain, wsPayload);
           // Notify observer of inbound WS event.
           invokeTransportObserver(() => {
             observer?.onTransportActivity?.({ direction: 'recv', url, kind: 'ws' });
@@ -623,23 +694,16 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
           }
         }
       } catch (error) {
-        const malformed = new GoodVibesError(`Malformed WebSocket runtime event frame: ${transportErrorFromUnknown(error, 'parse error').message}`, {
+        reportError(new GoodVibesError(`Malformed WebSocket runtime event frame: ${transportErrorFromUnknown(error, 'parse error').message}`, {
           category: 'protocol',
           source: 'transport',
           recoverable: true,
           cause: error,
-        });
-        invokeTransportObserver(() => observer?.onError?.(malformed), observer?.onObserverError);
-        options.onError?.(malformed);
+        }));
       }
     };
 
     const onClose = (event: CloseEvent) => {
-      hasReceivedMessage = false;
-      if (stabilityTimer) {
-        clearTimeout(stabilityTimer);
-        stabilityTimer = null;
-      }
       // RFC 6455 §7.4.1: code 1005 (No Status Received) is synthesized by runtimes
       // when a socket closes WITHOUT a close frame, including abnormal drops (process
       // death, proxy teardown, RST) where wasClean === false. Only a genuine clean
@@ -655,9 +719,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         // Abnormal close, surface error and schedule reconnect.
         // The raw close reason is forwarded so TRANSPORT_RECONNECT_ATTEMPT
         // metadata is meaningful to diagnostic UIs.
-        const closeError = webSocketCloseError(event);
-        invokeTransportObserver(() => observer?.onError?.(closeError), observer?.onObserverError);
-        options.onError?.(closeError);
+        reportError(webSocketCloseError(event));
         closeSocket();
         // Pass the close reason so reconnect metadata is meaningful.
         const rawReason = typeof event.reason === 'string' && event.reason.trim()
@@ -679,15 +741,16 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     };
 
     const onError = (event: Event) => {
-      const streamError = webSocketEventError(event, socket, url);
-      invokeTransportObserver(() => observer?.onError?.(streamError), observer?.onObserverError);
-      options.onError?.(streamError);
+      reportError(webSocketEventError(event, socket, url));
     };
 
     const connect = async () => {
       if (stopped) return;
       closeSocket();
       emitConnectionState('connecting');
+      // A new socket subscribes, through its URL, to the domains carried now.
+      url = buildWebSocketUrl(baseUrl, [...carried]);
+      told = new Set(carried);
       // A runtime may throw here (a blocked port, a bad scheme); the callers report that.
       const nextSocket = new WebSocketImpl(url);
       socket = nextSocket;
@@ -699,20 +762,28 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     };
 
     void connect().catch(handleConnectFailure);
-    return () => {
-      stopped = true;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-      }
-      closeSocket();
-      // 'failed' is final (see ConnectionState): disposing a connection that has
-      // already given up must not relabel it 'disconnected'.
-      if (lastConnectionState !== 'failed') emitConnectionState('disconnected');
-      // reset the outbound buffer on disposal so a future reconnect
-      // releases queued messages when the connector is explicitly disposed.
-      outboundQueue.length = 0;
+    return {
+      retarget(next) {
+        carried = new Set(next);
+        // Before authentication the auth frame carries the set; while the socket is
+        // down the next socket's URL does.
+        if (authenticated && socket && isSocketOpen(socket, WebSocketImpl)) sendSubscriptionChanges(socket);
+        return true;
+      },
+      close() {
+        stopped = true;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+        }
+        closeSocket();
+        // 'failed' is final (see ConnectionState): disposing a connection that has
+        // already given up must not relabel it 'disconnected'.
+        if (lastConnectionState !== 'failed') emitConnectionState('disconnected');
+        // Nothing queued is sent once the connection is disposed.
+        dropQueue();
+      },
     };
-  };
+  });
 }
 
 function webSocketCloseError(event: CloseEvent): Error {

@@ -32,15 +32,16 @@ export type TransportEvent =
   /** An SSE subscriber disconnected from the event stream. */
   | { type: 'STREAM_SUBSCRIBER_DISCONNECTED'; streamId: string; subscriberId: string; streamType: string; reason?: string }
   /**
-   * Declared, not yet emitted: the realtime connector's outbound queue is unbounded
-   * (messages are retained in order across reconnects and never dropped), so nothing
-   * publishes this event and `onBackpressure` is never called.
+   * The WebSocket connector's outbound queue refused a message: it was full (count or
+   * bytes) while the socket was down or not yet authenticated, or the message alone was
+   * over the byte limit. Emitted on the first drop since the queue last drained and on
+   * every tenth after it, alongside `onBackpressure`.
    */
   | {
       type: 'TRANSPORT_BACKPRESSURE';
-      /** Transport/connector identifier (domain name for WS connectors). */
+      /** Transport/connector identifier (the daemon's hostname for WS connectors). */
       transportId: string;
-      /** Number of messages dropped since the last successful queue flush. */
+      /** Number of messages dropped since the queue last drained. */
       droppedCount: number;
       /** Current number of messages waiting in the outbound buffer. */
       queueLength: number;

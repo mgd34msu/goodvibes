@@ -503,8 +503,8 @@ The platform-owned `HomeGraphService` supports:
 - generated Home Graph page listing with markdown content for panels and
   editors
 - visual knowledge-base maps from Home Graph nodes, sources, and edges
-- packet generation with sharing profiles (`guest`, `pet-sitter`, `emergency`, `contractor`, `network-admin`, each limited to the sections it may show) and `includeFields`/`excludeFields` over the sections devices, rooms, maintenance, troubleshooting, network, sources and issues; unknown profiles or field names are refused
-- issue listing and review actions
+- packet generation with sharing profiles (`guest`, `pet-sitter`, `emergency`, `contractor`, `network-admin`, each limited to the sections it may show) and `includeFields`/`excludeFields` over the sections devices, rooms, maintenance, troubleshooting, network, sources and issues; unknown profiles or field names are refused. Maintenance, troubleshooting (with warnings) and network sections list the facts the home has, grouped by device; a shown section with nothing recorded says so. A `guest` packet lists only devices the owner shared with guests: review the device with `value: { shareWith: ["guest"] }` (or `"all"`). A `packetKind` that names a profile selects it when no `sharingProfile` is given
+- issue listing and review actions; an action that would change nothing is refused with the actions that apply. On a source, `reject` and `forget` retire it from answers, `reopen` brings it back and `accept` records the decision; `resolve` and `edit` apply to issues and nodes only
 - durable semantic review decisions for generated issues
 - base knowledge refinement task listing and on-demand runs over
   `GET /api/homeassistant/home-graph/refinement/tasks` and
@@ -608,6 +608,18 @@ batteries, and warranties require useful source text; low-information
 extraction placeholders and unrelated integration documentation are not treated
 as answer material.
 
+An ask reads at most 24 records of the home. When the question names objects
+(a device, an entity), the candidates are those objects' facts, the documents
+linked to them and the documents that support those facts; otherwise every
+record is ranked by the words it shares with the question and the first 24 are
+read. Each candidate carries the passages of its document that mention the
+question, within 12 KiB. A candidate whose reading does not settle is left
+out; the answer's `candidates` gives `total`, `considered` and `unread`, and
+`readAtRevision` the store revision it was read at. The selection writes
+nothing and is not failed by a change elsewhere in the home while it runs.
+Device pages the answer names are refreshed after it returns, in the
+background (`pageRefresh: { requested, queued }`).
+
 Excerpt selection uses typed readings of exact original source spans, including
 whole-field and cross-field context bundles for labels and qualifications. An
 empty selection has no prefix or summary fallback. Corpus batching preserves the
@@ -671,6 +683,11 @@ low-value manual text:
 Device passport pages render structured facts and source inventory, not raw
 source-snippet sections.
 
+The page list is ordered by the priority read when each page was generated
+and stored on the page (`pagePriority`); pages without one follow by title.
+Listing asks no model and works with the model unavailable. A page generated
+on request keeps the priority it already had.
+
 Clients can read the current page index and markdown through
 `GET /api/homeassistant/home-graph/pages` or the
 `homeassistant.homeGraph.pages.list` operator method instead of reconstructing
@@ -678,6 +695,10 @@ page content from source inventory locally.
 
 Home Graph reindex repairs existing uploads in place. It:
 
+- finds every document whose stored extraction needs repair in one pass over
+  the space (the extractor version and readability are stored with the
+  extraction, so no model is asked), then re-extracts as many as fit in the
+  run budget and reports the rest as `deferred`; the next reindex takes them
 - re-extracts missing or placeholder extraction rows
 - auto-links sources to matching Home Assistant devices/entities when identity
   evidence is strong enough
@@ -688,13 +709,17 @@ Home Graph reindex repairs existing uploads in place. It:
 It skips generated-page artifacts and reports
 `changedSourceCount`, `forcedSourceCount`,
 `skippedGeneratedPageArtifactCount`, `refreshedGeneratedPageCount`,
-`generatedPagePolicyVersion`, `coalesced`, `truncated`, and
+`generatedPagePolicyVersion`, `coalesced`, `deferred`, `truncated`, and
 `budgetExhausted` so clients can tell what was actually scanned, skipped, or
-regenerated.
+regenerated. `stages` gives each stage after re-extraction (`link`,
+`semantic`, `quality`, `pages`) a status: `done`, `skipped`, `deferred` (the
+`maxRunMs` budget, which bounds every stage, was spent) or `held` with the
+reason. An optional stage that is held never fails the reindex, so the counts
+and the list of repaired sources always come back.
 
-Overlapping reindex requests are single-flight: the active run
-continues, and later callers receive a quick coalesced response instead of
-starting duplicate source scans. This lets users fix already-uploaded manuals
+Overlapping reindex requests are single-flight: an identical request joins the
+active run and returns that run's result with `coalesced: true`; a different
+one waits its turn and then runs, instead of starting duplicate source scans. This lets users fix already-uploaded manuals
 and refresh stale generated pages without reuploading anything while keeping
 daemon health routes responsive.
 
@@ -987,6 +1012,11 @@ skipped candidates. `deletedArtifacts` counts confirmed original removals;
 `preservedArtifacts` counts candidates this reset did not remove. Another family
 can preserve a shared artifact even when the artifact has no knowledge-space
 metadata. A dry run or `preserveArtifacts` request skips artifact removal.
+A reset removes only artifacts Home Graph created (recorded on the source at
+ingest) or whose own metadata names the space; an artifact handed to ingest by
+id is borrowed, counted in `borrowedArtifacts` and never removed. When files
+were kept because they were in use, locked or unreadable, `nextStep` says to
+run reset again.
 
 ## Recovery, cancellation and closed stores
 

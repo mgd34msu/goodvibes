@@ -37,7 +37,8 @@ Returned refinement metadata can include `status` (`not_needed`, `repaired`,
 `deferred`, `active` or `incomplete`), repair status, task ids, accepted source
 ids, promoted fact count, waited time, defer reason, and next repair attempt
 (epoch milliseconds). Home Graph answers add page refresh state
-(`pageRefreshRequested`, `pageRefreshed`).
+(`pageRefreshRequested`; `pageRefreshed` is false because device pages are
+refreshed in the background after the answer returns, see `pageRefresh.queued`).
 
 `promotedFactCount` counts useful subject-linked facts established by successfully
 completed repair candidates, including existing facts; it is not a count of

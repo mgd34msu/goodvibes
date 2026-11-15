@@ -1,4 +1,4 @@
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import type { KnowledgeStore } from '../store.js';
@@ -68,16 +68,21 @@ export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
   readonly triage?: HomeGraphTriageResult | undefined;
 }> {
   const signal = input.signal;
+  // The refinement runner reads 0 or a negative limit as "no limit" and would
+  // spend a model request on every candidate; a caller who wrote 0 meant none.
+  if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1)) {
+    throw new RefusalError(refusal({
+      code: 'HOMEGRAPH_REFINEMENT_LIMIT', status: 400,
+      state: 'nothing was refined',
+      reason: `Refinement limit must be a whole number of at least 1 (got ${String(input.limit)})`,
+      next: ['Send a limit of 1 or more, or omit limit to refine every candidate'],
+    }), { category: 'bad_request', source: 'runtime' });
+  }
   signal?.throwIfAborted();
   requireDecisionFeature('automatic Home Graph refinement and triage');
   await input.store.init();
   signal?.throwIfAborted();
   const { spaceId } = resolveReadableHomeGraphSpace(input.store, input);
-  if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1)) {
-    throw new GoodVibesError(`Refinement limit must be a whole number of at least 1 (got ${String(input.limit)}); omit it to refine every candidate.`, {
-      category: 'bad_request', source: 'runtime', operation: 'homegraph.refinement', recoverable: true,
-    });
-  }
 
   const triageRequested = input.triage !== undefined && input.triage !== false;
   const triage = triageRequested

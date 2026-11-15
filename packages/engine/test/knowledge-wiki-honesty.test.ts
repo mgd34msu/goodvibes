@@ -508,7 +508,7 @@ describe('knowledge wiki honesty: shared artifact reset does not orphan foreign 
       canonicalUri: 'ha://own', status: 'indexed', artifactId: hgBlob.id, metadata: knowledgeSpaceMetadata(spaceId),
     });
 
-    await resetHomeGraphSpace(store, artifactStore, { installationId: 'house' });
+    await resetHomeGraphSpace(store, artifactStore, { spaceId, installationId: 'house' });
 
     expect(artifactStore.get(wikiBlob.id)).not.toBeNull();
     expect(artifactStore.get(hgBlob.id)).toBeNull();

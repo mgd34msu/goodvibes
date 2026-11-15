@@ -38,27 +38,23 @@ describe('Home Graph daemon routes', () => {
 
     expect(first.coalesced).toBeUndefined();
     expect(second.coalesced).toBe(true);
-    expect(second.truncated).toBe(true);
-    expect(second.budgetExhausted).toBe(true);
-    expect(second.scanned).toBe(0);
+    // The joined request carries the running run's result, not an empty one.
+    expect(second.scanned).toBe(first.scanned);
+    expect(second.reparsed).toBe(first.reparsed);
   });
 
-  test('reset cancels pending Home Graph sync self-improvement for the scoped space', async () => {
+  test('reset cancels queued Home Graph background work for the scoped space', async () => {
     const { service } = createHomeGraphService();
     const spaceId = homeAssistantKnowledgeSpaceId('house-1');
-    const controller = new AbortController();
-    const internals = service as unknown as {
-      pendingSyncSelfImprove: Set<string>;
-      syncSelfImproveControllers: Map<string, AbortController>;
-    };
-    internals.pendingSyncSelfImprove.add(spaceId);
-    internals.syncSelfImproveControllers.set(spaceId, controller);
+    const work = (service as unknown as { work: { enqueue(spaceId: string, item: unknown, delayMs?: number): void; has(spaceId: string, key: string): boolean } }).work;
+    let ran = false;
+    work.enqueue(spaceId, { key: 'sync-improve', run: async () => { ran = true; } }, 60_000);
+    expect(work.has(spaceId, 'sync-improve')).toBe(true);
 
     await service.resetSpace({ installationId: 'house-1' });
 
-    expect(controller.signal.aborted).toBe(true);
-    expect(internals.pendingSyncSelfImprove.has(spaceId)).toBe(false);
-    expect(internals.syncSelfImproveControllers.has(spaceId)).toBe(false);
+    expect(work.has(spaceId, 'sync-improve')).toBe(false);
+    expect(ran).toBe(false);
   });
 
   test('keeps Home Graph review decisions durable across quality refreshes', async () => {

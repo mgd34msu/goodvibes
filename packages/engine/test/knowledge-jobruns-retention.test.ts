@@ -16,7 +16,6 @@ import { seedKnowledgeResearchTask } from './_helpers/knowledge-semantic-activat
 import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
 import {
   enrichAndImproveHomeGraphSource,
-  enrichHomeGraphSpaceSources,
   runHomeGraphSyncSelfImprovementPump,
 } from '../platform/src/platform/knowledge/home-graph/sync-self-improvement.js';
 import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
@@ -102,12 +101,6 @@ describe('governor pause at background entrypoints', () => {
     expect(result.truncated).toBe(true);
     // A pause stops the run; it is not the run's own time budget running out.
     expect(result.budgetExhausted).toBe(false);
-  });
-
-  test('whole-space enrichment stops repairing gaps when the governor pauses', async () => {
-    const fixture = await pauseFixture();
-    await enrichHomeGraphSpaceSources(fixture.runtime, fixture.spaceId);
-    expect(fixture.repairCalls()).toBe(1);
   });
 
   test('a sync-pump round stops repairing gaps when the governor pauses', async () => {

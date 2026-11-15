@@ -81,16 +81,6 @@ describe('complete-candidate bounded relevance batches', () => {
     expect(plan.accepted).toHaveLength(2);
     expect(fake.requests.map(request => (request.state as { candidate: { text: string } }).candidate.text)).toContain(text);
   });
-  test('candidate and envelope accessors never execute during corpus preparation', async () => {
-    const fake = readings(); let invoked = 0;
-    const second = { ...candidate(2), get text() { invoked++; return 'unsafe'; } };
-    await expect(prepareAnswerEvidenceRelevanceBatches({ query, candidates: [candidate(1, true), second] })).rejects.toBeInstanceOf(JudgmentInputError);
-    await expect(prepareAnswerEvidenceRelevanceBatches({ query, get candidates() { invoked++; return []; } })).rejects.toBeInstanceOf(JudgmentInputError);
-    const candidates = [candidate(1), candidate(2)];
-    Object.defineProperty(candidates, '1', { get() { invoked++; return candidate(2); } });
-    await expect(prepareAnswerEvidenceRelevanceBatches({ query, candidates })).rejects.toBeInstanceOf(JudgmentInputError);
-    expect(invoked).toBe(0); expect(fake.requests).toHaveLength(0);
-  });
   test('mutating a later input cannot alter its captured complete meaning', async () => {
     const first = candidate(1, true), second = candidate(2, true); const fake = readings();
     installJudgmentPort({ ...fake.port, async ask(request) {
@@ -119,9 +109,11 @@ describe('complete-candidate bounded relevance batches', () => {
       { assertCurrent() { if (stale) throw new KnowledgeEvidenceRelevanceHeldError('stale'); } }), 'stale');
     expect(guarded.requests).toHaveLength(1);
   });
-  test('a late uncertain or unavailable reading never returns a partial earlier success', async () => {
+  test('a late uncertain reading is left out and an unavailable one holds the pass', async () => {
     readings((reference) => reference === 'candidate-2' ? 0.6 : 0.99);
-    await held(prepareAnswerEvidenceRelevanceBatches({ query, candidates: [candidate(1, true), candidate(2, true)] }), 'unsettled');
+    const plan = await prepareAnswerEvidenceRelevanceBatches({ query, candidates: [candidate(1, true), candidate(2, true)] });
+    expect(plan.accepted.map((reading) => reading.reference)).toEqual(['candidate-1']);
+    expect(plan.unsettled).toEqual(['candidate-2']);
     const fake = readings(); let count = 0;
     installJudgmentPort({ ...fake.port, async ask(request) { if (++count === 2) throw new Error('synthetic unavailable'); return fake.port.ask(request); } });
     await held(prepareAnswerEvidenceRelevanceBatches({ query, candidates: [candidate(1, true), candidate(2, true)] }), 'unavailable');

@@ -1,6 +1,6 @@
 import { createKnowledgeIssueOperatorMutation } from '../store-lifecycle-authority.js';
 import { createKnowledgeNodeOperatorMutation } from '../store-node-authority.js';
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import type {
   KnowledgeIssueRecord,
   KnowledgeNodeRecord,
@@ -43,6 +43,9 @@ export async function reviewHomeGraphFact(
     }
     const issueMutation = createKnowledgeIssueOperatorMutation(issue);
     const subjectNode = issue.nodeId ? store.getNode(issue.nodeId) : null;
+    if (input.action === 'forget' && Object.keys(normalizeReviewFacts(input)).length === 0) {
+      refuseNoEffect('issue', issue.id, 'forget', ISSUE_ACTIONS);
+    }
     const appliedFacts = await applyHomeGraphReviewFacts(store, spaceId, issue, subjectNode, input);
     const suppression = buildSuppression(input, issue, reviewedAt);
     const updatedIssue = await store.upsertIssue({
@@ -120,6 +123,13 @@ export async function reviewHomeGraphFact(
         source: 'runtime',
         operation: 'homegraph.review',
       });
+    }
+    if (!SOURCE_ACTIONS.includes(input.action)) refuseNoEffect('source', source.id, input.action, SOURCE_ACTIONS);
+    if (input.action === 'reopen' && source.status !== 'stale') {
+      throw new RefusalError(refusal({ code: 'HOMEGRAPH_REVIEW_NO_EFFECT', status: 409,
+        state: `source ${source.id} is already ${source.status}`,
+        reason: 'Reopen brings back a rejected or forgotten source; this one is still answering questions',
+        next: ['Use reject or forget to retire it from answers'] }), { category: 'bad_request', source: 'runtime' });
     }
     const updated = await store.upsertSource({
       id: source.id,
@@ -210,6 +220,18 @@ function deriveIssueFacts(issue: KnowledgeIssueRecord, input: HomeGraphReviewInp
   return facts;
 }
 
+/** Actions that change an issue (forget changes one only when it carries corrected facts). */
+const ISSUE_ACTIONS: readonly HomeGraphReviewInput['action'][] = ['accept', 'reject', 'resolve', 'reopen', 'edit'];
+/** Actions that change a source: accept records the decision, reject and forget retire it, reopen brings it back. */
+const SOURCE_ACTIONS: readonly HomeGraphReviewInput['action'][] = ['accept', 'reject', 'forget', 'reopen'];
+
+function refuseNoEffect(target: string, id: string, action: string, actions: readonly string[]): never {
+  throw new RefusalError(refusal({ code: 'HOMEGRAPH_REVIEW_NO_EFFECT', status: 400,
+    state: `${target} ${id} was not changed`,
+    reason: `The ${action} action has no effect on a ${target}`,
+    next: [`Use one of: ${actions.join(', ')}`] }), { category: 'bad_request', source: 'runtime' });
+}
+
 function normalizeReviewFacts(input: HomeGraphReviewInput): Record<string, unknown> {
   const value = readRecord(input.value);
   const fact = readRecord(value.fact);
@@ -226,26 +248,33 @@ function normalizeReviewFacts(input: HomeGraphReviewInput): Record<string, unkno
     'installDate',
     'purchaseDate',
     'warrantyExpiration',
+    'shareWith',
   ]) {
     if (!(key in source)) continue;
     const value = source[key];
     const kind = FACT_VALUE_KINDS[key];
-    if (kind && typeof value !== kind) {
-      throw new GoodVibesError(`Home Graph review value "${key}" must be a ${kind}, got ${value === null ? 'null' : typeof value}.`, {
-        category: 'bad_request', source: 'runtime', operation: 'homegraph.review', recoverable: true,
-      });
+    const valid = kind === 'string-list'
+      ? Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+      : !kind || typeof value === kind;
+    if (!valid) {
+      throw new RefusalError(refusal({ code: 'HOMEGRAPH_REVIEW_VALUE_TYPE', status: 400,
+        state: 'nothing was changed',
+        reason: `Home Graph review value "${key}" must be a ${kind === 'string-list' ? 'list of strings' : kind}, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}`,
+        next: [`Send ${key} as a ${kind === 'string-list' ? 'list of strings' : kind} and review again`] }), { category: 'bad_request', source: 'runtime' });
     }
-    allowed[key] = value;
+    allowed[key] = key === 'shareWith' ? [...new Set((value as string[]).map((entry) => entry.trim().toLowerCase()).filter(Boolean))] : value;
   }
   return allowed;
 }
 
 // Later quality and passport readers treat these as typed declarations and
 // hold the whole space when one is malformed, so a bad value stops here.
-const FACT_VALUE_KINDS: Record<string, 'boolean' | 'string' | undefined> = {
+// `shareWith` names the sharing profiles a device appears in (for example guest).
+const FACT_VALUE_KINDS: Record<string, 'boolean' | 'string' | 'string-list' | undefined> = {
   batteryPowered: 'boolean',
   manualRequired: 'boolean',
   batteryType: 'string',
+  shareWith: 'string-list',
 };
 
 function reviewMetadata(input: HomeGraphReviewInput, reviewedAt: number): Record<string, unknown> {
@@ -287,8 +316,9 @@ function nodeStatusForAction(action: HomeGraphReviewInput['action'], current: Kn
   return (action === 'reopen' || action === 'accept') && current === 'stale' ? 'active' : current;
 }
 
+/** Rejecting or forgetting a source retires it from answers; reopening or accepting a retired one brings it back. */
 function sourceStatusForAction(action: HomeGraphReviewInput['action'], current: KnowledgeSourceRecord['status']): KnowledgeSourceRecord['status'] {
-  if (action === 'forget') return 'stale';
+  if (action === 'forget' || action === 'reject') return 'stale';
   return (action === 'reopen' || action === 'accept') && current === 'stale' ? 'indexed' : current;
 }
 

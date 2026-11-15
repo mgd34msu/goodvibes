@@ -51,10 +51,12 @@ export async function selectHomeGraphExtractionRepairCandidates(
   limit: number, signal?: AbortSignal,
 ): Promise<KnowledgeSourceRecord[]> {
   signal?.throwIfAborted();
-  assertExtractionInputs(sources, extractionBySourceId);
-  const originalVersion = JSON.stringify({ query, sources, nodes, edges, extractions: sources.map((source) => extractionBySourceId(source.id)) });
+  if (!query.trim()) return [];
+  // Only documents whose stored extraction needs repair are read; the rest cost nothing.
+  const eligible = sources.filter((source) => source.artifactId && homeGraphExtractionNeedsRepair(extractionBySourceId(source.id)));
+  if (eligible.length === 0) return [];
+  assertExtractionInputs(eligible, extractionBySourceId);
   const links = buildSourceLinkIndex(edges, nodes);
-  const eligible = sources.filter(source => source.artifactId);
   const snapshots = eligible.map((source) => {
     const extraction = extractionBySourceId(source.id);
     return { request: query, source: { title: source.title, summary: source.summary, description: source.description,
@@ -64,25 +66,22 @@ export async function selectHomeGraphExtractionRepairCandidates(
   });
   for (const state of snapshots) assertJudgmentInput(state);
   if (snapshots.some(state => JSON.stringify(state).length > 160_000)) throw new JudgmentInputError('unsupported-input');
-  if (!query.trim()) return [];
   const decisionGuards: Array<() => void> = [];
-  const results = await mapLimit(structuredClone(snapshots), 4, async (state, index) => {
+  const results = await mapLimit(snapshots, 4, async (state, index) => {
     const source = eligible[index]!;
     signal?.throwIfAborted();
-    if (!source.artifactId || !homeGraphExtractionNeedsRepair(extractionBySourceId(source.id))) return undefined;
     const run = await readKnowledgeBattery(repairSourceRelevance, state, signal);
     decisionGuards.push(run.assertDecisionCurrent);
     return run.readings.relevant.verdict === 'yes' ? { source, score: run.readings.relevant.probability } : undefined;
   });
   signal?.throwIfAborted();
-  if (JSON.stringify({ query, sources, nodes, edges, extractions: sources.map((source) => extractionBySourceId(source.id)) }) !== originalVersion) throw new KnowledgeAnswerQualityHeldError('stale');
   for (const check of decisionGuards) check();
   return results.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
     .sort((a, b) => b.score - a.score || a.source.id.localeCompare(b.source.id))
     .slice(0, Math.max(1, limit)).map((entry) => entry.source);
 }
-/** Decided from the extraction's stored version and readability; the signal is accepted for older callers and unused. */
-export function homeGraphExtractionNeedsRepair(extraction: KnowledgeExtractionRecord | null | undefined, _signal?: AbortSignal): boolean {
+/** Decided from the extraction's stored version and readability. */
+export function homeGraphExtractionNeedsRepair(extraction: KnowledgeExtractionRecord | null | undefined): boolean {
   return knowledgeExtractionNeedsRefresh(extraction ?? null);
 }
 function assertExtractionInputs(

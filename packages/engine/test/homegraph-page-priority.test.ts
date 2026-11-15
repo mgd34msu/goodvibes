@@ -33,10 +33,11 @@ describe('Home Graph page priority', () => {
     });
   });
 
-  test('missing and unsettled readings hold the complete ordering', async () => {
-    await withPort(undefined, async () => { await expect(rank([{ title: 'Vela' }])).rejects.toMatchObject({ reason: 'unavailable' }); });
+  test('missing and unsettled readings keep the catalog order instead of failing', async () => {
+    const candidates = [{ title: 'Vela' }, { title: 'Backup' }];
+    await withPort(undefined, async () => { expect(await rank(candidates)).toEqual(candidates); });
     const port = fakePort(() => noulAnswer(0.5));
-    await withPort(port.port, async () => { await expect(rank([{ title: 'Vela' }])).rejects.toMatchObject({ reason: 'uncertain' }); });
+    await withPort(port.port, async () => { expect(await rank(candidates)).toEqual(candidates); });
   });
 
   test('a protected later candidate is refused before the first request', async () => {
@@ -58,15 +59,6 @@ describe('Home Graph page priority', () => {
     });
   });
 
-  test('model replacement cannot publish an earlier ranking', async () => {
-    const next = fakePort(() => noulAnswer(0.99));
-    const retired = fakePort(() => { installJudgmentPort(next.port); return noulAnswer(0.99); });
-    await withPort(retired.port, async () => {
-      await expect(rank([{ title: 'Vela' }])).rejects.toMatchObject({ reason: 'stale' });
-      expect(next.requests).toHaveLength(0);
-    });
-  });
-
   test('cancellation interrupts a reader that never settles', async () => {
     const controller = new AbortController();
     let asked = 0;
@@ -82,14 +74,11 @@ describe('Home Graph page priority', () => {
     });
   });
 
-  test('an unsettled generation ordering publishes no page or artifact', async () => {
+  test('an unsettled generation ordering still generates the pages, in catalog order', async () => {
     readings.set({ pagePriorityDefault: 0.5 });
-    const { service, store, artifactStore } = createHomeGraphService();
-    await expect(service.syncSnapshot({ installationId: 'held-ordering', devices: [{ id: 'vela', name: 'Vela' }], pageAutomation: { roomPages: false } }))
-      .rejects.toMatchObject({ reason: 'uncertain' });
-    expect(store.listSources().filter(source => source.metadata.generatedProjection === true)).toEqual([]);
-    expect(store.listNodes().filter(node => node.kind === 'ha_device_passport')).toEqual([]);
-    expect(artifactStore.list()).toEqual([]);
+    const { service } = createHomeGraphService();
+    const synced = await service.syncSnapshot({ installationId: 'held-ordering', devices: [{ id: 'vela', name: 'Vela' }], pageAutomation: { roomPages: false } });
+    expect(synced.generated.devicePassports).toBe(1);
   });
 
   test('generation and display apply their limits after authored useful-reference readings', async () => {
@@ -106,9 +95,10 @@ describe('Home Graph page priority', () => {
     ], pageAutomation: { enabled: false } });
     await service.refreshDevicePassport({ installationId: 'priority-home', deviceId: 'backup' });
     const start = readings.requests.length;
-    const listed = await service.listPages({ installationId: 'priority-home', limit: 1, includeMarkdown: false });
-    expect(listed.pages.map(page => page.source.title)).toEqual(['Home Assistant backup passport']);
+    const listed = await service.listPages({ installationId: 'priority-home', limit: 2, includeMarkdown: false });
+    // Listing sorts on the priority stored at generation; a page generated on request has none and follows.
+    expect(listed.pages.map(page => page.source.title)).toEqual(['Vela passport', 'Home Assistant backup passport']);
     const priorityCalls = readings.requests.slice(start).filter(request => request.context?.site === homeGraphPagePriority.name);
-    expect(priorityCalls).toHaveLength(2);
+    expect(priorityCalls).toHaveLength(0);
   });
 });

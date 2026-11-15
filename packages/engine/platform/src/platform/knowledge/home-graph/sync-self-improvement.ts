@@ -6,7 +6,6 @@ import type { KnowledgeStore } from '../store.js';
 import { edgeIsActive, homeAssistantSpaceComponent, readHomeAssistantMetadataString } from './helpers.js';
 import { refreshHomeGraphDevicePassport } from './generated-pages.js';
 import { isHomeGraphPageFactCandidate } from './page-quality.js';
-import { readHomeGraphSearchState } from './search.js';
 import { readHomeGraphState } from './state.js';
 
 const SYNC_SELF_IMPROVEMENT_INGEST_LIMIT = 0;
@@ -29,54 +28,71 @@ export async function runHomeGraphSyncSelfImprovementPump(
   signal: AbortSignal,
 ): Promise<void> {
   for (let round = 0; !signal.aborted; round += 1) {
-    if (signal.aborted) return;
-    // Between-rounds governor gate: a high-tier pause (pauseAll) must stop the
-    // pump at the next ROUND boundary, the pump is exactly the deferrable
-    // background work the pause exists to shed. Belt-and-suspenders with the
-    // in-run stopWhenPaused consult below (which stops a round already in
-    // flight at its next per-gap yield point).
-    if (runtime.semanticService.isBackgroundWorkPaused()) {
-      logger.info('Home Graph sync self-improvement pump stopped: background knowledge work is paused for memory pressure', { spaceId, round });
-      return;
-    }
-    // stopWhenPaused: the pump is background work, a governor pause stops each
-    // round at the next safe boundary (the allowlist justification requires it).
-    // This is threaded through to the runner's per-gap yield points, so it is
-    // real for these space-scoped rounds, not just whole-store sweeps.
-    const result = await runtime.semanticService.selfImprove({
-      knowledgeSpaceId: spaceId,
-      reason: 'homegraph-sync',
-      force: round > 0,
-      signal,
-    }, { stopWhenPaused: true });
-    if (signal.aborted) return;
-    if ((result.acceptedSourceIds?.length ?? 0) > 0) {
-      await refreshHomeGraphDevicePagesForSourceIds(runtime, spaceId, installationId, result.acceptedSourceIds ?? [], signal);
-    }
-    if (!shouldContinueHomeGraphSyncSelfImprovement(result)) return;
-    await sleep(round < 2 ? SYNC_SELF_IMPROVEMENT_FAST_SLEEP_MS : SYNC_SELF_IMPROVEMENT_SLOW_SLEEP_MS, { signal });
+    const next = await runHomeGraphSyncSelfImprovementRound(runtime, spaceId, installationId, round, signal);
+    if (next === undefined) return;
+    await sleep(next, { signal });
   }
 }
 
-export async function enrichHomeGraphSpaceSources(
+/**
+ * One round of post-sync gap repair for a space, then the device pages of the
+ * sources it accepted. Returns the delay before the next round, or undefined
+ * when there is nothing more to do (or the round stopped).
+ */
+export async function runHomeGraphSyncSelfImprovementRound(
   runtime: HomeGraphSelfImprovementRuntime,
   spaceId: string,
-  signal?: AbortSignal | undefined,
-): Promise<void> {
-  signal?.throwIfAborted();
-  const sources = readHomeGraphSearchState(runtime.store, spaceId).sources;
-  signal?.throwIfAborted();
-  await runtime.semanticService.enrichSources(sources, { knowledgeSpaceId: spaceId, ...(signal ? { signal } : {}) });
-  signal?.throwIfAborted();
-  // stopWhenPaused: the sync pump is background work, a governor pause stops
-  // it at the next safe boundary instead of running through memory pressure.
-  const result = await runtime.semanticService.selfImprove({ knowledgeSpaceId: spaceId, reason: 'reindex', ...(signal ? { signal } : {}) }, { stopWhenPaused: true });
-  signal?.throwIfAborted();
-  const installationId = readHomeGraphInstallationIdFromSpace(spaceId);
-  if (installationId && (result.acceptedSourceIds?.length ?? 0) > 0) {
-    await refreshHomeGraphDevicePagesForSourceIds(runtime, spaceId, installationId, result.acceptedSourceIds ?? [], signal);
-    signal?.throwIfAborted();
+  installationId: string,
+  round: number,
+  signal: AbortSignal,
+): Promise<number | undefined> {
+  if (signal.aborted) return undefined;
+  // A memory-pressure pause stops the pump at the round boundary; the pass
+  // below also stops at its next per-gap boundary (stopWhenPaused).
+  if (runtime.semanticService.isBackgroundWorkPaused()) {
+    logger.info('Home Graph sync self-improvement pump stopped: background knowledge work is paused for memory pressure', { spaceId, round });
+    return undefined;
   }
+  const result = await runtime.semanticService.selfImprove({
+    knowledgeSpaceId: spaceId,
+    reason: 'homegraph-sync',
+    force: round > 0,
+    signal,
+  }, { stopWhenPaused: true });
+  if (signal.aborted) return undefined;
+  if ((result.acceptedSourceIds?.length ?? 0) > 0) {
+    await refreshHomeGraphDevicePagesForSourceIds(runtime, spaceId, installationId, result.acceptedSourceIds ?? [], signal);
+  }
+  if (!shouldContinueHomeGraphSyncSelfImprovement(result)) return undefined;
+  return round < 2 ? SYNC_SELF_IMPROVEMENT_FAST_SLEEP_MS : SYNC_SELF_IMPROVEMENT_SLOW_SLEEP_MS;
+}
+
+/**
+ * Enriches the given sources that have never been enriched, stopping between
+ * sources once `deadlineAt` passes. A source that fails is logged and left for
+ * the background owners (ingest tail, sync pump, reindex); the caller renders
+ * from what is stored.
+ */
+export async function enrichUnenrichedHomeGraphSources(
+  runtime: HomeGraphSelfImprovementRuntime,
+  spaceId: string,
+  sourceIds: readonly string[],
+  deadlineAt: number,
+  signal?: AbortSignal,
+): Promise<{ readonly enriched: number; readonly left: number }> {
+  const pending = sourceIds.filter((id) => runtime.store.getSemanticEnrichmentState(id) === null);
+  let enriched = 0;
+  for (const sourceId of pending) {
+    if (signal?.aborted || Date.now() >= deadlineAt) break;
+    try {
+      await runtime.semanticService.enrichSource(sourceId, { knowledgeSpaceId: spaceId, ...(signal ? { signal } : {}) });
+      enriched += 1;
+    } catch (error) {
+      signal?.throwIfAborted();
+      runtime.reportBackgroundError('homegraph-passport-enrich', error, { spaceId, sourceId });
+    }
+  }
+  return { enriched, left: pending.length - enriched };
 }
 
 export async function enrichAndImproveHomeGraphSource(

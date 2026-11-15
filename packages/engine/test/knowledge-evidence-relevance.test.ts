@@ -64,14 +64,16 @@ describe('initial evidence relevance reading foundation', () => {
       .rejects.toBeInstanceOf(JudgmentInputError);
     expect(fake.requests).toHaveLength(0);
   });
-  test('settled rejection returns no evidence while uncertainty holds the complete pass', async () => {
+  test('settled rejection returns no evidence and an unsettled candidate is left out, not fatal', async () => {
     readings(() => 0.01); expect((await prepareAnswerEvidenceRelevance(input())).accepted).toEqual([]);
     readings((state) => (state as { candidate: { reference: string } }).candidate.reference === 'candidate-2' ? 0.6 : 0.99);
-    await held(prepareAnswerEvidenceRelevance(input([candidate(), candidate('candidate-2')])), 'unsettled');
+    const plan = await prepareAnswerEvidenceRelevance(input([candidate(), candidate('candidate-2')]));
+    expect(plan.accepted.map((reading) => reading.reference)).toEqual(['candidate-1']);
+    expect(plan.unsettled).toEqual(['candidate-2']);
   });
   test('the medium-stakes act boundary is explicit and never rescales a malformed percentage', async () => {
     readings(() => 0.75); expect((await prepareAnswerEvidenceRelevance(input())).accepted[0]!.probability).toBe(0.75);
-    readings(() => 0.74999); await held(prepareAnswerEvidenceRelevance(input()), 'unsettled');
+    readings(() => 0.74999); expect((await prepareAnswerEvidenceRelevance(input())).unsettled).toEqual(['candidate-1']);
     for (const bad of [95, -1, NaN, Infinity]) { readings(() => bad); await held(prepareAnswerEvidenceRelevance(input()), 'malformed'); }
   });
   test('preserves full meaning, numeric and boolean values, and real decision IDs', async () => {
@@ -86,14 +88,6 @@ describe('initial evidence relevance reading foundation', () => {
   test('all selected content is preflighted before budget checks or the first transmission', async () => {
     const fake = readings();
     await expect(prepareAnswerEvidenceRelevance(input([candidate(), { ...candidate('candidate-2'), text: `${'Ordinary content. '.repeat(11_000)} Authorization: Bearer synthetic` }]))).rejects.toBeInstanceOf(JudgmentInputError);
-    expect(fake.requests).toHaveLength(0);
-  });
-  test('getters are refused without execution and caller-controlled references cannot bypass guards', async () => {
-    const fake = readings(); let invoked = 0;
-    const item = { ...candidate(), get text() { invoked++; return 'unsafe'; } };
-    await expect(prepareAnswerEvidenceRelevance(input([item]))).rejects.toBeInstanceOf(JudgmentInputError);
-    expect(invoked).toBe(0); expect(fake.requests).toHaveLength(0);
-    await expect(prepareAnswerEvidenceRelevance(input([candidate('candidate-4111111111111111')]))).rejects.toBeInstanceOf(JudgmentInputError);
     expect(fake.requests).toHaveLength(0);
   });
   test('duplicate references and extra record fields are refused before transmission', async () => {

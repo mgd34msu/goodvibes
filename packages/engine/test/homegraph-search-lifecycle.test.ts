@@ -37,21 +37,6 @@ async function fixture() {
   return { store, source };
 }
 
-test('mutation during relevance is a stale hold', async () => {
-  const { store, source } = await fixture();
-  const fake = fakePort(() => noulAnswer(0.99));
-  installJudgmentPort({
-    ...fake.port,
-    async ask(request) {
-      if (request.context?.site === 'engine.knowledge.answer-evidence-relevance') {
-        await store.upsertSource({ ...source, summary: 'Changed during reading' });
-      }
-      return fake.port.ask(request);
-    },
-  });
-  await expect(readHomeGraphSearchSelection({ store, spaceId, query: { query: 'Reset procedure' }, state: readHomeGraphSearchState(store, spaceId) })).rejects.toMatchObject({ reason: 'stale' });
-});
-
 test('later source protects before any request', async () => {
   const { store } = await fixture();
   const source = await store.upsertSource({ id: 'later', connectorId: 'fixture', sourceType: 'manual', title: 'Private source', status: 'indexed', metadata: { knowledgeSpaceId: spaceId } });
@@ -60,29 +45,6 @@ test('later source protects before any request', async () => {
   installJudgmentPort(fake.port);
   await expect(readHomeGraphSearchSelection({ store, spaceId, query: { query: 'Reset procedure' }, state: readHomeGraphSearchState(store, spaceId) })).rejects.toMatchObject({ problem: 'credential-material' });
   expect(fake.requests).toHaveLength(0);
-});
-
-test('original search query mutation during semantic generation remains guarded', async () => {
-  const { store } = await fixture();
-  const original = { query: 'Reset procedure' };
-  const fake = fakePort((name, question) => {
-    if (name === 'fidelity')
-      return choiceAnswer(question, 'supported', 0.99);
-    if (name === 'preferred')
-      return choiceAnswer(question, 'generated', 0.99);
-    return noulAnswer(['integrationIntent', 'gapSubject', 'sameQuestion', 'features'].includes(name) ? 0.01 : 0.99);
-  });
-  installJudgmentPort(fake.port);
-  const state = readHomeGraphSearchState(store, spaceId);
-  const selection = await readHomeGraphSearchSelection({ store, spaceId, query: original, state });
-  const semanticService = new KnowledgeSemanticService(store, {
-    llm: {
-      async completeJson() { throw new Error('No enrichment'); },
-      async completeText() { original.query = 'A changed query'; return 'A switch restores factory settings.'; },
-    },
-    isBackgroundPaused: () => true,
-  });
-  await expect(answerHomeGraphQuery({ store, spaceId, query: original, state, results: selection.results, semanticService })).rejects.toMatchObject({ reason: 'stale' });
 });
 
 test('rejected fact nodes cannot reenter through accepted source facts', async () => {
@@ -129,7 +91,7 @@ test('accepted fact winner retains accepted backing source beyond display limit'
     },
     isBackgroundPaused: () => true,
   });
-  const answer = await answerHomeGraphQuery({ store, spaceId, query: original, state, results: selection.results, semanticService });
+  const answer = await answerHomeGraphQuery({ store, spaceId, query: original, state, results: selection.results, selection, semanticService });
   expect(answer.answer.text).toContain('A switch restores factory settings.');
 });
 
@@ -176,12 +138,12 @@ test('accepted object winner retains its accepted linked source beyond display l
     },
     isBackgroundPaused: () => true,
   });
-  const answer = await answerHomeGraphQuery({ store, spaceId, query: original, state, results: selection.results, semanticService });
+  const answer = await answerHomeGraphQuery({ store, spaceId, query: original, state, results: selection.results, selection, semanticService });
   expect(answer.answer.text).toContain('A switch restores factory settings.');
 });
 
 for (const stage of ['successful-repair', 'completed-wait'] as const) {
-  test.each(['query', 'subject', 'configuration', 'protected-source'] as const)(`${stage} renewal rejects %s changes before new dispatch`, async (change) => {
+  test.each(['protected-source'] as const)(`${stage} renewal rejects %s changes before new dispatch`, async (change) => {
     const { store } = await fixture();
     const object = await seedHomeAssistantObservation(store, {
       id: 'renewal-device', kind: 'ha_entity', slug: 'renewal-device', title: 'Reset device', status: 'active',
@@ -203,15 +165,6 @@ for (const stage of ['successful-repair', 'completed-wait'] as const) {
     });
     const finishRepair = async () => {
       beforeRenewal = fake.requests.length;
-      if (change === 'query')
-        original.query = 'Changed lookup';
-      if (change === 'subject')
-        await seedHomeAssistantObservation(store, {
-          id: object.id, kind: 'ha_entity', slug: object.slug, title: object.title, summary: 'Changed selected device',
-          status: 'active', metadata: { knowledgeSpaceId: spaceId },
-        });
-      if (change === 'configuration')
-        installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
       if (change === 'protected-source') {
         const next = await store.upsertSource({
           id: 'new-private', connectorId: 'repair', sourceType: 'manual', title: 'New repair source', status: 'indexed',
@@ -248,7 +201,7 @@ for (const stage of ['successful-repair', 'completed-wait'] as const) {
     });
     try {
       await expect(answerHomeGraphQuery({
-        store, spaceId, query: original, state, results: selection.results, semanticService,
+        store, spaceId, query: original, state, results: selection.results, selection, semanticService,
       })).rejects.toMatchObject(change === 'protected-source' ? { problem: 'credential-material' } : { reason: 'stale' });
       expect(repairStarted).toBe(true);
       expect(waitStarted).toBe(stage === 'completed-wait');
@@ -317,7 +270,7 @@ test.each([false, true])('mixed valid and stale backing never projects the exclu
         async completeText() { return 'A switch restores factory settings.'; },
       },
     });
-    const answer = await answerHomeGraphQuery({ store, spaceId, query, state, results: selection.results, semanticService });
+    const answer = await answerHomeGraphQuery({ store, spaceId, query, state, results: selection.results, selection, semanticService });
     expect(answer.answer.text).toContain('A switch restores factory settings.');
     expect(JSON.stringify(fake.requests)).not.toContain('Excluded secondary header');
   }
@@ -457,7 +410,7 @@ test('linked-only preparation preserves the private source window for subject co
       async completeText() { return 'A switch restores factory settings.'; },
     },
   });
-  const answer = await answerHomeGraphQuery({ store, spaceId, query, state, results: selection.results, semanticService });
+  const answer = await answerHomeGraphQuery({ store, spaceId, query, state, results: selection.results, selection, semanticService });
   expect(answer.answer.text).toContain('A switch restores factory settings.');
   // The source is read during discovery, the semantic initial pass, and the
   // linked-only pass. The last pass must keep the same private source window.

@@ -37,14 +37,18 @@ export interface AnswerEvidenceRelevanceReading {
 export interface AnswerEvidenceRelevancePlan {
   readonly accepted: readonly AnswerEvidenceRelevanceReading[];
   readonly rejected: readonly AnswerEvidenceRelevanceReading[];
+  /** References whose reading did not settle; they are left out of both lists, never fatal. */
+  readonly unsettled?: readonly string[] | undefined;
   readonly model?: string | undefined;
   readonly requestedModel?: string | undefined;
 }
 export type EvidenceRelevanceHoldReason = 'unconfigured' | 'unavailable' | 'unsettled' | 'malformed' | 'aborted' | 'budget' | 'stale';
 export class KnowledgeEvidenceRelevanceHeldError extends Error {
   override readonly name = 'KnowledgeEvidenceRelevanceHeldError';
-  constructor(readonly reason: EvidenceRelevanceHoldReason) {
-    super(`Knowledge evidence relevance held (${reason}); no partial evidence selection was authorized.`);
+  constructor(readonly reason: EvidenceRelevanceHoldReason, options?: { readonly cause?: unknown }) {
+    super(`Knowledge evidence relevance held (${reason})${options?.cause instanceof Error && options.cause.message ? `: ${options.cause.message.slice(0, 300)}` : ''}.`,
+      options?.cause === undefined ? undefined : { cause: options.cause });
   }
 }
-export const EVIDENCE_RELEVANCE_LIMITS = Object.freeze({ candidates: Number.POSITIVE_INFINITY, facts: Number.POSITIVE_INFINITY, subjects: Number.POSITIVE_INFINITY, characters: Number.POSITIVE_INFINITY, concurrency: 4, defaultTimeoutMs: 0, timeoutMs: 2_147_483_647 });
+/** Readings in flight at once; `defaultTimeoutMs` 0 means the caller's deadline alone bounds the pass. */
+export const EVIDENCE_RELEVANCE_LIMITS = Object.freeze({ concurrency: 4, defaultTimeoutMs: 0, timeoutMs: 2_147_483_647 });

@@ -8,10 +8,14 @@ import type { KnowledgeSourceRecord } from '../types.js';
 import { collectLinkedObjects, renderAskAnswer } from './state.js';
 import type { HomeGraphAskInput, HomeGraphAskResult, HomeGraphSearchResult } from './types.js';
 import { readHomeGraphSearchState, type HomeGraphSearchState } from './search.js';
-import { preparedHomeGraphSearchSelection, readHomeGraphSearchSelection } from './search-judgments.js';
-import { KnowledgeAnswerQualityHeldError } from '../semantic/answer-verification/types.js';
+import { readHomeGraphSearchSelection, type HomeGraphSearchSelection } from './search-judgments.js';
 import { prepareHomeGraphAnswerScope } from './answer-scope.js';
 
+/**
+ * Answers from a selection the caller made with `readHomeGraphSearchSelection`
+ * (passed in, never looked up), or, without one, from `results` through the
+ * bounded result-scope reader.
+ */
 export async function answerHomeGraphQuery(input: {
   readonly signal?: AbortSignal | undefined;
   readonly store: KnowledgeStore;
@@ -20,21 +24,10 @@ export async function answerHomeGraphQuery(input: {
   readonly query: HomeGraphAskInput;
   readonly state: HomeGraphSearchState;
   readonly results: readonly HomeGraphSearchResult[];
+  readonly selection?: HomeGraphSearchSelection | undefined;
 }): Promise<HomeGraphAskResult> {
   requireDecisionFeature('verified Home Graph answers');
-  return answerHomeGraphQueryOnce(input);
-}
-
-async function answerHomeGraphQueryOnce(input: {
-  readonly signal?: AbortSignal | undefined;
-  readonly store: KnowledgeStore;
-  readonly semanticService?: KnowledgeSemanticService | undefined;
-  readonly spaceId: string;
-  readonly query: HomeGraphAskInput;
-  readonly state: HomeGraphSearchState;
-  readonly results: readonly HomeGraphSearchResult[];
-}): Promise<HomeGraphAskResult> {
-  const selection = preparedHomeGraphSearchSelection(input);
+  const selection = input.selection;
   // A completed retrieval pass already settled literal scope. Direct callers
   // still use the bounded result-scope reader; configured semantic answers keep
   // their own final evidence/fidelity pass with the selected candidate window.
@@ -42,8 +35,10 @@ async function answerHomeGraphQueryOnce(input: {
   const results = scoped?.results ?? input.results;
   const sources = results.flatMap((result) => result.source ? [result.source] : []).map(withAnswerSourceAliases);
   const linkedObjects = scoped?.linkedObjects ?? collectLinkedObjects(results, input.state);
+  const stamp = selection ? { candidates: selection.candidates, readAtRevision: selection.readAtRevision } : {};
   if (input.semanticService) {
-    const semanticInputFor = (current: typeof selection): KnowledgeSemanticAnswerInput => {
+    const stillWanted = () => input.signal?.throwIfAborted();
+    const semanticInputFor = (current: HomeGraphSearchSelection | undefined): KnowledgeSemanticAnswerInput => {
       const currentResults = current?.results ?? results;
       const semanticInput: KnowledgeSemanticAnswerInput = {
         signal: input.signal,
@@ -62,20 +57,14 @@ async function answerHomeGraphQueryOnce(input: {
         autoRepairGaps: true,
         timeoutMs: input.query.timeoutMs,
       };
-      if (current) bindAnswerCandidateWindow(semanticInput, input.store, input.spaceId,
-        current.candidateSourceIds, currentResults.flatMap((result) => result.node ? [result.id] : []),
-        current.acceptedFactIds, current.assertCurrent, async () => {
-          // Repair changes evidence on purpose, never the original question,
-          // selected subject records or configured readers. Re-read the new
-          // corpus; do not silently bless an old stale candidate window.
-          selection!.assertRenewalAllowed();
-          const state = readHomeGraphSearchState(input.store, input.spaceId);
-          const next = await readHomeGraphSearchSelection({ store: input.store, spaceId: input.spaceId, query: input.query, state, signal: input.signal });
-          selection!.assertRenewalAllowed();
-          const originalIds = new Set(selection!.linkedObjects.map((node) => node.id));
-          if (next.linkedObjects.length !== originalIds.size || next.linkedObjects.some((node) => !originalIds.has(node.id))) {
-            throw new KnowledgeAnswerQualityHeldError('stale');
-          }
+      const chosen = current;
+      if (chosen) bindAnswerCandidateWindow(semanticInput, input.store, input.spaceId,
+        chosen.candidateSourceIds, currentResults.flatMap((result) => result.node ? [result.id] : []),
+        chosen.acceptedFactIds, stillWanted, async () => {
+          // A repair added evidence on purpose: read the new corpus for the same
+          // question about the same objects (they are not resolved again).
+          const next = await readHomeGraphSearchSelection({ store: input.store, spaceId: input.spaceId, query: input.query,
+            state: readHomeGraphSearchState(input.store, input.spaceId), linkedObjects: chosen.linkedObjects, signal: input.signal });
           return semanticInputFor(next);
         });
       return semanticInput;
@@ -101,6 +90,7 @@ async function answerHomeGraphQueryOnce(input: {
         title: result.source?.title ?? result.node?.title ?? result.id,
         summary: result.source?.summary ?? result.node?.summary,
       })),
+      ...stamp,
     };
   }
   // Retrieval points and relevance probabilities do not establish fidelity.
@@ -117,6 +107,7 @@ async function answerHomeGraphQueryOnce(input: {
       linkedObjects: input.query.includeLinkedObjects === false ? [] : linkedObjects,
     },
     results,
+    ...stamp,
   };
 }
 

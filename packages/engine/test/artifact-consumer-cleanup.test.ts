@@ -20,12 +20,12 @@ async function fixture() {
   configureKnowledgeArtifactReferences({ artifactStore: artifacts, controlPlaneDirectory: root, stores: [home, wiki] });
   return { root, artifacts, home, wiki };
 }
-test('Home Graph reset preserves an unstamped shared artifact referenced by a separately persisted wiki source', async () => {
+test('Home Graph reset keeps an artifact it did not create and counts it as borrowed', async () => {
   const f = await fixture(), artifact = await f.artifacts.create({ kind: 'document', text: 'shared', mimeType: 'text/plain', retentionMs: 0 });
   await f.home.upsertSource({ connectorId: 'homeassistant', sourceType: 'document', status: 'indexed', artifactId: artifact.id, metadata: knowledgeSpaceMetadata('homeassistant:house') });
   await f.wiki.upsertSource({ connectorId: 'wiki', sourceType: 'document', status: 'indexed', artifactId: artifact.id });
-  const reset = await resetHomeGraphSpace(f.home, f.artifacts, { installationId: 'house' });
-  expect(reset.deleted.sources).toBe(1); expect(reset.deletedArtifacts).toBe(0); expect(reset.preservedArtifacts).toBe(1); expect(reset.artifactCleanup.referenced).toBe(1); expect(f.artifacts.getRecord(artifact.id)).not.toBeNull();
+  const reset = await resetHomeGraphSpace(f.home, f.artifacts, { spaceId: 'homeassistant:house', installationId: 'house' });
+  expect(reset.deleted.sources).toBe(1); expect(reset.deletedArtifacts).toBe(0); expect(reset.artifactDeleteCandidates).toBe(0); expect(reset.borrowedArtifacts).toBe(1); expect(f.artifacts.getRecord(artifact.id)).not.toBeNull();
 });
 test('reset captures original files before the DB await and refuses a same-byte replacement introduced by the reset continuation', async () => {
   const f = await fixture(), artifact = await f.artifacts.create({ kind: 'document', text: 'original', retentionMs: 0, metadata: knowledgeSpaceMetadata('homeassistant:house') }), record = f.artifacts.getRecord(artifact.id)!;
@@ -33,14 +33,14 @@ test('reset captures original files before the DB await and refuses a same-byte 
   const native = f.home.deleteKnowledgeSpace.bind(f.home), reset = spyOn(f.home, 'deleteKnowledgeSpace').mockImplementation(async (...args) => {
     const result = await native(...args), bytes = readFileSync(record.contentPath); renameSync(record.contentPath, `${record.contentPath}.retained`); writeFileSync(record.contentPath, bytes, { mode: 0o600 }); return result;
   });
-  try { const result = await resetHomeGraphSpace(f.home, f.artifacts, { installationId: 'house' }); expect(result.deletedArtifacts).toBe(0); expect(result.artifactCleanup.held).toBe(1); expect(readFileSync(record.contentPath).toString()).toBe('original'); }
+  try { const result = await resetHomeGraphSpace(f.home, f.artifacts, { spaceId: 'homeassistant:house', installationId: 'house' }); expect(result.deletedArtifacts).toBe(0); expect(result.artifactCleanup.held).toBe(1); expect(readFileSync(record.contentPath).toString()).toBe('original'); }
   finally { reset.mockRestore(); }
 });
 test('an unbound reset acknowledges data reset but reports unavailable artifact cleanup instead of deleting by ID', async () => {
   const root = mkdtempSync(join(tmpdir(), 'artifact-unbound-reset-')); roots.push(root);
   const store = new KnowledgeStore({ dbPath: join(root, 'custom.sqlite') }); stores.push(store); await store.init();
   const artifacts = new ArtifactStore({ rootDir: join(root, 'custom-artifacts') }), artifact = await artifacts.create({ kind: 'document', text: 'keep', metadata: knowledgeSpaceMetadata('homeassistant:house') });
-  const result = await resetHomeGraphSpace(store, artifacts, { installationId: 'house' }); expect(result.artifactCleanup.unavailable).toBe(1); expect(result.deletedArtifacts).toBe(0); expect(artifacts.getRecord(artifact.id)).not.toBeNull();
+  const result = await resetHomeGraphSpace(store, artifacts, { spaceId: 'homeassistant:house', installationId: 'house' }); expect(result.artifactCleanup.unavailable).toBe(1); expect(result.deletedArtifacts).toBe(0); expect(artifacts.getRecord(artifact.id)).not.toBeNull();
 });
 async function multimodalFixture(onIngest: (id: string, f: Awaited<ReturnType<typeof fixture>>) => Promise<never>) {
   const f = await fixture(), source = await f.artifacts.create({ kind: 'document', mimeType: 'text/plain', filename: 'source.txt', text: 'A safe source document.', retentionMs: 0 });

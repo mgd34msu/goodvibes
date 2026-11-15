@@ -4,7 +4,6 @@ import { createHomeGraphSourceIdentityPlanner, type HomeGraphSourceIdentity } fr
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { snapshotNodeInput } from '../activation/projection.js';
 import { KnowledgeScopeSelectionHeldError } from '../scope-selection.js';
-import { HomeGraphPagePriorityHeldError } from './page-priority.js';
 import { createKnowledgeExtractionOwner } from '../extraction-ownership.js';
 import type { KnowledgeIngestOwnership } from '../ingest-context.js';
 import { KnowledgeWebGapRepairHeldError } from '../semantic/web-gap-repair/types.js';
@@ -12,11 +11,11 @@ import { registerGeneratedKnowledgeExtractionReferences } from '../source-struct
 import { captureStrictRepairJson } from '../semantic/web-gap-repair/admission.js';
 import { knowledgeSourceCrawledNow, sameKnowledgeRecord } from '../store-record-representation.js';
 import { registerGeneratedKnowledgeSourceReferences } from '../source-structural-references.js';
-import { ConfigurationError, GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { ConfigurationError, GoodVibesError, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { acquireArtifactPublication, type ArtifactStore } from '../../artifacts/index.js';
 import type { ArtifactOriginalObservation, ArtifactDescriptor } from '../../artifacts/types.js';
 import { logger } from '../../utils/logger.js';
-import { scheduleBackground, yieldEvery, yieldToEventLoop } from '../cooperative.js';
+import { yieldEvery, yieldToEventLoop } from '../cooperative.js';
 import type { KnowledgeStore } from '../store.js';
 import type {
   KnowledgeExtractionRecord,
@@ -28,7 +27,6 @@ import {
   HOME_GRAPH_CONNECTOR_ID,
   buildHomeGraphMetadata,
   belongsToSpace,
-  isGeneratedPageSource,
   readRecord,
   uniqueStrings,
 } from './helpers.js';
@@ -46,12 +44,14 @@ import {
   autoLinkHomeGraphSourceWithOutcome,
 } from './auto-link.js';
 import {
+  devicePassportSourceIds,
   generateHomeGraphPacket,
   generateHomeGraphRoomPage,
   refreshHomeGraphDevicePassport,
 } from './generated-pages.js';
+import { HomeGraphSpaceWork } from './space-work.js';
 import { refreshDevicePagesForHomeGraphAsk } from './ask-page-refresh.js';
-import { coalescedHomeGraphReindexResult, runHomeGraphReindex } from './reindex.js';
+import { runHomeGraphReindex } from './reindex.js';
 import { listHomeGraphPages } from './pages.js';
 import { browseHomeGraph, listHomeGraphSources } from './inventory.js';
 import { mapHomeGraph } from './map-view.js';
@@ -74,9 +74,9 @@ import {
 } from './search.js';
 import {
   enrichAndImproveHomeGraphSource,
-  enrichHomeGraphSpaceSources,
+  enrichUnenrichedHomeGraphSources,
   HOME_GRAPH_SYNC_SELF_IMPROVEMENT_START_DELAY_MS,
-  runHomeGraphSyncSelfImprovementPump,
+  runHomeGraphSyncSelfImprovementRound,
 } from './sync-self-improvement.js';
 import { readHomeGraphSearchSelection } from './search-judgments.js';
 import { resolveHomeGraphResetSpace, resolveReadableHomeGraphSpace, resolveWritableHomeGraphSpace } from './space-selection.js';
@@ -91,28 +91,20 @@ import type {
   HomeGraphSnapshotInput, HomeGraphStatus, HomeGraphSyncResult,
 } from './types.js';
 
+/** Queue item of the post-sync improvement rounds of a space. */
+const SYNC_IMPROVE_ITEM = 'sync-improve';
+/** How long a device passport request may spend enriching its own linked sources that were never enriched. */
+const PASSPORT_ENRICHMENT_BUDGET_MS = 20_000;
+
 export class HomeGraphService {
   private readonly autoLinkController = new AbortController();
   private readonly activeReindex = new Map<string, { readonly key: string; readonly run: Promise<HomeGraphReindexResult> }>();
   private readonly syncTails = new Map<string, Promise<void>>();
   private readonly resettingSpaces = new Set<string>();
   private readonly spaceWrites = new Map<string, Set<Promise<unknown>>>();
-  private pendingSyncSelfImprove = new Set<string>();
-  private syncSelfImproveControllers = new Map<string, AbortController>();
-  private syncSelfImproveRuns = new Map<string, Promise<void>>();
   private readonly foregroundRuns = new Set<Promise<unknown>>();
-  private foregroundOperations = new Map<string, number>();
-  private resumeSyncSelfImprove = new Set<string>();
-  private pendingAnswerEnrichment = new Map<string, Set<string>>();
-  private scheduledAnswerEnrichment = new Set<string>();
-  private pendingIngestEnrichment = new Map<string, Set<string>>();
-  private scheduledIngestEnrichment = new Set<string>();
-  private ingestEnrichmentRuns = new Map<string, { readonly sourceId: string; readonly controller: AbortController; readonly run: Promise<void> }>();
-  private answerEnrichmentRuns = new Map<string, {
-    readonly controller: AbortController;
-    readonly sourceIds: readonly string[];
-    readonly run: Promise<void>;
-  }>();
+  /** What each space is doing: foreground verbs first, background items when the space is idle. */
+  private readonly work: HomeGraphSpaceWork;
   constructor(
     private readonly store: KnowledgeStore,
     private readonly artifactStore: ArtifactStore,
@@ -127,26 +119,32 @@ export class HomeGraphService {
     } = {},
   ) {
     this.options.semanticService?.addObjectProfiles(HOME_GRAPH_KNOWLEDGE_EXTENSION.objectProfiles);
+    this.work = new HomeGraphSpaceWork({
+      signal: this.autoLinkController.signal,
+      paused: () => this.options.semanticService?.isBackgroundWorkPaused() ?? false,
+      report: (event, error, metadata) => this.reportBackgroundError(event, error, metadata),
+    });
   }
 
-  /** Refuse expensive work at the critical memory tier (see MemoryGovernor). */
+  /** Refuse expensive work at the critical memory tier (see MemoryGovernor), with one typed refusal on every costly verb. */
   private requireAdmission(label: string): void {
     const decision = this.options.admitExpensiveWork?.(label);
     if (decision && !decision.allowed) {
-      throw new Error(decision.reason ?? `${label} refused: daemon is under critical memory pressure.`);
+      throw new RefusalError(refusal({
+        code: 'HOMEGRAPH_MEMORY_PRESSURE', status: 503, retryable: true, retryAfterMs: 30_000,
+        state: `${label} did not start`,
+        reason: decision.reason ?? 'The daemon is under critical memory pressure',
+        next: ['Retry once memory pressure eases, or free memory by closing idle sessions'],
+      }), { category: 'service', source: 'runtime' });
     }
   }
 
   async dispose(): Promise<void> {
     this.autoLinkController.abort();
-    this.cancelSyncSelfImprovement();
-    this.cancelAnswerEnrichment();
-    this.pendingIngestEnrichment.clear(); this.scheduledIngestEnrichment.clear();
     // Accepted foreground work owns this store until its cancelled work has
     // drained. Its caller retains the outcome; disposal only waits for release.
     await Promise.all([...this.foregroundRuns].map(run => run.then(() => undefined, () => undefined)));
-    await Promise.all([...this.syncSelfImproveRuns.values(), ...[...this.answerEnrichmentRuns.values()].map(tail => tail.run),
-      ...[...this.ingestEnrichmentRuns.values()].map(tail => tail.run)]);
+    await this.work.cancel();
   }
 
   async status(input: { readonly installationId?: string; readonly knowledgeSpaceId?: string } = {}): Promise<HomeGraphStatus> {
@@ -158,6 +156,7 @@ export class HomeGraphService {
   async syncSnapshot(input: HomeGraphSnapshotInput): Promise<HomeGraphSyncResult> {
     return this.ownForegroundOperation((writes) => withConfiguredDecisionModelPolicy(async () => {
       this.autoLinkController.signal.throwIfAborted();
+      this.requireAdmission('home-graph sync');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
       const target = resolveWritableHomeGraphSpace(this.store, input);
@@ -223,6 +222,7 @@ export class HomeGraphService {
           metadata: {
             ...(input.metadata ?? {}),
             homeGraphSourceKind: 'url',
+            homeGraphArtifactOwned: true,
           },
         }, owned ? { ...ownership, signal, assertCurrent: current } : ownership, identity, assertArtifactCurrent));
       });
@@ -261,6 +261,7 @@ export class HomeGraphService {
             ...(input.metadata ?? {}),
             homeGraphSourceKind: 'note',
             category: input.category ?? 'note',
+            homeGraphArtifactOwned: true,
           },
         }, {}, undefined, assertArtifactCurrent));
       });
@@ -301,6 +302,8 @@ export class HomeGraphService {
           metadata: {
             ...(input.metadata ?? {}),
             homeGraphSourceKind: 'artifact',
+            // A caller-supplied artifact id is borrowed: a reset never removes it.
+            homeGraphArtifactOwned: !artifactId,
           },
         }, {}, identity, assertArtifactCurrent));
       });
@@ -334,49 +337,42 @@ export class HomeGraphService {
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
       const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
-      // A read-only ask writes nothing; any other ask repairs extractions and
-      // refreshes pages, so a reset must wait for it and refuse a new one.
+      // A read-only ask writes nothing and takes no lane. Any other ask may
+      // repair a stale extraction first, so a reset waits for it, and
+      // background work does not start while it runs.
       if (!input.readOnly) writes.begin(spaceId);
-      return this.runForegroundOperation(spaceId, installationId, async () => {
-        const initialState = readHomeGraphSearchState(this.store, spaceId);
-        const repairedExtractions = input.readOnly ? 0 : await this.repairStaleExtractionsForAsk(spaceId, installationId, input.query, initialState);
-        this.autoLinkController.signal.throwIfAborted();
-        const state = repairedExtractions > 0 ? readHomeGraphSearchState(this.store, spaceId) : initialState;
-        const selection = await readHomeGraphSearchSelection({ store: this.store, spaceId, query: input, state, signal: this.autoLinkController.signal });
-        this.autoLinkController.signal.throwIfAborted();
-        const answer = await answerHomeGraphQuery({ store: this.store, semanticService: this.options.semanticService,
-          spaceId, query: input, state, results: selection.results, signal: this.autoLinkController.signal });
-        this.autoLinkController.signal.throwIfAborted();
-        const pageRefresh = input.readOnly ? { requested: false, refreshed: 0 } : await refreshDevicePagesForHomeGraphAsk({
-          store: this.store,
-          artifactStore: this.artifactStore,
-          spaceId,
-          installationId,
-          answer,
-          signal: this.autoLinkController.signal,
-        });
-        if (!input.readOnly) this.queueAnswerEnrichment(spaceId, answer);
-        return withHomeGraphAskPageRefresh(answer, pageRefresh);
-      });
+      const initialState = readHomeGraphSearchState(this.store, spaceId);
+      const repairedExtractions = input.readOnly ? 0 : await this.repairStaleExtractionsForAsk(spaceId, installationId, input.query, initialState);
+      this.autoLinkController.signal.throwIfAborted();
+      const state = repairedExtractions > 0 ? readHomeGraphSearchState(this.store, spaceId) : initialState;
+      const selection = await readHomeGraphSearchSelection({ store: this.store, spaceId, query: input, state, signal: this.autoLinkController.signal });
+      const answer = await answerHomeGraphQuery({ store: this.store, semanticService: this.options.semanticService,
+        spaceId, query: input, state, results: selection.results, selection, signal: this.autoLinkController.signal });
+      // The answer returns now; device pages and enrichment run in the background queue.
+      const queued = input.readOnly ? 0 : this.queueAskPageRefresh(spaceId, installationId, answer);
+      if (!input.readOnly) this.queueAnswerEnrichment(spaceId, answer);
+      return withHomeGraphAskPageRefresh(answer, { requested: queued > 0, queued });
     });
   }
 
   async reindex(input: HomeGraphReindexInput = {}): Promise<HomeGraphReindexResult> {
     return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('semantic Home Graph reindexing');
+      this.requireAdmission('home-graph reindex');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
+      const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
       writes.begin(spaceId);
       const key = JSON.stringify([input.limit, input.maxRunMs, input.semanticLimit, input.semanticMaxRunMs, input.generatedPageLimit, input.force === true, input.refreshPages]);
-      // One run per space. An identical request joins it; a different one
-      // (another limit, force, refreshPages) waits its turn and then runs.
+      // One run per space. An identical request joins it and returns that run's
+      // result; a different one (another limit, force, refreshPages) waits its
+      // turn and then runs.
       for (let active = this.activeReindex.get(spaceId); active; active = this.activeReindex.get(spaceId)) {
-        if (active.key === key) return coalescedHomeGraphReindexResult(this.store, { ...input, knowledgeSpaceId: spaceId });
+        if (active.key === key) return { ...(await active.run), coalesced: true };
         await active.run.then(() => undefined, () => undefined);
         this.autoLinkController.signal.throwIfAborted();
       }
-      const run = this.runForegroundOperation(spaceId, installationId, () => runHomeGraphReindex({
+      const run = this.runForegroundOperation(spaceId, () => runHomeGraphReindex({
         store: this.store,
         artifactStore: this.artifactStore,
         semanticService: this.options.semanticService,
@@ -446,12 +442,18 @@ export class HomeGraphService {
   async refreshDevicePassport(input: HomeGraphProjectionInput): Promise<HomeGraphDevicePassportResult> {
     return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('verified Home Graph device passports');
+      this.requireAdmission('home-graph device passport');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
       const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
       writes.begin(spaceId);
-      return this.runForegroundOperation(spaceId, installationId, async () => {
-        await this.enrichSpaceSources(spaceId);
+      return this.runForegroundOperation(spaceId, async () => {
+        // Only this passport's own linked sources that were never enriched, within a bound;
+        // the rest of the home is enriched by the ingest tail, the sync pump and reindex.
+        if (this.options.semanticService && input.deviceId) {
+          await enrichUnenrichedHomeGraphSources(this.requireSelfImprovementRuntime(), spaceId,
+            devicePassportSourceIds(this.store, spaceId, input.deviceId), Date.now() + PASSPORT_ENRICHMENT_BUDGET_MS, this.autoLinkController.signal);
+        }
         this.autoLinkController.signal.throwIfAborted();
         return refreshHomeGraphDevicePassport({
           store: this.store,
@@ -468,13 +470,12 @@ export class HomeGraphService {
   async generateRoomPage(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
     return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('verified Home Graph room pages');
+      this.requireAdmission('home-graph room page');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
       const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
       writes.begin(spaceId);
-      return this.runForegroundOperation(spaceId, installationId, async () => {
-        await this.enrichSpaceSources(spaceId);
-        this.autoLinkController.signal.throwIfAborted();
+      return this.runForegroundOperation(spaceId, async () => {
         return generateHomeGraphRoomPage({
           store: this.store,
           artifactStore: this.artifactStore,
@@ -490,13 +491,12 @@ export class HomeGraphService {
   async generatePacket(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
     return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('verified Home Graph sharing packets');
+      this.requireAdmission('home-graph sharing packet');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
       const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
       writes.begin(spaceId);
-      return this.runForegroundOperation(spaceId, installationId, async () => {
-        await this.enrichSpaceSources(spaceId);
-        this.autoLinkController.signal.throwIfAborted();
+      return this.runForegroundOperation(spaceId, async () => {
         return generateHomeGraphPacket({
           store: this.store,
           artifactStore: this.artifactStore,
@@ -551,29 +551,14 @@ export class HomeGraphService {
       this.autoLinkController.signal.throwIfAborted();
       const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
       const state = readHomeGraphState(this.store, spaceId);
-      const observedSources = state.sources.filter(isGeneratedPageSource);
-      const observedNodes = state.nodes.filter(node => !node.metadata.semanticKind && !['fact', 'knowledge_gap', 'wiki_page'].includes(node.kind));
-      const ids = new Set([...observedSources, ...observedNodes].map(record => record.id));
-      const observedEdges = state.edges.filter(edge => ids.has(edge.fromId) && ids.has(edge.toId));
-      const original = JSON.stringify({ sources: observedSources, nodes: observedNodes, edges: observedEdges });
-      const assertCurrent = () => {
-        this.autoLinkController.signal.throwIfAborted();
-        const edges = new Map(this.store.listEdges().map(edge => [edge.id, edge]));
-        const current = JSON.stringify({ sources: observedSources.map(source => this.store.getSource(source.id)),
-          nodes: observedNodes.map(node => this.store.getNode(node.id)), edges: observedEdges.map(edge => edges.get(edge.id)) });
-        if (current !== original) throw new HomeGraphPagePriorityHeldError('stale');
-      };
       return listHomeGraphPages({
         artifactStore: this.artifactStore,
-        store: this.store,
-        assertCurrent,
         spaceId,
         sources: state.sources,
         nodes: state.nodes,
         edges: state.edges,
         limit: Math.max(1, input.limit ?? 100),
         includeMarkdown: input.includeMarkdown !== false,
-        signal: this.autoLinkController.signal,
       });
     });
   }
@@ -606,13 +591,14 @@ export class HomeGraphService {
   } = {}) {
     return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('automatic Home Graph refinement and triage');
+      this.requireAdmission('home-graph refinement');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
       // Refinement and triage write issues, tasks and pages: claim the space so a reset waits for the run.
       const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
       writes.begin(spaceId);
-      return runHomeGraphRefinement({ ...input, knowledgeSpaceId: spaceId, store: this.store,
-        semanticService: this.options.semanticService, signal: this.autoLinkController.signal });
+      return this.runForegroundOperation(spaceId, () => runHomeGraphRefinement({ ...input, knowledgeSpaceId: spaceId, store: this.store,
+        semanticService: this.options.semanticService, signal: this.autoLinkController.signal }));
     });
   }
 
@@ -666,7 +652,7 @@ export class HomeGraphService {
       this.autoLinkController.signal.throwIfAborted();
       // Resolved once: the space whose work is cancelled is the space deleted.
       const { spaceId, installationId } = resolveHomeGraphResetSpace(this.store, input);
-      const target: HomeGraphResetInput = { ...input, knowledgeSpaceId: spaceId, installationId };
+      const target = { spaceId, installationId, dryRun: input.dryRun, preserveArtifacts: input.preserveArtifacts };
       if (input.dryRun === true) return resetHomeGraphSpace(this.store, this.artifactStore, target);
       if (this.resettingSpaces.has(spaceId)) {
         throw new GoodVibesError(`Home Graph space ${spaceId} is already being reset.`, {
@@ -676,20 +662,13 @@ export class HomeGraphService {
       this.resettingSpaces.add(spaceId);
       try {
         await Promise.all([...(this.spaceWrites.get(spaceId) ?? [])].map(run => run.then(() => undefined, () => undefined)));
-        const sync = this.syncSelfImproveRuns.get(spaceId);
-        this.cancelSyncSelfImprovement(spaceId);
-        const tail = this.answerEnrichmentRuns.get(spaceId)?.run;
-        this.cancelAnswerEnrichment(spaceId);
-        const ingest = this.ingestEnrichmentRuns.get(spaceId);
-        this.pendingIngestEnrichment.delete(spaceId); this.scheduledIngestEnrichment.delete(spaceId);
-        ingest?.controller.abort();
-        await Promise.all([sync, tail, ingest?.run]);
+        await this.work.cancel(spaceId);
         this.autoLinkController.signal.throwIfAborted();
         return await resetHomeGraphSpace(this.store, this.artifactStore, target);
       } finally {
         this.resettingSpaces.delete(spaceId);
         // Nothing is left to enrich or repair in a space that was just deleted.
-        this.pendingAnswerEnrichment.delete(spaceId); this.resumeSyncSelfImprove.delete(spaceId);
+        await this.work.cancel(spaceId);
       }
     });
   }
@@ -816,12 +795,13 @@ export class HomeGraphService {
         source = this.store.getSource(sourceId)!;
         extraction = this.store.getExtractionBySourceId(sourceId) ?? undefined;
         assertOwned();
-        registerGeneratedKnowledgeSourceReferences(this.store, source, { id: sourceId, canonicalUri,
-          ...(!input.sourceUri && !input.artifact.sourceUri && source.sourceUri === canonicalUri ? { sourceUri: canonicalUri } : {}) });
-        if (extraction?.id === generatedId) registerGeneratedKnowledgeExtractionReferences(this.store, source, extraction, generatedId);
       } else { source = await this.store.upsertSource(sourceInput, assertOwned); published = true; }
+      // Registered once on either path; the extraction's references need the source's first.
       registerGeneratedKnowledgeSourceReferences(this.store, source, { id: sourceId, canonicalUri,
         ...(!input.sourceUri && !input.artifact.sourceUri && source.sourceUri === canonicalUri ? { sourceUri: canonicalUri } : {}) });
+      if (atomic && extraction?.id === `hg-extract-${sourceId.replace(/^hg-src-/, '')}`) {
+        registerGeneratedKnowledgeExtractionReferences(this.store, source, extraction, extraction.id);
+      }
       if (!atomic) extraction = await storeHomeGraphArtifactExtraction(this.store, source, input.artifact, input.spaceId, input.installationId, prepared);
       assertOwned();
       // A document with no named target is linked when its subject settles; any
@@ -895,8 +875,10 @@ export class HomeGraphService {
   private async ownForegroundOperation<T>(operation: (writes: { begin(spaceId: string): void }) => Promise<T>): Promise<T> {
     this.autoLinkController.signal.throwIfAborted();
     const writtenSpaces = new Set<string>();
-    // A write claims its space so a reset can refuse new writers and wait for
-    // the ones already running before it deletes anything.
+    const releases: (() => void)[] = [];
+    // A write claims its space: a reset refuses new writers and waits for the
+    // ones already running, and background work of the space does not start
+    // while it runs.
     const writes = {
       begin: (spaceId: string): void => {
         if (this.resettingSpaces.has(spaceId)) {
@@ -904,7 +886,9 @@ export class HomeGraphService {
             category: 'bad_request', source: 'runtime', operation: 'homegraph.write', recoverable: true,
           });
         }
+        if (writtenSpaces.has(spaceId)) return;
         writtenSpaces.add(spaceId);
+        releases.push(this.work.enterForeground(spaceId));
         const runs = this.spaceWrites.get(spaceId) ?? new Set<Promise<unknown>>();
         runs.add(run); this.spaceWrites.set(spaceId, runs);
       },
@@ -917,11 +901,11 @@ export class HomeGraphService {
     });
     this.foregroundRuns.add(run);
     try {
-      const result = await run;
-      this.autoLinkController.signal.throwIfAborted();
-      return result;
+      // A result that was produced is returned even if shutdown began meanwhile.
+      return await run;
     } finally {
       this.foregroundRuns.delete(run);
+      for (const release of releases) release();
       for (const spaceId of writtenSpaces) {
         const runs = this.spaceWrites.get(spaceId);
         runs?.delete(run);
@@ -930,189 +914,82 @@ export class HomeGraphService {
     }
   }
 
-  private async runForegroundOperation<T>(spaceId: string, installationId: string, operation: () => Promise<T>): Promise<T> {
+  /**
+   * A verb that rewrites pages, quality or extractions across the space: it
+   * waits for the background item running in the space to reach its next
+   * boundary (the item is asked to yield, never aborted), then runs.
+   */
+  private async runForegroundOperation<T>(spaceId: string, operation: () => Promise<T>): Promise<T> {
     this.autoLinkController.signal.throwIfAborted();
-    this.foregroundOperations.set(spaceId, (this.foregroundOperations.get(spaceId) ?? 0) + 1);
-    if (this.syncSelfImproveControllers.has(spaceId)) this.resumeSyncSelfImprove.add(spaceId);
-    const background = this.syncSelfImproveRuns.get(spaceId);
-    this.cancelSyncSelfImprovement(spaceId);
-    const tail = this.answerEnrichmentRuns.get(spaceId);
-    if (tail) {
-      const pending = this.pendingAnswerEnrichment.get(spaceId) ?? new Set<string>();
-      for (const sourceId of tail.sourceIds) pending.add(sourceId);
-      this.pendingAnswerEnrichment.set(spaceId, pending);
-      tail.controller.abort();
-    }
-    const ingest = this.ingestEnrichmentRuns.get(spaceId);
-    if (ingest) {
-      this.queueIngestEnrichment(spaceId, ingest.sourceId);
-      ingest.controller.abort();
-    }
+    const release = this.work.enterForeground(spaceId);
     try {
-      // Capture answer and page inputs only after the cancelled same-space
-      // repair pump has finished its owned writes and cleanup.
-      await background;
-      this.autoLinkController.signal.throwIfAborted();
-      await tail?.run;
-      this.autoLinkController.signal.throwIfAborted();
-      await ingest?.run;
+      await this.work.settleRunning(spaceId);
       this.autoLinkController.signal.throwIfAborted();
       return await operation();
     } finally {
-      const remaining = (this.foregroundOperations.get(spaceId) ?? 1) - 1;
-      if (remaining > 0) this.foregroundOperations.set(spaceId, remaining);
-      else {
-        this.foregroundOperations.delete(spaceId);
-        const resume = this.resumeSyncSelfImprove.delete(spaceId);
-        if (!this.autoLinkController.signal.aborted) {
-          if (resume) this.scheduleSyncSelfImprovement(spaceId, installationId);
-          this.scheduleAnswerEnrichment(spaceId);
-          this.scheduleIngestEnrichment(spaceId);
-        }
-      }
+      release();
     }
   }
 
+  /** Queues the refresh of the device pages an answer named; returns how many devices it covers. */
+  private queueAskPageRefresh(spaceId: string, installationId: string, answer: HomeGraphAskResult): number {
+    if (isClassicOperation() || this.autoLinkController.signal.aborted) return 0;
+    if ((answer.answer.facts?.length ?? 0) === 0 && answer.answer.sources.length === 0) return 0;
+    const devices = answer.answer.linkedObjects.filter((node) => node.kind === 'ha_device').map((node) => node.id).sort();
+    if (devices.length === 0) return 0;
+    this.work.enqueue(spaceId, {
+      key: `ask-pages:${devices.join(',')}`,
+      run: async (signal) => {
+        await refreshDevicePagesForHomeGraphAsk({ store: this.store, artifactStore: this.artifactStore, spaceId, installationId, answer, signal });
+      },
+    });
+    return Math.min(devices.length, 3);
+  }
+
+  /** Queues enrichment of up to three sources an answer used, one item per source. */
   private queueAnswerEnrichment(spaceId: string, answer: HomeGraphAskResult): void {
-    if (isClassicOperation()) return;
-    if (!this.options.semanticService || this.autoLinkController.signal.aborted) return;
-    const pending = this.pendingAnswerEnrichment.get(spaceId) ?? new Set<string>();
-    const selected = new Set(answer.results.flatMap(result => result.source ? [result.source.id] : []));
-    for (const sourceId of [...selected].slice(0, 3)) pending.add(sourceId);
-    if (pending.size > 0) this.pendingAnswerEnrichment.set(spaceId, pending);
-    this.scheduleAnswerEnrichment(spaceId);
-  }
-
-  private scheduleAnswerEnrichment(spaceId: string): void {
-    if (isClassicOperation()) return;
     const semantic = this.options.semanticService;
-    if (!semantic || this.autoLinkController.signal.aborted || this.foregroundOperations.has(spaceId)
-      || this.answerEnrichmentRuns.has(spaceId) || this.scheduledAnswerEnrichment.has(spaceId)
-      || !this.pendingAnswerEnrichment.has(spaceId)) return;
-    this.scheduledAnswerEnrichment.add(spaceId);
-    scheduleBackground(() => {
-      this.scheduledAnswerEnrichment.delete(spaceId);
-      if (this.foregroundOperations.has(spaceId) || this.answerEnrichmentRuns.has(spaceId)) return;
-      const pending = this.pendingAnswerEnrichment.get(spaceId);
-      if (!pending) return;
-      // Preserve governor backpressure for the selected-source background tail.
-      if (semantic.isBackgroundWorkPaused()) { this.pendingAnswerEnrichment.delete(spaceId); return; }
-      const sourceIds = [...pending].slice(0, 3);
-      for (const sourceId of sourceIds) pending.delete(sourceId);
-      if (pending.size === 0) this.pendingAnswerEnrichment.delete(spaceId);
-      const sources = sourceIds.flatMap(id => { const source = this.store.getSource(id); return source ? [source] : []; });
-      const controller = new AbortController();
-      const signal = AbortSignal.any([controller.signal, this.autoLinkController.signal]);
-      const run = semantic.enrichSources(sources, { knowledgeSpaceId: spaceId, limit: 3, signal,
-        shouldStop: () => signal.aborted || this.foregroundOperations.has(spaceId),
-      }).then(() => {}, (error: unknown) => {
-        if (!signal.aborted) this.reportBackgroundError('homegraph-post-answer-enrich', error, { spaceId });
-      }).finally(() => {
-        if (this.answerEnrichmentRuns.get(spaceId)?.run === run) this.answerEnrichmentRuns.delete(spaceId);
-        this.scheduleAnswerEnrichment(spaceId);
+    if (isClassicOperation() || !semantic || this.autoLinkController.signal.aborted) return;
+    const selected = [...new Set(answer.results.flatMap(result => result.source ? [result.source.id] : []))].slice(0, 3);
+    for (const sourceId of selected) {
+      this.work.enqueue(spaceId, {
+        key: `answer-enrich:${sourceId}`,
+        run: async (signal) => {
+          const source = this.store.getSource(sourceId);
+          if (!source || isClassicOperation()) return;
+          await semantic.enrichSources([source], { knowledgeSpaceId: spaceId, limit: 1, signal });
+        },
       });
-      this.answerEnrichmentRuns.set(spaceId, { controller, sourceIds, run });
-    }, 0, this.autoLinkController.signal);
-  }
-
-  private cancelAnswerEnrichment(spaceId?: string): void {
-    const entries = spaceId ? [...this.answerEnrichmentRuns].filter(([id]) => id === spaceId) : [...this.answerEnrichmentRuns];
-    for (const [, tail] of entries) tail.controller.abort();
-    if (spaceId) {
-      this.pendingAnswerEnrichment.delete(spaceId);
-      this.scheduledAnswerEnrichment.delete(spaceId);
-    } else {
-      this.pendingAnswerEnrichment.clear();
-      this.scheduledAnswerEnrichment.clear();
     }
   }
 
   /**
-   * Start the post-sync self-improvement pump for a Home Graph space.
-   * The pump is intentionally delayed so the foreground sync response can
-   * return before source search, semantic repair, and page refresh work begins.
+   * Post-sync gap repair, one round per background item. A round that leaves
+   * work queues the next one after a pause, so a question or a page request
+   * between rounds goes first and the repair resumes where it was.
    */
-  private scheduleSyncSelfImprovement(spaceId: string, installationId: string): void {
-    if (isClassicOperation()) return;
-    if (!this.options.semanticService || this.autoLinkController.signal.aborted || this.pendingSyncSelfImprove.has(spaceId)) return;
-    if (this.foregroundOperations.has(spaceId)) { this.resumeSyncSelfImprove.add(spaceId); return; }
-    this.pendingSyncSelfImprove.add(spaceId);
-    const controller = new AbortController();
-    this.syncSelfImproveControllers.set(spaceId, controller);
-    scheduleBackground(() => {
-      const run = this.runSyncSelfImprovementPump(spaceId, installationId, controller.signal).catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        this.reportBackgroundError('homegraph-sync-self-improvement', error, { spaceId, installationId });
-      }).finally(() => {
-        if (this.syncSelfImproveRuns.get(spaceId) === run) this.syncSelfImproveRuns.delete(spaceId);
-        if (this.syncSelfImproveControllers.get(spaceId) === controller) {
-          this.pendingSyncSelfImprove.delete(spaceId);
-          this.syncSelfImproveControllers.delete(spaceId);
-        }
-      });
-      this.syncSelfImproveRuns.set(spaceId, run);
-    // Tie the delayed task to the controller so a space reset can cancel work
-    // before it starts or cooperatively stop it while it is running.
-    }, HOME_GRAPH_SYNC_SELF_IMPROVEMENT_START_DELAY_MS, controller.signal);
-  }
-
-  /** Cancel pending or active post-sync improvement work for one space or all spaces. */
-  private cancelSyncSelfImprovement(spaceId?: string): void {
-    const entries = spaceId
-      ? [...this.syncSelfImproveControllers.entries()].filter(([key]) => key === spaceId)
-      : [...this.syncSelfImproveControllers.entries()];
-    for (const [key, controller] of entries) {
-      controller.abort();
-      this.syncSelfImproveControllers.delete(key);
-      this.pendingSyncSelfImprove.delete(key);
-    }
-  }
-
-  /**
-   * Relentlessly repairs gaps discovered during sync until the run budget,
-   * task budget, or cooperative abort signal says to stop.
-   */
-  private async runSyncSelfImprovementPump(spaceId: string, installationId: string, signal: AbortSignal): Promise<void> {
-    const runtime = this.requireSelfImprovementRuntime();
-    await runHomeGraphSyncSelfImprovementPump(runtime, spaceId, installationId, signal);
-  }
-
-  private async enrichSpaceSources(spaceId: string): Promise<void> {
-    if (!this.options.semanticService) return;
-    await enrichHomeGraphSpaceSources(this.requireSelfImprovementRuntime(), spaceId, this.autoLinkController.signal);
+  private scheduleSyncSelfImprovement(spaceId: string, installationId: string, round = 0,
+    delayMs = HOME_GRAPH_SYNC_SELF_IMPROVEMENT_START_DELAY_MS): void {
+    if (isClassicOperation() || !this.options.semanticService || this.autoLinkController.signal.aborted) return;
+    if (round === 0 && this.work.has(spaceId, SYNC_IMPROVE_ITEM)) return;
+    this.work.enqueue(spaceId, {
+      key: SYNC_IMPROVE_ITEM,
+      run: async (signal) => {
+        const next = await runHomeGraphSyncSelfImprovementRound(this.requireSelfImprovementRuntime(), spaceId, installationId, round, signal);
+        if (next !== undefined && !signal.aborted) this.scheduleSyncSelfImprovement(spaceId, installationId, round + 1, next);
+      },
+    }, delayMs);
   }
 
   private queueIngestEnrichment(spaceId: string, sourceId: string): void {
-    if (isClassicOperation()) return;
-    if (!this.options.semanticService || this.autoLinkController.signal.aborted) return;
-    const pending = this.pendingIngestEnrichment.get(spaceId) ?? new Set<string>();
-    pending.add(sourceId); this.pendingIngestEnrichment.set(spaceId, pending);
-    this.scheduleIngestEnrichment(spaceId);
-  }
-
-  private scheduleIngestEnrichment(spaceId: string): void {
-    if (isClassicOperation()) return;
-    if (!this.options.semanticService || this.autoLinkController.signal.aborted || this.foregroundOperations.has(spaceId)
-      || this.ingestEnrichmentRuns.has(spaceId) || this.scheduledIngestEnrichment.has(spaceId)
-      || !this.pendingIngestEnrichment.has(spaceId)) return;
-    this.scheduledIngestEnrichment.add(spaceId);
-    scheduleBackground(() => {
-      this.scheduledIngestEnrichment.delete(spaceId);
-      if (isClassicOperation()) { this.pendingIngestEnrichment.delete(spaceId); return; }
-      if (this.foregroundOperations.has(spaceId) || this.ingestEnrichmentRuns.has(spaceId)) return;
-      const pending = this.pendingIngestEnrichment.get(spaceId), sourceId = pending?.values().next().value;
-      if (sourceId === undefined) return;
-      pending!.delete(sourceId); if (pending!.size === 0) this.pendingIngestEnrichment.delete(spaceId);
-      const controller = new AbortController(), signal = AbortSignal.any([controller.signal, this.autoLinkController.signal]);
-      const run = enrichAndImproveHomeGraphSource(this.requireSelfImprovementRuntime(), sourceId, spaceId, signal)
-        .catch((error: unknown) => {
-          if (!signal.aborted) this.reportBackgroundError('homegraph-ingest-enrich', error, { spaceId, sourceId });
-        }).finally(() => {
-          if (this.ingestEnrichmentRuns.get(spaceId)?.run === run) this.ingestEnrichmentRuns.delete(spaceId);
-          this.scheduleIngestEnrichment(spaceId);
-        });
-      this.ingestEnrichmentRuns.set(spaceId, { sourceId, controller, run });
-    }, 0, this.autoLinkController.signal);
+    if (isClassicOperation() || !this.options.semanticService || this.autoLinkController.signal.aborted) return;
+    this.work.enqueue(spaceId, {
+      key: `ingest-enrich:${sourceId}`,
+      run: async (signal) => {
+        if (isClassicOperation()) return;
+        await enrichAndImproveHomeGraphSource(this.requireSelfImprovementRuntime(), sourceId, spaceId, signal);
+      },
+    });
   }
 
   private requireSelfImprovementRuntime() {
@@ -1144,12 +1021,13 @@ export class HomeGraphService {
 
 function withHomeGraphAskPageRefresh(
   answer: HomeGraphAskResult,
-  pageRefresh: { readonly requested: boolean; readonly refreshed: number },
+  pageRefresh: { readonly requested: boolean; readonly queued: number },
 ): HomeGraphAskResult {
   if (!answer.answer.refinement && !pageRefresh.requested) return answer;
   const refinement = answer.answer.refinement;
   return {
     ...answer,
+    pageRefresh,
     answer: {
       ...answer.answer,
       refinement: {
@@ -1163,7 +1041,8 @@ function withHomeGraphAskPageRefresh(
         ...(typeof refinement?.waitedMs === 'number' ? { waitedMs: refinement.waitedMs } : {}),
         ...(refinement?.answerCacheInvalidated ? { answerCacheInvalidated: true } : {}),
         pageRefreshRequested: pageRefresh.requested,
-        pageRefreshed: pageRefresh.refreshed > 0,
+        // Refreshed after the answer returns, in the background queue.
+        pageRefreshed: false,
       },
     },
   };

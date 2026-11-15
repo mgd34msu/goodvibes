@@ -13,10 +13,8 @@ export function snapshotAnswerEvidenceRelevanceInput(input: AnswerEvidenceReleva
   assertJudgmentInput(input);
   if (!record(input) || Object.keys(input).some((key) => !['query', 'candidates', 'subjects'].includes(key))
     || typeof input.query !== 'string' || !Array.isArray(input.candidates)) throw new Held('malformed');
-  if (input.candidates.length > LIMITS.candidates) throw new Held('budget');
   if (input.subjects !== undefined) {
     if (!Array.isArray(input.subjects)) throw new Held('malformed');
-    if (input.subjects.length > LIMITS.subjects) throw new Held('budget');
     for (const subject of input.subjects) {
       if (!record(subject) || Object.keys(subject).some((key) => !['title', 'kind', 'summary', 'aliases', 'identity'].includes(key))
         || typeof subject.title !== 'string' || typeof subject.kind !== 'string'
@@ -35,7 +33,6 @@ export function snapshotAnswerEvidenceRelevanceInput(input: AnswerEvidenceReleva
     references.add(candidate.reference);
     if (candidate.facts !== undefined) {
       if (!Array.isArray(candidate.facts)) throw new Held('malformed');
-      if (candidate.facts.length > LIMITS.facts) throw new Held('budget');
       for (const fact of candidate.facts) {
         if (!record(fact) || Object.keys(fact).some((key) => !['title', 'kind', 'summary', 'value', 'evidence', 'details'].includes(key))
           || typeof fact.title !== 'string' || !optionalText(fact.kind) || !optionalText(fact.summary) || !optionalText(fact.evidence) || !optionalText(fact.details)
@@ -44,7 +41,6 @@ export function snapshotAnswerEvidenceRelevanceInput(input: AnswerEvidenceReleva
       }
     }
   }
-  if (JSON.stringify(input).length > LIMITS.characters) throw new Held('budget');
   return freezeSupport(structuredClone(input));
 }
 function jsonState(value: object): Record<string, JsonValue> {
@@ -55,7 +51,13 @@ function jsonState(value: object): Record<string, JsonValue> {
 function validatedPort(port: JudgmentPort, beforeAsk: () => void): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
     beforeAsk();
-    const result = await port.ask(request);
+    let result: Awaited<ReturnType<JudgmentPort['ask']>>;
+    // Only a failure of the request itself means the model could not be reached.
+    try { result = await port.ask(request); }
+    catch (error) {
+      if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error) || error instanceof Held) throw error;
+      throw new Held('unavailable', { cause: error });
+    }
     if (!result?.answers || typeof result.model !== 'string' || !result.model.trim()
       || typeof result.requestedModel !== 'string' || !result.requestedModel.trim()
       || (result.decisionId !== undefined && (typeof result.decisionId !== 'string' || !result.decisionId.trim()))) throw new Held('malformed');
@@ -67,14 +69,20 @@ function validatedPort(port: JudgmentPort, beforeAsk: () => void): JudgmentPort 
     return result;
   } };
 }
-/** Pure initial ranking. Callers retain access/serving filters and must revalidate their local record map before applying it. */
+/**
+ * One reading per candidate, four at a time. A candidate whose reading does
+ * not settle is listed in `unsettled` and left out; it never fails the pass.
+ * Callers keep their own access and serving filters.
+ */
 export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceRelevanceInput, options: {
   readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined;
   readonly assertCurrent?: (() => void) | undefined;
   readonly observeVerdict?: ((verdict: 'yes' | 'no') => void) | undefined;
+  /** The input was already validated and copied by this module (the batch reader). */
+  readonly validated?: boolean | undefined;
 } = {}): Promise<AnswerEvidenceRelevancePlan> {
   if (options.signal?.aborted) throw new Held('aborted');
-  const snapshot = snapshotAnswerEvidenceRelevanceInput(input);
+  const snapshot = options.validated ? input : snapshotAnswerEvidenceRelevanceInput(input);
   if (!snapshot.query.trim() || !snapshot.candidates.length) return freezeSupport({ accepted: [], rejected: [] });
   const timeoutMs = options.timeoutMs;
   if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
@@ -93,7 +101,7 @@ export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceReleva
       if (judgmentPort('engine.knowledge.answer-evidence-relevance') !== configuredPort || configuredPort.model !== configuredModel) throw new Held('stale');
     };
     const port = validatedPort(configuredPort, () => { check(); checkConfiguration(); });
-    const readings: AnswerEvidenceRelevanceReading[] = []; let next = 0;
+    const readings: AnswerEvidenceRelevanceReading[] = [], unsettled: string[] = []; let next = 0;
     let model: string | undefined, requestedModel: string | undefined;
     await Promise.all(Array.from({ length: Math.min(LIMITS.concurrency, snapshot.candidates.length) }, async () => {
       while (next < snapshot.candidates.length) {
@@ -105,13 +113,13 @@ export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceReleva
           if ((model !== undefined && read.result.model !== model) || (requestedModel !== undefined && read.result.requestedModel !== requestedModel)) throw new Held('stale');
           model = read.result.model; requestedModel = read.result.requestedModel;
           const useful = read.readings.useful;
-          if (useful.outcome !== 'act' || useful.verdict === 'uncertain') throw new Held('unsettled');
+          if (useful.outcome !== 'act' || useful.verdict === 'uncertain') { unsettled.push(candidate.reference); continue; }
           options.observeVerdict?.(useful.verdict);
           check(); checkConfiguration();
           readings[index] = { reference: candidate.reference, probability: useful.probability, verdict: useful.verdict, outcome: 'act',
             ...(read.result.decisionId ? { decisionId: read.result.decisionId } : {}) };
           read.recordAction(`settled evidence relevance ${useful.verdict}; serving and write authority are separate`);
-        } catch (error) { const failure = error instanceof Held || error instanceof DecisionModelsDisabledError || activateClassicFallback(error) ? error : new Held('unavailable'); stop(failure); throw failure; }
+        } catch (error) { stop(error); throw error; }
       }
     }));
     check(); checkConfiguration();
@@ -119,9 +127,14 @@ export async function prepareAnswerEvidenceRelevance(input: AnswerEvidenceReleva
     return freezeSupport({ model, requestedModel,
       accepted: readings.filter((reading) => reading.verdict === 'yes').sort((a, b) => b.probability - a.probability || order.get(a.reference)! - order.get(b.reference)!),
       rejected: readings.filter((reading) => reading.verdict === 'no'),
+      ...(unsettled.length > 0 ? { unsettled: unsettled.sort((a, b) => order.get(a)! - order.get(b)!) } : {}),
     });
   };
   try { return await Promise.race([run(), stopped]); }
-  catch (error) { controller.abort(); if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error; throw error instanceof Held ? error : new Held(error instanceof JudgmentPortMissingError ? 'unconfigured' : 'unavailable'); }
+  catch (error) {
+    controller.abort();
+    if (error instanceof JudgmentPortMissingError) throw new Held('unconfigured', { cause: error });
+    throw error;
+  }
   finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
 }

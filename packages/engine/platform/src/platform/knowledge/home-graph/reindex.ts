@@ -23,7 +23,10 @@ import type {
   HomeGraphGeneratedPagesSummary,
   HomeGraphReindexInput,
   HomeGraphReindexResult,
+  HomeGraphStageOutcome,
 } from './types.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/native-error-summary.js';
 
 export interface HomeGraphReindexContext {
   readonly signal?: AbortSignal | undefined;
@@ -44,26 +47,6 @@ export interface HomeGraphReindexContext {
   readonly refreshQualityIssues: (spaceId: string, installationId: string) => Promise<readonly KnowledgeIssueRecord[]>;
 }
 
-export function coalescedHomeGraphReindexResult(
-  store: KnowledgeStore,
-  input: HomeGraphReindexInput,
-): HomeGraphReindexResult {
-  const { spaceId } = resolveReadableHomeGraphSpace(store, input);
-  return {
-    ok: true,
-    spaceId,
-    scanned: 0,
-    reparsed: 0,
-    skipped: 0,
-    failed: 0,
-    sources: [],
-    failures: [],
-    coalesced: true,
-    truncated: true,
-    budgetExhausted: true,
-  };
-}
-
 export async function runHomeGraphReindex(
   context: HomeGraphReindexContext,
   input: HomeGraphReindexInput = {},
@@ -75,8 +58,11 @@ export async function runHomeGraphReindex(
   const { spaceId, installationId } = resolveReadableHomeGraphSpace(context.store, input);
   const state = readHomeGraphSearchState(context.store, spaceId);
   const allSourceCount = readHomeGraphState(context.store, spaceId).sources.length;
-  const startedAt = Date.now();
+  // One budget for the whole call: every stage starts only while it lasts and
+  // reports what it left for the next run.
   const maxRunMs = clampPositive(input.maxRunMs, 90_000, 15_000, 180_000);
+  const deadlineAt = Date.now() + maxRunMs;
+  const remaining = () => deadlineAt - Date.now();
   const sources = state.sources.filter((source) => !isGeneratedPageSource(source));
   const skippedGeneratedPageArtifactCount = Math.max(0, allSourceCount - sources.length);
   const reindex = await reindexHomeGraphSources({
@@ -84,7 +70,7 @@ export async function runHomeGraphReindex(
     sources,
     extractionBySourceId: state.extractionBySourceId,
     artifactStore: context.artifactStore,
-    maxRunMs: Math.min(maxRunMs, 30_000),
+    deadlineAt,
     limit: input.limit,
     extract: (source, artifact) => context.extract(source, artifact, spaceId, installationId),
     signal: context.signal,
@@ -92,9 +78,9 @@ export async function runHomeGraphReindex(
   await yieldToEventLoop();
   context.signal?.throwIfAborted();
   const relinkedSourceIds = reindex.sources.map((source) => source.id);
-  const linked = relinkedSourceIds.length > 0 || input.force === true
-    ? await context.autoLinkExistingSources(spaceId, installationId, input.force === true ? undefined : relinkedSourceIds)
-    : [];
+  const wantsLink = relinkedSourceIds.length > 0 || input.force === true;
+  const link = await runStage(context.signal, remaining, wantsLink, () => context.autoLinkExistingSources(spaceId, installationId, input.force === true ? undefined : relinkedSourceIds));
+  const linked = link.value ?? [];
   await yieldToEventLoop();
   context.signal?.throwIfAborted();
   const changedSourceIds = uniqueStrings([
@@ -105,48 +91,76 @@ export async function runHomeGraphReindex(
     ? sources.slice(0, clampPositive(input.semanticLimit, 8, 1, 24)).map((source) => source.id)
     : [];
   const semanticSourceIds = changedSourceIds.length > 0 ? changedSourceIds : forcedSourceIds;
-  const remainingMs = Math.max(5_000, maxRunMs - (Date.now() - startedAt));
-  const semantic = semanticSourceIds.length > 0
-    ? await context.semanticService?.reindex({
-        knowledgeSpaceId: spaceId,
-        sourceIds: semanticSourceIds,
-        limit: semanticSourceIds.length,
-        maxRunMs: Math.min(remainingMs, clampPositive(input.semanticMaxRunMs, 20_000, 5_000, 45_000)),
-        force: input.force === true,
-        signal: context.signal,
-      })
-    : undefined;
+  const semanticService = context.semanticService;
+  const semanticStage = await runStage(context.signal, remaining, semanticSourceIds.length > 0 && semanticService !== undefined, () => semanticService!.reindex({
+    knowledgeSpaceId: spaceId,
+    sourceIds: semanticSourceIds,
+    limit: semanticSourceIds.length,
+    maxRunMs: Math.max(1_000, Math.min(remaining(), clampPositive(input.semanticMaxRunMs, 20_000, 5_000, 45_000))),
+    force: input.force === true,
+    signal: context.signal,
+  }));
   await yieldToEventLoop();
   context.signal?.throwIfAborted();
-  const qualityIssues = await context.refreshQualityIssues(spaceId, installationId);
+  const quality = await runStage(context.signal, remaining, true, () => context.refreshQualityIssues(spaceId, installationId));
   await yieldToEventLoop();
   context.signal?.throwIfAborted();
-  const currentState = readHomeGraphState(context.store, spaceId);
-  const generated = input.refreshPages === false
-    ? emptyGeneratedPagesSummary()
-    : await refreshHomeGraphPagesForSources({
-        store: context.store,
-        artifactStore: context.artifactStore,
-        spaceId,
-        installationId,
-        signal: context.signal,
-      }, currentState.sources, changedSourceIds, clampPositive(input.generatedPageLimit, 256, 1, 512));
+  const pages = await runStage(context.signal, remaining, input.refreshPages !== false, () => refreshHomeGraphPagesForSources({
+    store: context.store,
+    artifactStore: context.artifactStore,
+    spaceId,
+    installationId,
+    signal: context.signal,
+  }, readHomeGraphState(context.store, spaceId).sources, changedSourceIds, clampPositive(input.generatedPageLimit, 256, 1, 512), deadlineAt));
   context.signal?.throwIfAborted();
+  const generated = pages.value ?? emptyGeneratedPagesSummary();
+  const pagesOutcome = pages.outcome.status === 'done' && (generated.deferredDevicePassports ?? 0) > 0
+    ? { status: 'deferred' as const, reason: `${generated.deferredDevicePassports} device page(s) did not fit in the run budget` }
+    : pages.outcome;
   const refreshedGeneratedPageCount = generated.devicePassports + generated.roomPages;
+  const budgetExhausted = reindex.budgetExhausted === true || [link, semanticStage, quality, pages].some((stage) => stage.outcome.status === 'deferred')
+    || pagesOutcome.status === 'deferred';
   return {
     ...reindex,
+    truncated: reindex.truncated === true || budgetExhausted,
+    budgetExhausted,
     changedSourceCount: changedSourceIds.length,
     forcedSourceCount: forcedSourceIds.length,
     skippedGeneratedPageArtifactCount,
     refreshedGeneratedPageCount,
     generatedPagePolicyVersion: HOME_GRAPH_PAGE_POLICY_VERSION,
     ...(linked.length > 0 ? { linked } : {}),
-    ...(semantic ? { semantic } : {}),
-    qualityIssues,
+    ...(semanticStage.value ? { semantic: semanticStage.value } : {}),
+    ...(quality.value ? { qualityIssues: quality.value } : {}),
     generated,
+    stages: { link: link.outcome, semantic: semanticStage.outcome, quality: quality.outcome, pages: pagesOutcome },
   };
 }
 
+/**
+ * Runs one optional stage of a reindex. A stage that is not wanted is skipped,
+ * one that would start after the budget is deferred, and one that is held or
+ * fails reports why; only a cancelled call throws.
+ */
+async function runStage<T>(signal: AbortSignal | undefined, remaining: () => number, wanted: boolean,
+  run: () => Promise<T>): Promise<{ readonly value?: T; readonly outcome: HomeGraphStageOutcome }> {
+  if (!wanted) return { outcome: { status: 'skipped' } };
+  if (remaining() <= 0) return { outcome: { status: 'deferred', reason: 'the run budget was spent; run reindex again to finish' } };
+  try { return { value: await run(), outcome: { status: 'done' } }; }
+  catch (error) {
+    signal?.throwIfAborted();
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.warn('Home Graph reindex stage did not finish', { error: summarizeError(error) });
+    return { outcome: { status: 'held', reason } };
+  }
+}
+
+/**
+ * Re-extracts the documents whose stored extraction needs it. Which documents
+ * those are is read from the stored extractor version and readability of every
+ * document in one pass, so a damaged extraction anywhere in the space is found;
+ * only the re-extraction itself spends the run budget.
+ */
 export async function reindexHomeGraphSources(input: {
   readonly signal?: AbortSignal | undefined;
   readonly spaceId: string;
@@ -155,37 +169,28 @@ export async function reindexHomeGraphSources(input: {
   readonly artifactStore: ArtifactStore;
   readonly extract: (source: KnowledgeSourceRecord, artifact: ArtifactDescriptor) => Promise<KnowledgeExtractionRecord | undefined>;
   readonly limit?: number | undefined;
-  readonly maxRunMs?: number | undefined;
+  readonly deadlineAt?: number | undefined;
 }): Promise<HomeGraphReindexResult> {
   const sources: KnowledgeSourceRecord[] = [];
   const failures: Array<{ readonly sourceId: string; readonly error: string }> = [];
-  const maxRunMs = clampPositive(input.maxRunMs, 30_000, 1_000, 120_000);
-  const startedAt = Date.now();
-  const candidates = input.sources.slice(0, clampPositive(input.limit, input.sources.length, 1, 10_000));
-  let scanned = 0;
+  const withArtifact = input.sources.filter((source) => typeof source.artifactId === 'string' && source.artifactId.length > 0);
+  const needing = withArtifact.filter((source) => homeGraphExtractionNeedsRepair(input.extractionBySourceId.get(source.id)));
+  const scanned = withArtifact.length;
+  let skipped = scanned - needing.length;
+  const repairs = needing.slice(0, clampPositive(input.limit, needing.length, 1, 10_000));
   let reparsed = 0;
-  let skipped = 0;
   let failed = 0;
-  let truncated = input.sources.length > candidates.length;
+  let attempted = 0;
   let budgetExhausted = false;
-  for (const [index, source] of candidates.entries()) {
+  for (const [index, source] of repairs.entries()) {
     await yieldEvery(index);
     input.signal?.throwIfAborted();
-    if (Date.now() - startedAt >= maxRunMs) {
-      truncated = true;
+    if (input.deadlineAt !== undefined && Date.now() >= input.deadlineAt) {
       budgetExhausted = true;
       break;
     }
-    const artifactId = typeof source.artifactId === 'string' ? source.artifactId : undefined;
-    if (!artifactId) continue;
-    scanned += 1;
-    const current = input.extractionBySourceId.get(source.id);
-    const needsRepair = await homeGraphExtractionNeedsRepair(current, input.signal);
-    input.signal?.throwIfAborted();
-    if (!needsRepair) {
-      skipped += 1;
-      continue;
-    }
+    attempted += 1;
+    const artifactId = source.artifactId!;
     const artifact = input.artifactStore.get(artifactId);
     if (!artifact) {
       if (isGeneratedPageSource(source)) {
@@ -207,7 +212,9 @@ export async function reindexHomeGraphSources(input: {
     sources.push(source);
     await yieldToEventLoop();
   }
-  return { ok: true, spaceId: input.spaceId, scanned, reparsed, skipped, failed, sources, failures, truncated, budgetExhausted };
+  const deferred = needing.length - attempted;
+  return { ok: true, spaceId: input.spaceId, scanned, reparsed, skipped, failed, sources, failures,
+    truncated: deferred > 0, budgetExhausted, deferred };
 }
 
 async function refreshHomeGraphPagesForSources(
@@ -215,17 +222,24 @@ async function refreshHomeGraphPagesForSources(
   sources: readonly KnowledgeSourceRecord[],
   sourceIds: readonly string[],
   limit: number,
+  deadlineAt: number,
 ): Promise<HomeGraphGeneratedPagesSummary> {
   const summary = emptyGeneratedPagesSummary();
   const state = readHomeGraphState(context.store, context.spaceId);
-  const devices = uniqueStrings([
+  const wanted = uniqueStrings([
     ...devicesLinkedToSources(state, sourceIds),
     ...devicesWithStaleGeneratedPages(state, sources),
-  ]).slice(0, limit);
+  ]);
+  const devices = wanted.slice(0, limit);
+  summary.deferredDevicePassports = wanted.length - devices.length;
   if (devices.length === 0) return summary;
   for (const [index, deviceId] of devices.entries()) {
     await yieldEvery(index, 2);
     context.signal?.throwIfAborted();
+    if (Date.now() >= deadlineAt) {
+      summary.deferredDevicePassports += devices.length - index;
+      break;
+    }
     try {
       const page = await refreshHomeGraphDevicePassport({
         ...context,
@@ -301,9 +315,10 @@ function emptyGeneratedPagesSummary(): {
   roomPages: number;
   artifacts: number;
   sources: number;
+  deferredDevicePassports: number;
   errors: { kind: 'device-passport' | 'room-page'; targetId: string; error: string }[];
 } {
-  return { devicePassports: 0, roomPages: 0, artifacts: 0, sources: 0, errors: [] };
+  return { devicePassports: 0, roomPages: 0, artifacts: 0, sources: 0, deferredDevicePassports: 0, errors: [] };
 }
 
 function clampPositive(value: unknown, fallback: number, min: number, max: number): number {

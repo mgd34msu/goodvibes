@@ -254,6 +254,8 @@ export interface HomeGraphSyncResult {
   /** Structural snapshot import succeeded even when derived quality could not settle. */
   readonly quality?: { readonly status: 'refreshed' | 'held' | 'partial'; readonly reason?: string | undefined; readonly retainedLegacyIssues?: number | undefined } | undefined;
   readonly generated: HomeGraphGeneratedPagesSummary;
+  /** How the documents of this sync were linked to devices: counts per outcome. */
+  readonly autoLink?: Readonly<Record<'linked' | 'none' | 'ambiguous' | 'unread', number>> | undefined;
   readonly counts: {
     readonly entities: number;
     readonly helpers: number;
@@ -312,6 +314,8 @@ export interface HomeGraphIngestResult {
   readonly artifactId?: string | undefined;
   readonly extraction?: KnowledgeExtractionRecord | undefined;
   readonly linked?: KnowledgeEdgeRecord | undefined;
+  /** Outcome of linking a document that named no target; the ingest succeeds whatever it is. */
+  readonly autoLink?: { readonly status: 'linked' | 'none' | 'ambiguous' | 'unread'; readonly reason?: string | undefined; readonly shortlisted: number } | undefined;
 }
 
 export interface HomeGraphLinkInput extends HomeGraphSpaceInput {
@@ -374,6 +378,17 @@ export interface HomeGraphAskResult {
     readonly synthesized?: boolean | undefined;
   };
   readonly results: readonly HomeGraphSearchResult[];
+  /**
+   * How the answer's evidence was chosen: `total` records of the space could
+   * apply, `considered` were shortlisted from the objects the question names
+   * (or from text search) and read, `unread` of those gave no settled reading
+   * and were left out.
+   */
+  readonly candidates?: { readonly total: number; readonly considered: number; readonly unread: number } | undefined;
+  /** The knowledge store revision the answer was read at. */
+  readonly readAtRevision?: number | undefined;
+  /** Device pages named by the answer are refreshed in the background after it returns. */
+  readonly pageRefresh?: { readonly requested: boolean; readonly queued: number } | undefined;
 }
 
 export interface HomeGraphMapInput extends HomeGraphSpaceInput {
@@ -446,9 +461,19 @@ export interface HomeGraphReindexResult {
   readonly skippedGeneratedPageArtifactCount?: number | undefined;
   readonly refreshedGeneratedPageCount?: number | undefined;
   readonly generatedPagePolicyVersion?: string | undefined;
+  /** This request joined a run already in progress and carries that run's result. */
   readonly coalesced?: boolean | undefined;
   readonly truncated?: boolean | undefined;
   readonly budgetExhausted?: boolean | undefined;
+  /** Documents that needed re-extraction but did not fit in the run budget; the next reindex takes them first. */
+  readonly deferred?: number | undefined;
+  /** Outcome of each stage after re-extraction; an optional stage that was held never fails the reindex. */
+  readonly stages?: {
+    readonly link: HomeGraphStageOutcome;
+    readonly semantic: HomeGraphStageOutcome;
+    readonly quality: HomeGraphStageOutcome;
+    readonly pages: HomeGraphStageOutcome;
+  } | undefined;
   readonly sources: readonly KnowledgeSourceRecord[];
   readonly failures: readonly { readonly sourceId: string; readonly error: string }[];
   readonly linked?: readonly {
@@ -468,6 +493,11 @@ export interface HomeGraphReindexResult {
     readonly errors: readonly { readonly sourceId: string; readonly error: string }[];
     readonly selfImprovement?: KnowledgeSemanticSelfImproveResult | undefined;
   };
+}
+
+export interface HomeGraphStageOutcome {
+  readonly status: 'done' | 'skipped' | 'held' | 'deferred';
+  readonly reason?: string | undefined;
 }
 
 export interface HomeGraphSearchResult {
@@ -609,5 +639,9 @@ export interface HomeGraphResetResult {
   };
   readonly deletedArtifacts: number;
   readonly preservedArtifacts: number;
+  /** Artifacts a source of this space used but Home Graph did not create; a reset never removes them. */
+  readonly borrowedArtifacts: number;
   readonly artifactsDeleted: boolean;
+  /** Present when files were kept because they were in use, locked or unreadable: what to do about them. */
+  readonly nextStep?: string | undefined;
 }

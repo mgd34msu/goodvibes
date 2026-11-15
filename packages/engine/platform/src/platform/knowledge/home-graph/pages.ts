@@ -1,7 +1,5 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
-import { rankHomeGraphPageCandidates, HomeGraphPagePriorityHeldError } from './page-priority.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
-import type { KnowledgeStore } from '../store.js';
 import {
   listGeneratedKnowledgePages,
   type GeneratedKnowledgePageGraph,
@@ -10,52 +8,50 @@ import type { KnowledgeEdgeRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } 
 import { isGeneratedPageSource, readRecord } from './helpers.js';
 import type { HomeGraphPageGraphNode, HomeGraphPageListResult } from './types.js';
 
+/**
+ * Lists generated pages, ordered by the priority stored on each page when it
+ * was generated (pages without one follow, by title). Listing reads what is
+ * stored: no model request, and it works with the model down.
+ */
 export async function listHomeGraphPages(input: {
   readonly artifactStore: ArtifactStore;
-  readonly store?: KnowledgeStore;
   readonly spaceId: string;
   readonly sources: readonly KnowledgeSourceRecord[];
   readonly nodes: readonly KnowledgeNodeRecord[];
   readonly edges: readonly KnowledgeEdgeRecord[];
   readonly limit: number;
   readonly includeMarkdown: boolean;
-  readonly signal?: AbortSignal;
-  readonly assertCurrent?: () => void;
 }): Promise<HomeGraphPageListResult> {
-  return withConfiguredDecisionModelPolicy(async () => {
-    const state = () => JSON.stringify({ sources: input.sources, nodes: input.nodes, edges: input.edges });
-    const original = state();
-    const assertCurrent = () => {
-      input.assertCurrent?.();
-      if (state() !== original) throw new HomeGraphPagePriorityHeldError('stale');
-    };
-    const result = await listGeneratedKnowledgePages<HomeGraphPageGraphNode>({
-      artifactStore: input.artifactStore,
-      spaceId: input.spaceId,
-      sources: input.sources,
-      nodes: input.nodes,
-      edges: input.edges,
-      limit: input.limit,
-      includeMarkdown: input.includeMarkdown,
-      isGeneratedSource: isGeneratedPageSource,
-      isPageSubjectNode,
-      resolvePageSubject,
-      projectNode: pageGraphNode,
-      rankGeneratedPages: (sources, graph) => rankHomeGraphPageCandidates({
-        candidates: sources, store: input.store, purpose: 'Order useful generated home references for the owner',
-        signal: input.signal, assertCurrent,
-        content: source => {
-          const target = graph.targetBySourceId.get(source.id);
-          const subject = target ? resolvePageSubject(target, graph) : undefined;
-          return { title: source.title, summary: source.summary, projectionKind: source.metadata.projectionKind,
-            ...(target ? { target: prioritySubject(target) } : {}),
-            ...(subject ? { subject: prioritySubject(subject) } : {}) };
-        },
-      }),
-    });
-    assertCurrent();
-    return { ...result, ...(isClassicOperation() ? { provenance: 'classic' as const, ordering: 'catalog' as const } : {}) };
+  const result = await listGeneratedKnowledgePages<HomeGraphPageGraphNode>({
+    artifactStore: input.artifactStore,
+    spaceId: input.spaceId,
+    sources: input.sources,
+    nodes: input.nodes,
+    edges: input.edges,
+    limit: input.limit,
+    includeMarkdown: input.includeMarkdown,
+    isGeneratedSource: isGeneratedPageSource,
+    isPageSubjectNode,
+    resolvePageSubject,
+    projectNode: pageGraphNode,
+    rankGeneratedPages: async (sources) => [...sources].sort(compareStoredPagePriority),
   });
+  return { ...result, ...(isClassicOperation() ? { provenance: 'classic' as const } : {}) };
+}
+
+function storedPagePriority(source: KnowledgeSourceRecord): number | undefined {
+  const value = source.metadata.pagePriority;
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function compareStoredPagePriority(left: KnowledgeSourceRecord, right: KnowledgeSourceRecord): number {
+  const a = storedPagePriority(left), b = storedPagePriority(right);
+  if (a !== undefined || b !== undefined) {
+    if (a === undefined) return 1;
+    if (b === undefined) return -1;
+    if (a !== b) return b - a;
+  }
+  return (left.title ?? left.id).localeCompare(right.title ?? right.id) || left.id.localeCompare(right.id);
 }
 
 function resolvePageSubject(target: KnowledgeNodeRecord, graph: GeneratedKnowledgePageGraph): KnowledgeNodeRecord | undefined {

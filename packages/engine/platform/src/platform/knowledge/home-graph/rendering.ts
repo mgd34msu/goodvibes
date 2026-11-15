@@ -136,6 +136,63 @@ const PACKET_PROFILE_SECTIONS: Readonly<Record<string, readonly PacketSection[]>
   'network-admin': ['devices', 'network', 'troubleshooting'],
 };
 
+/** A packet kind that names a sharing profile shows that profile's sections when no profile is given. */
+export function sharingProfileForPacket(packetKind: string | undefined, sharingProfile: string | undefined): string {
+  if (sharingProfile) return sharingProfile;
+  const kind = packetKind?.trim().toLowerCase();
+  return kind && kind !== 'default' && Object.hasOwn(PACKET_PROFILE_SECTIONS, kind) ? kind : 'default';
+}
+
+const NETWORK_TERMS = /\b(wi-?fi|wlan|ssid|ethernet|lan|ip address|ipv[46]|dhcp|dns|router|gateway|mesh|zigbee|z-?wave|thread|matter|bluetooth|mqtt|port \d+|subnet|vlan|access point|network)\b/i;
+
+/** Facts the home has, by the packet section they belong to: maintenance, troubleshooting (with warnings) and network. */
+function packetFacts(state: HomeGraphRenderState): Record<'maintenance' | 'troubleshooting' | 'network', KnowledgeNodeRecord[]> {
+  const out = { maintenance: [] as KnowledgeNodeRecord[], troubleshooting: [] as KnowledgeNodeRecord[], network: [] as KnowledgeNodeRecord[] };
+  for (const node of state.nodes) {
+    if (node.status !== 'active' || (node.kind !== 'fact' && node.metadata.semanticKind !== 'fact')) continue;
+    const kind = readString(node.metadata.factKind);
+    if (kind === 'maintenance') out.maintenance.push(node);
+    else if (kind === 'troubleshooting' || kind === 'warning') out.troubleshooting.push(node);
+    const text = [node.title, node.summary, typeof node.metadata.value === 'string' ? node.metadata.value : ''].join(' ');
+    if (kind === 'network' || kind === 'connectivity' || ((kind === 'configuration' || kind === 'specification' || kind === 'compatibility') && NETWORK_TERMS.test(text))) out.network.push(node);
+  }
+  return out;
+}
+
+/** The device each fact describes, for grouping a packet section by device. */
+function factDevices(state: HomeGraphRenderState): Map<string, string> {
+  const devices = new Map(state.nodes.filter((node) => node.kind === 'ha_device').map((node) => [node.id, node.title]));
+  const byFact = new Map<string, string>();
+  for (const edge of state.edges) {
+    if (!edgeIsActive(edge) || edge.relation !== 'describes' || edge.fromKind !== 'node' || edge.toKind !== 'node') continue;
+    const title = devices.get(edge.toId);
+    if (title && !byFact.has(edge.fromId)) byFact.set(edge.fromId, title);
+  }
+  for (const node of state.nodes) {
+    if (byFact.has(node.id)) continue;
+    const id = [...normalizeStringArray(node.metadata.subjectIds), ...normalizeStringArray(node.metadata.linkedObjectIds)].find((candidate) => devices.has(candidate));
+    if (id) byFact.set(node.id, devices.get(id)!);
+  }
+  return byFact;
+}
+
+function renderPacketSection(title: string, nodes: readonly KnowledgeNodeRecord[], facts: readonly KnowledgeNodeRecord[],
+  devicesByFact: ReadonlyMap<string, string>, empty: string): string {
+  if (nodes.length === 0 && facts.length === 0) return [`## ${title}`, '', empty, ''].join('\n');
+  const groups = new Map<string, KnowledgeNodeRecord[]>();
+  for (const fact of dedupePageFacts(facts)) {
+    const device = devicesByFact.get(fact.id) ?? 'Whole home';
+    groups.set(device, [...(groups.get(device) ?? []), fact]);
+  }
+  const lines: string[] = [`## ${title}`, ''];
+  lines.push(...listWithRemainder(nodes, PAGE_LIST_LIMIT, (node) => `- ${node.title}${node.summary ? ` - ${node.summary}` : ''}`));
+  for (const [device, group] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    lines.push('', `### ${device}`, '', ...listWithRemainder(group, PAGE_FACT_GROUP_LIMIT, renderPageFactLine));
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
 function packetFieldNames(label: string, fields: readonly string[] | undefined): Set<PacketSection> {
   const names = new Set<PacketSection>();
   for (const field of fields ?? []) {
@@ -168,20 +225,37 @@ export function renderPacketPage(state: HomeGraphRenderState, options: {
   const excluded = packetFieldNames('excludeFields', options.excludeFields);
   const shows = (section: PacketSection): boolean => profileSections.includes(section)
     && (included.size === 0 || included.has(section)) && !excluded.has(section);
+  const facts = packetFacts(state);
+  const devicesByFact = factDevices(state);
+  const allDevices = state.nodes.filter((node) => node.kind === 'ha_device');
+  // A guest sees only the devices the owner chose to share with guests.
+  const devices = profile === 'guest' ? allDevices.filter((node) => sharedWith(node, 'guest')) : allDevices;
+  const section = (name: PacketSection, heading: string, nodes: readonly KnowledgeNodeRecord[], empty: string): string =>
+    shows(name) ? (nodes.length > 0 ? renderNodeList(heading, nodes) : [`## ${heading}`, '', empty, ''].join('\n')) : '';
   return [
     `# ${title}`,
     '',
     `Sharing profile: \`${profile}\``,
     `Knowledge space: \`${state.spaceId}\``,
     '',
-    shows('devices') ? renderNodeList('Devices', state.nodes.filter((node) => node.kind === 'ha_device')) : '',
-    shows('rooms') ? renderNodeList('Rooms', state.nodes.filter((node) => node.kind === 'ha_area' || node.kind === 'ha_room')) : '',
-    shows('maintenance') ? renderNodeList('Maintenance', state.nodes.filter((node) => node.kind === 'ha_maintenance_item')) : '',
-    shows('troubleshooting') ? renderNodeList('Troubleshooting', state.nodes.filter((node) => node.kind === 'ha_troubleshooting_case')) : '',
-    shows('network') ? renderNodeList('Network', state.nodes.filter((node) => node.kind === 'ha_network_node')) : '',
-    shows('sources') ? renderSourceList('Sources', state.sources.filter((source) => !isGeneratedPageSource(source))) : '',
-    shows('issues') ? renderIssueList('Open Issues', state.issues.filter((issue) => issue.status === 'open')) : '',
+    section('devices', 'Devices', devices, profile === 'guest'
+      ? 'No devices are shared with guests. Review a device with `shareWith: ["guest"]` to include it.'
+      : 'No devices recorded.'),
+    section('rooms', 'Rooms', state.nodes.filter((node) => node.kind === 'ha_area' || node.kind === 'ha_room'), 'No rooms recorded.'),
+    shows('maintenance') ? renderPacketSection('Maintenance', state.nodes.filter((node) => node.kind === 'ha_maintenance_item'),
+      facts.maintenance, devicesByFact, 'No maintenance information recorded.') : '',
+    shows('troubleshooting') ? renderPacketSection('Troubleshooting', state.nodes.filter((node) => node.kind === 'ha_troubleshooting_case'),
+      facts.troubleshooting, devicesByFact, 'No troubleshooting information recorded.') : '',
+    shows('network') ? renderPacketSection('Network', state.nodes.filter((node) => node.kind === 'ha_network_node'),
+      facts.network, devicesByFact, 'No network information recorded.') : '',
+    shows('sources') ? (renderSourceList('Sources', state.sources.filter((source) => !isGeneratedPageSource(source))) || '## Sources\n\nNo sources recorded.\n') : '',
+    shows('issues') ? (renderIssueList('Open Issues', state.issues.filter((issue) => issue.status === 'open')) || '## Open Issues\n\nNo open issues.\n') : '',
   ].filter(Boolean).join('\n');
+}
+
+function sharedWith(node: KnowledgeNodeRecord, profile: string): boolean {
+  const labels = normalizeStringArray(node.metadata.shareWith).map((label) => label.toLowerCase());
+  return labels.includes(profile) || labels.includes('all');
 }
 
 export function renderHomeGraphMap(state: HomeGraphRenderState, selection: KnowledgeScopeSelection, options: HomeGraphMapInput = {}): HomeGraphMapResult {
@@ -400,12 +474,23 @@ function matchesAny(allowed: readonly string[], values: readonly string[]): bool
   return allowed.length === 0 || values.some((value) => allowed.includes(value));
 }
 
+const PAGE_LIST_LIMIT = 100;
+const PAGE_FACT_LIMIT = 80;
+const PAGE_FACT_GROUP_LIMIT = 24;
+
+/** The first `limit` lines of a list, then a line saying how many more were not shown. */
+function listWithRemainder<T>(items: readonly T[], limit: number, line: (item: T) => string): string[] {
+  const lines = items.slice(0, limit).map(line).filter(Boolean);
+  if (items.length > limit) lines.push(`- (${items.length - limit} more not shown)`);
+  return lines;
+}
+
 function renderNodeList(title: string, nodes: readonly KnowledgeNodeRecord[]): string {
   if (nodes.length === 0) return '';
   return [
     `## ${title}`,
     '',
-    ...nodes.slice(0, 100).map((node) => `- ${node.title}${node.summary ? ` - ${node.summary}` : ''}`),
+    ...listWithRemainder(nodes, PAGE_LIST_LIMIT, (node) => `- ${node.title}${node.summary ? ` - ${node.summary}` : ''}`),
     '',
   ].join('\n');
 }
@@ -450,7 +535,7 @@ function renderSourceList(title: string, sources: readonly KnowledgeSourceRecord
   return [
     `## ${title}`,
     '',
-    ...sources.slice(0, 100).map((source) => {
+    ...listWithRemainder(sources, PAGE_LIST_LIMIT, (source) => {
       const uri = source.sourceUri ?? source.url ?? source.canonicalUri;
       const label = source.title ?? uri ?? source.id;
       return `- ${label}${uri ? ` (${uri})` : ''}`;
@@ -460,9 +545,9 @@ function renderSourceList(title: string, sources: readonly KnowledgeSourceRecord
 }
 
 function renderSemanticFacts(title: string, facts: readonly KnowledgeNodeRecord[]): string {
-  const entries = dedupePageFacts([...facts]
-    .sort((left, right) => semanticFactSortKey(left).localeCompare(semanticFactSortKey(right)) || left.title.localeCompare(right.title)))
-    .slice(0, 80);
+  const all = dedupePageFacts([...facts]
+    .sort((left, right) => semanticFactSortKey(left).localeCompare(semanticFactSortKey(right)) || left.title.localeCompare(right.title)));
+  const entries = all.slice(0, PAGE_FACT_LIMIT);
   if (entries.length === 0) return '';
   const groups = new Map<string, KnowledgeNodeRecord[]>();
   for (const fact of entries) {
@@ -475,9 +560,10 @@ function renderSemanticFacts(title: string, facts: readonly KnowledgeNodeRecord[
     ...[...groups.entries()].flatMap(([kind, group]) => [
       `### ${titleCase(kind)}`,
       '',
-      ...group.slice(0, 24).map(renderPageFactLine).filter(Boolean),
+      ...listWithRemainder(group, PAGE_FACT_GROUP_LIMIT, renderPageFactLine),
       '',
     ]),
+    ...(all.length > entries.length ? [`(${all.length - entries.length} more fact(s) not shown)`, ''] : []),
   ].join('\n');
 }
 
@@ -638,7 +724,7 @@ function renderIssueList(title: string, issues: readonly KnowledgeIssueRecord[])
   return [
     `## ${title}`,
     '',
-    ...entries.slice(0, 100).map((issue) => `- ${issue.severity}: ${issue.message}`),
+    ...listWithRemainder(entries, PAGE_LIST_LIMIT, (issue) => `- ${issue.severity}: ${issue.message}`),
     '',
   ].join('\n');
 }

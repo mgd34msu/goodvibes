@@ -59,6 +59,15 @@ interface InitialEvidencePass {
   readonly factWindow?: ReadonlySet<string> | undefined;
   readonly assertCurrent: () => void;
 }
+/**
+ * Where candidate builders read related records from: a write guard that
+ * watches what it reads, or a plain snapshot when the caller writes nothing.
+ */
+export interface AnswerRecordReader {
+  source(id: string): KnowledgeSourceRecord | null;
+  node(id: string): KnowledgeNodeRecord | null;
+  watch<T>(key: string, read: () => T): T;
+}
 export function assertAnswerEvidenceCurrent(evidence: readonly EvidenceItem[]): void { initialPasses.get(evidence)?.assertCurrent(); }
 /** The identical complete claim has already settled for this same question. */
 export function settledAnswerFacts(query: string, evidence: readonly EvidenceItem[]): KnowledgeNodeRecord[] | undefined {
@@ -189,7 +198,7 @@ export async function collectAnswerEvidence(
 }
 
 /** A claim's source and subject identities carry meaning; their database keys stay local. */
-export function initialNodeReferenceContext(store: KnowledgeStore, node: KnowledgeNodeRecord, selection: KnowledgeScopeSelection, guard: SemanticWriteGuard,
+export function initialNodeReferenceContext(store: KnowledgeStore, node: KnowledgeNodeRecord, selection: KnowledgeScopeSelection, guard: AnswerRecordReader,
   admissibleSourceIds?: ReadonlySet<string>): string {
   const selectedSources = new Set(selection.sources.map((source) => source.id));
   const selectedNodes = new Set(selection.nodes.map((subject) => subject.id));
@@ -229,7 +238,7 @@ export function initialNodeReferenceContext(store: KnowledgeStore, node: Knowled
   assertJudgmentInput(context); return JSON.stringify(context);
 }
 
-export function initialEvidenceCandidate(item: EvidenceItem, reference: string, text: string, store: KnowledgeStore, guard: SemanticWriteGuard, selection: KnowledgeScopeSelection): AnswerEvidenceCandidate {
+export function initialEvidenceCandidate(item: EvidenceItem, reference: string, text: string, store: KnowledgeStore, guard: AnswerRecordReader, selection: KnowledgeScopeSelection): AnswerEvidenceCandidate {
   const selectedNodeIds = new Set(selection.nodes.map((node) => node.id));
   const facts = item.facts.map((fact) => {
     const value = fact.metadata.value;
@@ -266,7 +275,7 @@ export function initialEvidenceCandidate(item: EvidenceItem, reference: string, 
   };
 }
 
-function withoutLocalTargetKeys(store: KnowledgeStore, node: KnowledgeNodeRecord, guard?: SemanticWriteGuard): KnowledgeNodeRecord {
+function withoutLocalTargetKeys(store: KnowledgeStore, node: KnowledgeNodeRecord, guard?: AnswerRecordReader): KnowledgeNodeRecord {
   const hints = Array.isArray(node.metadata.targetHints) ? node.metadata.targetHints : [];
   const targetHints = hints.map((hint) => {
     const record = readRecord(hint), id = readString(record.id);

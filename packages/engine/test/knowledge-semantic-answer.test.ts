@@ -899,7 +899,8 @@ describe('semantic knowledge/wiki enrichment: answer quality', () => {
     // the complete source sentence and may refresh those category records.
     expect(answer.answer.refinement?.promotedFactCount).toBe(6);
     expect(answer.answer.refinement?.pageRefreshRequested).toBe(true);
-    expect(answer.answer.refinement?.pageRefreshed).toBe(true);
+    // The device page is refreshed in the background after the answer returns.
+    expect(answer.pageRefresh?.queued).toBe(1);
     expect(answer.answer.text).toContain('Dolby Vision');
     expect(answer.answer.text).toContain('120 Hz');
     expect(base.answer.gaps).toHaveLength(0);

@@ -2,6 +2,8 @@ import { activateClassicFallback, decisionOrClassic } from '../../runtime/decisi
 import { captureJudgmentPort, DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, captureOwnedJson, JudgmentInputError } from '../../gate/judgment-input.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/native-error-summary.js';
 import { homeGraphPagePriority } from './batteries/page-priority.js';
 import type { KnowledgeStore } from '../store.js';
 import { knowledgePageCandidateRepresentation } from '../source-structural-references.js';
@@ -12,28 +14,37 @@ export class HomeGraphPagePriorityHeldError extends Error {
   }
 }
 
-/** One complete local candidate set. Ranking never filters or changes authority. */
-export async function rankHomeGraphPageCandidates<T>(input: {
+/**
+ * Orders candidates by the priority reading, best first. The order is a
+ * preference, never a precondition: a candidate whose reading does not settle
+ * keeps its catalog place after the settled ones, and with no model (missing,
+ * unreachable or off) the catalog order stands. Only a cancelled call throws.
+ */
+export async function rankHomeGraphPageCandidates<T>(input: PagePriorityInput<T>): Promise<readonly T[]> {
+  return (await readHomeGraphPagePriorities(input)).map((row) => row.candidate);
+}
+
+interface PagePriorityInput<T> {
   readonly candidates: readonly T[];
   readonly content: (candidate: T) => object;
   readonly purpose: string;
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
   readonly store?: KnowledgeStore | undefined;
-}): Promise<readonly T[]> {
+}
+
+/** {@link rankHomeGraphPageCandidates} with each settled probability, for a caller that stores it. */
+export async function readHomeGraphPagePriorities<T>(input: PagePriorityInput<T>): Promise<readonly { readonly candidate: T; readonly probability?: number }[]> {
   const signal = input.signal, callerCurrent = input.assertCurrent, store = input.store;
-  // The candidate list and its content are read once; the inputs are this
-  // call's own values, so checks only ask whether the caller still wants it.
   assertJudgmentInput({ purpose: input.purpose, candidates: input.candidates.map((candidate) => knowledgePageCandidateRepresentation(store, candidate)) });
   const content = input.candidates.map(candidate => captureOwnedJson(input.content(candidate)));
   assertJudgmentInput(content);
-  const timeout = new AbortController();
-
   const check = () => {
     if (signal?.aborted) throw new HomeGraphPagePriorityHeldError('aborted');
     callerCurrent?.();
   };
   check();
+  const catalog = () => input.candidates.map((candidate) => ({ candidate }));
   if (!content.length) return [];
   const candidates = content.map((value, index) => {
     if (!value || typeof value !== 'object') throw new JudgmentInputError('unsupported-input');
@@ -41,37 +52,33 @@ export async function rankHomeGraphPageCandidates<T>(input: {
   });
   return decisionOrClassic(async () => {
     let authority: ReturnType<typeof captureJudgmentPort>;
-    const boundedSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
-    try { authority = captureJudgmentPort(homeGraphPagePriority.name, { signal: boundedSignal, assertCurrent: check }); }
+    try { authority = captureJudgmentPort(homeGraphPagePriority.name, { ...(signal ? { signal } : {}), assertCurrent: check }); }
     catch (error) {
       if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error;
       check();
-      if (error instanceof JudgmentPortMissingError) throw new HomeGraphPagePriorityHeldError('unavailable');
-      throw new HomeGraphPagePriorityHeldError('stale');
+      if (error instanceof JudgmentPortMissingError) return catalog();
+      throw error;
     }
-    const query: JsonValue = input.purpose;
+    let result: Awaited<ReturnType<typeof homeGraphPagePriority.rerank>>;
     try {
-      const result = await homeGraphPagePriority.rerank(authority.port, query, candidates, {
+      result = await homeGraphPagePriority.rerank(authority.port, input.purpose as JsonValue, candidates, {
         site: homeGraphPagePriority.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
       });
-      check(); authority.assertCurrent();
-      if (result.ranked.some(row => row.reading.outcome !== 'act' || row.reading.verdict === 'uncertain')) throw new HomeGraphPagePriorityHeldError('uncertain');
-      const byId = new Map(input.candidates.map((candidate, index) => [`page-${index + 1}`, { candidate, index }]));
-      return result.ranked.map(row => {
-        const original = byId.get(row.id);
-        if (!original) throw new HomeGraphPagePriorityHeldError('stale');
-        return { ...original, probability: row.probability };
-      }).sort((left, right) => right.probability - left.probability || left.index - right.index).map(row => row.candidate);
     } catch (error) {
       if (error instanceof DecisionModelsDisabledError || activateClassicFallback(error)) throw error;
       check();
-      try { authority.assertCurrent(); } catch { throw new HomeGraphPagePriorityHeldError(signal?.aborted ? 'aborted' : 'stale'); }
-      if (error instanceof HomeGraphPagePriorityHeldError || error instanceof JudgmentInputError) throw error;
-      throw new HomeGraphPagePriorityHeldError('unavailable');
+      logger.warn('Home Graph page priority could not be read; keeping catalog order', { error: summarizeError(error) });
+      return catalog();
     }
+    check();
+    const byId = new Map(input.candidates.map((candidate, index) => [`page-${index + 1}`, { candidate, index }]));
+    const settled = new Map(result.ranked.filter((row) => row.reading.outcome === 'act' && row.reading.verdict !== 'uncertain')
+      .map((row) => [row.id, row.probability]));
+    return [...byId.entries()].map(([id, row]) => ({ ...row, probability: settled.get(id) }))
+      .sort((left, right) => (right.probability ?? -1) - (left.probability ?? -1) || left.index - right.index)
+      .map((row) => row.probability === undefined ? { candidate: row.candidate } : { candidate: row.candidate, probability: row.probability });
   }, () => {
     check();
-    // Keep the complete catalog order. No semantic priority or confidence is manufactured.
-    return [...input.candidates];
+    return catalog();
   });
 }

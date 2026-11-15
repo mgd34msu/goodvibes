@@ -5,7 +5,8 @@ import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
 import { createSemanticFactIdentityPlanner } from '../semantic/identity-plan.js';
-import { rankHomeGraphPageCandidates, HomeGraphPagePriorityHeldError } from './page-priority.js';
+import { readHomeGraphPagePriorities } from './page-priority.js';
+import { sharingProfileForPacket } from './rendering.js';
 import { prioritySubject } from './pages.js';
 import { knowledgeClockIso } from '../store-record-representation.js';
 import { withDevicePageRefresh } from './page-refresh-queue.js';
@@ -128,16 +129,18 @@ async function generateHomeGraphPagesWithinBudget(
     : undefined;
 
   const state = readHomeGraphServingState(context.store, context.spaceId);
+  // The priority reading orders generation and is stored on each page, so a
+  // page list sorts on it without asking again. It never stops generation:
+  // without a settled reading the catalog order stands.
+  const priorities = new Map<string, number>();
   const rankRemaining = async (nodes: KnowledgeNodeRecord[], deferred: 'deferredDevicePassports' | 'deferredRoomPages') => {
     if (!nodes.length) return [];
-    const expired = () => context.signal?.aborted || deadlineReached(deadlineAt);
-    if (expired()) { summary[deferred] += nodes.length; return []; }
-    try { return await prioritizeNodesForGeneratedPages(context, nodes); }
-    catch (error) {
-      if (!expired()) throw error;
-      summary[deferred] += nodes.length; return [];
-    }
+    if (context.signal?.aborted || deadlineReached(deadlineAt)) { summary[deferred] += nodes.length; return []; }
+    const ranked = await prioritizeNodesForGeneratedPages(context, nodes);
+    for (const [id, probability] of ranked.probabilities) priorities.set(id, probability);
+    return [...ranked.ordered];
   };
+  const priorityMetadata = (node: KnowledgeNodeRecord) => priorities.has(node.id) ? { pagePriority: priorities.get(node.id) } : {};
   if (effectiveOptions.devicePassports !== false) {
     const allDevices = await rankRemaining(
       state.nodes.filter((node) => node.kind === 'ha_device' && node.status === 'active'), 'deferredDevicePassports',
@@ -157,7 +160,7 @@ async function generateHomeGraphPagesWithinBudget(
           input: {
             knowledgeSpaceId: context.spaceId,
             deviceId,
-            metadata: { automation: 'snapshot-sync' },
+            metadata: { automation: 'snapshot-sync', ...priorityMetadata(device) },
           },
         });
         summary.devicePassports += 1;
@@ -195,7 +198,7 @@ async function generateHomeGraphPagesWithinBudget(
             knowledgeSpaceId: context.spaceId,
             areaId,
             title: room.title,
-            metadata: { automation: 'snapshot-sync' },
+            metadata: { automation: 'snapshot-sync', ...priorityMetadata(room) },
           },
         });
         summary.roomPages += 1;
@@ -455,6 +458,10 @@ async function refreshHomeGraphDevicePassportNow(
       metadata: {
         ...(input.metadata ?? {}),
         deviceId: deviceObjectId,
+        ...(pageProfileFacts.omittedSources > 0 ? {
+          omittedSources: pageProfileFacts.omittedSources,
+          limitations: [`${pageProfileFacts.omittedSources} linked source(s) were not read for profile facts.`],
+        } : {}),
       },
     }, graph);
   // Register only nodes returned by this actual atomic native publication.
@@ -571,7 +578,8 @@ export async function generateHomeGraphPacket(
   requireDecisionFeature('verified Home Graph sharing packets');
   const { store, artifactStore, spaceId, installationId, input } = context;
   const title = input.title ?? `${input.packetKind ?? 'home'} packet`;
-  const markdown = renderPacketPage({ ...readHomeGraphServingState(store, spaceId), title }, input);
+  const sharingProfile = sharingProfileForPacket(input.packetKind, input.sharingProfile);
+  const markdown = renderPacketPage({ ...readHomeGraphServingState(store, spaceId), title }, { ...input, sharingProfile });
   const generated = await materializeGeneratedMarkdown({
     store,
     artifactStore,
@@ -584,12 +592,12 @@ export async function generateHomeGraphPacket(
     assertCurrent: context.assertCurrent,
     identityKeys: [input.packetKind ?? 'home'],
     title,
-    summary: `Generated ${title} packet for ${input.sharingProfile ?? 'default'} sharing.`,
+    summary: `Generated ${title} packet for ${sharingProfile} sharing.`,
     tags: ['homeassistant', 'home-graph', 'generated-page', 'packet'],
     metadata: {
       ...(input.metadata ?? {}),
       packetKind: input.packetKind ?? 'home',
-      sharingProfile: input.sharingProfile ?? 'default',
+      sharingProfile,
       includeFields: input.includeFields ? [...input.includeFields] : [],
       excludeFields: input.excludeFields ? [...input.excludeFields] : [],
     },
@@ -629,6 +637,11 @@ async function materializeGeneratedMarkdown(input: HomeGraphPageContext & {
     ...(input.targetNodeId ? { generatedTargetNodeId: input.targetNodeId } : {}),
   };
   const identity = createHomeGraphSourceIdentityPlanner(input.store).prepare({ spaceId: input.spaceId, role: 'generated-page', projectionKind: input.projectionKind, keys: input.identityKeys, ...(input.projectionKind === 'packet' ? { sharingProfile: metadata.sharingProfile as string } : {}) });
+  // A regeneration without a new priority reading keeps the page's stored priority.
+  if (typeof metadata.pagePriority !== 'number') {
+    const stored = input.store.getSource(identity.id)?.metadata.pagePriority;
+    if (typeof stored === 'number') metadata.pagePriority = stored;
+  }
   const homeGraphMetadata = buildHomeGraphMetadata(input.spaceId, input.installationId, { ...metadata, ...identity.metadata });
   const assertCurrent = () => {
     assertKnowledgeRestriction(() => input.assertCurrent?.());
@@ -721,17 +734,25 @@ function createGeneratedPagesSummary(): {
   };
 }
 
-async function prioritizeNodesForGeneratedPages(context: HomeGraphPageContext, nodes: readonly KnowledgeNodeRecord[]): Promise<readonly KnowledgeNodeRecord[]> {
-  const versions = new Map(nodes.map(node => [node.id, JSON.stringify(node)]));
-  return rankHomeGraphPageCandidates({
+async function prioritizeNodesForGeneratedPages(context: HomeGraphPageContext, nodes: readonly KnowledgeNodeRecord[]): Promise<{
+  readonly ordered: readonly KnowledgeNodeRecord[]; readonly probabilities: ReadonlyMap<string, number>;
+}> {
+  const ranked = await readHomeGraphPagePriorities({
     candidates: nodes, content: prioritySubject, store: context.store,
     purpose: 'Prioritize useful household subjects for reference page generation',
     signal: context.signal,
-    assertCurrent: () => {
-      assertKnowledgeRestriction(() => context.assertCurrent?.());
-      for (const node of nodes) if (JSON.stringify(context.store.getNode(node.id)) !== versions.get(node.id)) throw new HomeGraphPagePriorityHeldError('stale');
-    },
+    assertCurrent: () => assertKnowledgeRestriction(() => context.assertCurrent?.()),
   });
+  return { ordered: ranked.map((row) => row.candidate),
+    probabilities: new Map(ranked.flatMap((row) => row.probability === undefined ? [] : [[row.candidate.id, row.probability] as const])) };
+}
+
+/** Linked sources a device passport reads, by the same rule the passport uses. */
+export function devicePassportSourceIds(store: KnowledgeStore, spaceId: string, deviceId: string): string[] {
+  const state = readHomeGraphServingState(store, spaceId);
+  const device = findHomeAssistantNode(state.nodes, 'ha_device', deviceId);
+  if (!device) return [];
+  return [...(buildDevicePassportSourceLookup(state.sources, state.nodes, state.edges).sourceIdsByNodeId.get(device.id) ?? [])];
 }
 
 function semanticFactsForNode(

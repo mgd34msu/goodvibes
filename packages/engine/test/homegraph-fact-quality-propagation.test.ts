@@ -227,35 +227,6 @@ for (const outcome of ['success', 'cancel', 'failure', 'authority'] as const) {
   });
 }
 
-for (const change of ['fact', 'twice', 'source', 'subject', 'port', 'cancel'] as const) {
-  test(`Ask page recovery rejudges genuine fact changes once and preserves ${change} lifetime`, async () => {
-    const context = await fixture(); const controller = new AbortController();
-    const original = context.artifactStore.createForPublication.bind(context.artifactStore); let creations = 0;
-    const create = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (...args) => {
-      const artifact = await original(...args); creations += 1;
-      if (creations === 1 || change === 'twice') {
-        const fact = context.store.getNode(context.fact.id)!;
-        await context.store.replaceNodeRecord({ ...fact, summary: `Replace the appliance filter every six months. Revision ${creations}.` });
-        if (change === 'source') await context.store.replaceSourceRecord({ ...context.source, title: 'Replaced source owner' });
-        if (change === 'subject') await seedHomeAssistantObservation(context.store, { ...context.device, title: 'Replaced device owner' });
-        if (change === 'port') readings();
-        if (change === 'cancel') controller.abort();
-      }
-      return artifact;
-    });
-    try {
-      const result = refreshDevicePagesForHomeGraphAsk({ ...context, signal: controller.signal, answer: {
-        ok: true, spaceId, query: 'When should the filter be replaced?', results: [],
-        answer: { text: 'Every six months.', mode: 'standard', confidence: 95,
-          sources: [context.source], facts: [context.fact], linkedObjects: [context.device] },
-      } });
-      if (change === 'fact') { expect(await result).toEqual({ requested: true, refreshed: 1 }); expect(creations).toBe(2); }
-      else { await expect(result).rejects.toThrow(); expect(creations).toBe(change === 'twice' ? 2 : 1); }
-      if (change !== 'fact') expect(context.store.listSources().filter((source) => source.metadata.generatedProjection === true)).toHaveLength(0);
-    } finally { create.mockRestore(); }
-  });
-}
-
 test('different device and space queue keys progress independently', async () => {
   const context = await fixture();
   const { withDevicePageRefresh } = await import('../platform/src/platform/knowledge/home-graph/page-refresh-queue.js');
@@ -265,18 +236,6 @@ test('different device and space queue keys progress independently', async () =>
     await withTestTimeout(withDevicePageRefresh(context.store, JSON.stringify(['space-a', 'device-b']), undefined, () => 'request', async () => 'second'));
     await withTestTimeout(withDevicePageRefresh(context.store, JSON.stringify(['space-b', 'device-a']), undefined, () => 'request', async () => 'third'));
   } finally { release(); await first; }
-});
-
-test('unrelated fact churn cannot turn generic stale into Ask retry permission', async () => {
-  const context = await fixture();
-  const { createAskPageRecovery } = await import('../platform/src/platform/knowledge/home-graph/ask-page-recovery.js');
-  const { KnowledgeRepairFactUsefulnessHeldError } = await import('../platform/src/platform/knowledge/semantic/repair-usefulness/types.js');
-  const recovery = createAskPageRecovery(context.store, spaceId, { nodes: [], sources: [] }, () => {}); let calls = 0;
-  await expect(recovery.run(async () => {
-    calls += 1; await context.store.replaceNodeRecord({ ...context.fact, summary: 'Changed unrelated fact.' });
-    throw new KnowledgeRepairFactUsefulnessHeldError('stale');
-  })).rejects.toThrow();
-  expect(calls).toBe(1);
 });
 
 test('Ask edge receipt never adopts a concurrent replacement during save', async () => {

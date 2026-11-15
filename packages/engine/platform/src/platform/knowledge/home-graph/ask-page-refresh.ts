@@ -1,5 +1,5 @@
 import { knowledgeRawRepresentation } from '../store-record-representation.js';
-import { createAskPageRecovery } from './ask-page-recovery.js';
+import { captureHomeGraphRows } from './rows-current.js';
 import { KnowledgeGeneratedFactSupportHeldError } from '../semantic/verification/types.js';
 import { restoreKnowledgeSourceAnswerAliases } from '../source-structural-references.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
@@ -24,8 +24,8 @@ import { getKnowledgeSpaceId } from '../spaces.js';
 import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
 import type { HomeGraphAskResult } from './types.js';
 
-// Passport pages are regenerated inside the ask request, each with model
-// readings; the cap keeps latency bounded when an answer links many devices.
+// Runs in the background after the answer has been returned. Each passport
+// costs model readings, so one answer refreshes at most three.
 const MAX_ASK_PAGE_REFRESHES = 3;
 // Devices named as subjects in the fact reading, and answer sources read for
 // page usefulness, are sent to the model; the rest are counted as omitted.
@@ -49,17 +49,19 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
   const answerSources = (input.answer.answer.sources ?? []).filter((source) => getKnowledgeSpaceId(source) === input.spaceId);
   const omitted = { devices: linkedDevices.length - devices.length, sources: Math.max(0, answerSources.length - MAX_ASK_PAGE_SOURCES_TO_CONSIDER) };
   const signal = input.signal;
-  // The answer selected these device rows; one replaced since then (or moved
-  // to another home) cannot be refreshed in their name.
-  for (const device of devices) {
-    const current = input.store.getNode(device.id);
-    if (!current || current.updatedAt !== device.updatedAt || getKnowledgeSpaceId(current) !== input.spaceId) throw new KnowledgeGeneratedFactSupportHeldError('stale');
-  }
-  // The store generations of the selected device rows and answer sources are
-  // the baseline: a change to one of them (not to the rest of the space) stops
-  // the refresh.
-  const recovery = createAskPageRecovery(input.store, input.spaceId, { nodes: devices.map((device) => device.id),
-    sources: answerSources.slice(0, MAX_ASK_PAGE_SOURCES_TO_CONSIDER).map((source) => source.id) }, () => {}, signal);
+  // The link writes below are checked against the generations of exactly the
+  // device rows and answer sources they use; a change elsewhere in the home
+  // does not stop them. Each passport refresh checks its own read set.
+  const sourceIds = new Set(answerSources.slice(0, MAX_ASK_PAGE_SOURCES_TO_CONSIDER).map((source) => source.id));
+  const capture = () => captureHomeGraphRows(input.store, { nodes: devices.map((device) => device.id), sources: [...sourceIds],
+    extractions: [...sourceIds].flatMap((id) => { const extraction = input.store.getExtractionBySourceId(id); return extraction ? [extraction.id] : []; }) },
+  () => new KnowledgeGeneratedFactSupportHeldError('stale'));
+  let rowsCurrent = capture();
+  const recovery = {
+    assertCurrent: () => { signal?.throwIfAborted(); rowsCurrent(); },
+    /** This refresh wrote the source: its new generation is the baseline. */
+    acknowledgeSourceWritten: (source: KnowledgeSourceRecord) => { sourceIds.add(source.id); rowsCurrent = capture(); },
+  };
   try {
     await persistAnswerFactSubjectLinks({
       store: input.store,
@@ -79,25 +81,26 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
       installationId: input.installationId,
       error: error instanceof Error ? error.message : String(error),
     });
+    // A failed link write leaves the pages alone when the rows it used moved.
     recovery.assertCurrent();
   }
   let refreshed = 0;
   for (const device of devices.slice(0, MAX_ASK_PAGE_REFRESHES)) {
     const deviceId = readHomeAssistantMetadataString(device, 'objectId', 'deviceId') ?? device.id;
     try {
-      await recovery.run(() => refreshHomeGraphDevicePassport({
+      signal?.throwIfAborted();
+      await refreshHomeGraphDevicePassport({
         store: input.store,
         artifactStore: input.artifactStore,
         spaceId: input.spaceId,
         installationId: input.installationId,
         signal,
-        assertCurrent: recovery.assertCurrent,
         input: {
           knowledgeSpaceId: input.spaceId,
           deviceId,
           metadata: { automation: 'ask-refresh' },
         },
-      }));
+      });
       refreshed += 1;
     } catch (error) {
       if (isKnowledgeSourceQualityFailure(error)) throw error;
@@ -110,7 +113,6 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
       recovery.assertCurrent();
     }
   }
-  recovery.assertCurrent();
   if (omitted.devices || omitted.sources) logger.info('Home Graph Ask page refresh left part of the answer out of its readings', { spaceId: input.spaceId, ...omitted });
   return { requested: devices.length > 0, refreshed, ...(omitted.devices || omitted.sources ? { omitted } : {}) };
 }

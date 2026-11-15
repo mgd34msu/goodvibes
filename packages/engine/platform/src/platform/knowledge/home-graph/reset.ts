@@ -5,19 +5,25 @@ import { summarizeError } from '../../utils/native-error-summary.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
 import { getExplicitKnowledgeSpaceId, getKnowledgeSpaceId, normalizeKnowledgeSpaceId } from '../spaces.js';
 import type { KnowledgeStore } from '../store.js';
-import { resolveHomeGraphResetSpace } from './space-selection.js';
-import type { HomeGraphResetInput, HomeGraphResetResult } from './types.js';
+import type { HomeGraphResetResult } from './types.js';
+
+/** The space a reset deletes, resolved once by the caller. */
+export interface HomeGraphResetTarget {
+  readonly spaceId: string;
+  readonly installationId: string;
+  readonly dryRun?: boolean | undefined;
+  readonly preserveArtifacts?: boolean | undefined;
+}
 
 export async function resetHomeGraphSpace(
   store: KnowledgeStore,
   artifactStore: ArtifactStore,
-  input: HomeGraphResetInput,
+  target: HomeGraphResetTarget,
 ): Promise<HomeGraphResetResult> {
-  await store.init();
-  const { spaceId, installationId } = resolveHomeGraphResetSpace(store, input);
-  const dryRun = input.dryRun === true;
-  const preserveArtifacts = input.preserveArtifacts === true;
-  const artifactIds = collectKnowledgeSpaceArtifactIds(store, artifactStore, spaceId);
+  const { spaceId, installationId } = target;
+  const dryRun = target.dryRun === true;
+  const preserveArtifacts = target.preserveArtifacts === true;
+  const { owned: artifactIds, borrowed } = collectKnowledgeSpaceArtifactIds(store, artifactStore, spaceId);
   // Capture the exact original pairs BEFORE the asynchronous database reset.
   // A file/record replacement during that await is never adopted for removal.
   const originals = new Map<string, ArtifactOriginalObservation>();
@@ -30,6 +36,8 @@ export async function resetHomeGraphSpace(
   let deletedArtifacts = 0;
   if (dryRun || preserveArtifacts) artifactCleanup.skipped = artifactIds.length;
   else {
+    // A candidate whose original could not be captured (missing or changed) is
+    // unavailable in both branches below.
     try {
       const outcomes = await cleanupKnowledgeArtifacts(store, [...originals.values()]);
       for (const id of artifactIds) {
@@ -42,13 +50,14 @@ export async function resetHomeGraphSpace(
       // reporting every candidate as retained.
       logger.warn('Home Graph artifact cleanup stopped before finishing; counting the artifacts that were removed.', { error: summarizeError(error) });
       for (const id of artifactIds) {
-        if (artifactStore.get(id) === null) deletedArtifacts++;
+        if (!originals.has(id)) artifactCleanup.unavailable++;
+        else if (artifactStore.get(id) === null) deletedArtifacts++;
         else artifactCleanup.held++;
       }
     }
-    if (artifactCleanup.held || artifactCleanup.unavailable) logger.debug('Home Graph data reset completed with retained artifact cleanup candidates.');
   }
   const preservedArtifacts = Math.max(0, artifactIds.length - deletedArtifacts);
+  const retained = artifactCleanup.held + artifactCleanup.unavailable;
   return {
     ok: true,
     spaceId,
@@ -58,32 +67,39 @@ export async function resetHomeGraphSpace(
     artifactDeleteCandidates: artifactIds.length,
     deletedArtifacts,
     preservedArtifacts,
+    borrowedArtifacts: borrowed,
     artifactCleanup,
     artifactsDeleted: deletedArtifacts > 0,
+    ...(retained > 0 ? {
+      nextStep: `${retained} Home Graph file(s) were kept because they were in use, locked or could not be read; run reset again to remove the ones no longer in use.`,
+    } : {}),
   };
 }
 
-function collectKnowledgeSpaceArtifactIds(store: KnowledgeStore, artifactStore: ArtifactStore, spaceId: string): string[] {
+/**
+ * Artifacts a reset may remove: ones Home Graph created for a source of this
+ * space (recorded on the source at ingest), and ones whose own metadata names
+ * this space. An artifact a caller handed to ingest by id is borrowed: it is
+ * counted, never removed. Deletion below still requires zero references in
+ * every configured knowledge family.
+ */
+function collectKnowledgeSpaceArtifactIds(store: KnowledgeStore, artifactStore: ArtifactStore, spaceId: string): { readonly owned: string[]; readonly borrowed: number } {
   const normalized = normalizeKnowledgeSpaceId(spaceId);
-  const ids = new Set<string>();
-  // Metadata classifies a candidate; it cannot prove absence of references.
-  // Actual deletion below still requires fresh typed refs in every configured
-  // family under their original publication locks.
-  const ownedByOtherSpace = (artifactId: string): boolean => {
+  const owned = new Set<string>(), borrowed = new Set<string>();
+  const namesThisSpace = (artifactId: string): boolean => {
     const descriptor = artifactStore.get(artifactId);
-    if (!descriptor) return false;
-    const artifactSpace = getExplicitKnowledgeSpaceId({ metadata: descriptor.metadata });
-    return artifactSpace !== null && artifactSpace !== normalized;
+    return descriptor !== null && getExplicitKnowledgeSpaceId({ metadata: descriptor.metadata }) === normalized;
   };
-  for (const source of store.listSources(Number.MAX_SAFE_INTEGER)) {
+  for (const source of store.listSourcesInSpace(spaceId)) {
     if (getKnowledgeSpaceId(source) !== normalized) continue;
     const artifactId = typeof source.artifactId === 'string' ? source.artifactId.trim() : '';
     if (artifactId.length === 0) continue;
-    if (ownedByOtherSpace(artifactId)) continue;
-    ids.add(artifactId);
+    if (source.metadata.homeGraphArtifactOwned === true || namesThisSpace(artifactId)) owned.add(artifactId);
+    else borrowed.add(artifactId);
   }
   for (const artifact of artifactStore.list(Number.MAX_SAFE_INTEGER)) {
-    if (getKnowledgeSpaceId({ metadata: artifact.metadata }) === normalized) ids.add(artifact.id);
+    if (getKnowledgeSpaceId({ metadata: artifact.metadata }) === normalized) owned.add(artifact.id);
   }
-  return [...ids];
+  for (const id of owned) borrowed.delete(id);
+  return { owned: [...owned], borrowed: borrowed.size };
 }

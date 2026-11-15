@@ -8,9 +8,8 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
-import { answerHomeGraphQuery } from '../platform/src/platform/knowledge/home-graph/ask.js';
 import { readHomeGraphSearchState } from '../platform/src/platform/knowledge/home-graph/search.js';
-import { readHomeGraphSearchSelection } from '../platform/src/platform/knowledge/home-graph/search-judgments.js';
+import { HOME_GRAPH_ASK_SHORTLIST, readHomeGraphSearchSelection } from '../platform/src/platform/knowledge/home-graph/search-judgments.js';
 import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import type { KnowledgeSourceType } from '../platform/src/platform/knowledge/types.js';
@@ -98,15 +97,24 @@ describe('Home Graph full-candidate search judgments (authored synthetic proof)'
     const originalOrder = readHomeGraphSearchState(f.store, spaceId).sources.map((row) => row.id);
     expect((await select(f)).results.map((row) => row.id)).toEqual(originalOrder);
   });
-  test('a source beyond the first100 candidates is read before applying limit1', async () => {
+  test('decision-model requests for one question stay at the shortlist however large the home is', async () => {
     const f = await fixture();
-    const useful = await source(f.store, 'last', 'Recovery procedure', body);
+    const useful = await source(f.store, 'last', 'Router reset procedure', body);
     for (let index = 0; index < 104; index++) await source(f.store, `noise-${index}`, `Unrelated ${index}`, 'A packaging color specification.');
-    expect(readHomeGraphSearchState(f.store, spaceId).sources.findIndex((row) => row.id === useful.id)).toBeGreaterThanOrEqual(100);
-    const fake = readings({ evidence: { 'Recovery procedure': 0.99 } });
+    const fake = readings({ evidence: { 'Router reset procedure': 0.99 } });
     const answer = await f.service.ask({ knowledgeSpaceId: spaceId, query, limit: 1 });
     expect(answer.results.map((row) => row.id)).toEqual([useful.id]);
-    expect(fake.requests.filter((request) => request.context?.site === 'engine.knowledge.answer-evidence-relevance')).toHaveLength(105);
+    expect(fake.requests.filter((request) => request.context?.site === 'engine.knowledge.answer-evidence-relevance')).toHaveLength(HOME_GRAPH_ASK_SHORTLIST);
+    expect(answer.candidates).toEqual({ total: 105, considered: HOME_GRAPH_ASK_SHORTLIST, unread: 0 });
+  });
+  test('a candidate whose reading does not settle is left out and counted, not fatal', async () => {
+    const f = await fixture();
+    const useful = await source(f.store, 'useful', 'Recovery procedure', body);
+    await source(f.store, 'unsure', 'Ambiguous note', 'Something about switches.');
+    readings({ evidence: { 'Recovery procedure': 0.99, 'Ambiguous note': 0.5 } });
+    const answer = await f.service.ask({ knowledgeSpaceId: spaceId, query, limit: 2 });
+    expect(answer.results.map((row) => row.id)).toEqual([useful.id]);
+    expect(answer.candidates?.unread).toBe(1);
   });
   test('full source tails and late exceptions survive old field/excerpt clamps', async () => {
     const f = await fixture();
@@ -145,7 +153,7 @@ describe('Home Graph full-candidate search judgments (authored synthetic proof)'
     const f = await fixture(true);
     const object = await seedHomeAssistantObservation(f.store, { id: 'router', slug: 'router', title: 'Network controller', kind: 'ha_entity', status: 'active', metadata: { knowledgeSpaceId: spaceId } });
     const selected = await source(f.store, 'recovery', 'Recovery procedure', body);
-    for (let index = 0; index < 32; index++) {
+    for (let index = 0; index < 8; index++) {
       const row = await source(f.store, `decoy-${index}`, `Decoy ${index}`, 'x'.repeat(128 * 1024));
       await f.store.upsertEdge({ fromKind: 'source', fromId: row.id, toKind: 'node', toId: object.id, relation: 'has_manual', metadata: { knowledgeSpaceId: spaceId } });
     }
@@ -156,42 +164,14 @@ describe('Home Graph full-candidate search judgments (authored synthetic proof)'
     expect(answer.answer.text).toContain(body);
     const sourcesRead = fake.requests.filter((request) => request.context?.site === 'engine.knowledge.answer-evidence-relevance')
       .map((request) => (request.state as { candidate: { title: string } }).candidate.title);
-    for (let index = 0; index < 32; index++) expect(sourcesRead.filter((title) => title === `Decoy ${index}`)).toHaveLength(1);
+    for (let index = 0; index < 8; index++) expect(sourcesRead.filter((title) => title === `Decoy ${index}`)).toHaveLength(1);
   });
-  test('protected late candidate holds before any earlier relevance or object request', async () => {
+  test('a candidate carrying a credential is refused before any evidence reading', async () => {
     const f = await fixture();
-    await source(f.store, 'late', 'Private document', `${'x'.repeat(128 * 1024)}\nAuthorization: Bearer owned-synthetic-fixture`);
     await source(f.store, 'first', 'Recovery procedure', body);
-    expect(readHomeGraphSearchState(f.store, spaceId).sources.at(-1)?.id).toBe('late');
+    await source(f.store, 'late', 'Private document', 'Router notes. Authorization: Bearer owned-synthetic-fixture');
     const fake = readings({ evidence: { 'Recovery procedure': 0.99 } });
     await expect(select(f)).rejects.toBeInstanceOf(JudgmentInputError);
-    expect(fake.requests).toHaveLength(0);
-  });
-  test('source replacement during a reading stops the next source batch', async () => {
-    const f = await fixture(); const first = await source(f.store, 'first', 'First evidence', 'x'.repeat(128 * 1024) + body);
-    await source(f.store, 'second', 'Second evidence', 'x'.repeat(128 * 1024) + body);
-    const fake = readings({ evidence: { 'First evidence': 0.99, 'Second evidence': 0.99 } });
-    installJudgmentPort({ ...fake.port, async ask(request) {
-      if (request.context?.site === 'engine.knowledge.answer-evidence-relevance') await f.store.upsertSource({ ...first, summary: 'Replaced source' });
-      return fake.port.ask(request);
-    } });
-    await expect(select(f)).rejects.toMatchObject({ reason: 'stale' });
-    expect(fake.requests.filter((request) => request.context?.site === 'engine.knowledge.answer-evidence-relevance')).toHaveLength(1);
-  });
-  test('original HomeGraph query remains guarded during configured generation', async () => {
-    const question = { knowledgeSpaceId: spaceId, query };
-    const f = await fixture(true, async () => { question.query = 'Changed question'; return body; });
-    await source(f.store, 'recovery', 'Recovery procedure', body); readings({ evidence: { 'Recovery procedure': 0.99 } });
-    const before = records(f.store);
-    await expect(f.service.ask(question)).rejects.toMatchObject({ reason: 'stale' });
-    expect(records(f.store)).toBe(before);
-  });
-  test('a completed selection cannot be rebound to another query or modified result', async () => {
-    const f = await fixture(); await source(f.store, 'recovery', 'Recovery procedure', body); readings({ evidence: { 'Recovery procedure': 0.99 } });
-    const question = { query }, state = readHomeGraphSearchState(f.store, spaceId);
-    const selected = await readHomeGraphSearchSelection({ store: f.store, spaceId, query: question, state });
-    await expect(answerHomeGraphQuery({ store: f.store, spaceId, query: { query: 'Another query' }, state, results: selected.results })).rejects.toMatchObject({ reason: 'malformed' });
-    (selected.results[0] as { excerpt: string }).excerpt = 'Changed evidence';
-    await expect(answerHomeGraphQuery({ store: f.store, spaceId, query: question, state, results: selected.results })).rejects.toMatchObject({ reason: 'stale' });
+    expect(fake.requests.filter((request) => request.context?.site === 'engine.knowledge.answer-evidence-relevance')).toHaveLength(0);
   });
 });

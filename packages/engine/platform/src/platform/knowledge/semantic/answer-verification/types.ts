@@ -35,7 +35,15 @@ export interface VerifiedAnswerSelection {
 export type AnswerQualityHoldReason = 'uncertain' | 'unavailable' | 'malformed' | 'aborted' | 'budget' | 'stale';
 export class KnowledgeAnswerQualityHeldError extends Error {
   override readonly name = 'KnowledgeAnswerQualityHeldError';
-  constructor(readonly reason: AnswerQualityHoldReason) {
-    super(`Knowledge answer verification held (${reason}); no further answer or repair action is authorized.`);
+  /** `cause` keeps the failure the hold stands for, so it can be diagnosed from the error and the log. */
+  constructor(readonly reason: AnswerQualityHoldReason, options?: { readonly cause?: unknown }) {
+    super(`Knowledge answer verification held (${reason})${causeText(options?.cause)}; no further answer or repair action is authorized.`,
+      options?.cause === undefined ? undefined : { cause: options.cause });
   }
+}
+
+function causeText(cause: unknown): string {
+  if (cause === undefined) return '';
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return message ? `: ${message.slice(0, 300)}` : '';
 }

@@ -10,10 +10,7 @@ const ART_LINES = [
 const ART_W = Math.max(...ART_LINES.map((line) => getDisplayWidth(line)));
 const TOP_BORDER = '━'.repeat(ART_W);
 const SEPARATOR = '━'.repeat(ART_W);
-/**
- * Audit Fix: Full-width English characters for vaporwave aesthetic.
- * ｇｏｏｄ ｖｉｂｅｓ ・ Ａ Ｉ ・ いい雰囲気
- */
+/** Full-width characters for the vaporwave look: ｇｏｏｄ ｖｉｂｅｓ ・ Ａ Ｉ ・ いい雰囲気 */
 const TAGLINE = '[ ｇｏｏｄ ｖｉｂｅｓ ・ Ａ Ｉ ・ いい雰囲気 ]';
 const versionLine = (version: string) => `　✦　v${version}　█　terminal AI assistant　█　自動ｺｰﾄﾞ 　✦`;
 /**
@@ -23,7 +20,6 @@ const versionLine = (version: string) => `　✦　v${version}　█　terminal 
  * each wordmark row.
  */
 export const SPLASH_GRADIENT = Object.freeze({ start: '#00ffff', end: '#d000ff' } as const);
-/** Fixed hint line, the three primary shell entry points. */
 export interface SplashOptions {
     workingDir?: string | undefined;
     model?: string | undefined;
@@ -41,7 +37,14 @@ export interface SplashOptions {
      * to the live VERSION break on every release bump (v1.0.0 release failure).
      */
     version?: string | undefined;
+    /**
+     * Label of the command-palette binding as the keybindings view formats it
+     * (the user's keybindings.json included), for a hint line that names it.
+     */
+    commandPaletteKey?: string | undefined;
 }
+/** The bottom hint line: fixed text, or built from the options at each draw. */
+export type SplashHint = string | ((opts: SplashOptions) => string);
 /** Collapse a $HOME-prefixed working directory to a leading `~`. */
 function collapseHome(dir: string): string {
     const home = typeof process !== 'undefined' ? process.env.HOME ?? '' : '';
@@ -51,7 +54,7 @@ function collapseHome(dir: string): string {
 function metaLine(text: string, columns: number): string {
     return center(truncateDisplay(text, Math.max(0, columns)), columns);
 }
-export function createSplashLines(defaultVersion: string, showContext: boolean, hint: string) {
+export function createSplashLines(defaultVersion: string, showContext: boolean, hint: SplashHint) {
     return function getSplashLines(columns: number, opts: SplashOptions = {}): string[] {
         const lines: string[] = [
             center(TOP_BORDER, columns),
@@ -84,7 +87,8 @@ export function createSplashLines(defaultVersion: string, showContext: boolean, 
             }
             lines.push('');
         }
-        lines.push(showContext ? metaLine(hint, columns) : center(hint, columns));
+        const hintText = typeof hint === 'function' ? hint(opts) : hint;
+        lines.push(showContext ? metaLine(hintText, columns) : center(hintText, columns));
         return lines;
     };
 }

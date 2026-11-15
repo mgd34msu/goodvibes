@@ -149,6 +149,19 @@ class FeatureFlagManagerImpl {
   }
 
   /**
+   * Every startup-gated flag whose saved value is not the running one yet,
+   * with both states. Walks only the pending set, so it costs nothing while
+   * no restart is owed.
+   */
+  listPendingRestarts(): Array<{ flagId: string; running: FlagState; saved: FlagState }> {
+    const pending: Array<{ flagId: string; running: FlagState; saved: FlagState }> = [];
+    for (const [flagId, saved] of this._pendingRestart) {
+      pending.push({ flagId, running: this._states.get(flagId) as FlagState, saved });
+    }
+    return pending;
+  }
+
+  /**
    * Returns a copy of the ordered audit log of flag state transitions
    * recorded in this process lifetime; once more than
    * {@link MAX_RECORDED_TRANSITIONS} have happened, only the latest are kept.

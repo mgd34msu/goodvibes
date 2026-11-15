@@ -21,6 +21,12 @@ let volumeValue: unknown = { enabled: false, budgets: [], intervalMs: 60_000, wi
 let semanticCalls = 0;
 let primaryEndpoint = "https://api.typesafe.ai";
 let primaryKeySource = "env";
+// What the daemon's flags.status reports: restart-gated features running in a
+// state other than their saved one. A permissions.simulation write adds one,
+// as the daemon's gate manager does for a startup-only gate.
+type PendingRestartEntry = { featureId: string; running: string; saved: string };
+let pendingRestart: PendingRestartEntry[] = [];
+let flagsStatusCalls = 0;
 
 // Enough of a live config to exercise: a typed string field
 // (provider.systemPromptFile), the engine-declared display.theme field,
@@ -78,6 +84,12 @@ mock.module("../../../lib/goodvibes", () => ({
           });
         },
       },
+      flags: {
+        status: () => {
+          flagsStatusCalls++;
+          return Promise.resolve({ pendingRestart: [...pendingRestart] });
+        },
+      },
       config: {
         get: () => {
           if (outcome === "admin-required") {
@@ -102,6 +114,9 @@ mock.module("../../../lib/goodvibes", () => ({
           if (key === "judgment.volumeMonitor") volumeValue = value;
           if (key === "judgment.endpoint") primaryEndpoint = String(value);
           if (key === "judgment.keySource") primaryKeySource = String(value);
+          if (key === "permissions.simulation") {
+            pendingRestart = [{ featureId: "permissions-simulation", running: "enabled", saved: value ? "enabled" : "disabled" }];
+          }
           // daemonOwned surfaces.* keys report a daemon-tier persistedTo; everything
           // else reports the ordinary client settings path, mirrors system-routes.ts.
           const daemonOwned = key.startsWith("surfaces.");
@@ -132,8 +147,13 @@ const { groupsForSection, sectionForNamespace } = await import("./sections");
  * groups the dialog would show there, so the namespace-to-section mapping is
  * exercised too.
  */
+/** The provider's latest value, for tests that call its write paths directly. */
+const captured: { current: ReturnType<typeof useConfigSettings> | null } = { current: null };
+
 function Harness() {
-  const { groups } = useConfigSettings();
+  const settings = useConfigSettings();
+  captured.current = settings;
+  const { groups } = settings;
   const [picked, setPicked] = React.useState("");
   const current = groups.find((g) => g.label === picked) ?? groups[0];
   const shown = current ? groupsForSection(sectionForNamespace(current.id), groups) : [];
@@ -249,6 +269,8 @@ function commitByBlur(input: HTMLInputElement): void {
 }
 
 afterEach(() => {
+  pendingRestart = [];
+  flagsStatusCalls = 0;
   credentialSetMode = "ok";
   outcome = "ok";
   setOutcome = "ok";
@@ -374,6 +396,36 @@ describe("settings config groups: feature units", () => {
     await waitFor(() =>
       Boolean(el.querySelector('[data-pending-restart="permissions-simulation"]'))
     );
+    expect(el.querySelector('[data-pending-restart="permissions-simulation"]')?.textContent).toContain(
+      "Saved as disabled; the daemon is running it enabled"
+    );
+    unmount();
+  });
+
+  test("the pending-restart marker comes from the daemon, so a reopened dialog still shows it", async () => {
+    // Saved earlier (another session, another device): nothing written here.
+    pendingRestart = [{ featureId: "permissions-simulation", running: "enabled", saved: "disabled" }];
+    const { el, unmount } = render();
+    await waitFor(() =>
+      Boolean(
+        [...el.querySelectorAll(".settings-category")].some((b) => b.textContent === "Permissions")
+      )
+    );
+    clickCategory(el, "Permissions");
+    await waitFor(() =>
+      Boolean(el.querySelector('[data-pending-restart="permissions-simulation"]'))
+    );
+    expect(configSetCalls).toEqual([]);
+    unmount();
+  });
+
+  test("only a restart-gated enablement save re-reads the restart status", async () => {
+    const { unmount } = render();
+    await waitFor(() => flagsStatusCalls === 1 && captured.current !== null);
+    await captured.current!.commit("display.collapseThreshold", 31);
+    expect(flagsStatusCalls).toBe(1);
+    await captured.current!.commit("permissions.simulation", false);
+    await waitFor(() => flagsStatusCalls === 2);
     unmount();
   });
 

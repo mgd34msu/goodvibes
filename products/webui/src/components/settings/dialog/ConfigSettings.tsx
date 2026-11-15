@@ -13,10 +13,10 @@
  * settings keys it owns (settings-model.ts). Owned keys never double-list as
  * orphan rows in their namespace.
  *
- * Restart honesty: a restart-gated feature whose enablement was changed here
- * shows a pending-restart marker, tracked per feature id from THIS dialog
- * session's confirmed config.set writes. The state lives in the provider, so
- * switching sections never drops a marker.
+ * Restart honesty: the daemon reports which restart-gated features run in a
+ * state other than their saved setting (flags.status); a feature it names shows
+ * a pending-restart marker with both states, whoever saved it and whenever.
+ * The read is refetched after a save of a restart-gated feature's enablement key.
  *
  * Honesty bars:
  *   - an admin-scope refusal (403) on config.get reads distinctly from a generic
@@ -36,6 +36,8 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { isStructuredCredentialReferenceConfigKey } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 import { client as platformClient, type ConfigSetOutcome } from '../../../lib/goodvibes';
+import type { FeaturePendingRestart } from '../../../lib/feature-restart-status';
+import { FEATURE_SETTINGS } from '../../../lib/generated/config-schema';
 import { formatError, isAdminRequiredError } from '../../../lib/errors';
 import { useToast } from '../../../lib/toast';
 import { ErrorState } from '../../feedback/ErrorState';
@@ -88,16 +90,22 @@ interface ConfigSettingsValue {
   /** The daemon's current value for one key, for editors whose write replaces a whole object. */
   readLatest: (key: string) => Promise<unknown>;
   persistedByKey: Readonly<Record<string, ConfigSetOutcome>>;
-  pendingRestartIds: ReadonlySet<string>;
-  markPendingRestart: (featureId: string) => void;
+  /** What the running daemon reports per restart-gated feature id whose saved setting is not applied yet. */
+  pendingRestart: ReadonlyMap<string, FeaturePendingRestart>;
 }
+
+const FEATURE_RESTART_STATUS_KEY = ['flags', 'status'] as const;
+
+/** Enablement keys of restart-gated features: only a save of one of these can change flags.status. */
+const RESTART_GATED_KEYS: ReadonlySet<string> = new Set(
+  FEATURE_SETTINGS.filter((feature) => feature.restartRequired).map((feature) => feature.enablement.key),
+);
 
 const ConfigSettingsContext = createContext<ConfigSettingsValue | null>(null);
 
 export function ConfigSettingsProvider({ enabled = true, children }: { enabled?: boolean; children: ReactNode }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [pendingRestartIds, setPendingRestartIds] = useState<ReadonlySet<string>>(new Set());
   // What the daemon reported back for the last successful config.set of each key
   // (persistedTo / tier / daemonOwned), never fabricated from config.get, which
   // returns the persisted tree only. Cleared whenever the dialog remounts.
@@ -109,6 +117,19 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     enabled,
     retry: false,
   });
+
+  // Read beside config.get: the saved tree cannot say what the daemon runs. A
+  // daemon without this read (or a refusal) leaves no marker; config still shows.
+  const restartStatus = useQuery({
+    queryKey: FEATURE_RESTART_STATUS_KEY,
+    queryFn: () => platformClient.operator.flags.status(),
+    enabled,
+    retry: false,
+  });
+  const pendingRestart = useMemo(
+    () => new Map((restartStatus.data?.pendingRestart ?? []).map((entry) => [entry.featureId, entry] as const)),
+    [restartStatus.data],
+  );
 
   const groups = useMemo(() => buildSettingsModel(config.data), [config.data]);
   // payments.currency's live value, for MoneyField's currency label, read from
@@ -135,7 +156,10 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
           ? await setCredential(key, value)
           : await platformClient.operator.config.set(key, value);
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
-        await queryClient.invalidateQueries({ queryKey: ['config'] });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['config'] }),
+          RESTART_GATED_KEYS.has(key) ? queryClient.invalidateQueries({ queryKey: FEATURE_RESTART_STATUS_KEY }) : undefined,
+        ]);
         toast({
           title: 'Config saved',
           description: outcome.persistedTo ? `${key} updated: stored in ${outcome.persistedTo}.` : `${key} updated.`,
@@ -154,7 +178,10 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
       try {
         const outcome = await platformClient.operator.config.reset(key);
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
-        await queryClient.invalidateQueries({ queryKey: ['config'] });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['config'] }),
+          RESTART_GATED_KEYS.has(key) ? queryClient.invalidateQueries({ queryKey: FEATURE_RESTART_STATUS_KEY }) : undefined,
+        ]);
         toast({ title: 'Setting reset', description: `${key} is back to its default.`, tone: 'success' });
       } catch (error) {
         toast({ title: 'Failed to reset setting', description: formatError(error), tone: 'danger' });
@@ -169,10 +196,6 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     [],
   );
 
-  const markPendingRestart = useCallback((featureId: string) => {
-    setPendingRestartIds((prev) => new Set(prev).add(featureId));
-  }, []);
-
   const value = useMemo<ConfigSettingsValue>(() => ({
     config,
     groups,
@@ -183,9 +206,8 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     reset,
     readLatest,
     persistedByKey,
-    pendingRestartIds,
-    markPendingRestart,
-  }), [config, groups, currency, refused, degraded, commit, reset, readLatest, persistedByKey, pendingRestartIds, markPendingRestart]);
+    pendingRestart,
+  }), [config, groups, currency, refused, degraded, commit, reset, readLatest, persistedByKey, pendingRestart]);
 
   return <ConfigSettingsContext.Provider value={value}>{children}</ConfigSettingsContext.Provider>;
 }
@@ -209,7 +231,7 @@ export function ConfigGroupList({
   /** Shown when there is nothing to render (after the search). */
   emptyText?: string;
 }) {
-  const { config, refused, degraded, commit, reset, readLatest, persistedByKey, pendingRestartIds, markPendingRestart, currency } = useConfigSettings();
+  const { config, refused, degraded, commit, reset, readLatest, persistedByKey, pendingRestart, currency } = useConfigSettings();
   const shown = useMemo(() => filterSettingsModel([...groups], query), [groups, query]);
   // One level under the section heading when the list sits inside a titled section.
   const GroupHeading = useContext(SettingsHeadingLevel) === 4 ? 'h4' : 'h3';
@@ -265,11 +287,8 @@ export function ConfigGroupList({
               onCommit={commit}
               onReset={reset}
               persistedByKey={persistedByKey}
-              pendingRestart={pendingRestartIds.has(unit.feature.id)}
+              pendingRestart={pendingRestart.get(unit.feature.id) ?? null}
               currency={currency}
-              onEnablementCommitted={() => {
-                if (unit.feature.restartRequired) markPendingRestart(unit.feature.id);
-              }}
             />
           ))}
           {group.plainRows.length > 0 && (

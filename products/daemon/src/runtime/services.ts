@@ -1,4 +1,4 @@
-import { completeGatewayScopePolicyBootstrap } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { completeGatewayScopePolicyBootstrap, registerFlagsStatusGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 /** The product's async composition boundary over its real runtime graph. */
 import { createDisposalScope } from './disposal-wiring.js';
 import { createRuntimeBaseServices } from './service-graph.js';
@@ -17,6 +17,8 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
   }
   observeNativeStartupPhase('runtime-base');
   const { services, handlerOptions, closeWorkLedger, closeBrowserJudgment, closeAutonomousPermissions, retireContinuationScope } = await createRuntimeBaseServices(options);
+  // The gate manager is this daemon's: flags.status reads its pending-restart record.
+  registerFlagsStatusGatewayMethods(services.gatewayMethods, services.featureFlags);
   const scope = createDisposalScope('Daemon runtime acquisition');
   let shutdownRequested = false;
   const close = (): Promise<void> => {

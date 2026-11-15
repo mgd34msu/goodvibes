@@ -27,7 +27,10 @@ configurable capability, never unreachable machinery.
   tracking, plugin/MCP lifecycles, the OTel foundation, policy signing, the
   overflow spill backend) accept
   live settings changes but honestly report pending-restart instead of faking a
-  live apply.
+  live apply. The daemon's `flags.status` read lists each such feature with the
+  state it is running in and the saved state that applies at the next start;
+  `config.get` returns saved values only. Web UI Settings shows both states on
+  the feature and offers the daemon restart.
 - There is no separate kill switch: to switch a capability off, change its
   settings key.
 

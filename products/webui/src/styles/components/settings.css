@@ -214,9 +214,18 @@
 
 /* Enablement change saved this session; the daemon applies it on restart. */
 .feature-unit-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
   margin: var(--space-1) 0;
   color: var(--warn);
   font-size: var(--text-meta);
+}
+
+.feature-unit-pending p {
+  margin: 0;
+  flex: 1 1 16rem;
 }
 
 /* Enum enablement: the feature's mode select in the unit header. */

@@ -21,17 +21,21 @@
  *     daemon's live settings bridge derives the internal gate state from the
  *     domain key on every config change).
  *   - a restart-gated feature (`restartRequired`) states that up front, and
- *     after a successful enablement change shows a pending-restart marker at
- *     the point of change: the write persisted, the running daemon applies it
- *     on its next restart. The marker is driven by THIS session's confirmed
- *     writes (config.set resolved), never fabricated from a wire signal the
- *     daemon does not expose, config.get returns the persisted tree only.
+ *     while the daemon reports (flags.status) that it runs the feature in a
+ *     state other than the saved one, shows both states and offers the daemon
+ *     restart that applies it. The marker comes from the running daemon, so it
+ *     holds across reloads, devices and whoever saved the change.
  *   - the current state distinguishes an explicit config value from the schema
  *     default.
  */
 import { useState } from 'react';
 import type { FeatureUnitModel } from '../../lib/settings-model';
-import type { ConfigSetOutcome } from '../../lib/goodvibes';
+import { client as platformClient, type ConfigSetOutcome } from '../../lib/goodvibes';
+import type { FeatureGateState, FeaturePendingRestart } from '../../lib/feature-restart-status';
+import { formatError } from '../../lib/errors';
+import { useToast } from '../../lib/toast';
+import { Button } from '../ui/Button';
+import { useConfirm } from '../ui/ConfirmDialog';
 import { SettingsField } from './SettingsField';
 import { Chip } from '../ui/Chip';
 import { Select } from '../ui/Select';
@@ -47,10 +51,8 @@ interface FeatureUnitCardProps {
    *  (SettingsModal's persistedByKey), keyed by config key, looked up here per field and
    *  for the enablement key itself. */
   readonly persistedByKey: Readonly<Record<string, ConfigSetOutcome>>;
-  /** True when an enablement change was saved this session and awaits a daemon restart. */
-  readonly pendingRestart: boolean;
-  /** Called after a successful enablement write (toggle or mode change). */
-  readonly onEnablementCommitted: () => void;
+  /** The running daemon's report for this feature when its saved setting is not applied yet (flags.status). */
+  readonly pendingRestart: FeaturePendingRestart | null;
   /** The live `payments.currency` value, forwarded to any owned field marked
    *  `unit: 'money'`, see SettingsField's `currency` prop. */
   readonly currency?: string;
@@ -62,7 +64,6 @@ export function FeatureUnitCard({
   onReset,
   persistedByKey,
   pendingRestart,
-  onEnablementCommitted,
   currency,
 }: FeatureUnitCardProps) {
   const { feature, enabled, explicit, enablementField, fields, daemonOwned } = unit;
@@ -76,7 +77,6 @@ export function FeatureUnitCard({
     setError(null);
     try {
       await onCommit(feature.enablement.key, value);
-      onEnablementCommitted();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -156,11 +156,7 @@ export function FeatureUnitCard({
         ) : (
           <p className="feature-unit-note">Changes to this feature apply immediately.</p>
         ))}
-      {pendingRestart && (
-        <p className="feature-unit-pending" role="status" data-pending-restart={feature.id}>
-          Saved: takes effect when the daemon restarts.
-        </p>
-      )}
+      {pendingRestart && <PendingRestartNotice featureId={feature.id} featureName={feature.name} pending={pendingRestart} />}
       {kind === 'enum' && enablementField?.description && (
         <p className="feature-unit-mode-desc">{enablementField.description}</p>
       )}
@@ -189,5 +185,61 @@ export function FeatureUnitCard({
         </div>
       )}
     </section>
+  );
+}
+
+function gateStateLabel(state: FeatureGateState): string {
+  return state === 'killed' ? 'switched off by a kill switch' : state;
+}
+
+/**
+ * The daemon's own report that this feature runs in a state other than its
+ * saved one, with the restart that applies it. Restarting ends every running
+ * turn and drops every connected client, so it is asked once; the daemon's
+ * refusal (service management off) is shown as it answered.
+ */
+function PendingRestartNotice({ featureId, featureName, pending }: {
+  readonly featureId: string;
+  readonly featureName: string;
+  readonly pending: FeaturePendingRestart;
+}) {
+  const [restarting, setRestarting] = useState(false);
+  const confirm = useConfirm();
+  const { toast } = useToast();
+
+  async function restartDaemon(): Promise<void> {
+    if (restarting) return;
+    const ok = await confirm.ask({
+      title: 'Restart the daemon?',
+      target: featureName,
+      description: 'The saved setting applies when the daemon starts again. Work running now stops and every connected client reconnects.',
+      confirmLabel: 'Restart daemon',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setRestarting(true);
+    try {
+      await platformClient.operator.services.restart();
+      toast({ title: 'Daemon restarting', description: 'This page reconnects when it is back.', tone: 'success' });
+    } catch (problem) {
+      toast({ title: 'The daemon did not restart', description: formatError(problem), tone: 'danger' });
+    } finally {
+      setRestarting(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="feature-unit-pending" role="status" data-pending-restart={featureId}>
+        <p>
+          Saved as {gateStateLabel(pending.saved)}; the daemon is running it {gateStateLabel(pending.running)} until it
+          restarts.
+        </p>
+        <Button size="sm" disabled={restarting} onClick={() => void restartDaemon()}>
+          {restarting ? 'Restarting…' : 'Restart daemon'}
+        </Button>
+      </div>
+      {confirm.element}
+    </>
   );
 }

@@ -1,6 +1,6 @@
 /**
- * FeatureUnitCard, the enablement commit: a saved toggle reports the change to
- * its owner, a refused one shows the daemon's reason and reports nothing.
+ * FeatureUnitCard, the enablement commit: a saved toggle writes the enablement
+ * key, a refused one shows the daemon's reason.
  */
 import { describe, expect, test } from 'bun:test';
 import React from 'react';
@@ -25,7 +25,6 @@ const unit = {
 } as unknown as FeatureUnitModel;
 
 function render(onCommit: (key: string, value: unknown) => Promise<void>) {
-  const committed: number[] = [];
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -34,13 +33,11 @@ function render(onCommit: (key: string, value: unknown) => Promise<void>) {
       unit,
       onCommit,
       persistedByKey: {},
-      pendingRestart: false,
-      onEnablementCommitted: () => committed.push(1),
+      pendingRestart: null,
     }));
   });
   return {
     el: container,
-    committed,
     unmount: () => {
       flushSync(() => root.unmount());
       container.remove();
@@ -61,22 +58,21 @@ function toggle(el: HTMLElement): void {
 }
 
 describe('FeatureUnitCard enablement', () => {
-  test('flipping the toggle writes the enablement key and reports the committed change', async () => {
+  test('flipping the toggle writes the enablement key', async () => {
     const writes: [string, unknown][] = [];
     const view = render(async (key, value) => { writes.push([key, value]); });
     toggle(view.el);
-    await waitFor(() => view.committed.length === 1);
+    await waitFor(() => writes.length === 1);
     expect(writes).toEqual([['demo.enabled', true]]);
     expect(view.el.querySelector('[role="alert"]')).toBeNull();
     view.unmount();
   });
 
-  test('a refused write shows the reason and does not report a committed change', async () => {
+  test('a refused write shows the reason', async () => {
     const view = render(() => Promise.reject(new Error('daemon said no')));
     toggle(view.el);
     await waitFor(() => view.el.querySelector('[role="alert"]') !== null);
     expect(view.el.querySelector('[role="alert"]')?.textContent).toBe('daemon said no');
-    expect(view.committed).toHaveLength(0);
     view.unmount();
   });
 });

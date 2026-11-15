@@ -253,8 +253,13 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
           ctx.print('Usage: /bridge import <path>');
           return;
         }
-        const artifact = await remoteRegistry.importArtifact(shellPaths.resolveWorkspacePath(pathArg));
-        ctx.print(`Imported remote bridge artifact ${artifact.id} for runner ${artifact.runnerId}.`);
+        // The same registry import as /remote import, with its capability-ceiling refusal.
+        try {
+          const artifact = await remoteRegistry.importArtifact(shellPaths.resolveWorkspacePath(pathArg));
+          ctx.print(`Imported remote bridge artifact ${artifact.id} for runner ${artifact.runnerId}. Review it with /bridge review ${artifact.id}.`);
+        } catch (error) {
+          ctx.print(`Bridge import refused: ${error instanceof Error ? error.message : String(error)}`);
+        }
         return;
       }
       ctx.print(

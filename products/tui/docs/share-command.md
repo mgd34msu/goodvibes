@@ -5,7 +5,7 @@ Export the current session to a local file and optionally share it.
 ## Syntax
 
 ```
-/share <html|json|md> [path] [--redact] [--upload] [--copy] [--open]
+/share <html|json|md> [path] [--redact] [--upload] [--no-redact] [--copy] [--open]
 ```
 
 ## Formats
@@ -21,15 +21,18 @@ Export the current session to a local file and optionally share it.
 | Flag       | Description |
 |------------|-------------|
 | `--redact` | Redact API keys, tokens, and this account's home-directory path and login name from the output |
-| `--upload` | Upload the export as a secret GitHub Gist and print the share link |
+| `--upload` | Upload the export as a secret GitHub Gist and print the share link. An upload is always redacted, whether or not `--redact` is given |
+| `--no-redact` | With `--upload` only: upload the transcript as stored. You are asked first, with a list of what it exposes (a secret gist is readable by anyone with the link); `--yes` answers in advance |
 | `--copy`   | Copy the output file path to the clipboard (OSC 52; terminal must support it) |
 | `--open`   | Open an HTML export in the default browser (`xdg-open` / `open` / `start`) |
 
 Flags can be combined:
 
 ```
-/share html --redact --upload --copy
+/share html --upload --copy
 ```
+
+The result line says which happened: `(redacted before upload)`, `(uploaded unredacted, as stored)`, `(sensitive data redacted)` or `(not redacted)` for a local file.
 
 ## Cost summary
 
@@ -128,9 +131,9 @@ The directory is created automatically.
 /share html                          # export to default path
 /share html /tmp/session.html        # export to explicit path
 /share json --redact                 # JSON with sensitive data removed
-/share html --upload                 # export + Gist link
+/share html --upload                 # export + redacted Gist link
 /share html --upload --copy --open   # export + link + clipboard + open browser
-/share md --redact --upload          # redacted Markdown Gist
+/share md --upload --no-redact       # unredacted Markdown Gist (asks first)
 ```
 
 ## Related

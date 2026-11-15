@@ -175,11 +175,11 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
     description: 'Packaged task modes, teammate templates, and orchestration recipes',
     usage: '[review|modes|mode <id>|create-mode <id> <title...>|recipes|recipe <id>|templates|archetypes|validate|archetype <name>|create-archetype <name> <title...>]',
     async handler(args, ctx) {
-      ctx.teamworkReading?.cancel();
+      ctx.commandReadings?.cancel('teamwork');
       let submission: ReturnType<typeof beginCommandReading> | undefined;
       // One read of the agents directory through the loader spawns use, one family reading, then print.
       const listArchetypeModes = async () => {
-        submission = beginCommandReading(ctx, args, 'teamworkReading');
+        submission = beginCommandReading(ctx, args, 'teamwork');
         const archetypes = readArchetypeListing(join(requireShellPaths(ctx).workingDirectory, '.goodvibes', 'agents'));
         const families = await readArchetypeFamilies(archetypes, { signal: submission.signal });
         submission.signal.throwIfAborted();

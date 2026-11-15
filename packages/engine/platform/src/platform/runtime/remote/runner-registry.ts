@@ -278,6 +278,18 @@ export class RemoteRunnerRegistry {
     if (!this.agentManager.getStatus(contract.runnerId)) this.contracts.set(contract.runnerId, contract);
   }
 
+  /**
+   * Why an imported contract may not be stored: a file must not replace the
+   * capability ceiling of a runner this runtime already holds with a different
+   * one. Every import path (artifact, session bundle) asks this before storing.
+   */
+  private importedCeilingConflict(contract: RemoteRunnerContract): string | undefined {
+    const existing = this.contracts.get(contract.runnerId);
+    if (!existing || this.agentManager.getStatus(contract.runnerId)) return undefined;
+    if (JSON.stringify(existing.capabilityCeiling) === JSON.stringify(contract.capabilityCeiling)) return undefined;
+    return `runner ${contract.runnerId} already has a different capability ceiling in this session, and the file would replace it`;
+  }
+
   private resolveConnection(agentId: string, store?: RuntimeStore): AcpConnection | undefined {
     return store?.getState().acp.connections.get(agentId);
   }
@@ -295,6 +307,13 @@ export class RemoteRunnerRegistry {
 
   getContract(agentId: string): RemoteRunnerContract | null {
     return this.contracts.get(agentId) ?? null;
+  }
+
+  /** The contract a live runner would have now, built without storing it; an imported one as stored. */
+  readContractForAgent(agentId: string, store?: RuntimeStore): RemoteRunnerContract | null {
+    const agent = this.agentManager.getStatus(agentId);
+    if (!agent) return this.getContract(agentId);
+    return buildContract(agent, this.workspaceRoot, this.resolveConnection(agentId, store), this.contracts.get(agentId) ?? undefined);
   }
 
   registerContract(contract: RemoteRunnerContract): RemoteRunnerContract {
@@ -428,6 +447,10 @@ export class RemoteRunnerRegistry {
       throw new Error(`Cannot import a remote artifact from ${path}: it has no valid ${problem}. Nothing was imported; import a file written by a remote artifact export.`);
     }
     const parsed = value as unknown as RemoteExecutionArtifact;
+    const conflict = this.importedCeilingConflict(parsed.runnerContract);
+    if (conflict) {
+      throw new Error(`Cannot import a remote artifact from ${path}: ${conflict}. Nothing was imported; export the runner's current contract, or import into a session that does not know this runner.`);
+    }
     this.storeArtifact(parsed);
     this.storeImportedContract(parsed.runnerContract);
     return parsed;
@@ -469,6 +492,10 @@ export class RemoteRunnerRegistry {
     const parsed = value as unknown as RemoteSessionBundle;
     if (parsed.artifacts.length > MAX_ARTIFACTS) {
       throw new Error(`Cannot import a remote session bundle from ${path}: it holds ${parsed.artifacts.length} artifacts and this runtime keeps at most ${MAX_ARTIFACTS}. Nothing was imported; export a smaller bundle.`);
+    }
+    const conflicts = parsed.contracts.map((contract) => this.importedCeilingConflict(contract)).filter((reason) => reason !== undefined);
+    if (conflicts.length > 0) {
+      throw new Error(`Cannot import a remote session bundle from ${path}: ${conflicts.join('; ')}. Nothing was imported; export the runners' current contracts, or import into a session that does not know these runners.`);
     }
     for (const pool of parsed.pools) {
       this.pools.set(pool.id, pool);

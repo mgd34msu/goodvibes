@@ -84,11 +84,17 @@ interface RewindSessionState {
   readonly redo: RewindReceipt[];
 }
 
+/**
+ * Rewind state lives as long as its session is the open one: a resume, load or
+ * new session replaces it, and the replaced session's receipts go with it (an
+ * undo receipt points into a conversation that is no longer live).
+ */
 const sessions = new Map<string, RewindSessionState>();
 
 /** Get or build the per-session service, capturing the session's live stores. */
 function stateFor(ctx: CommandContext): RewindSessionState {
   const sessionId = ctx.session.runtime.sessionId;
+  for (const other of [...sessions.keys()]) if (other !== sessionId) sessions.delete(other);
   let state = sessions.get(sessionId);
   if (!state) {
     const mgr = ctx.workspace.workspaceCheckpointManager;
@@ -133,6 +139,40 @@ export interface RewindReversalResult {
 const BUSY_MESSAGE = (what: string): string =>
   `A turn is still running, so ${what} was not started and nothing changed. Stop it with Esc or let it finish, then retry.`;
 
+/**
+ * Shows what restoring `checkpointId` would do to the working tree and asks,
+ * the same Changes preview /rewind uses. Work done since the rewind (turns or
+ * hand edits) is in that diff, so it is never replaced unseen.
+ */
+async function confirmFileRestore(
+  ctx: CommandContext,
+  mgr: WorkspaceCheckpointManager,
+  checkpointId: string,
+  question: string,
+): Promise<'confirmed' | 'cancelled' | 'no-preview'> {
+  if (!ctx.previewChanges) return 'no-preview';
+  let diff: string | undefined;
+  let note: string | undefined;
+  try {
+    const result = await mgr.diff(checkpointId);
+    if (result.unifiedDiff.trim()) diff = result.unifiedDiff;
+    else note = 'The working tree already matches; no file changes.';
+  } catch {
+    note = 'Could not load the diff of the files this would restore.';
+  }
+  ctx.renderRequest();
+  const confirmed = await ctx.previewChanges({
+    title: question,
+    diff,
+    note,
+    question: { text: `${question} A safety checkpoint of the current files is taken first.`, confirmLabel: 'Restore', tone: 'warning' },
+  });
+  return confirmed ? 'confirmed' : 'cancelled';
+}
+
+const NO_PREVIEW_MESSAGE = (what: string): string =>
+  `${what} was not started: restoring files needs the Changes view to show what would be overwritten, and it is not available in this session. Nothing changed.`;
+
 export async function undoLastRewind(ctx: CommandContext): Promise<RewindReversalResult> {
   if (ctx.isGenerating?.()) return { handled: true, message: BUSY_MESSAGE('undoing the rewind') };
   const state = stateFor(ctx);
@@ -149,12 +189,24 @@ export async function undoLastRewind(ctx: CommandContext): Promise<RewindReversa
   }
 
   const mgr = ctx.workspace.workspaceCheckpointManager;
+  if (receipt.undo.files && mgr) {
+    const answer = await confirmFileRestore(ctx, mgr, receipt.undo.files.restoreCheckpointId, 'Undo the rewind: put the files back as they were before it?');
+    if (answer !== 'confirmed' || ctx.isGenerating?.()) {
+      state.undo.push(receipt);
+      return {
+        handled: true,
+        message: answer === 'no-preview' ? NO_PREVIEW_MESSAGE('Undo rewind')
+          : answer === 'cancelled' ? 'Undo rewind cancelled: nothing changed. The rewind is still listed under /undo rewind.'
+          : BUSY_MESSAGE('undoing the rewind'),
+      };
+    }
+  }
   const parts: string[] = [];
   let conversationFailed = false;
   let filesFailed = '';
   try {
     if (receipt.undo.files && mgr) {
-      const restored = await mgr.restore(receipt.undo.files.restoreCheckpointId, { safetyCheckpoint: false });
+      const restored = await mgr.restore(receipt.undo.files.restoreCheckpointId, { safetyCheckpoint: true });
       const failed = restored.failedPaths ?? [];
       if (failed.length > 0) {
         filesFailed = failed.map((f) => `${f.path}: ${f.reason}`).join('; ');
@@ -208,12 +260,24 @@ export async function redoLastRewind(ctx: CommandContext): Promise<RewindReversa
   if (!receipt) return { handled: false, message: 'No undone rewind to redo. (Bare /redo restores the last conversation turn.)' };
 
   const mgr = ctx.workspace.workspaceCheckpointManager;
+  if (receipt.files?.checkpointId && mgr) {
+    const answer = await confirmFileRestore(ctx, mgr, receipt.files.checkpointId, 'Redo the rewind: restore the files to the rewound turn again?');
+    if (answer !== 'confirmed' || ctx.isGenerating?.()) {
+      state.redo.push(receipt);
+      return {
+        handled: true,
+        message: answer === 'no-preview' ? NO_PREVIEW_MESSAGE('Redo rewind')
+          : answer === 'cancelled' ? 'Redo rewind cancelled: nothing changed. The rewind is still listed under /redo rewind.'
+          : BUSY_MESSAGE('re-applying the rewind'),
+      };
+    }
+  }
   const parts: string[] = [];
   let conversationFailed = false;
   let filesFailed = '';
   try {
     if (receipt.files?.checkpointId && mgr) {
-      const restored = await mgr.restore(receipt.files.checkpointId, { safetyCheckpoint: false });
+      const restored = await mgr.restore(receipt.files.checkpointId, { safetyCheckpoint: true });
       const failed = restored.failedPaths ?? [];
       if (failed.length > 0) {
         filesFailed = failed.map((f) => `${f.path}: ${f.reason}`).join('; ');
@@ -377,6 +441,11 @@ async function handleCheckpointOnlyRewind(args: string[], ctx: CommandContext): 
     return;
   }
 
+  // A restore under a running turn would interleave with its file writes.
+  if (ctx.isGenerating?.()) {
+    ctx.print(BUSY_MESSAGE('restoring the checkpoint'));
+    return;
+  }
   const resolved = resolveCheckpointRef(checkpoints, args[0]!);
   if ('error' in resolved) {
     ctx.print(resolved.error);
@@ -409,6 +478,11 @@ async function handleCheckpointOnlyRewind(args: string[], ctx: CommandContext): 
   if (!confirmed) {
     ctx.print('Restore cancelled: nothing changed.');
     ctx.renderRequest();
+    return;
+  }
+  // The preview waits on the owner; a turn may have started meanwhile.
+  if (ctx.isGenerating?.()) {
+    ctx.print(BUSY_MESSAGE('restoring the checkpoint'));
     return;
   }
   try {

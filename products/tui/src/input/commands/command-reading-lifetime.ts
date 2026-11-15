@@ -1,5 +1,4 @@
 import type { CommandContext } from '../command-registry.ts';
-import type { ScheduleReadingLifetime } from './schedule-reading-lifetime.ts';
 import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 
 export class CommandReadingHeldError extends Error {
@@ -7,12 +6,12 @@ export class CommandReadingHeldError extends Error {
 }
 
 /** Retain original shell and effect owners before any semantic await. */
-export function beginCommandReading(ctx: CommandContext, args: readonly string[], field: 'teamworkReading' | 'planningReading') {
+export function beginCommandReading(ctx: CommandContext, args: readonly string[], kind: 'teamwork') {
   const original = retainStrictJudgmentJson(args);
   assertJudgmentInput(original.snapshot);
-  const lifetime: ScheduleReadingLifetime | undefined = ctx[field];
-  const submission = lifetime?.begin(field);
-  if (!submission) throw new CommandReadingHeldError();
+  const lifetime = ctx.commandReadings;
+  const submission = lifetime?.begin(kind, kind);
+  if (!submission?.ok) throw new CommandReadingHeldError();
   try {
     const session = ctx.session, runtime = session.runtime, sessionId = runtime.sessionId;
     const workspace = ctx.workspace, paths = workspace.shellPaths, directory = paths?.workingDirectory;
@@ -22,7 +21,7 @@ export function beginCommandReading(ctx: CommandContext, args: readonly string[]
     const print = ctx.print, render = ctx.renderRequest;
     const assertCurrent = () => {
       submission.assertCurrent(); original.assertCurrent();
-      if (ctx[field] !== lifetime || ctx.session !== session || session.runtime !== runtime || runtime.sessionId !== sessionId
+      if (ctx.commandReadings !== lifetime || ctx.session !== session || session.runtime !== runtime || runtime.sessionId !== sessionId
         || ctx.workspace !== workspace || workspace.shellPaths !== paths || paths?.workingDirectory !== directory
         || ctx.clients !== clients || clients?.opsApi !== ops || ops?.tasks !== tasks || tasks?.create !== create
         || ctx.nativeConversationIntake !== intake || intake?.submit !== submit || ctx.dispatchNativeIntakeTurn !== dispatch

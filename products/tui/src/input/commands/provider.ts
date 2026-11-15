@@ -35,34 +35,34 @@ function fmtTs(epochMs: number): string {
   return new Date(epochMs).toISOString().replace('T', ' ').slice(0, 19);
 }
 
-function requireProviderOptimizer(context: CommandContext) {
+function requireProviderOptimizer(context: CommandContext, out: string[]) {
   if (!context.provider.providerOptimizer) {
-    context.print('[provider] Provider optimizer is not wired into this runtime.');
+    out.push('[provider] Provider optimizer is not wired into this runtime.');
     return null;
   }
   return context.provider.providerOptimizer;
 }
 
-function fmtExplanation(expl: RouteExplanation, context: CommandContext): void {
+function fmtExplanation(expl: RouteExplanation, out: string[]): void {
   const status = expl.accepted ? '[accepted]' : '[rejected]';
-  context.print(`  ${status} ${expl.providerId}/${expl.modelId}`);
-  context.print(`    ${expl.summary}`);
+  out.push(`  ${status} ${expl.providerId}/${expl.modelId}`);
+  out.push(`    ${expl.summary}`);
   if (!expl.accepted && expl.rejections.length > 0) {
-    context.print('    Unmet requirements:');
+    out.push('    Unmet requirements:');
     for (const r of expl.rejections) {
-      context.print(
+      out.push(
         `      - ${r.code}: ${r.reason} (actual=${r.actual}, required=${r.required})`,
       );
     }
   }
   if (expl.accepted) {
     const c = expl.capability;
-    context.print(
+    out.push(
       `    Capabilities: streaming=${fmtBool(c.streaming)}, tools=${fmtBool(c.toolCalling)}, ` +
       `parallel=${fmtBool(c.parallelTools)}, json=${fmtBool(c.jsonMode)}, ` +
       `reasoning=${fmtBool(c.reasoningControls)}`,
     );
-    context.print(
+    out.push(
       `    Context=${c.maxContextTokens.toLocaleString()} tokens, ` +
       `output=${c.maxOutputTokens.toLocaleString()} tokens, ` +
       `timeout=${c.timeoutMs}ms, caching=${c.caching}`,
@@ -77,16 +77,17 @@ function fmtExplanation(expl: RouteExplanation, context: CommandContext): void {
 function handleOptimizerToggle(
   args: string[],
   context: CommandContext,
+  out: string[],
 ): void {
-  const optimizer = requireProviderOptimizer(context);
+  const optimizer = requireProviderOptimizer(context, out);
   if (!optimizer) return;
   const sub = args[0];
 
   if (sub !== 'on' && sub !== 'off') {
-    context.print('[provider] Usage: /provider-opt optimizer on|off');
-    context.print(`  Current state: optimizer is ${optimizer.enabled ? 'enabled' : 'disabled'}`);
-    context.print('  "on"  — activates intelligent failover and auto-routing');
-    context.print('  "off" — disables optimizer; provider selection is manual only');
+    out.push('[provider] Usage: /provider-opt optimizer on|off');
+    out.push(`  Current state: optimizer is ${optimizer.enabled ? 'enabled' : 'disabled'}`);
+    out.push('  "on"  — activates intelligent failover and auto-routing');
+    out.push('  "off" — disables optimizer; provider selection is manual only');
     return;
   }
 
@@ -102,17 +103,17 @@ function handleOptimizerToggle(
   if (write) context.platform.configManager.setDynamic(write.key, write.value);
 
   if (enable && !wasEnabled) {
-    context.print('[provider] Optimizer enabled.');
-    context.print('  Intelligent failover is now active: on a request error the optimizer');
-    context.print('  will attempt the next viable provider and surface a transcript notice');
-    context.print('  naming the from→to transition and reason before retrying.');
-    context.print('  Use "/provider-opt route auto" to enable fully automatic routing.');
+    out.push('[provider] Optimizer enabled.');
+    out.push('  Intelligent failover is now active: on a request error the optimizer');
+    out.push('  will attempt the next viable provider and surface a transcript notice');
+    out.push('  naming the from→to transition and reason before retrying.');
+    out.push('  Use "/provider-opt route auto" to enable fully automatic routing.');
   } else if (!enable && wasEnabled) {
-    context.print('[provider] Optimizer disabled.');
-    context.print('  Provider selection returns to manual-only mode. No automatic failover.');
-    context.print('  Pinned targets and fallback log are preserved; re-enable to resume.');
+    out.push('[provider] Optimizer disabled.');
+    out.push('  Provider selection returns to manual-only mode. No automatic failover.');
+    out.push('  Pinned targets and fallback log are preserved; re-enable to resume.');
   } else {
-    context.print(`[provider] Optimizer already ${enable ? 'enabled' : 'disabled'}; no change.`);
+    out.push(`[provider] Optimizer already ${enable ? 'enabled' : 'disabled'}; no change.`);
   }
 }
 
@@ -123,40 +124,41 @@ function handleOptimizerToggle(
 function handleRoute(
   args: string[],
   context: CommandContext,
+  out: string[],
 ): void {
-  const optimizer = requireProviderOptimizer(context);
+  const optimizer = requireProviderOptimizer(context, out);
   if (!optimizer) return;
   const sub = args[0];
 
   if (sub !== 'auto' && sub !== 'manual') {
-    context.print('[provider] Usage: /provider-opt route auto|manual');
-    context.print(`  Current mode: ${optimizer.mode} (optimizer ${optimizer.enabled ? 'on' : 'off'})`);
+    out.push('[provider] Usage: /provider-opt route auto|manual');
+    out.push(`  Current mode: ${optimizer.mode} (optimizer ${optimizer.enabled ? 'on' : 'off'})`);
     return;
   }
 
   if (!optimizer.enabled) {
-    context.print(
+    out.push(
       '[provider] Optimizer is off: routing mode recorded but failover will not fire until optimizer is enabled.',
     );
-    context.print('  Enable with: /provider-opt optimizer on');
+    out.push('  Enable with: /provider-opt optimizer on');
   }
 
   optimizer.setMode(sub);
-  context.print(`[provider] Routing mode → ${sub}`);
+  out.push(`[provider] Routing mode → ${sub}`);
   // While the optimizer is off, writing "auto"/"manual" would switch it on at
   // the next start, so the mode is persisted only when it is already active.
   if (optimizer.enabled) {
     context.platform.configManager.setDynamic('provider.optimizerMode', sub);
   } else {
-    context.print('  This mode is not saved until the optimizer is on; it is lost on restart.');
+    out.push('  This mode is not saved until the optimizer is on; it is lost on restart.');
   }
 
   if (sub === 'auto') {
-    context.print(
+    out.push(
       '  Auto mode: optimizer selects the best capable provider for each request profile.',
     );
   } else {
-    context.print(
+    out.push(
       '  Manual mode: optimizer is advisory only; provider selection is caller-driven.',
     );
   }
@@ -169,8 +171,9 @@ function handleRoute(
 async function handleExplainRoute(
   _args: string[],
   context: CommandContext,
+  out: string[],
 ): Promise<void> {
-  const optimizer = requireProviderOptimizer(context);
+  const optimizer = requireProviderOptimizer(context, out);
   if (!optimizer) return;
   const providerApi = requireProviderApi(context);
 
@@ -178,23 +181,23 @@ async function handleExplainRoute(
   try {
     currentModel = await providerApi.getCurrentModel();
   } catch {
-    context.print('[provider] No current model selected.');
+    out.push('[provider] No current model selected.');
     return;
   }
 
-  context.print(
+  out.push(
     `[provider] Route explanation for current model: ${currentModel.providerId}/${currentModel.modelId}`,
   );
 
   // Always explain current route regardless of optimizer enabled state
   const expl = optimizer.explainCurrentRoute();
-  fmtExplanation(expl, context);
+  fmtExplanation(expl, out);
 
   // Show optimizer status
-  context.print(`
+  out.push(`
   Optimizer: ${optimizer.enabled ? 'enabled' : 'disabled'}, mode=${optimizer.mode}`);
   if (optimizer.pinnedTarget) {
-    context.print(
+    out.push(
       `  Pinned to: ${optimizer.pinnedTarget.providerId}/${optimizer.pinnedTarget.modelId}`,
     );
   }
@@ -203,14 +206,14 @@ async function handleExplainRoute(
   const log = optimizer.fallbackLog;
   if (log.length > 0) {
     const recent = log.slice(-5); // last 5 transitions
-    context.print(`  Fallback log (last ${recent.length} of ${log.length}):`);
+    out.push(`  Fallback log (last ${recent.length} of ${log.length}):`);
     for (const t of recent) {
-      context.print(
+      out.push(
         `    ${fmtTs(t.ts)}  ${t.from} → ${t.to}  (${t.reason})`,
       );
     }
   } else {
-    context.print('  Fallback log: empty');
+    out.push('  Fallback log: empty');
   }
 }
 
@@ -221,21 +224,22 @@ async function handleExplainRoute(
 async function handlePin(
   args: string[],
   context: CommandContext,
+  out: string[],
 ): Promise<void> {
-  const optimizer = requireProviderOptimizer(context);
+  const optimizer = requireProviderOptimizer(context, out);
   if (!optimizer) return;
   const target = args[0];
 
   if (!target) {
     // Show current pin status
     if (optimizer.pinnedTarget) {
-      context.print(
+      out.push(
         `[provider] Currently pinned to: ${optimizer.pinnedTarget.providerId}/${optimizer.pinnedTarget.modelId}`,
       );
-      context.print('  Use "/provider-opt pin <provider:model>" to change, or "/provider-opt route manual" to unpin.');
+      out.push('  Use "/provider-opt pin <provider:model>" to change, or "/provider-opt route manual" to unpin.');
     } else {
-      context.print('[provider] No pin active. Usage: /provider-opt pin <provider:model>');
-      context.print('  Example: /provider-opt pin anthropic:claude-opus-4-5');
+      out.push('[provider] No pin active. Usage: /provider-opt pin <provider:model>');
+      out.push('  Example: /provider-opt pin anthropic:claude-opus-4-5');
     }
     return;
   }
@@ -243,8 +247,8 @@ async function handlePin(
   // Parse provider:model format
   const colonIdx = target.indexOf(':');
   if (colonIdx === -1) {
-    context.print(`[provider] Invalid format "${target}". Expected: <provider>:<model>`);
-    context.print('  Example: /provider-opt pin anthropic:claude-opus-4-5');
+    out.push(`[provider] Invalid format "${target}". Expected: <provider>:<model>`);
+    out.push('  Example: /provider-opt pin anthropic:claude-opus-4-5');
     return;
   }
 
@@ -252,7 +256,7 @@ async function handlePin(
   const modelId = target.slice(colonIdx + 1);
 
   if (!providerId || !modelId) {
-    context.print(`[provider] Invalid format "${target}". Both provider and model must be non-empty.`);
+    out.push(`[provider] Invalid format "${target}". Both provider and model must be non-empty.`);
     return;
   }
 
@@ -270,25 +274,25 @@ async function handlePin(
   );
 
   if (!match) {
-    context.print(
+    out.push(
       `[provider] Model not found in registry: ${providerId}/${modelId}`,
     );
-    context.print('  Use "/model" to see available models, or check the provider and model ID.');
+    out.push('  Use "/model" to see available models, or check the provider and model ID.');
     return;
   }
 
   // Enable optimizer if it's off
   if (!optimizer.enabled) {
     optimizer.setEnabled(true);
-    context.print('⚠ Optimizer was disabled: enabling it for pin to take effect (saved: stays on after restart).');
+    out.push('⚠ Optimizer was disabled: enabling it for pin to take effect (saved: stays on after restart).');
   }
 
   optimizer.pin(match.providerId, match.modelId);
   context.platform.configManager.setDynamic('provider.optimizerPinnedModel', `${match.providerId}:${match.modelId}`);
   context.platform.configManager.setDynamic('provider.optimizerMode', 'pinned');
-  context.print(`[provider] Pinned → ${match.providerId}/${match.modelId} (saved: survives restart)`);
-  context.print('  All routed requests will target this provider/model.');
-  context.print('  Unpin with: /provider-opt route manual');
+  out.push(`[provider] Pinned → ${match.providerId}/${match.modelId} (saved: survives restart)`);
+  out.push('  All routed requests will target this provider/model.');
+  out.push('  Unpin with: /provider-opt route manual');
 }
 
 // ---------------------------------------------------------------------------
@@ -298,21 +302,22 @@ async function handlePin(
 function handleFallbackTest(
   args: string[],
   context: CommandContext,
+  out: string[],
 ): void {
-  const optimizer = requireProviderOptimizer(context);
+  const optimizer = requireProviderOptimizer(context, out);
   if (!optimizer) return;
   const sub = args[0];
 
   if (sub !== 'test') {
-    context.print('[provider] Usage: /provider-opt fallback test');
+    out.push('[provider] Usage: /provider-opt fallback test');
     return;
   }
 
-  context.print('[provider] Simulating fallback chain (empty request profile; no requirements)...');
+  out.push('[provider] Simulating fallback chain (empty request profile; no requirements)...');
 
   const result: FallbackTestResult = optimizer.testFallback();
 
-  context.print(
+  out.push(
     `[provider] Fallback chain: ${result.viableCount} capable / ${result.totalCount} total providers`,
   );
 
@@ -321,47 +326,47 @@ function handleFallbackTest(
   const rejected = result.chain.filter((n) => !n.capable);
 
   if (capable.length > 0) {
-    context.print('  Capable providers (would succeed):');
+    out.push('  Capable providers (would succeed):');
     for (const node of capable.slice(0, 10)) {
-      context.print(`    [${node.position}] ${node.providerId}/${node.modelId}`);
+      out.push(`    [${node.position}] ${node.providerId}/${node.modelId}`);
     }
     if (capable.length > 10) {
-      context.print(`    ... and ${capable.length - 10} more`);
+      out.push(`    ... and ${capable.length - 10} more`);
     }
   } else {
-    context.print('  No capable providers found for this profile.');
+    out.push('  No capable providers found for this profile.');
   }
 
   if (rejected.length > 0) {
-    context.print(`  Rejected providers (${rejected.length}):`);
+    out.push(`  Rejected providers (${rejected.length}):`);
     for (const node of rejected.slice(0, 5)) {
       const reasons = !node.explanation.accepted
         ? node.explanation.rejections.map((r) => r.code).join(', ')
         : '';
-      context.print(
+      out.push(
         `    [${node.position}] ${node.providerId}/${node.modelId}: ${reasons || 'unknown'}`,
       );
     }
     if (rejected.length > 5) {
-      context.print(`    ... and ${rejected.length - 5} more`);
+      out.push(`    ... and ${rejected.length - 5} more`);
     }
   }
 
   // Show fallback log
   const log = optimizer.fallbackLog;
   if (log.length > 0) {
-    context.print(`  Logged transitions (${log.length} total):`);
+    out.push(`  Logged transitions (${log.length} total):`);
     const recent: readonly FallbackTransition[] = log.slice(-5);
     for (const t of recent) {
-      context.print(
+      out.push(
         `    ${fmtTs(t.ts)}  ${t.from} → ${t.to}  (${t.reason})`,
       );
     }
   } else {
-    context.print('  No fallback transitions logged this session.');
+    out.push('  No fallback transitions logged this session.');
   }
 
-  context.print(`  Test completed at: ${fmtTs(result.testedAt)}`);
+  out.push(`  Test completed at: ${fmtTs(result.testedAt)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -381,48 +386,57 @@ export const providerCommand: SlashCommand = {
   argsHint: 'optimizer|route|explain-route|pin|fallback',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;
-
-    switch (sub) {
-      case 'optimizer':
-        handleOptimizerToggle(rest, context);
-        break;
-
-      case 'route':
-        handleRoute(rest, context);
-        break;
-
-      case 'explain-route':
-      case 'explain':
-        await handleExplainRoute(rest, context);
-        break;
-
-      case 'pin':
-        await handlePin(rest, context);
-        break;
-
-      case 'fallback':
-        handleFallbackTest(rest, context);
-        break;
-
-      default: {
-        const optimizer = requireProviderOptimizer(context);
-        if (!optimizer) return;
-        const lines = [
-          'Usage: /provider-opt <subcommand>',
-          '  optimizer on|off               — Enable or disable the provider optimizer',
-          '  route auto|manual              — Set optimizer routing mode',
-          '  explain-route                  — Show current route explanation',
-          '  pin <provider:model>           — Pin routing to specific provider/model',
-          '  fallback test                  — Simulate the full fallback chain',
-          '',
-          `  Optimizer: ${optimizer.enabled ? 'enabled' : 'disabled'}  mode=${optimizer.mode}`,
-        ];
-        if (optimizer.pinnedTarget) {
-          lines.push(`  Pinned: ${optimizer.pinnedTarget.providerId}/${optimizer.pinnedTarget.modelId}`);
-        }
-        context.print(lines.join('\n'));
-        break;
-      }
+    // One report is one printed block, so it is one notice and one saved message.
+    const out: string[] = [];
+    try {
+      await runProviderOptCommand(sub, rest, context, out);
+    } finally {
+      if (out.length > 0) context.print(out.join('\n'));
     }
   },
 };
+
+async function runProviderOptCommand(sub: string | undefined, rest: string[], context: CommandContext, out: string[]): Promise<void> {
+  switch (sub) {
+    case 'optimizer':
+      handleOptimizerToggle(rest, context, out);
+      break;
+
+    case 'route':
+      handleRoute(rest, context, out);
+      break;
+
+    case 'explain-route':
+    case 'explain':
+      await handleExplainRoute(rest, context, out);
+      break;
+
+    case 'pin':
+      await handlePin(rest, context, out);
+      break;
+
+    case 'fallback':
+      handleFallbackTest(rest, context, out);
+      break;
+
+    default: {
+      const optimizer = requireProviderOptimizer(context, out);
+      if (!optimizer) return;
+      const lines = [
+        'Usage: /provider-opt <subcommand>',
+        '  optimizer on|off               — Enable or disable the provider optimizer',
+        '  route auto|manual              — Set optimizer routing mode',
+        '  explain-route                  — Show current route explanation',
+        '  pin <provider:model>           — Pin routing to specific provider/model',
+        '  fallback test                  — Simulate the full fallback chain',
+        '',
+        `  Optimizer: ${optimizer.enabled ? 'enabled' : 'disabled'}  mode=${optimizer.mode}`,
+      ];
+      if (optimizer.pinnedTarget) {
+        lines.push(`  Pinned: ${optimizer.pinnedTarget.providerId}/${optimizer.pinnedTarget.modelId}`);
+      }
+      out.push(...lines);
+      break;
+    }
+  }
+}

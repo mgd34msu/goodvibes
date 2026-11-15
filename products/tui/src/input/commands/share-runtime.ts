@@ -29,8 +29,20 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
     name: 'share',
     aliases: [],
     description: 'Export the current session to a shareable format (html, json, md)',
-    usage: '<html|json|md> [path] [--redact] [--upload] [--copy] [--open]',
+    usage: '<html|json|md> [path] [--redact] [--upload] [--no-redact] [--copy] [--open]',
     argsHint: '<html|json|md> [path]',
+    confirm(args) {
+      // Publishing the transcript as stored is the one line that asks: once a
+      // gist link is shared, its copies cannot be recalled.
+      if (!args.includes('--upload') || !args.includes('--no-redact') || args.includes('--redact')) return undefined;
+      return {
+        title: 'Upload the transcript without redaction?',
+        detail: 'The secret gist is readable by anyone who has its link, and it will hold the session as stored: tool output (file contents, environment values), '
+          + 'API keys and tokens it showed, this account\'s home path and login name, and every notice. Copies made from the link cannot be recalled. '
+          + 'Without --no-redact the upload is redacted.',
+        confirmLabel: 'Upload unredacted',
+      };
+    },
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const FORMATS = ['html', 'json', 'md'] as const;
@@ -39,13 +51,14 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
       const format = args[0]?.toLowerCase() as Format | undefined;
       if (!format || !FORMATS.includes(format)) {
         ctx.print(
-          'Usage: /share <html|json|md> [path] [--redact] [--upload] [--copy] [--open]\n'
+          'Usage: /share <html|json|md> [path] [--redact] [--upload] [--no-redact] [--copy] [--open]\n'
           + '  html  — self-contained HTML with syntax highlighting\n'
           + '  json  — structured JSON (machine-readable)\n'
           + '  md    — Markdown\n\n'
           + 'Options:\n'
-          + '  --redact  Redact API keys, tokens, and this account\'s home path and login name (other users\' paths are not matched)\n'
-          + '  --upload  Upload export as a secret GitHub Gist and print the share link\n'
+          + '  --redact     Redact API keys, tokens, and this account\'s home path and login name (other users\' paths are not matched)\n'
+          + '  --upload     Upload the export as a secret GitHub Gist and print the share link; always redacted unless --no-redact\n'
+          + '  --no-redact  With --upload: send the transcript as stored (asks first)\n'
           + '  --copy    Copy the export file path to the clipboard\n'
           + '  --open    Open HTML export in the default browser\n\n'
           + 'Default path: ~/goodvibes-exports/session-<timestamp>.<ext>',
@@ -54,12 +67,22 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
       }
 
       const remainingArgs = args.slice(1);
-      const redact  = remainingArgs.includes('--redact');
       const upload  = remainingArgs.includes('--upload');
+      const noRedact = remainingArgs.includes('--no-redact');
+      if (noRedact && remainingArgs.includes('--redact')) {
+        ctx.print('Choose one of --redact and --no-redact. Nothing was exported or uploaded.');
+        return;
+      }
+      if (noRedact && !upload) {
+        ctx.print('--no-redact applies only to --upload; a local export is unredacted unless --redact is given. Nothing was exported.');
+        return;
+      }
+      // Anything that leaves the machine is redacted unless the owner chose otherwise.
+      const redact  = remainingArgs.includes('--redact') || (upload && !noRedact);
       const doCopy  = remainingArgs.includes('--copy');
       const doOpen  = remainingArgs.includes('--open');
       const pathArgs = remainingArgs.filter(
-        (a) => a !== '--redact' && a !== '--upload' && a !== '--copy' && a !== '--open',
+        (a) => a !== '--redact' && a !== '--no-redact' && a !== '--upload' && a !== '--copy' && a !== '--open',
       );
       // A mistyped flag must never become the output path: with --upload it would
       // publish an unredacted export while looking like a successful share.
@@ -67,7 +90,7 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
       if (unknownFlags.length > 0) {
         ctx.print(
           `Unknown option${unknownFlags.length > 1 ? 's' : ''}: ${unknownFlags.join(', ')}. Nothing was exported or uploaded. `
-          + 'Valid options: --redact, --upload, --copy, --open. For a path that starts with "--", write it as ./<path>.',
+          + 'Valid options: --redact, --upload, --no-redact, --copy, --open. For a path that starts with "--", write it as ./<path>.',
         );
         return;
       }
@@ -75,11 +98,14 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
         ctx.print(`Expected at most one output path but got ${pathArgs.length}: ${pathArgs.join(' ')}. Nothing was exported or uploaded.`);
         return;
       }
-      const reading = upload ? ctx.shareReading?.begin(JSON.stringify(args)) : undefined;
-      if (upload && !reading) {
-        ctx.print('Gist upload is unavailable or this submission is already pending.');
+      const begun = upload ? ctx.commandReadings?.begin('share', JSON.stringify(args)) : undefined;
+      if (upload && !begun?.ok) {
+        ctx.print(begun?.reason === 'pending'
+          ? 'This upload is already in progress; its link is printed when it finishes. Nothing new was started.'
+          : 'Gist upload is not available while the terminal is closing. Nothing was exported or uploaded.');
         return;
       }
+      const reading = begun?.ok ? begun : undefined;
       const conversation = ctx.session.conversationManager;
       const history = conversation.captureHistoryReadingLifetime();
       const sourceSignal = reading ? AbortSignal.any([history.signal, reading.signal]) : history.signal;
@@ -285,7 +311,8 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
 
       // Emit the summary line, with all post-export hints inline.
       const hints: string[] = [];
-      if (redact) hints.push('(sensitive data redacted)');
+      if (upload) hints.push(redact ? '(redacted before upload)' : '(uploaded unredacted, as stored)');
+      else hints.push(redact ? '(sensitive data redacted)' : '(not redacted)');
       if (shareLink) hints.push(`Share link: ${shareLink}`);
       if (uploadReceipt) hints.push(`Upload receipt: ${uploadReceipt}`);
       if (doCopy) hints.push('(path copied to clipboard)');

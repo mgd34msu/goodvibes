@@ -7,7 +7,7 @@ import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
 import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
 import { parseSlashCommand } from './slash-command-parser.ts';
-import { scheduleCommandArguments } from './commands/schedule-arguments.ts';
+import { strictArgumentsRefusal, strictCommandArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { activeTokens } from '../renderer/theme.ts';
 
 export type CommandModeRouteState = {
@@ -65,12 +65,12 @@ export const handleCommandModeToken = createCommandModeTokenHandler<CommandConte
   commandError: (error) => summarizeCommandError(error),
   prepare(context, state, raw) {
     const { name, args } = parseSlashCommand(raw);
-    if (name === 'schedule' || name === 'sched') {
-      // A schedule command is refused when its quoting is incomplete or has an empty word,
-      // rather than closing the quote silently and shifting the words that follow.
-      const strict = scheduleCommandArguments(raw.slice(1));
+    if (state.commandRegistry?.get(name)?.strictArgs) {
+      // A command whose words are fields is refused when its quoting is incomplete or has an
+      // empty word, rather than closing the quote silently and shifting the words that follow.
+      const strict = strictCommandArguments(raw.slice(1));
       if (!strict) {
-        context.print('Not run: the schedule command has an unclosed quote or an empty quoted word, so its words could land in the wrong fields. Close the quote or fill the empty word, then run it again.');
+        context.print(strictArgumentsRefusal(name));
         state.requestRender();
         return undefined;
       }

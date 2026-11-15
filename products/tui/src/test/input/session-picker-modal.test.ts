@@ -139,7 +139,7 @@ describe('SessionPickerModal', () => {
     const waiting = new Promise<void>((resolve) => { release = resolve; });
     const state = {
       sessionPickerModal: modal,
-      commandContext: { resumeSession: async (id: string): Promise<void> => { entered.push(id); await waiting; } },
+      commandContext: { resumeSession: async (id: string): Promise<undefined> => { entered.push(id); await waiting; return undefined; } },
       requestRender: () => {},
       handleEscape: () => { dismissals++; modal.close(); },
     };

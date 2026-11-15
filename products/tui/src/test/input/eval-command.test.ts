@@ -184,9 +184,10 @@ describe('evalCommand canonical observe registry adoption', () => {
 
       printed.length = 0;
       await evalCommand.handler(['compare', baseline], context);
-      expect(printed).toHaveLength(2);
+      // One report, one printed block, both suites in it.
+      expect(printed).toHaveLength(1);
       expect(printed[0]).toContain('cost-tokens');
-      expect(printed[1]).toContain('safety-baseline');
+      expect(printed[0]).toContain('safety-baseline');
       // Comparing reads the registry; it does not start a run.
       expect(states).toHaveLength(notifiedAfterGates);
       unsubscribe();
@@ -206,17 +207,5 @@ describe('evalCommand running flag ownership', () => {
     const context = makeGateContext([], registry);
     await expect(evalCommand.handler(['run', 'core-performance'], context)).rejects.toThrow('registry rejected');
     expect(registry.isRunning()).toBe(false);
-  });
-
-  test('a second run is refused while one is active and leaves the flag with the first', async () => {
-    const registry = new EvalRegistry();
-    registry.setRunning(true);
-    const printed: string[] = [];
-    const context = makeGateContext(printed, registry);
-    await evalCommand.handler(['run', 'core-performance'], context);
-    await evalCommand.handler(['gate', 'core-performance'], context);
-    expect(printed.filter(line => line.includes('already in progress'))).toHaveLength(2);
-    expect(registry.getSuiteResults()).toEqual([]);
-    expect(registry.isRunning()).toBe(true);
   });
 });

@@ -5,7 +5,7 @@ import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher
 import { join } from 'node:path';
 import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
-import { ScheduleReadingLifetime } from './input/commands/schedule-reading-lifetime.ts';
+import { CommandReadings } from './input/commands/command-readings.ts';
 import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
 import type { HostPairingController } from './shell/host-pairing-controller.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
@@ -455,30 +455,12 @@ async function main() {
     exitListener,
   } = lifecycle;
   commandContext.exit = exitApp;
-  const scheduleReading = new ScheduleReadingLifetime(
+  const commandReadings = new CommandReadings(
     () => runtime.sessionId,
     () => !lifecycle.isTerminalRestored(),
   );
-  commandContext.scheduleReading = scheduleReading;
-  const shareReading = new ScheduleReadingLifetime(
-    () => runtime.sessionId,
-    () => !lifecycle.isTerminalRestored(),
-  );
-  commandContext.shareReading = shareReading;
-  const teamworkReading = new ScheduleReadingLifetime(
-    () => runtime.sessionId,
-    () => !lifecycle.isTerminalRestored(),
-  );
-  commandContext.teamworkReading = teamworkReading;
-  const planningReading = new ScheduleReadingLifetime(
-    () => runtime.sessionId,
-    () => !lifecycle.isTerminalRestored(),
-  );
-  commandContext.planningReading = planningReading;
-  unsubs.push(() => teamworkReading.dispose());
-  unsubs.push(() => planningReading.dispose());
-  unsubs.push(() => shareReading.dispose());
-  unsubs.push(() => scheduleReading.dispose());
+  commandContext.commandReadings = commandReadings;
+  unsubs.push(() => commandReadings.dispose());
 
   // In-terminal (OSC 9) notifier (approval-wait/turn-end/agent-blocked); writes
   // are restore-gated so no escape sequence lands after the shell resumes.
@@ -541,10 +523,7 @@ async function main() {
   commandContext.dispatchNativeIntakeTurn = (state) => dispatchNativeTurn(state);
 
   const submitInput = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
-    scheduleReading.cancel();
-    shareReading.cancel();
-    teamworkReading.cancel();
-    planningReading.cancel();
+    commandReadings.cancelAll();
     hostPairing?.cancelForTakeover();
     input.clearModalStack();
     // Acting here after another surface took the session over is what moves the conversation back for rewinds.
@@ -589,12 +568,8 @@ async function main() {
     }
   };
 
-  const cancelGeneration = planningReading.withCancellation(
-    teamworkReading.withCancellation(
-      shareReading.withCancellation(
-        scheduleReading.withCancellation(createCancelGeneration(orchestrator, spokenTurns, () => streamResult.cancelPendingRecovery())),
-      ),
-    ),
+  const cancelGeneration = commandReadings.withCancellation(
+    createCancelGeneration(orchestrator, spokenTurns, () => streamResult.cancelPendingRecovery()),
   );
 
   const jumpToBookmark = (key: string) => {
@@ -633,10 +608,7 @@ async function main() {
   commandContext.platform.externalServices = uiServices.platform.externalServices;
   commandContext.cancelGeneration = cancelGeneration;
   commandContext.cancelPendingRecovery = () => {
-    scheduleReading.cancel();
-    shareReading.cancel();
-    teamworkReading.cancel();
-    planningReading.cancel();
+    commandReadings.cancelAll();
     return streamResult.cancelPendingRecovery();
   };
   wireInteractionSeams(commandContext, {

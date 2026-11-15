@@ -2,17 +2,14 @@ import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/s
 import { createSessionSaveCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import { unlinkSync } from 'node:fs';
-import 'node:fs/promises';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
-import '@goodvibes-jev/engine/platform/platform/export';
 import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/platform/platform/templates';
 import { requireSessionManager, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sessionCommand } from './session.ts';
-import { loadSavedSessionIntoLive } from './session-load.ts';
+import { describeSessionLoad, loadSessionWithAgents } from './session-load.ts';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
-import { filterUserFacingSessions } from './session-picker-filter.ts';
 
 /** Loading replaces the live conversation, which a running turn is still appending to. */
 function refuseWhileGenerating(ctx: CommandContext, action: string): boolean {
@@ -33,29 +30,15 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     description: 'Load a saved session',
     usage: '<name>',
     argsHint: '<name>',
-    handler(args, ctx) {
+    async handler(args, ctx) {
       if (!args[0]) {
         ctx.print('Usage: /load <session-name>\nRun /sessions to list available sessions.');
         return;
       }
       if (refuseWhileGenerating(ctx, `/load ${args[0]}`)) return;
-      const sessionManager = requireSessionManager(ctx);
-      try {
-        const agentManager = ctx.ops.agentManager;
-        if (!agentManager) {
-          ctx.print('Agent manager is not available in this runtime.');
-          return;
-        }
-        const { messageCount, agentRecords } = loadSavedSessionIntoLive(ctx, sessionManager, args[0]);
-        agentManager.clear();
-        if (agentRecords.length > 0) agentManager.importState(agentRecords);
-        ctx.renderRequest();
-        ctx.print(
-          `Session loaded: ${args[0]} (${messageCount} messages)${agentRecords.length > 0 ? ` [${agentRecords.length} agent records restored]` : ''}`,
-        );
-      } catch (e) {
-        ctx.print(`Failed to load session: ${summarizeError(e)}`);
-      }
+      const result = await loadSessionWithAgents(ctx, requireSessionManager(ctx), args[0]);
+      ctx.renderRequest();
+      ctx.print(result.ok ? describeSessionLoad(args[0], result) : result.message);
     },
   });
 
@@ -152,8 +135,13 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     name: 'template',
     aliases: ['tmpl'],
     description: 'Manage and use prompt templates',
-    usage: 'save <name> | use <name> [args] | list | edit <name> | delete <name>',
-    argsHint: '<save|use|list|edit|delete> [name]',
+    usage: 'save <name> | use <name> [args] | list | show <name> | edit <name> | delete <name>',
+    argsHint: '<save|use|list|show|edit|delete> [name]',
+    subcommands: { save: '<name>', use: '<name> [args]', list: '', show: '<name>', edit: '<name>', delete: '<name>' },
+    confirm(args) {
+      if (args[0] !== 'delete' || !args[1]) return undefined;
+      return { title: `Delete template ${args[1]}?`, detail: `The template file ${args[1]} is removed and cannot be recovered.`, confirmLabel: 'Delete' };
+    },
     handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const templateManager = new TemplateManager({
@@ -162,6 +150,35 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
       });
       const sub = args[0];
       const rest = args.slice(1);
+      /** The file a template loads from (project before global), or undefined when there is none. */
+      const templatePath = (name: string): string | undefined => {
+        // Stored names are folded the way TemplateManager.save folds them.
+        const stored = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '') || 'template';
+        const wanted = templateManager.list().filter((entry) => entry.name === stored);
+        return (wanted.find((entry) => entry.scope === 'project') ?? wanted[0])?.path;
+      };
+      /** Opens the template's file in $VISUAL / $EDITOR; without an editor it says where the file is. */
+      const editTemplate = (name: string): void => {
+        const path = templatePath(name);
+        if (!path) {
+          ctx.print(`Template not found: ${name}. Run /template list to see the templates, or /template save ${name} to create it.`);
+          return;
+        }
+        if (!ctx.openFileInEditor) {
+          ctx.print(`No editor can be opened from this surface. The template is the file ${path}; edit it there, or set $VISUAL or $EDITOR.`);
+          return;
+        }
+        ctx.openFileInEditor(path);
+        ctx.print(`Opened template ${name} in the editor (${path}); /template use ${name} reads the saved file.`);
+      };
+      const deleteTemplate = (name: string): void => {
+        const deleted = templateManager.delete(name);
+        if (!deleted.ok) {
+          ctx.print(`${deleted.refusal.reason}. ${deleted.refusal.next[0] ?? ''}`.trim());
+          return;
+        }
+        ctx.print(`Template deleted: ${deleted.name}${deleted.stillLoadsFrom === 'global' ? ' (a global template of that name still loads)' : ''}`);
+      };
       if (!sub || sub === 'list') {
         const templates = templateManager.list();
         if (ctx.openSelection) {
@@ -177,21 +194,18 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
                   label: t.name,
                   detail: t.preview,
                   category: t.scope === 'project' ? 'project' : 'global',
-                  actions: '[d] delete  [e] edit',
+                  actions: '[Del] delete  [Ctrl+E] edit',
                 }));
           ctx.openSelection('Templates', items, { allowSearch: true, customActions: actions }, (result) => {
             if (!result) return;
             if (result.action === 'delete') {
-              const deleted = templateManager.delete(result.item.id);
-              ctx.print(deleted ? `Template deleted: ${result.item.id}` : `Template not found: ${result.item.id}`);
+              deleteTemplate(result.item.id);
+            } else if (result.action === 'edit') {
+              editTemplate(result.item.id);
             } else {
               const content = templateManager.load(result.item.id);
-              if (content !== null) {
-                if (result.action === 'edit') ctx.print(`Template: ${result.item.id}\n\n${content}`);
-                else ctx.submitInput?.(content);
-              } else {
-                ctx.print(`Template not found: ${result.item.id}`);
-              }
+              if (content !== null) ctx.submitInput?.(content);
+              else ctx.print(`Template not found: ${result.item.id}`);
             }
           });
           return;
@@ -236,10 +250,14 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         ctx.submitInput?.(templateManager.expand(templateContent, parseTemplateArgs(rest.slice(1))));
         return;
       }
-      if (sub === 'edit') {
+      if (sub === 'show' || sub === 'edit') {
         const name = rest[0];
         if (!name) {
-          ctx.print('Usage: /template edit <name>');
+          ctx.print(`Usage: /template ${sub} <name>`);
+          return;
+        }
+        if (sub === 'edit') {
+          editTemplate(name);
           return;
         }
         const content = templateManager.load(name);
@@ -252,10 +270,10 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           ctx.print('Usage: /template delete <name>');
           return;
         }
-        ctx.print(templateManager.delete(name) ? `Template deleted: ${name}` : `Template not found: ${name}`);
+        deleteTemplate(name);
         return;
       }
-      ctx.print(`Unknown subcommand: ${sub}\nUsage: /template save|use|list|edit|delete`);
+      ctx.print(`Unknown subcommand: ${sub}\nUsage: /template save|use|list|show|edit|delete`);
     },
   });
 
@@ -360,9 +378,8 @@ const saveCommand = createSessionSaveCommand<CommandContext>({
 const sessionsCommand = createSessionListCommand<CommandContext>({
   manager: requireSessionManager,
   forward: (args, ctx) => sessionCommand.handler(args, ctx),
-  filter: filterUserFacingSessions,
   emptyDetail: 'Use /save [name] to save',
-  actions: '[d] delete',
+  actions: '[Del] delete',
   options: { allowSearch: true, customActions: new Map([['d', 'delete' as const]]) },
   selected: (ctx, sessionManager, sessions, result) => {
     if (!result) return;
@@ -396,13 +413,12 @@ const sessionsCommand = createSessionListCommand<CommandContext>({
         });
     } else {
       if (refuseWhileGenerating(ctx, `loading ${result.item.id}`)) return;
-      try {
-        const { messageCount } = loadSavedSessionIntoLive(ctx, sessionManager, result.item.id);
+      // The same load as /load, agent records included.
+      const name = result.item.id;
+      void loadSessionWithAgents(ctx, sessionManager, name).then((loaded) => {
         ctx.renderRequest();
-        ctx.print(`Session loaded: ${result.item.id} (${messageCount} messages)`);
-      } catch (e) {
-        ctx.print(`Failed to load session: ${summarizeError(e)}`);
-      }
+        ctx.print(loaded.ok ? describeSessionLoad(name, loaded) : loaded.message);
+      });
     }
   },
   heading: 'Saved sessions:',

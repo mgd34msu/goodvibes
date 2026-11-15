@@ -167,7 +167,6 @@ const saveCommand = createSessionSaveCommand<CommandContext>({
 const sessionsCommand = createSessionListCommand<CommandContext>({
   manager: requireSessionManager,
   forward: (args, ctx) => sessionCommand.handler(args, ctx),
-  filter: (sessions) => sessions,
   emptyDetail: 'Open Agent Workspace -> Conversation -> Save current session',
   actions: 'Enter to load',
   options: { allowSearch: true },

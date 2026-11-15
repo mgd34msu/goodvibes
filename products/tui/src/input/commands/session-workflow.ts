@@ -1,13 +1,8 @@
 import { formatSessionExport, resolveSessionExportRequest } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
 import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
-import '@goodvibes-jev/engine/terminal-shell/transcript-review';
-
-import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
 import { resolveSessionTarget } from '@goodvibes-jev/engine/platform/platform/sessions';
-import './transcript-reading.ts';
-import 'node:crypto';
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import type { CommandContext } from '../command-registry.ts';
 
@@ -19,7 +14,7 @@ import {
   loadedReturnContext,
   maybeAssistReturnContextSummary,
 } from '@/runtime/index.ts';
-import { requireProviderApi, requireSessionManager, requireSurface } from './runtime-services.ts';
+import { requireProviderApi, requireSessionManager, requireShellPaths, requireSurface } from './runtime-services.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
 import { checkSessionLiveness } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -57,20 +52,58 @@ function flattenMessageContent(content: unknown): string {
     .join('\n');
 }
 
-async function printSessionExport(
-  ctx: { print: (text: string) => void },
+/**
+ * `/session export` writes the transcript to a file (redacted like every
+ * export), and prints it only with `--print`; the printed copy is display-only
+ * and never becomes part of this conversation.
+ */
+async function exportSessionTranscript(
+  ctx: Pick<CommandContext, 'print' | 'workspace'>,
   sessionId: string,
   title: string,
   messages: Array<Record<string, unknown>>,
   format: string,
+  output: { readonly printOnly: boolean; readonly path: string | undefined },
 ): Promise<void> {
   const formatted = formatSessionExport(sessionId, title, messages, format, {
     role: (message) => String(message.role ?? 'unknown'),
     content: (message) => flattenMessageContent(message.content),
     tool: (message) => String(message.toolName ?? 'tool'),
   });
-  // A printed transcript is redacted like the exported file; a failed redaction prints nothing.
-  ctx.print(await redactSensitiveDataAsync(formatted, { purpose: 'export' }));
+  // A failed redaction writes and prints nothing.
+  const redacted = await redactSensitiveDataAsync(formatted, { purpose: 'export' });
+  if (output.printOnly) {
+    ctx.print(redacted);
+    return;
+  }
+  const paths = requireShellPaths(ctx);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const target = output.path
+    ? paths.resolveWorkspacePath(output.path)
+    : join(paths.homeDirectory, 'goodvibes-exports', `session-${sessionId}-${stamp}.${format === 'text' ? 'txt' : 'md'}`);
+  mkdirSync(dirname(target), { recursive: true });
+  // Never replaces an existing file.
+  writeFileSync(target, redacted, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+  ctx.print(`Exported session ${sessionId} (${messages.length} messages, redacted) to ${target}`);
+}
+
+/** `--print` and `--out <path>` of `/session export`, with the remaining words. */
+function readExportOutput(args: readonly string[]): { readonly rest: string[]; readonly printOnly: boolean; readonly path: string | undefined } | string {
+  const rest: string[] = [];
+  let printOnly = false;
+  let path: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i]!;
+    if (token === '--print') printOnly = true;
+    else if (token === '--out') {
+      path = args[i + 1];
+      if (!path || path.startsWith('--')) return 'Usage: /session export <session-id|.> [markdown|text] [--out <path>] [--print]';
+      i++;
+    } else if (token.startsWith('--')) return `Unknown option ${token}. Options: --out <path>, --print. Nothing was exported.`;
+    else rest.push(token);
+  }
+  if (printOnly && path) return 'Choose one of --out and --print. Nothing was exported.';
+  return { rest, printOnly, path };
 }
 
 // session-mgmt / smgmt was removed in TASK-032.
@@ -170,16 +203,25 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
 
       try {
         const providerApi = requireProviderApi(ctx);
-        ctx.cancelPendingRecovery?.();
-        const outcome = await resumeSessionCore(found.name, {
-          sessionManager: sm,
-          conversation: ctx.session.conversationManager,
-          runtime: ctx.session.runtime,
-          surface: requireSurface(ctx),
-          selectModel: (model) => providerApi.selectModel(model),
-          hydrateSessionUsage: ctx.session.hydrateSessionUsage,
-          canResume: () => !ctx.isGenerating?.(),
-        });
+        // The terminal's one resume routine also publishes the resumed session
+        // (last-session pointer, shared session, daemon spine, load hook); this
+        // command keeps only its own lines. A context without the routine
+        // (a test harness) runs the shared restore alone.
+        const outcome = ctx.resumeSession
+          ? await ctx.resumeSession(found.name, { quiet: true, liveChecked: true })
+          : await (() => {
+            ctx.cancelPendingRecovery?.();
+            return resumeSessionCore(found.name, {
+              sessionManager: sm,
+              conversation: ctx.session.conversationManager,
+              runtime: ctx.session.runtime,
+              surface: requireSurface(ctx),
+              selectModel: (model) => providerApi.selectModel(model),
+              hydrateSessionUsage: ctx.session.hydrateSessionUsage,
+              canResume: () => !ctx.isGenerating?.(),
+            });
+          })();
+        if (!outcome) return true;
         const { meta, journalReplay, restoredAnchorCount, resumedMessageCount } = outcome;
 
         ctx.renderRequest();
@@ -238,8 +280,13 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
     }
 
     if (sub === 'export') {
+      const output = readExportOutput(args);
+      if (typeof output === 'string') {
+        ctx.print(output);
+        return true;
+      }
       const request = resolveSessionExportRequest(
-        args,
+        output.rest,
         ctx.session.runtime.sessionId,
         () => sm.list(),
         (text) => ctx.print(text),
@@ -255,7 +302,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
           return true;
         }
         try {
-          await printSessionExport(ctx, sessionId, loaded.meta.title, loaded.messages as Array<Record<string, unknown>>, format);
+          await exportSessionTranscript(ctx, sessionId, loaded.meta.title, loaded.messages as Array<Record<string, unknown>>, format, output);
         } catch (e) {
           ctx.print(`Failed to export session: ${summarizeError(e)}`);
         }
@@ -264,7 +311,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
       const loadName = found ? found.name : sessionId;
       try {
         const { meta, messages } = sm.load(loadName);
-        await printSessionExport(ctx, loadName, meta.title, messages as Array<Record<string, unknown>>, format);
+        await exportSessionTranscript(ctx, loadName, meta.title, messages as Array<Record<string, unknown>>, format, output);
       } catch (e) {
         ctx.print(`Failed to export session: ${summarizeError(e)}`);
       }

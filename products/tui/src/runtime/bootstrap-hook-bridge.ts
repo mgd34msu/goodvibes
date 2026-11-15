@@ -3,20 +3,17 @@ import { activeTokens } from '../renderer/theme.ts';
 import type { ConversationManager } from '../core/conversation';
 import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
-import '@/runtime/index.ts';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { emitSessionResumed } from '@/runtime/index.ts';
 import { emitSessionRecoveryFailed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
-import '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import '@/runtime/index.ts';
 import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { resumeSessionCore } from '../core/session-resume-core.ts';
+import { resumeSessionCore, type SessionResumeOutcome } from '../core/session-resume-core.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 
 export interface ResumeSessionOptions {
@@ -57,7 +54,33 @@ export interface ResumeSessionOptions {
   readonly isGenerating?: () => boolean;
 }
 
+/** How one caller of the resume routine wants it run. */
+export interface ResumeSessionCallOptions {
+  /**
+   * The caller prints its own lines from the returned outcome and wants a
+   * failure thrown to it; the routine then logs nothing itself. The session
+   * browser leaves this off and the routine reports in the conversation.
+   */
+  readonly quiet?: boolean | undefined;
+  /** The caller already decided about a session open in another terminal (`--force`, or its own check). */
+  readonly liveChecked?: boolean | undefined;
+  /** Replace the live agent list with the session's saved agent records (`/load`, `/sessions`). */
+  readonly agents?: { clear(): void; importState(records: ReturnType<SessionManager['load']>['agentRecords']): void } | undefined;
+}
+
+/** What a resume did, for a caller that prints its own lines. */
+export interface ResumedSession extends SessionResumeOutcome {
+  /** Agent records restored from the session (0 when `agents` was not given or the session had none). */
+  readonly agentRecordsRestored: number;
+}
+
 /**
+ * The terminal app's one resume routine: `/session resume` (and the
+ * `--continue`, `--resume` and `sessions resume` start-up flags that run it),
+ * `/load`, Enter in `/sessions` and the session browser all come here, so each
+ * writes the last-session pointer, reopens the shared session and the daemon
+ * spine, fires the `Lifecycle:session:load` hook and announces the resume.
+ *
  * Delegates the mechanical resume sequence to resumeSessionCore (the same
  * routine session-workflow.ts's `/session resume` calls) so the two seams
  * cannot diverge on restoreTurnAnchors, resetAll-before-fromJSON, model
@@ -67,8 +90,8 @@ export interface ResumeSessionOptions {
  * this seam performs (hook fire, session-spine mirror, shared-broker
  * reopen, last-session pointer) plus this seam's own log/render idiom.
  */
-export function createResumeSessionHandler(options: ResumeSessionOptions): (sessionId: string) => Promise<void> {
-  return async (sessionId: string): Promise<void> => {
+export function createResumeSessionHandler(options: ResumeSessionOptions): (sessionId: string, call?: ResumeSessionCallOptions) => Promise<ResumedSession | undefined> {
+  return async (sessionId: string, call: ResumeSessionCallOptions = {}): Promise<ResumedSession | undefined> => {
     // Set once the refusal checks passed: a failure from here on is the saved session
     // failing to load or restore, which the ops playbooks read as a recovery failure.
     let restoring = false;
@@ -77,10 +100,11 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
       // Multi-instance safety, matching what `/session resume` already does
       // for the text path: never fork a session another terminal is holding
       // open without the operator saying so.
-      if (options.confirmLiveResume && !(await options.confirmLiveResume(sessionId))) {
+      if (!call.liveChecked && options.confirmLiveResume && !(await options.confirmLiveResume(sessionId))) {
+        if (call.quiet) throw new Error('Resume cancelled: the session is still open in another terminal. Nothing changed.');
         options.conversation.log('Resume cancelled: the session is still open in another terminal.', { fg: activeTokens().textMuted });
         options.requestRender();
-        return;
+        return undefined;
       }
       // Pre-read purely for the emitSessionResumed announcement's turnCount,
       // which reports the raw saved-snapshot size, resumeSessionCore performs
@@ -88,7 +112,7 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
       // parse; the tiny duplicate read keeps this announcement's meaning
       // unchanged rather than repurposing it to a post-replay count).
       restoring = true;
-      const { messages: rawMessages } = options.sessionManager.load(sessionId);
+      const { messages: rawMessages, agentRecords } = options.sessionManager.load(sessionId);
       // The session this process was running leaves the daemon's live list once a
       // resume replaces it; left open it would keep being kept alive until the
       // daemon's reaper retired it.
@@ -122,7 +146,12 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         },
       );
 
+      if (call.agents) {
+        call.agents.clear();
+        if (agentRecords.length > 0) call.agents.importState(agentRecords);
+      }
       publishResumedSession(options, sessionId, meta, {
+        announce: !call.quiet,
         reopen: () => {
           if (previousSessionId !== sessionId) options.sessionSpine.close?.(previousSessionId);
           options.sessionSpine.reopen({ sessionId, project: options.project, title: options.conversation.title || meta.title });
@@ -136,6 +165,8 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         },
         hookError: 'Hook bridge fire error',
       });
+      options.requestRender();
+      return { ...outcome, agentRecordsRestored: call.agents ? agentRecords.length : 0 };
     } catch (error) {
       const reason = summarizeError(error);
       logger.debug('resumeSession failed', { error: reason });
@@ -146,8 +177,10 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
           source: 'bootstrap',
         }, { sessionId, error: reason });
       }
+      if (call.quiet) throw error;
       options.conversation.log(`Failed to resume session: ${reason}`, { fg: activeTokens().error });
     }
     options.requestRender();
+    return undefined;
   };
 }

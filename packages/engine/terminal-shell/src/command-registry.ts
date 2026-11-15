@@ -10,6 +10,13 @@ export interface TerminalSlashCommand<Context> {
   hidden?: boolean | undefined;
   /** Typed arguments that carry a secret; the input history stores `<redacted>` in their place. */
   secretArgs?: CommandSecretArgs | undefined;
+  /**
+   * Quoting is part of this command's grammar: the typed line is split by
+   * `strictCommandArguments`, and a line with an unclosed quote, a trailing
+   * lone backslash or an empty quoted word is refused instead of shifting
+   * words into the wrong fields.
+   */
+  strictArgs?: boolean | undefined;
   handler: (args: string[], context: Context) => void | Promise<void>;
 }
 /**

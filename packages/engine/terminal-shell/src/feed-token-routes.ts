@@ -15,7 +15,7 @@ import {
 import { captureNativeConversationInput } from './native/native-conversation-input.js';
 import { commandHistoryLine } from './command-registry.js';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
-import { scheduleCommandArguments } from './command-arguments.js';
+import { strictArgumentsRefusal, strictCommandArguments } from './command-arguments.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
 export interface FeedCommandContext {
   readonly print: (message: string) => void;
@@ -32,14 +32,10 @@ export interface FeedCommandContext {
           | undefined,
       ) => unknown)
     | undefined;
-  readonly scheduleReading?:
+  /** Pending command readings; a refused command line revokes them like any new submission. */
+  readonly commandReadings?:
     | {
-        cancel(): void;
-      }
-    | undefined;
-  readonly shareReading?:
-    | {
-        cancel(): void;
+        cancelAll(): unknown;
       }
     | undefined;
 }
@@ -374,13 +370,12 @@ export function createFeedTokenRoutes<
         ) {
           const parts = text.slice(1).trim().split(/\s+/);
           const name = parts[0];
-          const args = name === 'schedule' || name === 'sched' ? scheduleCommandArguments(text.slice(1)) : parts.slice(1);
+          const args = name && state.commandRegistry.get(name)?.strictArgs ? strictCommandArguments(text.slice(1)) : parts.slice(1);
           prompt = '';
           cursorPos = 0;
           if (!args) {
-            state.commandContext.scheduleReading?.cancel();
-            state.commandContext.shareReading?.cancel();
-            state.commandContext.print('Invalid schedule command quoting.');
+            state.commandContext.commandReadings?.cancelAll();
+            state.commandContext.print(strictArgumentsRefusal(name ?? ''));
             state.requestRender();
             return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
           }

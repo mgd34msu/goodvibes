@@ -56,26 +56,21 @@ export function readKnowledgeAskArguments(args: readonly string[], allowKnowledg
   } as const;
 }
 
-/** `/schedule` arguments. Quoting is command grammar, never schedule meaning: incomplete input is refused. */
-export function scheduleCommandArguments(command: string): string[] | undefined {
-  let quote: '"' | "'" | undefined;
-  let tokenStart: number | undefined;
-  for (let i = 0; i < command.length; i++) {
-    const ch = command[i];
-    if (!quote && /\s/.test(ch!)) {
-      // shellSplit intentionally drops empty words. A positional command must
-      // reject that input before a prompt can shift into the schedule slot.
-      if (tokenStart !== undefined && shellSplit(command.slice(tokenStart, i)).length === 0) return undefined;
-      tokenStart = undefined;
-      continue;
-    }
-    tokenStart ??= i;
-    if (ch === '\\' && quote !== "'") {
-      if (i + 1 === command.length) return undefined;
-      if (!quote || command[i + 1] === '"' || command[i + 1] === '\\') i++;
-    } else if (ch === quote) quote = undefined;
-    else if (!quote && (ch === '"' || ch === "'")) quote = ch;
+/**
+ * The arguments of a typed line (without its leading `/`) for a command that
+ * declares `strictArgs`: split with strict shell quoting, refused (undefined)
+ * on an unclosed quote, a trailing lone backslash or an empty quoted word.
+ */
+export function strictCommandArguments(command: string): string[] | undefined {
+  try {
+    const words = shellSplit(command, { strict: true });
+    return words.includes('') ? undefined : words.slice(1);
+  } catch {
+    return undefined;
   }
-  if (quote || (tokenStart !== undefined && shellSplit(command.slice(tokenStart)).length === 0)) return undefined;
-  return shellSplit(command).slice(1);
+}
+
+/** The refusal printed when a `strictArgs` command's line does not split. */
+export function strictArgumentsRefusal(name: string): string {
+  return `Not run: /${name} has an unclosed quote, a trailing backslash or an empty quoted word, so its words could land in the wrong fields. Close the quote or fill the empty word, then run it again.`;
 }

@@ -23,7 +23,6 @@ import type { CancellationScope, CrossSessionTaskRef } from '@goodvibes-jev/engi
 import { VALID_SCOPES } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { handleSessionWorkflowCommand } from './session-workflow.ts';
 import { requireSessionOrchestration, requireSessionManager } from './runtime-services.ts';
-import { filterUserFacingSessions } from './session-picker-filter.ts';
 
 // ── Argument parsing helpers ──────────────────────────────────────────────────
 
@@ -106,7 +105,67 @@ function handleLinkTask(args: string[], context: CommandContext): void {
 
 // ── /session handoff ──────────────────────────────────────────────────────────
 
+/** Handoffs still waiting for their destination session, one line each; empty when none. */
+function pendingHandoffLines(context: CommandContext): string[] {
+  const pending = requireSessionOrchestration(context).getHandoffs().filter((handoff) => !handoff.acknowledged);
+  if (pending.length === 0) return [];
+  return [
+    `[session] Handoffs waiting (${pending.length}): accept with /session handoff accept <handoffId>, decline with /session handoff reject <handoffId>`,
+    ...pending.map((handoff) =>
+      `  ${handoff.handoffId}  task ${handoff.taskRef.taskId}  ${handoff.fromSessionId.slice(0, 8)}... -> ${handoff.toSessionId.slice(0, 8)}...`
+      + (handoff.reason ? `  reason: ${handoff.reason}` : '')),
+  ];
+}
+
+/**
+ * `/session handoff accept|reject <handoffId>`: the owner ends a handoff from
+ * the terminal. Accept completes it for its destination session (the task is
+ * released from "blocked"); reject withdraws it (the task returns to the status
+ * it had before). Typed by the owner, who speaks for every session of theirs.
+ */
+function handleHandoffAnswer(verb: 'accept' | 'reject', args: string[], context: CommandContext): void {
+  const handoffId = args[0];
+  if (!handoffId) {
+    const pending = pendingHandoffLines(context);
+    context.print([`[session] Usage: /session handoff ${verb} <handoffId>`, ...(pending.length > 0 ? pending : ['[session] No handoffs are waiting.'])].join('\n'));
+    return;
+  }
+  const orchestration = requireSessionOrchestration(context);
+  const handoff = orchestration.getHandoffs().find((record) => record.handoffId === handoffId);
+  if (!handoff) {
+    context.print(`[session] Unknown handoff: ${handoffId}. Nothing was changed. /session handoff list shows the waiting ones.`);
+    return;
+  }
+  if (handoff.acknowledged) {
+    context.print(`[session] Handoff ${handoffId} was already accepted by session ${handoff.toSessionId}. Nothing was changed.`);
+    return;
+  }
+  if (verb === 'accept') {
+    if (!orchestration.acknowledgeHandoff(handoffId)) {
+      context.print(`[session] Handoff ${handoffId} is no longer waiting (withdrawn or expired). Nothing was changed.`);
+      return;
+    }
+    context.print(`[session] Handoff ${handoffId} accepted for session ${handoff.toSessionId}: task ${handoff.taskRef.taskId} is no longer blocked.`);
+    return;
+  }
+  const result = orchestration.withdrawHandoff(handoffId);
+  if (!result.ok) {
+    context.print(`[session] ${result.error ?? `Handoff ${handoffId} could not be rejected.`}`);
+    return;
+  }
+  context.print(`[session] Handoff ${handoffId} rejected: task ${handoff.taskRef.taskId} stays with session ${handoff.fromSessionId}${result.status ? ` (status ${result.status})` : ''}.`);
+}
+
 function handleHandoff(args: string[], context: CommandContext): void {
+  if (args[0] === 'accept' || args[0] === 'reject') {
+    handleHandoffAnswer(args[0], args.slice(1), context);
+    return;
+  }
+  if (args[0] === 'list') {
+    const pending = pendingHandoffLines(context);
+    context.print(pending.length > 0 ? pending.join('\n') : '[session] No handoffs are waiting.');
+    return;
+  }
   const taskId = args[0];
   const toSessionId = flagValue(args, '--to');
   const fromSessionId = flagValue(args, '--session') ?? context.session.runtime.sessionId;
@@ -129,9 +188,9 @@ function handleHandoff(args: string[], context: CommandContext): void {
   context.print(
     `[session] Handoff initiated: ${taskId} (${fromSessionId.slice(0, 8)}...) → (${toSessionId.slice(0, 8)}...)` +
       (reason ? `  reason: ${reason}` : '') +
-      `\n[session] handoffId: ${result.handoffId}`,
+      `\n[session] handoffId: ${result.handoffId}` +
+      `\n[session] The task is blocked until the destination session accepts it: /session handoff accept ${result.handoffId} (or reject to take it back).`,
   );
-  context.print('[session] The task is now blocked pending acknowledgement from the destination session.');
 }
 
 // ── /session graph ────────────────────────────────────────────────────────────
@@ -200,11 +259,9 @@ function handleCancel(args: string[], context: CommandContext): void {
 /**
  * SESSION_SUBCOMMAND_ARG_HINTS, the single source of truth for each
  * `/session <subcommand>` argument hint, co-located with the switch below so
- * the two can't silently drift apart (command-args-hint.ts imports this
- * directly instead of hand-maintaining its own copy; a drift test,
- * src/test/input/command-args-hint.test.ts, cross-checks every key here
- * against the default usage text's own subcommand list). Aliases (`link`,
- * `ho`, `g`) share their canonical subcommand's hint text.
+ * the two can't silently drift apart; the command carries it as `subcommands`,
+ * where the composer reads it. Aliases (`link`, `ho`, `g`) share their
+ * canonical subcommand's hint text.
  */
 export const SESSION_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
   list: '',
@@ -213,7 +270,7 @@ export const SESSION_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
   fork: '[name]',
   save: '[name]',
   info: '[id]',
-  export: '<id|.> [markdown|text]',
+  export: '<id|.> [markdown|text] [--out <path>] [--print]',
   search: '<query>',
   delete: '<id>',
   events: '[kind]',
@@ -221,8 +278,8 @@ export const SESSION_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
   hotspots: '',
   'link-task': '<taskId> [--session <sid>] [--depends-on <sid:taskId>] [--label <label>]',
   link: '<taskId> [--session <sid>] [--depends-on <sid:taskId>] [--label <label>]',
-  handoff: '<taskId> --to <sid> [--session <sid>] [--reason <reason>]',
-  ho: '<taskId> --to <sid> [--session <sid>] [--reason <reason>]',
+  handoff: '<taskId> --to <sid> [--session <sid>] [--reason <reason>] | accept|reject <handoffId> | list',
+  ho: '<taskId> --to <sid> [--session <sid>] [--reason <reason>] | accept|reject <handoffId> | list',
   graph: '[--session <sid>] [--format text|json]',
   g: '[--session <sid>] [--format text|json]',
   cancel: '<taskId> [--scope task|subtree|session] [--session <sid>] [--reason <reason>]',
@@ -254,6 +311,7 @@ export const sessionCommand: SlashCommand = {
   description: 'Session lifecycle and orchestration: list, resume, fork, save, export, link-task, handoff, graph, cancel',
   usage: '<subcommand> [args]',
   argsHint: 'list|rename|resume|fork|save|info|export|search|delete|events|groups|hotspots|link-task|handoff|graph|cancel',
+  subcommands: SESSION_SUBCOMMAND_ARG_HINTS,
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;
 
@@ -288,9 +346,13 @@ export const sessionCommand: SlashCommand = {
         break;
 
       case 'graph':
-      case 'g':
+      case 'g': {
         handleGraph(rest, context);
+        // Waiting handoffs are listed under the graph so a blocked task shows what releases it.
+        const pending = rest.includes('json') ? [] : pendingHandoffLines(context);
+        if (pending.length > 0) context.print(pending.join('\n'));
         break;
+      }
 
       case 'cancel':
         handleCancel(rest, context);
@@ -312,7 +374,8 @@ export const sessionCommand: SlashCommand = {
           '  fork [name]                             — Fork the current session',
           '  save [name]                             — Save the current session',
           '  info [id]                               — Show session info',
-          '  export <id|.> [markdown|text]           — Export session transcript',
+          '  export <id|.> [markdown|text] [--out <path>] [--print]',
+          '                                          — Write the redacted transcript to a file (or print it)',
           '  search <query>                          — Search session content',
           '  delete <id>                             — Delete a saved session',
           '  events [kind]                           — Show transcript events',
@@ -324,6 +387,8 @@ export const sessionCommand: SlashCommand = {
           '                                          — Register a task in the cross-session graph',
           '  handoff <taskId> --to <sid> [--session <sid>] [--reason <reason>]',
           '                                          — Hand a task off to another session',
+          '  handoff accept|reject <handoffId>       — Accept or decline a waiting handoff',
+          '  handoff list                            — List handoffs waiting to be accepted',
           '  graph [--session <sid>] [--format text|json]',
           '                                          — Display the cross-session task dependency graph',
           '  cancel <taskId> [--scope task|subtree|session] [--session <sid>] [--reason <reason>]',
@@ -358,10 +423,9 @@ export const resumeCommand: SlashCommand = {
       return;
     }
     const sm = requireSessionManager(ctx);
-    // Excludes the current session and subagent-shaped transcripts (see
-    // session-picker-filter.ts), a direct `/resume agent-xxxxxxxx` still
-    // reaches them, this only keeps the picker itself readable.
-    const sessions = filterUserFacingSessions(sm.list()).filter((s) => s.name !== ctx.session.runtime.sessionId);
+    // Every saved session except the open one. Subagent transcripts are not
+    // listed by the session manager (they live under sessions/agents/).
+    const sessions = sm.list().filter((s) => s.name !== ctx.session.runtime.sessionId);
     if (sessions.length === 0) {
       ctx.print('No previous sessions to resume yet. /session save [name] stores the current one explicitly.');
       return;

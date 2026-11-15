@@ -163,9 +163,12 @@ describe('/checkpoints: lists newest first', () => {
 
     await registry.execute('checkpoints', [], ctx);
 
-    const header = printed.find((l) => l.startsWith('Checkpoints ('));
+    // The list is one printed block.
+    expect(printed).toHaveLength(1);
+    const lines = printed[0]!.split('\n');
+    const header = lines.find((l) => l.startsWith('Checkpoints ('));
     expect(header).toContain('2, newest first');
-    const dataRows = printed.filter((l) => l.startsWith('  '));
+    const dataRows = lines.filter((l) => l.startsWith('  '));
     expect(dataRows.length).toBe(2);
     expect(dataRows[0]).toContain('second');
     expect(dataRows[1]).toContain('first');

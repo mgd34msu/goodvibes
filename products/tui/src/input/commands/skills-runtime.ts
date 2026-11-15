@@ -12,19 +12,7 @@ import {
   upsertEcosystemCatalogEntry,
 } from '@/runtime/index.ts';
 import { openModalCommand, requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
-
-/**
- * Scope word of `/skills install|update|uninstall`. Absent means `project`,
- * the same default `/plugin` and `/marketplace` use, so an install and its
- * uninstall through different commands hit the same target. Any other word
- * is refused rather than guessed, because a typo must not widen a project
- * install to the user account.
- */
-export function parseEcosystemScope(arg: string | undefined): 'project' | 'user' | undefined {
-  if (arg === undefined || arg === 'project') return 'project';
-  if (arg === 'user') return 'user';
-  return undefined;
-}
+import { parseScope } from './marketplace-runtime.ts';
 
 export function registerSkillsRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -38,14 +26,14 @@ export function registerSkillsRuntimeCommands(registry: CommandRegistry): void {
         openModalCommand(ctx, 'skills-modal');
         return;
       }
-      if (sub === 'install' || sub === 'update' || sub === 'uninstall') {
-        if (args[1] && parseEcosystemScope(args[2]) === undefined) {
-          ctx.print(`Unknown scope "${args[2]}": nothing was changed. Usage: /skills ${sub} <catalog-id> [project|user] (default: project)`);
-          return;
-        }
-      }
-      const skills = await discoverSkills(requireShellPaths(ctx));
+      // Read before anything is discovered, so a mistyped scope changes nothing.
+      const scope = (sub === 'install' || sub === 'update' || sub === 'uninstall') && args[1]
+        ? parseScope(args[2], ctx, `/skills ${sub} <catalog-id> [project|user]`)
+        : 'project';
+      if (scope === null) return;
+      // The same discovery and inputs as the Skills modal, so marketplace provenance shows here too.
       const ecosystemPaths = requireEcosystemCatalogPaths(ctx);
+      const skills = await discoverSkills(requireShellPaths(ctx), ecosystemPaths);
       if (sub === 'list') {
         if (skills.length === 0) {
           ctx.print('No skills discovered.');
@@ -53,7 +41,7 @@ export function registerSkillsRuntimeCommands(registry: CommandRegistry): void {
         }
         ctx.print([
           `Skills (${skills.length})`,
-          ...skills.map((skill) => `  ${skill.name}  [${skill.origin}]  ${skill.description || 'No description provided.'}`),
+          ...skills.map((skill) => `  ${skill.name}  [${skill.origin}]  ${skill.description || 'No description provided.'}${skill.marketplaceProvenance ? `  (${skill.marketplaceProvenance})` : ''}`),
         ].join('\n'));
         return;
       }
@@ -194,36 +182,30 @@ export function registerSkillsRuntimeCommands(registry: CommandRegistry): void {
       }
       if (sub === 'install') {
         const entryId = args[1];
-        const scopeArg = args[2];
         if (!entryId) {
           ctx.print('Usage: /skills install <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = parseEcosystemScope(scopeArg)!;
         const result = installEcosystemCatalogEntry('skill', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok ? `Installed curated skill ${entryId} into ${result.receipt.targetPath}` : `Error: ${result.error}`);
         return;
       }
       if (sub === 'update') {
         const entryId = args[1];
-        const scopeArg = args[2];
         if (!entryId) {
           ctx.print('Usage: /skills update <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = parseEcosystemScope(scopeArg)!;
         const result = updateInstalledEcosystemEntry('skill', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok ? `Updated curated skill ${entryId} in ${result.receipt.targetPath}` : `Error: ${result.error}`);
         return;
       }
       if (sub === 'uninstall') {
         const entryId = args[1];
-        const scopeArg = args[2];
         if (!entryId) {
           ctx.print('Usage: /skills uninstall <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = parseEcosystemScope(scopeArg)!;
         const result = uninstallEcosystemCatalogEntry('skill', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok ? `Uninstalled curated skill ${entryId} from ${result.removedPath}` : `Error: ${result.error}`);
         return;

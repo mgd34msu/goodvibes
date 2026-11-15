@@ -12,9 +12,7 @@ import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/run
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandRegistry } from '../command-registry.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
-import '@/runtime/index.ts';
 import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
-import '@/runtime/index.ts';
 import {
   requireLocalUserAuthManager,
   requireOperatorClient,
@@ -37,7 +35,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
     aliases: ['doctor'],
     description: 'Health workspace for startup posture, service readiness, sandbox posture, and provider health',
     usage:
-      '[report|review|open|setup|services|sandbox|provider|accounts|auth|settings|intelligence|remote|mcp|memory|metrics|continuity|worktrees|maintenance|term|repair [domain]]: bare and report stay a cross-domain transcript report (see also /health provider for the providers modal)',
+      '[report|review|open|setup|services|sandbox|provider|accounts|auth|settings|intelligence|remote|mcp|memory|metrics|continuity|worktrees|maintenance|term|next [domain]]: bare and report stay a cross-domain transcript report (see also /health provider for the providers modal)',
     async handler(args, ctx) {
       const sub = (args[0] ?? 'review').toLowerCase();
       const readModels = requireReadModels(ctx);
@@ -348,9 +346,11 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
         return;
       }
 
-      if (sub === 'repair') {
+      // `next` lists the commands that fix a domain; it changes nothing itself.
+      // `repair` is the earlier name of the same list.
+      if (sub === 'next' || sub === 'repair') {
         const domain = (args[1] ?? 'review').toLowerCase();
-        const lines = ['Health Repair'];
+        const lines = ['Health: next steps (commands to run; nothing was changed)'];
         if (domain === 'settings') {
           const settings = getSettingsControlPlaneSnapshot(ctx.platform.configManager);
           lines.push('  domain: settings');
@@ -429,7 +429,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
           lines.push(
             '  domains: settings, auth, accounts, services, sandbox, remote, mcp, continuity, maintenance, worktrees, intelligence',
           );
-          lines.push('  use: /health repair <domain>');
+          lines.push('  use: /health next <domain>');
         }
         ctx.print(lines.join('\n'));
         return;
@@ -509,7 +509,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
           '  /health maintenance',
           '  /health worktrees',
           '  /health term',
-          '  /health repair <domain>',
+          '  /health next <domain>',
           '  /setup onboarding',
         ].join('\n'),
       );

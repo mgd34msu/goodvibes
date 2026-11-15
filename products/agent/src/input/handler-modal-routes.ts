@@ -40,15 +40,12 @@ export const { handleSettingsModalToken } = createSettingsModalRoute<
     });
   },
 });
-import '@goodvibes-jev/engine/terminal-shell/runtime-setting-reset';
 export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
 
-import '../providers/reasoning-effort-surface.ts';
 import type { CommandContext } from './command-registry.ts';
 import { openTtsProviderPicker, openTtsVoicePicker } from './tts-settings-actions.ts';
 import { openThemePicker } from './theme-settings-actions.ts';
 import { openDaemonTimezonePicker } from './daemon-settings-actions.ts';
-import '@goodvibes-jev/engine/terminal-shell';
 
 type SessionPickerRouteState = {
   sessionPickerModal: {

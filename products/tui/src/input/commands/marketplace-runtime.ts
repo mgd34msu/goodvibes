@@ -34,11 +34,21 @@ function formatCompatibility(review: Awaited<ReturnType<typeof reviewEcosystemCa
   return review.compatibility.reasons.join('; ');
 }
 
-/** An omitted scope means the project; any other word that is not a scope is refused, never read as the project. */
-export function parseScope(token: string | undefined, ctx: CommandContext): 'project' | 'user' | null {
+/**
+ * The one reading of the scope word of /marketplace, /plugin and /skills. An
+ * omitted scope means the project, so an install and its uninstall through
+ * different commands hit the same target; any other word is refused, never
+ * read as the project, because a typo must not install into or remove from
+ * the wrong place.
+ */
+export function parseScope(
+  token: string | undefined,
+  ctx: Pick<CommandContext, 'print'>,
+  usage = '/marketplace <verb> <kind> <id> [project|user] (rollback: <kind> <id> [project|user] [backupId])',
+): 'project' | 'user' | null {
   if (token === undefined || token === 'project') return 'project';
   if (token === 'user') return 'user';
-  ctx.print(`Unknown scope "${token}": use project or user. For rollback the order is <kind> <id> [project|user] [backupId]. Nothing was changed.`);
+  ctx.print(`Unknown scope "${token}": nothing was changed. The scope is project (the default) or user. Usage: ${usage}`);
   return null;
 }
 
@@ -48,6 +58,16 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
     aliases: ['catalog'],
     description: 'Browse the unified plugin and skill marketplace',
     usage: '[open|overview|recommend|browse [query]|review <plugin|skill|hook-pack|policy-pack> <id>|provenance <plugin|skill|hook-pack|policy-pack> <id>|install-hint <plugin|skill|hook-pack|policy-pack> <id>|install <plugin|skill|hook-pack|policy-pack> <id> [project|user]|update <plugin|skill|hook-pack|policy-pack> <id> [project|user]|rollback <plugin|skill|hook-pack|policy-pack> <id> [project|user] [backupId]|history <plugin|skill|hook-pack|policy-pack> <id> [project|user]|uninstall <plugin|skill|hook-pack|policy-pack> <id> [project|user]|receipt <plugin|skill|hook-pack|policy-pack> <id> [project|user]|bundle export <path> [project|user]|bundle inspect <path>|bundle import <path> [project|user]|installed]',
+    confirm(args) {
+      if (args[0] !== 'uninstall' || !args[1] || !args[2] || !['plugin', 'skill', 'hook-pack', 'policy-pack'].includes(args[1])) return undefined;
+      // A scope word that is not project or user is refused by the handler; nothing would change.
+      if (args[3] !== undefined && args[3] !== 'project' && args[3] !== 'user') return undefined;
+      return {
+        title: `Uninstall ${args[1]} ${args[2]}?`,
+        detail: `The installed ${args[1]} ${args[2]} (${args[3] ?? 'project'} scope) is removed from disk with its install receipt; /marketplace install installs it again from the catalog.`,
+        confirmLabel: 'Uninstall',
+      };
+    },
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const ecosystemPaths = requireEcosystemCatalogPaths(ctx);

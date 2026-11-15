@@ -14,7 +14,8 @@
 export interface ShellSplitOptions {
   /**
    * Split for execution: an empty quoted word (`""`, `''`) is kept as an empty
-   * argument and an unterminated quote throws. Without it, empty words are
+   * argument, and an unterminated quote or a trailing lone backslash throws.
+   * Without it, empty words are
    * dropped and an unterminated quote runs to the end of the input, which is
    * what callers that only inspect words (and check quoting themselves) rely on.
    */
@@ -83,6 +84,8 @@ export function shellSplit(input: string, options: ShellSplitOptions = {}): stri
         }
         if (strict && i >= len) throw new Error('Unterminated single quote in command');
         i++; // consume closing '
+      } else if (ch === '\\' && i + 1 === len && strict) {
+        throw new Error('Trailing backslash in command');
       } else if (ch === '\\' && i + 1 < len) {
         // Backslash escape outside quotes
         token += input[i + 1];

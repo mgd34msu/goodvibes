@@ -7,6 +7,9 @@ import { CommandRegistry, type CommandContext } from '../../input/command-regist
 import { handleCommandModeToken } from '../../input/handler-command-route.ts';
 
 function submit(prompt: string) {
+  // The command declares that quoting is part of its grammar; the route reads that, not the name.
+  const commandRegistry = new CommandRegistry();
+  commandRegistry.register({ name: 'schedule', aliases: ['sched'], description: 'Schedules', strictArgs: true, handler: () => {} });
   const executed: Array<{ name: string; args: string[] }> = [];
   const printed: string[] = [];
   const context = {
@@ -22,7 +25,7 @@ function submit(prompt: string) {
     cursorPos: prompt.length,
     autocomplete: null,
     modalStack: ['command'],
-    commandRegistry: new CommandRegistry(),
+    commandRegistry,
     commandContext: context,
     conversationManager: { log: () => {}, dismissSplash: () => {} } as never,
     requestRender: () => {},

@@ -17,7 +17,6 @@ import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from '../
 import { renderConfigModal } from '../../renderer/config-modal.ts';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 import type { NativeConversationIntakeState } from '../../runtime/native-conversation-intake.ts';
-import { ScheduleReadingLifetime } from '../../input/commands/schedule-reading-lifetime.ts';
 
 const [mode, home, baseUrl, projectId] = process.argv.slice(2);
 assert.ok(mode && home && baseUrl && projectId);
@@ -40,9 +39,8 @@ const dispatched: { text: string; requestId: string; inputId: string }[] = [];
 const registry = new CommandRegistry(); registerPlanningRuntimeCommands(registry);
 registerNativeWorkLedgerCommand(registry, host.selectProject, host.discoverProject, host.submission);
 const runtime = { sessionId: 'compiled-planning-history' };
-const planningReading = new ScheduleReadingLifetime(() => runtime.sessionId, () => true);
 const context = {
-  session: { runtime }, platform: { configManager }, provider: {}, planningReading,
+  session: { runtime }, platform: { configManager }, provider: {},
   workspace: { projectPlanningService: service, projectPlanningProjectId: projectId,
     shellPaths: { homeDirectory: home, workingDirectory: home } },
   renderRequest() {},
@@ -116,5 +114,5 @@ try {
   assert.deepEqual(readFileSync(dbPath), historicalBytes);
   console.log(JSON.stringify({ mode, opened, output, dispatched, historicalUnchanged: true, judgmentReads: judgment.requests.length }));
 } finally {
-  planningReading.dispose(); modal.close(); host.intake.close(); host.submission.close(); await store.close(); installJudgmentPort(previous);
+  modal.close(); host.intake.close(); host.submission.close(); await store.close(); installJudgmentPort(previous);
 }

@@ -69,15 +69,16 @@ export function registerCheckpointRuntimeCommands(registry: CommandRegistry): vo
         ctx.print('No checkpoints yet. /checkpoint <label> creates one manually; turns and agent runs snapshot automatically.');
         return;
       }
-      ctx.print(`Checkpoints (${checkpoints.length}, newest first):`);
+      const lines = [`Checkpoints (${checkpoints.length}, newest first):`];
       for (const cp of checkpoints) {
-        ctx.print(`  ${shortId(cp.id).padEnd(12)} ${cp.kind.padEnd(9)} ${cp.label}  ${formatAge(cp.createdAt)}  ~${formatBytes(cp.sizeBytes)} new`);
+        lines.push(`  ${shortId(cp.id).padEnd(12)} ${cp.kind.padEnd(9)} ${cp.label}  ${formatAge(cp.createdAt)}  ~${formatBytes(cp.sizeBytes)} new`);
       }
       // Files-changed counts are deliberately NOT shown per-row here: getting
       // them would cost one diff spawn per checkpoint (O(checkpoints)), which
       // stops being cheap once there are more than a handful. /rewind <id>
       // loads exactly one diff, so the exact file list is available there.
-      ctx.print('Use /rewind to preview and restore a completed turn (files and/or conversation); it reuses these checkpoints for the files half. With no completed turns recorded this run (e.g. right after a restart), /rewind falls back to restoring one of these checkpoints directly, by number or id; files only, no conversation state.');
+      lines.push('Use /rewind to preview and restore a completed turn (files and/or conversation); it reuses these checkpoints for the files half. With no completed turns recorded this run (e.g. right after a restart), /rewind falls back to restoring one of these checkpoints directly, by number or id; files only, no conversation state.');
+      ctx.print(lines.join('\n'));
     },
   });
 

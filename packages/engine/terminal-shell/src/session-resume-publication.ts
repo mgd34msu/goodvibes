@@ -28,6 +28,8 @@ export function publishResumedSession(
   sessionId: string,
   meta: SessionMeta,
   policy: {
+    /** False when the caller prints its own resume lines; the shared state is published either way. */
+    readonly announce?: boolean | undefined;
     readonly reopen: () => void;
     readonly reentry: (summary: SessionReturnContextSummary) => string[];
     readonly hookError: string;
@@ -56,9 +58,10 @@ export function publishResumedSession(
   } catch (error) {
     warn('the session state was not reopened', error);
   }
-  options.conversation.log(`Resumed session: ${sessionId}`, { fg: activeTokens().secondary });
+  const announce = policy.announce !== false;
+  if (announce) options.conversation.log(`Resumed session: ${sessionId}`, { fg: activeTokens().secondary });
   const returnContextMode = getReturnContextMode(options.configManager);
-  if (returnContextMode !== 'off' && meta.returnContext) {
+  if (announce && returnContextMode !== 'off' && meta.returnContext) {
     for (const line of formatReturnContextForDisplay(meta.returnContext))
       options.conversation.log(`Resume: ${line}`, { fg: activeTokens().textMuted });
     for (const line of policy.reentry(meta.returnContext)) options.conversation.log(line, { fg: activeTokens().textMuted });

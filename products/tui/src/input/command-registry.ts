@@ -10,6 +10,9 @@ import type {
 } from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
 
 import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
+import { withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
+import { SHARED_COMMAND_CONFIRMATIONS } from './shared-command-confirmations.ts';
 import type { ProductInputContext } from '../runtime/native-conversation-input.ts';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 
@@ -86,14 +89,8 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
 
   /** Revoke only an async failed-turn recovery before replacing session identity/history. */
   cancelPendingRecovery?: () => boolean;
-  /** Owned Gist upload reading; revoked by Escape/session changes/shutdown. */
-  shareReading?: import('./commands/schedule-reading-lifetime.ts').ScheduleReadingLifetime;
-  /** Owned natural-language schedule submission; revoked by the same shell lifecycle. */
-  scheduleReading?: import('./commands/schedule-reading-lifetime.ts').ScheduleReadingLifetime;
-  /** Owned archetype listing; retired by Escape/session changes/shutdown. */
-  teamworkReading?: import('./commands/schedule-reading-lifetime.ts').ScheduleReadingLifetime;
-  /** Owned free planning-goal observation with the same shell lifetime. */
-  planningReading?: import('./commands/schedule-reading-lifetime.ts').ScheduleReadingLifetime;
+  /** Pending command readings (schedule phrase, gist upload, teamwork listing); revoked by Escape, a new submission, session changes and shutdown. */
+  commandReadings?: import('./commands/command-readings.ts').CommandReadings;
   /**
    * Cancel JUST the currently-running tool call (the live transcript row),
    * leaving the turn to continue, the local-session equivalent of the
@@ -161,8 +158,15 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
    */
   openModal?: (name: string) => void;
 
-  /** Resume a saved session through the runtime's native resume owner. */
-  resumeSession?: (sessionId: string) => Promise<void>;
+  /**
+   * The terminal's one resume routine (runtime/bootstrap-hook-bridge.ts): replaces
+   * the live conversation and publishes it (last-session pointer, shared session,
+   * daemon spine, load hook). `quiet` callers print their own lines from the result.
+   */
+  resumeSession?: (
+    sessionId: string,
+    options?: import('../runtime/bootstrap-hook-bridge.ts').ResumeSessionCallOptions,
+  ) => Promise<import('../runtime/bootstrap-hook-bridge.ts').ResumedSession | undefined>;
 
   /**
    * Open the fuzzy command palette, a searchable picker over every registered
@@ -402,8 +406,26 @@ export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'quit',
 ]);
 
-export type SlashCommand = TerminalSlashCommand<CommandContext>;
+/**
+ * A command as this app registers it. `subcommands` gives the composer's
+ * argument hint for each subcommand; `confirm` names the lines that cannot be
+ * undone or change access, which the registry asks about once before running.
+ */
+export type SlashCommand = TerminalSlashCommand<CommandContext> & CommandSubcommandHints & Pick<ConfirmableCommand<CommandContext>, 'confirm'>;
 const platformCommands = createTerminalCommandRegistry<CommandContext>({ commonNames: COMMON_COMMAND_NAMES });
-export class CommandRegistry extends platformCommands.CommandRegistry {}
+export class CommandRegistry extends platformCommands.CommandRegistry {
+  /**
+   * Every registration passes through the one confirmation rule
+   * (command-confirmation.ts); a command built by shared shell code takes its
+   * irreversible lines from shared-command-confirmations.ts.
+   */
+  override register(command: SlashCommand): void {
+    const confirm = command.confirm ?? SHARED_COMMAND_CONFIRMATIONS[command.name];
+    super.register(withOwnerConfirmation<CommandContext, SlashCommand>(confirm ? { ...command, confirm } : command));
+  }
+  override get(name: string): SlashCommand | undefined {
+    return super.get(name);
+  }
+}
 export const { isDirectOwnerCommandContext, directOwnerWorkstreamInput, directOwnerRemoteInput, directOwnerPlanningInput } =
   platformCommands;

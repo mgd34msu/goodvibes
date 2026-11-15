@@ -141,6 +141,8 @@ export interface PeerClientRunnersDomain {
   getContract(runnerId: string): RemoteRunnerContract | null;
   registerContract(contract: RemoteRunnerContract): RemoteRunnerContract;
   upsertContractForAgent(agentId: string): RemoteRunnerContract | null;
+  /** The contract a runner has now, built without storing anything (read commands use this). */
+  readContractForAgent(agentId: string): RemoteRunnerContract | null;
   listArtifacts(): RemoteExecutionArtifact[];
   getArtifact(artifactId: string): RemoteExecutionArtifact | null;
   captureArtifactForAgent(agentId: string): RemoteExecutionArtifact | null;
@@ -377,6 +379,9 @@ export function createPeerClient(deps: PeerClientDependencies): PeerClient {
       },
       upsertContractForAgent(agentId: string): RemoteRunnerContract | null {
         return resolved.remoteRunnerRegistry.upsertContractForAgent(agentId, resolved.runtimeStore);
+      },
+      readContractForAgent(agentId: string): RemoteRunnerContract | null {
+        return resolved.remoteRunnerRegistry.readContractForAgent(agentId, resolved.runtimeStore);
       },
       listArtifacts(): RemoteExecutionArtifact[] {
         return resolved.remoteRunnerRegistry.listArtifacts();

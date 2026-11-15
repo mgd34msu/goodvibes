@@ -177,6 +177,8 @@ async function editSchedule(args: readonly string[], ctx: CommandContext): Promi
 export function registerScheduleRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'schedule',
+    // Its words are fields (kind, value, prompt), so an unclosed quote is refused, not shifted.
+    strictArgs: true,
     aliases: ['sched'],
     description: 'Inspect schedules, create confirmed reminders, and explicitly promote Agent-local routines to connected schedules',
     usage: 'list | edit <id> --cron <expr> --yes | remind --at <iso> --message <text> --yes | receipts | reconcile | receipt <id> | promote-routine <routine-id> --cron <expr> --yes',

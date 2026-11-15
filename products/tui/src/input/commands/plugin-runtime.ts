@@ -251,7 +251,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           ctx.print('Usage: /plugin install <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = parseScope(scopeArg, ctx);
+        const scope = parseScope(scopeArg, ctx, '/plugin install <catalog-id> [project|user]');
         if (scope === null) return;
         const result = installEcosystemCatalogEntry('plugin', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok
@@ -266,7 +266,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           ctx.print('Usage: /plugin update <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = parseScope(scopeArg, ctx);
+        const scope = parseScope(scopeArg, ctx, '/plugin update <catalog-id> [project|user]');
         if (scope === null) return;
         const result = updateInstalledEcosystemEntry('plugin', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok
@@ -281,7 +281,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           ctx.print('Usage: /plugin uninstall <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = parseScope(scopeArg, ctx);
+        const scope = parseScope(scopeArg, ctx, '/plugin uninstall <catalog-id> [project|user]');
         if (scope === null) return;
         const result = uninstallEcosystemCatalogEntry('plugin', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok

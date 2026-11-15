@@ -15,11 +15,96 @@
  * Returns a human-readable result string to display in the conversation.
  */
 
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { DeterministicReplayEngine } from './deterministic-replay.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import type { LedgerEntry } from '../runtime/telemetry/exporters/local-ledger.js';
+import { LocalLedgerExporter, type LedgerEntry } from '../runtime/telemetry/exporters/local-ledger.js';
 import type { RuntimeStateSnapshot } from '../runtime/diagnostics/types.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
+import { resolveAtRestPolicy } from '../runtime/at-rest-persistence.js';
+
+/** What /replay reads recorded runs from (a LocalLedgerExporter satisfies it). */
+export interface ReplayLedgerReader {
+  readRunEntries: (runId: string) => LedgerEntry[];
+  listRunIds: () => string[];
+  /** The runtime state snapshot stored when the run started, or null if none was stored. */
+  readRunSnapshot: (runId: string) => RuntimeStateSnapshot | null;
+}
+
+/** The ledger each replay engine reads from, bound where the runtime is composed. */
+const ledgerOfEngine = new WeakMap<DeterministicReplayEngine, ReplayLedgerReader>();
+
+/** Turn events recorded per run; the per-chunk text deltas are left out (one line per event is the cost). */
+const SKIPPED_TURN_EVENTS = new Set(['STREAM_DELTA']);
+const TURN_ENDS = new Set(['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL']);
+
+export interface ReplayRecording {
+  readonly ledger: ReplayLedgerReader;
+  /** Stop recording (unsubscribe); recorded runs stay readable. */
+  stop(): void;
+}
+
+/**
+ * Records every turn as a replayable run: the turn's events (without stream
+ * deltas) and the tool and task events inside it are appended to the run
+ * ledger under the turn id, and `/replay` on `replayEngine` reads that ledger.
+ * Cost: one appended, locally redacted line per recorded event; nothing on a
+ * stream delta.
+ */
+export function startReplayRecording(options: {
+  readonly runtimeBus: Pick<RuntimeEventBus, 'onDomain'>;
+  readonly replayEngine: DeterministicReplayEngine;
+  /** Directory the run ledger lives in (created on start). */
+  readonly directory: string;
+  /** Reads the at-rest redaction and retention settings (`configManager.get`). */
+  readonly readConfig?: ((key: string) => unknown) | undefined;
+}): ReplayRecording {
+  mkdirSync(options.directory, { recursive: true });
+  const ledger = new LocalLedgerExporter({
+    filePath: join(options.directory, 'spans.jsonl'),
+    ledgerFilePath: join(options.directory, 'runs.jsonl'),
+    atRestPolicy: resolveAtRestPolicy(options.readConfig),
+  });
+  ledgerOfEngine.set(options.replayEngine, ledger);
+  const revisions = new Map<string, number>();
+  let activeTurn: string | undefined;
+  const record = (runId: string, eventName: string, payload: unknown, ts: number): void => {
+    const rev = (revisions.get(runId) ?? 0) + 1;
+    revisions.set(runId, rev);
+    ledger.recordEvent({ runId, rev, eventName, payload, ts });
+  };
+  const offTurn = options.runtimeBus.onDomain('turn', (envelope) => {
+    const payload = envelope.payload as { readonly type: string; readonly turnId?: string };
+    if (SKIPPED_TURN_EVENTS.has(payload.type)) return;
+    const runId = payload.turnId ?? envelope.turnId ?? activeTurn;
+    if (!runId) return;
+    if (payload.type === 'TURN_SUBMITTED') activeTurn = runId;
+    record(runId, payload.type, payload, envelope.ts);
+    if (TURN_ENDS.has(payload.type)) {
+      revisions.delete(runId);
+      if (activeTurn === runId) activeTurn = undefined;
+    }
+  });
+  const inTurn = (envelope: { readonly ts: number; readonly turnId?: string | undefined; readonly payload: unknown }): void => {
+    const runId = envelope.turnId ?? activeTurn;
+    if (!runId) return;
+    record(runId, (envelope.payload as { readonly type: string }).type, envelope.payload, envelope.ts);
+  };
+  const offTools = options.runtimeBus.onDomain('tools', inTurn);
+  const offTasks = options.runtimeBus.onDomain('tasks', inTurn);
+  return {
+    ledger,
+    stop: () => { offTurn(); offTools(); offTasks(); },
+  };
+}
+
+/** The run ledger bound to this replay engine by `startReplayRecording`, if any. */
+export function replayLedgerOf(engine: DeterministicReplayEngine): ReplayLedgerReader | undefined {
+  return ledgerOfEngine.get(engine);
+}
+
 
 export interface ReplayCommandResult {
   /** Human-readable output to show the user. */
@@ -37,22 +122,17 @@ export interface ReplayCommandDeps {
  *
  * @param subcommand - The first word after /replay (e.g. 'load', 'step').
  * @param args       - Remaining tokens.
- * @param ledger     - Optional ledger reader for 'load' (a LocalLedgerExporter
- *                     satisfies it). When omitted, the handler reports that
- *                     no ledger is configured.
+ * @param explicitLedger - Ledger reader for 'load' and 'diff'; when omitted,
+ *                     the one `startReplayRecording` bound to the engine.
  */
 export async function handleReplayCommand(
   deps: ReplayCommandDeps,
   subcommand: string,
   args: string[],
-  ledger?: {
-    readRunEntries: (runId: string) => LedgerEntry[];
-    listRunIds: () => string[];
-    /** The runtime state snapshot stored when the run started, or null if none was stored. */
-    readRunSnapshot: (runId: string) => RuntimeStateSnapshot | null;
-  },
+  explicitLedger?: ReplayLedgerReader,
 ): Promise<ReplayCommandResult> {
   const engine = deps.replayEngine;
+  const ledger = explicitLedger ?? replayLedgerOf(engine);
 
   switch (subcommand.toLowerCase()) {
     case 'load': {
@@ -62,14 +142,14 @@ export async function handleReplayCommand(
         if (!ledger) {
           return {
             ok: false,
-            output: 'Usage: /replay load <runId>\n\nNo ledger configured - cannot list runs.',
+            output: 'Usage: /replay load <runId>\n\nThis runtime does not record runs, so there is nothing to list.',
           };
         }
         const ids = ledger.listRunIds();
         if (ids.length === 0) {
           return {
             ok: true,
-            output: 'No recorded runs found in the ledger.\n\nRuns are recorded automatically when telemetry is enabled.',
+            output: 'No recorded runs yet.\n\nEvery turn is recorded as a run once it starts; send a message, then run /replay load again.',
           };
         }
         const list = ids.map((id, i) => `  ${i + 1}. ${id}`).join('\n');
@@ -82,7 +162,7 @@ export async function handleReplayCommand(
       if (!ledger) {
         return {
           ok: false,
-          output: `Cannot load run "${runId}": no ledger is configured.\n\nEnable telemetry and set a ledger file path to record runs.`,
+          output: `Cannot load run "${runId}": this runtime does not record runs, so there is nothing to load.`,
         };
       }
 
@@ -125,7 +205,7 @@ export async function handleReplayCommand(
           `  Last:  ${new Date(entries[entries.length - 1]?.ts ?? Date.now()).toISOString()}`,
           storedSnapshot
             ? `  Baseline: state snapshot from run start (${storedSnapshot.domains.length} domain${storedSnapshot.domains.length === 1 ? '' : 's'}, ${new Date(storedSnapshot.capturedAt).toISOString()})`
-            : '  Baseline: empty (this run was recorded before run-start state snapshots were stored)',
+            : '  Baseline: empty (no runtime state snapshot was stored when this run started)',
           ...(redacted
             ? ['', 'Note: some records were redacted at rest, secrets appear as [REDACTED_*] markers; the content shown is post-redaction.']
             : []),

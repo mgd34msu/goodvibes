@@ -73,6 +73,7 @@ async function createRemoteCommandContext(
     getContract: (runnerId: string) => remoteRunnerRegistry.getContract(runnerId),
     registerContract: (contract: Parameters<typeof remoteRunnerRegistry.registerContract>[0]) => remoteRunnerRegistry.registerContract(contract),
     upsertContractForAgent: (runnerId: string) => remoteRunnerRegistry.upsertContractForAgent(runnerId, store),
+    readContractForAgent: (runnerId: string) => remoteRunnerRegistry.readContractForAgent(runnerId, store),
     listArtifacts: () => remoteRunnerRegistry.listArtifacts(),
     getArtifact: (artifactId: string) => remoteRunnerRegistry.getArtifact(artifactId),
     buildReviewSummary: (artifactId: string) => remoteRunnerRegistry.buildReviewSummary(artifactId),
@@ -124,6 +125,7 @@ async function createRemoteCommandContext(
       getContract: (runnerId: string) => remoteRunnerRegistry.getContract(runnerId),
       registerContract: (contract) => remoteRunnerRegistry.registerContract(contract),
       upsertContractForAgent: (agentId: string) => remoteRunnerRegistry.upsertContractForAgent(agentId, store),
+      readContractForAgent: (agentId: string) => remoteRunnerRegistry.readContractForAgent(agentId, store),
       listArtifacts: () => remoteRunnerRegistry.listArtifacts(),
       getArtifact: (artifactId: string) => remoteRunnerRegistry.getArtifact(artifactId),
       captureArtifactForAgent: (agentId: string) => remoteRunnerRegistry.captureArtifactForAgent(agentId, store),
@@ -336,7 +338,12 @@ describe('remote command', () => {
     expect(artifactId).toBeDefined();
 
     out.length = 0;
+    // The owner is shown the task and tools and answers the one question before anything starts.
+    const asked: string[] = [];
+    Object.assign(ctx, { confirm: async (options: { title: string; body: string }) => { asked.push(options.body); return true; } });
     await registry.executeFromOwner('remote', ['rerun-local', artifactId!], ctx, `/remote rerun-local ${artifactId!}`);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain('tools:');
     expect(out.join('\n')).toContain('Spawned local rerun agent');
   });
 

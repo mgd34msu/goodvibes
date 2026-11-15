@@ -16,6 +16,32 @@ describe('importing remote artifacts', () => {
     expect(registry.listContracts()).toEqual([]);
   });
 
+  test('an artifact that would widen a known runner\'s capability ceiling is refused on every import path', async () => {
+    const dir = makeProjectTempDir('remote-import');
+    const now = Date.now();
+    const contract = {
+      id: 'runner:r1', runnerId: 'r1', label: 'r1', sourceTransport: 'acp', trustClass: 'self-hosted-acp', template: 'general',
+      capabilityCeiling: { allowedTools: ['read'], capabilityCeilingTools: ['read'], executionProtocol: 'gather-plan-apply', reviewMode: 'none',
+        communicationLane: 'direct', orchestrationDepth: 0, successCriteria: [], requiredEvidence: [], writeScope: [] },
+      createdAt: now, lastUpdatedAt: now, transport: { state: 'initializing', messageCount: 0, errorCount: 0 },
+    } as unknown as Parameters<RemoteRunnerRegistry['registerContract']>[0];
+    const source = new RemoteRunnerRegistry({ getStatus: () => null, list: () => [] });
+    source.registerContract(contract);
+    const artifact = source.captureArtifactForRunner('r1')!;
+    const wide = { ...artifact, runnerContract: { ...artifact.runnerContract, capabilityCeiling: { ...artifact.runnerContract.capabilityCeiling, allowedTools: ['read', 'exec', 'write'] } } };
+    const artifactPath = join(dir, 'wide-artifact.json');
+    writeFileSync(artifactPath, JSON.stringify(wide));
+    const bundlePath = join(dir, 'wide-bundle.json');
+    writeFileSync(bundlePath, JSON.stringify({ version: 1, exportedAt: now, sessionId: 's', activeConnectionIds: [], pools: [], contracts: [wide.runnerContract], artifacts: [] }));
+
+    const target = new RemoteRunnerRegistry({ getStatus: () => null, list: () => [] });
+    target.registerContract(contract);
+    await expect(target.importArtifact(artifactPath)).rejects.toThrow('different capability ceiling');
+    await expect(target.importSessionBundle(bundlePath)).rejects.toThrow('different capability ceiling');
+    expect(target.listArtifacts()).toEqual([]);
+    expect(target.getContract('r1')?.capabilityCeiling.allowedTools).toEqual(['read']);
+  });
+
   test('a session bundle with one bad artifact imports nothing', async () => {
     const dir = makeProjectTempDir('remote-import');
     const path = join(dir, 'bundle.json');

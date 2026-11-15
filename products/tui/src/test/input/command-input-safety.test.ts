@@ -14,7 +14,6 @@ import { registerPlatformAccessRuntimeCommands } from '../../input/commands/plat
 import { registerPlatformServicesRuntimeCommands } from '../../input/commands/platform-services-runtime.ts';
 import { registerShareRuntimeCommands } from '../../input/commands/share-runtime.ts';
 import { registerPrincipalsRuntimeCommands } from '../../input/commands/principals-runtime.ts';
-import { registerScheduleRuntimeCommands } from '../../input/commands/schedule-runtime.ts';
 import { registerPluginRuntimeCommands } from '../../input/commands/plugin-runtime.ts';
 import { handleRemoteCancelCommand, registerRemoteRuntimeCommands } from '../../input/commands/remote-runtime.ts';
 import { registerSettingsSyncRuntimeCommands } from '../../input/commands/settings-sync-runtime.ts';
@@ -182,7 +181,7 @@ describe('/share', () => {
     let fetched = false;
     globalThis.fetch = fakeFetch(async () => { fetched = true; return new Response('{}'); });
     let began = false;
-    const { ctx, out } = makeCtx({ shareReading: { begin: () => { began = true; return undefined; } } });
+    const { ctx, out } = makeCtx({ commandReadings: { begin: () => { began = true; return { ok: false, reason: 'closed' }; } } });
     await command(registerShareRuntimeCommands, 'share').handler(['md', '--reddact', '--upload'], ctx);
     expect(out.join('\n')).toContain('Unknown option: --reddact');
     expect(began).toBe(false);
@@ -225,45 +224,6 @@ describe('/principals identities', () => {
     await principals().handler(['update', 'p1', '--identities', 'none'], ctx);
     expect(out.join('\n')).not.toContain('refused');
     expect(out.join('\n')).toContain('[principals]');
-  });
-});
-
-describe('/schedule job ids', () => {
-  function jobs() {
-    const removed: string[] = [];
-    const list = [
-      { id: 'auto-1a2b3c4d-aaaa', name: 'first' },
-      { id: 'auto-1a2b9z9z-bbbb', name: 'second' },
-      { id: 'solo-0001', name: 'solo' },
-    ];
-    const { ctx, out } = makeCtx({
-      ops: {
-        automationManager: {
-          start: async () => {},
-          listJobs: () => list,
-          removeJob: async (id: string) => { removed.push(id); return true; },
-        },
-      },
-    });
-    return { ctx, out, removed };
-  }
-  const schedule = () => command(registerScheduleRuntimeCommands, 'schedule');
-
-  test('a prefix shared by two jobs removes nothing and lists the candidates', async () => {
-    const { ctx, out, removed } = jobs();
-    await schedule().handler(['remove', 'auto-1a2b'], ctx);
-    expect(removed).toEqual([]);
-    const text = out.join('\n');
-    expect(text).toContain('Ambiguous');
-    expect(text).toContain('auto-1a2b3c4d-aaaa');
-    expect(text).toContain('auto-1a2b9z9z-bbbb');
-  });
-
-  test('an exact id wins over longer ids that share it, and a unique prefix still resolves', async () => {
-    const { ctx, removed } = jobs();
-    await schedule().handler(['remove', 'auto-1a2b3c4d-aaaa'], ctx);
-    await schedule().handler(['remove', 'solo'], ctx);
-    expect(removed).toEqual(['auto-1a2b3c4d-aaaa', 'solo-0001']);
   });
 });
 
@@ -365,8 +325,15 @@ describe('/remote', () => {
     test('spawns with only the recorded tools, shows the task and tools first-hand, and only for a directly typed command', async () => {
       const fake = peer({ artifacts: { 'artifact:a1': artifact(['read']) } });
       const spawn = mock((_input: { tools: string[]; restrictTools?: boolean }) => ({ id: 'agent-1' }));
-      const { ctx, out } = makeCtx({ clients: fake.clients, ops: { agentManager: { spawn } } });
+      const asked: string[] = [];
+      const { ctx, out } = makeCtx({
+        clients: fake.clients, ops: { agentManager: { spawn } },
+        confirm: async (options: { body: string }) => { asked.push(options.body); expect(spawn).not.toHaveBeenCalled(); return true; },
+      });
       await asOwner(['rerun-local', 'artifact:a1'], ctx);
+      expect(asked).toHaveLength(1);
+      expect(asked[0]).toContain('inspect the logs');
+      expect(asked[0]).toContain('tools: read');
       expect(spawn).toHaveBeenCalledTimes(1);
       expect(spawn.mock.calls[0]![0].tools).toEqual(['read']);
       expect(spawn.mock.calls[0]![0].restrictTools).toBe(true);
@@ -378,7 +345,7 @@ describe('/remote', () => {
     test('is refused when not typed by the owner (model-invoked or programmatic)', async () => {
       const fake = peer({ artifacts: { 'artifact:a1': artifact(['read']) } });
       const spawn = mock(() => ({ id: 'agent-1' }));
-      const { ctx, out } = makeCtx({ clients: fake.clients, ops: { agentManager: { spawn } } });
+      const { ctx, out } = makeCtx({ clients: fake.clients, ops: { agentManager: { spawn } }, confirm: async () => true });
       await remote().handler(['rerun-local', 'artifact:a1'], ctx);
       expect(spawn).not.toHaveBeenCalled();
       expect(out.join('\n')).toContain('directly entered command');
@@ -401,16 +368,6 @@ describe('/remote', () => {
     expect(fake.exported).toEqual([['artifact:a1', join(root, 'out.json')]]);
     await remote().handler(['import', 'in.json'], ctx);
     expect(fake.imported).toEqual([join(root, 'in.json')]);
-  });
-
-  test('importing a file that would replace a known runner\'s capability ceiling is refused', async () => {
-    const fake = peer({ contracts: { r1: { capabilityCeiling: { allowedTools: ['read'] } } } });
-    const file = join(root, 'wide.json');
-    writeFileSync(file, JSON.stringify({ runnerId: 'r1', runnerContract: { capabilityCeiling: { allowedTools: ['read', 'exec', 'write'] } } }));
-    const { ctx, out } = makeCtx({ clients: fake.clients });
-    await remote().handler(['import', 'wide.json'], ctx);
-    expect(fake.imported).toEqual([]);
-    expect(out.join('\n')).toContain('Remote import refused');
   });
 
   test('cancelling an external runner reports a failed cancel instead of claiming it was requested', async () => {
@@ -580,7 +537,7 @@ describe('/session export and delete', () => {
 
   test('a message whose content is an array of parts exports its text, not [object Object]', async () => {
     const { ctx, out } = sessionCtx([{ role: 'user', content: [{ type: 'text', text: 'hello there' }, { type: 'image', data: 'AAAA', mediaType: 'image/png' }] }]);
-    await classicExport(() => handleSessionWorkflowCommand(['export', 'old-1', 'text'], ctx));
+    await classicExport(() => handleSessionWorkflowCommand(['export', 'old-1', 'text', '--print'], ctx));
     const text = out.join('\n');
     expect(text).toContain('hello there');
     expect(text).toContain('[image part omitted]');
@@ -590,7 +547,7 @@ describe('/session export and delete', () => {
   test('a printed export redacts a credential carried by the transcript', async () => {
     const key = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0'.repeat(2);
     const { ctx, out } = sessionCtx([{ role: 'user', content: `my key is ${key}` }]);
-    await classicExport(() => handleSessionWorkflowCommand(['export', 'old-1', 'text'], ctx));
+    await classicExport(() => handleSessionWorkflowCommand(['export', 'old-1', 'text', '--print'], ctx));
     expect(out.join('\n')).toContain('my key is');
     expect(out.join('\n')).not.toContain(key);
   });

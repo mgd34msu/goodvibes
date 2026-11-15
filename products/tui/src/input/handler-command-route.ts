@@ -1,5 +1,5 @@
 import { createCommandModeTokenHandler } from '@goodvibes-jev/engine/terminal-shell/command-mode-route';
-import { scheduleCommandArguments } from './commands/schedule-arguments.ts';
+import { strictArgumentsRefusal, strictCommandArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { activeTokens } from '../renderer/theme.ts';
 import { loadSkillByTrigger } from '@goodvibes-jev/engine/platform/platform/tools';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -71,10 +71,10 @@ export const handleCommandModeToken = createCommandModeTokenHandler<CommandConte
   prepare(context, state, raw) {
     const parts = raw.slice(1).trim().split(/\s+/),
       name = parts[0] ?? '';
-    const args = name === 'schedule' || name === 'sched' ? scheduleCommandArguments(raw.slice(1)) : parts.slice(1);
+    const args = state.commandRegistry?.get(name)?.strictArgs ? strictCommandArguments(raw.slice(1)) : parts.slice(1);
     if (!args) {
-      context.scheduleReading?.cancel();
-      context.print('Invalid schedule command quoting.');
+      context.commandReadings?.cancelAll();
+      context.print(strictArgumentsRefusal(name));
       state.requestRender();
       return undefined;
     }

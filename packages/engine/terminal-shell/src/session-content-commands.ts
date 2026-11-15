@@ -227,9 +227,6 @@ export function createSessionListCommand<
 >(policy: {
   readonly manager: (context: Context) => import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager;
   readonly forward: (args: string[], context: Context) => void | Promise<void>;
-  readonly filter: (
-    sessions: ReturnType<import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager['list']>,
-  ) => ReturnType<import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager['list']>;
   readonly emptyDetail: string;
   readonly actions: string;
   readonly options: Parameters<import('./selection-modal.js').OpenSelection>[2];
@@ -252,7 +249,7 @@ export function createSessionListCommand<
         return;
       }
       const manager = policy.manager(ctx);
-      const sessions = policy.filter(manager.list());
+      const sessions = manager.list();
       if (ctx.openSelection) {
         const items =
           sessions.length === 0

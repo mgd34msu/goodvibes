@@ -6,7 +6,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { isDeepStrictEqual } from 'node:util';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { recordedBuiltinArchetypes, recordedFamilyPort } from '../helpers/teamwork-family-reading.ts';
-import { ScheduleReadingLifetime } from '../../input/commands/schedule-reading-lifetime.ts';
+import { CommandReadings } from '../../input/commands/command-readings.ts';
 import { createTaskManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { ConversationManager } from '../../core/conversation.ts';
@@ -297,6 +297,7 @@ describe('product breadth commands', () => {
       getContract: (runnerId: string) => productRemoteRunnerRegistry.getContract(runnerId),
       registerContract: (contract: Parameters<typeof productRemoteRunnerRegistry.registerContract>[0]) => productRemoteRunnerRegistry.registerContract(contract),
       upsertContractForAgent: (runnerId: string) => productRemoteRunnerRegistry.upsertContractForAgent(runnerId, runtimeStore),
+      readContractForAgent: (runnerId: string) => productRemoteRunnerRegistry.readContractForAgent(runnerId, runtimeStore),
       listArtifacts: () => productRemoteRunnerRegistry.listArtifacts(),
       getArtifact: (artifactId: string) => productRemoteRunnerRegistry.getArtifact(artifactId),
       buildReviewSummary: (artifactId: string) => productRemoteRunnerRegistry.buildReviewSummary(artifactId),
@@ -2312,8 +2313,8 @@ describe('product breadth commands', () => {
     const create = opsApi.tasks.create;
     opsApi.tasks.create = input => { created.push(input); return create(input); };
     ctx.clients = { ...ctx.clients, opsApi };
-    const lifetime = new ScheduleReadingLifetime(() => ctx.session.runtime.sessionId, () => true);
-    ctx.teamworkReading = lifetime;
+    const lifetime = new CommandReadings(() => ctx.session.runtime.sessionId, () => true);
+    ctx.commandReadings = lifetime;
     const doc = { name: 'doc-specialist', description: 'Documentation specialist for operator handoff notes', tools: ['read', 'write', 'analyze'], family: 'implement' as const };
     const builtin = recordedFamilyPort(recordedBuiltinArchetypes);
     const previous = installJudgmentPort(builtin.port);

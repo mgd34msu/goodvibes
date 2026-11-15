@@ -8,7 +8,7 @@ import { ConversationManager } from '../../core/conversation.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerShareRuntimeCommands } from '../../input/commands/share-runtime.ts';
 import { getSharedNotificationFeed } from '../../views/notifications-feed.ts';
-import { ScheduleReadingLifetime } from '../../input/commands/schedule-reading-lifetime.ts';
+import { CommandReadings } from '../../input/commands/command-readings.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -25,15 +25,16 @@ function fixture() {
   const authHeaders = { Authorization: 'Bearer configured-literal' };
   let lookup: (() => Promise<void>) | undefined;
   const runtime = { model: 'synthetic-unpriced', provider: 'synthetic', sessionId: 'exact-session' };
-  const lifetime = new ScheduleReadingLifetime(() => runtime.sessionId, () => true);
+  const readings = new CommandReadings(() => runtime.sessionId, () => true);
+  const lifetime = { cancel: () => readings.cancel('share'), dispose: () => readings.dispose() };
   const context = {
-    shareReading: lifetime,
+    commandReadings: readings,
     print: (text: string) => lines.push(text),
     workspace: { shellPaths: createShellPathService({ workingDirectory: root, homeDirectory: root }) },
     platform: { serviceRegistry: { resolveAuth: async (name: string) => { calls.push(name); const wait = lookup; lookup = undefined; await wait?.(); return authHeaders; } } },
     session: { runtime, conversationManager: conversation },
   } as unknown as CommandContext;
-  return { root, lines, calls, runtime, lifetime, authHeaders, holdNextLookup: (wait: () => Promise<void>) => { lookup = wait; }, replace: () => conversation.fromJSON({ messages: [{ role: 'user', content: 'hello' }] }), run: (args = ['json', 'session.json', '--upload']) => registry.get('share')!.handler(args, context) };
+  return { root, lines, calls, runtime, lifetime, authHeaders, holdNextLookup: (wait: () => Promise<void>) => { lookup = wait; }, replace: () => conversation.fromJSON({ messages: [{ role: 'user', content: 'hello' }] }), run: (args = ['json', 'session.json', '--upload', '--no-redact', '--yes']) => registry.get('share')!.handler(args, context) };
 }
 
 test('share sends the configured bearer token with no model reading and repeats normally', async () => {

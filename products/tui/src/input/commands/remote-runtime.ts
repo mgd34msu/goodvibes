@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { directOwnerRemoteInput, isDirectOwnerCommandContext, type CommandRegistry, type CommandContext } from '../command-registry.ts';
 import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
 import { handleRemoteSetupCommand } from './remote-runtime-setup.ts';
@@ -8,24 +7,6 @@ import { requireAgentManager, requireAcpManager, requirePeerClient, requireShell
 /** Own keys only: `constructor` or `toString` are not templates. */
 function isAgentTemplate(name: string | undefined): name is string {
   return name !== undefined && Object.hasOwn(AGENT_TEMPLATES, name);
-}
-
-/** A reason the artifact file at `path` would replace a known runner's different capability ceiling, else undefined. */
-function importedContractConflict(
-  runners: { getContract(runnerId: string): { capabilityCeiling: unknown } | null | undefined },
-  path: string,
-): string | undefined {
-  let parsed: { runnerId?: unknown; runnerContract?: { capabilityCeiling?: unknown } };
-  try {
-    parsed = JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
-    return undefined; // an unreadable or malformed file is reported by the import itself
-  }
-  if (typeof parsed?.runnerId !== 'string') return undefined;
-  const existing = runners.getContract(parsed.runnerId);
-  if (!existing) return undefined;
-  if (JSON.stringify(existing.capabilityCeiling) === JSON.stringify(parsed.runnerContract?.capabilityCeiling)) return undefined;
-  return `runner ${parsed.runnerId} already has a different capability ceiling in this session; the file would replace it.`;
 }
 
 type RemoteConnectionLike = { agentId: string };
@@ -84,6 +65,33 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
     name: 'remote',
     aliases: [],
     description: 'Inspect, dispatch, and review self-hosted remote runners and artifacts',
+    confirm(args, ctx) {
+      // Starting a local agent from another machine's task text and tool list is
+      // asked once, with everything it would run shown; an unknown or tool-less
+      // artifact asks nothing and the handler says why nothing starts.
+      const artifactId = args[1];
+      if (args[0]?.toLowerCase() !== 'rerun-local' || !artifactId) return undefined;
+      const artifact = (() => {
+        try {
+          return requirePeerClient(ctx).runners.getArtifact(artifactId);
+        } catch {
+          return null;
+        }
+      })();
+      if (!artifact || artifact.runnerContract.capabilityCeiling.allowedTools.length === 0) return undefined;
+      const ceiling = artifact.runnerContract.capabilityCeiling;
+      const template = isAgentTemplate(artifact.runnerContract.template) ? artifact.runnerContract.template : 'general';
+      return {
+        title: `Start a local agent from remote artifact ${artifactId}?`,
+        detail: [
+          `Runner ${artifact.runnerId} recorded this task; a local ${template} agent would run it in this workspace with only these tools.`,
+          `  tools: ${ceiling.allowedTools.join(', ')}`,
+          `  writeScope: ${ceiling.writeScope.join(', ') || '(none recorded)'}`,
+          `  task: ${artifact.task.task}`,
+        ].join('\n'),
+        confirmLabel: 'Start',
+      };
+    },
     usage: '[list | show [agentId] | supervisor [runnerId] | capabilities [runnerId] | recover [runnerId] | setup [export <path>] | env [export <path>] | tunnel [review|export <path>] | bootstrap [export <path>|inspect <path>] | session <export|inspect|import> <path> | pool <list|show|create|assign|unassign> ... | dispatch [template] <description> | dispatch-pool <pool> [template] <description> | contract [agentId] | cancel <agentId> | export <agentId> [path] | artifact list | artifact show <id> | artifact export <id> [path] | review <id> | rerun-local <id> | import <path>]',
     async handler(args, ctx) {
       if (args.length === 0) {
@@ -248,7 +256,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ctx.print(agentId ? `Unknown remote connection: ${agentId}` : 'No active remote connections.');
           return;
         }
-        const contract = remoteRunners.upsertContractForAgent(connection.agentId);
+        const contract = remoteRunners.readContractForAgent(connection.agentId);
         ctx.print([
           `Remote connection ${connection.agentId}`,
           `  label: ${connection.label}`,
@@ -364,6 +372,10 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ctx.print('Remote dispatch requires the original directly entered command. Enter /remote dispatch or /remote dispatch-pool in the terminal.');
           return;
         }
+        if (pool.maxRunners !== undefined && pool.runnerIds.length >= pool.maxRunners) {
+          ctx.print(`Remote dispatch refused: pool ${poolId} already holds its ${pool.maxRunners} runner(s). Nothing was started. Remove one with /remote pool unassign ${poolId} <runnerId>, or dispatch to another pool.`);
+          return;
+        }
         const templateDef = AGENT_TEMPLATES[template] ?? AGENT_TEMPLATES.general;
         const workingDirectory = requireShellPaths(ctx).workingDirectory;
         const runnerId = await ctx.ops.acpManager.spawn({
@@ -400,9 +412,11 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
             errorCount: 0,
           }),
         });
-        remoteRunners.assignRunnerToPool(poolId, runnerId);
+        const assigned = remoteRunners.assignRunnerToPool(poolId, runnerId);
         ctx.print([
-          `Dispatched remote runner ${runnerId} via pool ${poolId}`,
+          assigned
+            ? `Dispatched remote runner ${runnerId} via pool ${poolId}`
+            : `Dispatched remote runner ${runnerId}; pool ${poolId} filled up meanwhile, so the runner is not in it (cancel it with /remote cancel ${runnerId} if it should not run outside the pool)`,
           `  template: ${template}`,
           `  tools: ${templateDef.defaultTools.join(', ')} (advisory: listed to the runner in its prompt; the runner's own harness is not restricted to them)`,
           `  description: ${description}`,
@@ -416,7 +430,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ctx.print('No remote runner contracts are available yet.');
           return;
         }
-        const contract = remoteRunners.upsertContractForAgent(agentId);
+        const contract = remoteRunners.readContractForAgent(agentId);
         if (!contract) {
           ctx.print(`Unknown remote runner: ${agentId}`);
           return;
@@ -550,7 +564,8 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         }
         // The artifact may come from another machine (/remote import). Running its
         // task text with its tool list is an owner decision: typed by the owner,
-        // never model-invoked, and shown before it starts.
+        // never model-invoked, and shown in the registry's question (`confirm`
+        // above) before anything starts.
         if (!isDirectOwnerCommandContext(ctx, 'remote')) {
           ctx.print('Remote rerun-local requires the original directly entered command. Enter /remote rerun-local <artifactId> in the terminal.');
           return;
@@ -591,15 +606,13 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
         const sourcePath = requireShellPaths(ctx).resolveWorkspacePath(path);
-        // Importing stores the file's contract under its runner id. A file must not
-        // widen the ceiling of a runner this session already knows.
-        const conflict = importedContractConflict(remoteRunners, sourcePath);
-        if (conflict) {
-          ctx.print(`Remote import refused: ${conflict} Nothing was imported.`);
-          return;
+        // The registry refuses a file that would replace a known runner's capability ceiling.
+        try {
+          const artifact = await remoteRunners.importArtifact(sourcePath);
+          ctx.print(`Imported remote review artifact ${artifact.id} for runner ${artifact.runnerId}. Review it with /remote review ${artifact.id}; /remote rerun-local ${artifact.id} shows its task and tools and asks before anything starts.`);
+        } catch (error) {
+          ctx.print(`Remote import refused: ${error instanceof Error ? error.message : String(error)}`);
         }
-        const artifact = await remoteRunners.importArtifact(sourcePath);
-        ctx.print(`Imported remote review artifact ${artifact.id} for runner ${artifact.runnerId}.`);
         return;
       }
 

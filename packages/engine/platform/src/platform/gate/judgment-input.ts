@@ -91,7 +91,7 @@ function rememberCapturedRoot(snapshot: unknown): unknown {
 }
 const isFrozenJson = Object.isFrozen;
 /** True only when every node is a frozen data object; such a tree cannot change after capture. */
-function isDeepFrozenJson(value: unknown): boolean {
+export function isDeepFrozenJson(value: unknown): boolean {
   const seen = new Set<object>();
   const pending: unknown[] = [value];
   while (pending.length > 0) {

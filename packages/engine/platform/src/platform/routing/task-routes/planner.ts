@@ -15,7 +15,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  */
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
-import { assertJudgmentInput } from '../../gate/judgment-input.js';
+import { assertJudgmentInput, isDeepFrozenJson } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson, prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { SOURCE_SCREENING_LIMITS, type SourceScreeningReceipt } from '../../security/source-screening/types.js';
 import { ToolInputProjectionError } from '../../tools/input-projection.js';
@@ -150,15 +150,6 @@ const MISSING_REQUEST: MissingRequestPlan = {
   policy: 'Route planning is read-only. It never runs tools, creates jobs, sends messages, changes settings, or opens UI surfaces.',
 };
 
-/** True when every node is frozen and holds only data slots; such a tree cannot change. */
-function isDeepFrozenData(value: unknown, seen = new Set<object>()): boolean {
-  if (value === null || typeof value !== 'object') return true;
-  if (seen.has(value)) return true;
-  seen.add(value);
-  if (nodeTypes.isProxy(value) || !Object.isFrozen(value)) return false;
-  return Object.values(Object.getOwnPropertyDescriptors(value)).every((field) => 'value' in field && isDeepFrozenData(field.value, seen));
-}
-
 /**
  * Plans the route for a user task. Needs an installed judgment port
  * and a current protected source owner; `deps` supplies the product catalogs
@@ -198,9 +189,9 @@ export async function planTaskRoute(
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const depsPrototype = Object.getPrototypeOf(deps), optionsPrototype = Object.getPrototypeOf(options);
   const ownerPrototype = Object.getPrototypeOf(owner), listingPrototype = listing === undefined ? undefined : Object.getPrototypeOf(listing);
-  // Frozen data cannot change after capture, so only mutable inputs are compared again.
-  const argsFrozen = isDeepFrozenData(args);
-  const routesFrozen = Object.isFrozen(TASK_ROUTES) && TASK_ROUTES.every((entry) => Object.isFrozen(entry));
+  // Frozen arguments cannot change after capture (a proxy was refused by the
+  // capture above), so only mutable arguments are compared again.
+  const argsFrozen = isDeepFrozenJson(args);
   const assertBindings = () => {
     signal?.throwIfAborted();
     if (Object.getPrototypeOf(deps) !== depsPrototype || Object.getPrototypeOf(options) !== optionsPrototype
@@ -222,12 +213,10 @@ export async function planTaskRoute(
     assertBindings(); const ids = captureStrictJudgmentJson(source?.() ?? []); assertBindings();
     return { kind, source, ids };
   });
+  // The route catalog is frozen where it is declared, so its candidates are read once.
   const routeSource = captureStrictJudgmentJson(routeCandidates());
-  const routeBuilders = TASK_ROUTES.map(entry => ({ entry, build: entry.build }));
   const sourceCurrent = () => {
     assertBindings();
-    if (!routesFrozen && (!isDeepStrictEqual(captureStrictJudgmentJson(routeCandidates()), routeSource)
-      || routeBuilders.some(({ entry, build }, index) => TASK_ROUTES[index] !== entry || entry.build !== build))) throw new ToolInputProjectionError('held');
     for (const { source, ids } of snapshots) {
       if (!isDeepStrictEqual(captureStrictJudgmentJson(source?.() ?? []), ids)) throw new ToolInputProjectionError('held');
     }

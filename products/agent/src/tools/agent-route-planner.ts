@@ -18,7 +18,8 @@ import { captureModelReadingInput, captureModelReadingSnapshotGuard, withModelRe
 import { listWorkspaceActions } from './agent-harness-workspace-actions.ts';
 import { externalMemoryLiveProviderRecords, externalMemoryProviderCatalog, externalMemoryReceiptEvidence } from './agent-harness-memory-external-providers.ts';
 
-/** These two native declaration trees have no mutable production consumers. */
+/** Native declaration trees have no mutable production consumers. The workspace
+ * categories freeze themselves where they are declared. */
 function freezeRouteDeclarations(value: unknown, visited = new Set<object>()): void {
   if (value === null || typeof value !== 'object') return;
   if (visited.has(value)) return;
@@ -34,7 +35,6 @@ function freezeRouteDeclarations(value: unknown, visited = new Set<object>()): v
   Object.freeze(value);
 }
 freezeRouteDeclarations(HARNESS_MODE_DESCRIPTORS);
-freezeRouteDeclarations(AGENT_WORKSPACE_CATEGORIES);
 const assertDeclarationMethods = captureCatalogMethods(Array.prototype, ['flatMap', 'map', 'filter', 'slice', 'find', 'sort']);
 
 export type AgentRoutePlannerArgs = TaskRouteArgs;

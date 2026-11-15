@@ -10,49 +10,44 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { findAgentKnowledgeScopeContamination } from '../cli/agent-knowledge-runtime.ts';
-import { normalizeAgentKnowledgeJsonText } from '../agent/knowledge-scope-alias.ts';
 
-const AGENT_KNOWLEDGE_FORBIDDEN_RESPONSE_MARKERS = [
-  ['home', ' assistant'].join(''),
-  ['home', 'graph'].join(''),
-  ['home ', 'graph'].join(''),
-] as const;
-const AGENT_KNOWLEDGE_FORBIDDEN_RESPONSE_PATTERNS = [
-  {
-    label: 'default knowledge scope id',
-    pattern:
-      /["']?(?:knowledge[-_\s]*space[-_\s]*id|knowledgespaceid|space[-_\s]*id|spaceid|spaceId|knowledgeSpaceId|namespace)["']?\s*[:=]\s*["']?default["']?/i,
-  },
-] as const;
+const AGENT_KNOWLEDGE_ROUTE = '/api/goodvibes-agent/knowledge';
+const DEFAULT_KNOWLEDGE_ROUTE = '/api/knowledge';
+/** Ingest runs extraction on the host, so it gets longer than a plain read. */
+const KNOWLEDGE_PROBE_TIMEOUT_MS = 30_000;
+
+// The scenario ids are stable report keys; the titles say what each check
+// actually observes. Isolation itself is proven only by the seeded probe in
+// `agent-knowledge-search-isolated`.
 const AGENT_KNOWLEDGE_READ_ROUTE_CHECKS = [
   {
     id: 'agent-knowledge-sources-isolated',
-    title: 'Agent Knowledge isolated sources list',
-    route: '/api/goodvibes-agent/knowledge/sources',
+    title: 'Agent Knowledge sources route',
+    route: `${AGENT_KNOWLEDGE_ROUTE}/sources`,
   },
   {
     id: 'agent-knowledge-nodes-isolated',
-    title: 'Agent Knowledge isolated nodes list',
-    route: '/api/goodvibes-agent/knowledge/nodes',
+    title: 'Agent Knowledge nodes route',
+    route: `${AGENT_KNOWLEDGE_ROUTE}/nodes`,
   },
   {
     id: 'agent-knowledge-issues-isolated',
-    title: 'Agent Knowledge isolated issues list',
-    route: '/api/goodvibes-agent/knowledge/issues',
+    title: 'Agent Knowledge issues route',
+    route: `${AGENT_KNOWLEDGE_ROUTE}/issues`,
   },
   {
     id: 'agent-knowledge-map-isolated',
-    title: 'Agent Knowledge isolated map',
-    route: '/api/goodvibes-agent/knowledge/map',
+    title: 'Agent Knowledge map route',
+    route: `${AGENT_KNOWLEDGE_ROUTE}/map`,
   },
   {
     id: 'agent-knowledge-connectors-isolated',
-    title: 'Agent Knowledge isolated connectors list',
-    route: '/api/goodvibes-agent/knowledge/connectors',
+    title: 'Agent Knowledge connectors route',
+    route: `${AGENT_KNOWLEDGE_ROUTE}/connectors`,
   },
 ] as const;
 /**
@@ -273,22 +268,6 @@ async function fetchJsonCheck(
   }
 }
 
-export function findAgentKnowledgeResponseContamination(body: string): string | null {
-  const normalizedBody = normalizeAgentKnowledgeJsonText(body);
-  const lower = normalizedBody.toLowerCase();
-  for (const marker of AGENT_KNOWLEDGE_FORBIDDEN_RESPONSE_MARKERS) {
-    if (lower.includes(marker)) return marker;
-  }
-  for (const { label, pattern } of AGENT_KNOWLEDGE_FORBIDDEN_RESPONSE_PATTERNS) {
-    if (pattern.test(normalizedBody)) return label;
-  }
-  try {
-    return findAgentKnowledgeScopeContamination(JSON.parse(normalizedBody) as unknown);
-  } catch {
-    return findAgentKnowledgeScopeContamination(normalizedBody);
-  }
-}
-
 function validateAgentKnowledgeJsonBody(
   label: string,
   body: string,
@@ -299,14 +278,6 @@ function validateAgentKnowledgeJsonBody(
   } catch {
     return { status: 'fail', summary: `${label} was not parseable JSON.` };
   }
-  const contamination = findAgentKnowledgeResponseContamination(body);
-  if (contamination) {
-    return {
-      status: 'fail',
-      summary: `${label} returned non-Agent knowledge contamination.`,
-      detail: `${contamination}\n${compact(body)}`,
-    };
-  }
   return { status: 'pass', summary: passSummary, detail: KNOWLEDGE_RELEASE_DETAIL };
 }
 
@@ -316,7 +287,137 @@ function validateAgentKnowledgeJsonRoute(
 ): (status: number, body: string) => { status: LiveVerificationStatus; summary: string; detail?: string } {
   return (status, body) => {
     if (status !== 200) return { status: 'fail', summary: `${route} returned ${status}.` };
-    return validateAgentKnowledgeJsonBody(label, body, `${label} stayed on the isolated Agent route.`);
+    return validateAgentKnowledgeJsonBody(label, body, `${label} returned 200 with parseable JSON.`);
+  };
+}
+
+interface KnowledgeProbe {
+  readonly marker: string;
+  readonly title: string;
+}
+
+function createKnowledgeProbe(space: 'agent' | 'default'): KnowledgeProbe {
+  // One unbroken token per probe, so neither probe's words occur in the other
+  // or anywhere else in the operator's knowledge.
+  const marker = `gvprobe${space}${randomUUID().replace(/-/g, '')}`;
+  return { marker, title: `Live verification probe ${marker}` };
+}
+
+type ProbeStep<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly summary: string; readonly detail?: string };
+
+async function probeRequest(
+  url: string,
+  token: string,
+  init: { readonly body: FormData | string; readonly json: boolean },
+): Promise<ProbeStep<{ status: number; body: string }>> {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        // FormData sets its own multipart boundary header.
+        ...(init.json ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: init.body,
+      signal: AbortSignal.timeout(KNOWLEDGE_PROBE_TIMEOUT_MS),
+    });
+    return { ok: true, value: { status: response.status, body: await response.text() } };
+  } catch (error) {
+    return { ok: false, summary: `Request to ${new URL(url).pathname} failed.`, detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Seeds one probe source through a knowledge ingest route and returns its source id. */
+async function seedKnowledgeProbe(baseUrl: string, routePrefix: string, token: string, probe: KnowledgeProbe): Promise<ProbeStep<string>> {
+  const route = `${routePrefix}/ingest/artifact`;
+  const form = new FormData();
+  form.append('file', new Blob([`${probe.title}\n\nThis source was written by the GoodVibes Agent live verification to check knowledge isolation.\n`], { type: 'text/plain' }), `${probe.marker}.txt`);
+  form.append('title', probe.title);
+  form.append('tags', 'live-verification');
+  form.append('metadata', JSON.stringify({ originSurface: 'goodvibes-agent-live-verification' }));
+  const sent = await probeRequest(`${baseUrl}${route}`, token, { body: form, json: false });
+  if (!sent.ok) return sent;
+  const { status, body } = sent.value;
+  if (status !== 200 && status !== 201) {
+    return {
+      ok: false,
+      summary: `Seeding a probe source through ${route} returned ${status}; isolation was not checked. Use an operator token that may write knowledge.`,
+      detail: compact(body),
+    };
+  }
+  try {
+    const id = (JSON.parse(body) as { source?: { id?: unknown } }).source?.id;
+    if (typeof id === 'string' && id.length > 0) return { ok: true, value: id };
+  } catch {
+    // Reported below.
+  }
+  return { ok: false, summary: `${route} accepted the probe but returned no source id; isolation was not checked.`, detail: compact(body) };
+}
+
+/** Whether the Agent search route returned the probe, by its source id or its unique marker. */
+async function agentSearchReturns(baseUrl: string, token: string, probe: KnowledgeProbe, sourceId: string): Promise<ProbeStep<boolean>> {
+  const route = `${AGENT_KNOWLEDGE_ROUTE}/search`;
+  const sent = await probeRequest(`${baseUrl}${route}`, token, { body: JSON.stringify({ query: probe.title, limit: 10 }), json: true });
+  if (!sent.ok) return sent;
+  const { status, body } = sent.value;
+  if (status !== 200) return { ok: false, summary: `${route} returned ${status}.`, detail: compact(body) };
+  let results: unknown;
+  try {
+    results = (JSON.parse(body) as { results?: unknown }).results;
+  } catch {
+    return { ok: false, summary: `${route} did not return parseable JSON.` };
+  }
+  if (!Array.isArray(results)) return { ok: false, summary: `${route} returned no results array.` };
+  return {
+    ok: true,
+    value: results.some((entry: unknown) => {
+      const record = entry as { id?: unknown; source?: { id?: unknown } } | null;
+      return record?.id === sourceId || record?.source?.id === sourceId || JSON.stringify(entry).includes(probe.marker);
+    }),
+  };
+}
+
+/**
+ * Seeds one probe through the Agent ingest route and one through the default
+ * route, then searches for each on the Agent route: the Agent probe must come
+ * back and the default probe must not. This is the observation that tells a
+ * working split from crossed spaces; an empty store cannot pass it.
+ */
+async function checkAgentKnowledgeIsolation(baseUrl: string, token: string | undefined): Promise<LiveVerificationCheck> {
+  const id = 'agent-knowledge-search-isolated';
+  const title = 'Agent Knowledge isolation (seeded probes)';
+  if (!token) return { id, title, status: 'skip', summary: 'No connected-host bearer token was available.' };
+  const fail = (step: { summary: string; detail?: string }): LiveVerificationCheck => ({
+    id, title, status: 'fail', summary: step.summary, ...(step.detail ? { detail: step.detail } : {}),
+  });
+  const agentProbe = createKnowledgeProbe('agent');
+  const defaultProbe = createKnowledgeProbe('default');
+  const agentSource = await seedKnowledgeProbe(baseUrl, AGENT_KNOWLEDGE_ROUTE, token, agentProbe);
+  if (!agentSource.ok) return fail(agentSource);
+  const defaultSource = await seedKnowledgeProbe(baseUrl, DEFAULT_KNOWLEDGE_ROUTE, token, defaultProbe);
+  if (!defaultSource.ok) return fail(defaultSource);
+  const agentFound = await agentSearchReturns(baseUrl, token, agentProbe, agentSource.value);
+  if (!agentFound.ok) return fail(agentFound);
+  if (!agentFound.value) {
+    return fail({
+      summary: 'The Agent search route did not return the source just seeded through the Agent ingest route; isolation could not be observed.',
+      detail: `Agent probe source ${agentSource.value} was not in the results.`,
+    });
+  }
+  const defaultFound = await agentSearchReturns(baseUrl, token, defaultProbe, defaultSource.value);
+  if (!defaultFound.ok) return fail(defaultFound);
+  if (defaultFound.value) {
+    return fail({
+      summary: 'The Agent search route returned a source seeded through the default knowledge route: the knowledge spaces are crossed.',
+      detail: `Default probe source ${defaultSource.value} appeared in Agent search results.`,
+    });
+  }
+  return {
+    id,
+    title,
+    status: 'pass',
+    summary: 'Agent search returned the Agent probe and did not return the default-route probe.',
+    detail: `Agent probe ${agentSource.value} found; default probe ${defaultSource.value} absent. Both probes stay in the host's knowledge, tagged live-verification.`,
   };
 }
 
@@ -454,18 +555,11 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   checks.push(
     await fetchJsonCheck(
       'agent-knowledge-status',
-      'Agent Knowledge isolated /status',
-      `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/status`,
+      'Agent Knowledge status route',
+      `${connectedHostBaseUrl}${AGENT_KNOWLEDGE_ROUTE}/status`,
       token,
       {
-        validate: (status, body) => {
-          if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/status returned ${status}.` };
-          return validateAgentKnowledgeJsonBody(
-            'Agent Knowledge status',
-            body,
-            'Agent Knowledge status route returned parseable isolated JSON.',
-          );
-        },
+        validate: validateAgentKnowledgeJsonRoute(`${AGENT_KNOWLEDGE_ROUTE}/status`, 'Agent Knowledge status route'),
       },
     ),
   );
@@ -473,8 +567,8 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   checks.push(
     await fetchJsonCheck(
       'agent-knowledge-ask-isolated',
-      'Agent Knowledge isolated ask',
-      `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/ask`,
+      'Agent Knowledge ask route',
+      `${connectedHostBaseUrl}${AGENT_KNOWLEDGE_ROUTE}/ask`,
       token,
       {
         method: 'POST',
@@ -486,34 +580,12 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
           includeConfidence: true,
           includeLinkedObjects: true,
         },
-        validate: (status, body) => {
-          if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/ask returned ${status}.` };
-          return validateAgentKnowledgeJsonBody('Agent Knowledge ask', body, 'Agent Knowledge ask stayed on the isolated Agent route.');
-        },
+        validate: validateAgentKnowledgeJsonRoute(`${AGENT_KNOWLEDGE_ROUTE}/ask`, 'Agent Knowledge ask route'),
       },
     ),
   );
 
-  checks.push(
-    await fetchJsonCheck(
-      'agent-knowledge-search-isolated',
-      'Agent Knowledge isolated search',
-      `${connectedHostBaseUrl}/api/goodvibes-agent/knowledge/search`,
-      token,
-      {
-        method: 'POST',
-        body: { query: 'What is GoodVibes Agent?', limit: 5 },
-        validate: (status, body) => {
-          if (status !== 200) return { status: 'fail', summary: `/api/goodvibes-agent/knowledge/search returned ${status}.` };
-          return validateAgentKnowledgeJsonBody(
-            'Agent Knowledge search',
-            body,
-            'Agent Knowledge search stayed on the isolated Agent route.',
-          );
-        },
-      },
-    ),
-  );
+  checks.push(await checkAgentKnowledgeIsolation(connectedHostBaseUrl, token));
 
   for (const check of AGENT_KNOWLEDGE_READ_ROUTE_CHECKS) {
     checks.push(

@@ -33,6 +33,11 @@ if (args.includes('--help') || args.includes('-h')) {
     '  --json              Print JSON instead of Markdown.',
     '  --out <dir>         Write live-verification.{json,md} to a directory.',
     '  --help              Show this help.',
+    '',
+    'The Agent Knowledge isolation check writes two small probe sources to the',
+    'connected host, one through the Agent Knowledge ingest route and one through',
+    'the default knowledge ingest route, both tagged live-verification, and needs',
+    'an operator token that may write knowledge. The probes stay on the host.',
   ].join('\n'));
   process.exit(0);
 }

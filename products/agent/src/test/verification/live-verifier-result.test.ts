@@ -84,19 +84,49 @@ describe('live verification result', () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  it('keeps the knowledge response text out of the release artifact when the isolation checks pass', async () => {
+  /**
+   * A two-space knowledge host. Ingest stores a probe in the space its route
+   * names; Agent search returns the Agent space's rows, plus the default
+   * space's rows when `crossed` is set. Every other route answers with text
+   * that must not reach the release artifact.
+   */
+  function stubKnowledgeHost(options: { readonly crossed: boolean; readonly bodyMarker: string }) {
+    const spaces: Record<'agent' | 'default', { id: string; title: string }[]> = { agent: [], default: [] };
+    return (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
+      const space = url.pathname.startsWith('/api/goodvibes-agent/knowledge') ? 'agent' : 'default';
+      if (url.pathname.endsWith('/ingest/artifact')) {
+        const title = String((init?.body as FormData).get('title'));
+        const source = { id: `src-${space}-${spaces[space].length + 1}`, title };
+        spaces[space].push(source);
+        return Response.json({ source, issues: [] }, { status: 201 });
+      }
+      if (space === 'agent' && url.pathname.endsWith('/search')) {
+        const { query } = JSON.parse(String(init?.body)) as { query: string };
+        const visible = options.crossed ? [...spaces.agent, ...spaces.default] : spaces.agent;
+        return Response.json({ results: visible.filter((source) => source.title === query).map((source) => ({ kind: 'source', id: source.id, source })) });
+      }
+      return Response.json({ answer: options.bodyMarker, sources: [options.bodyMarker] });
+    }) as never;
+  }
+
+  it('passes the isolation check only when the Agent route keeps the default space out', async () => {
     const root = makeProjectTempDir('goodvibes-live-verifier-knowledge');
     try {
-      const marker = 'KNOWLEDGE-BODY-MARKER-7f3a';
-      spies.push(spyOn(globalThis, 'fetch').mockImplementation((async () => new Response(JSON.stringify({ answer: marker, sources: [marker] }), { status: 200 })) as never));
-      const report = await buildLiveVerificationReport({ homeDir: join(root, 'home'), binaryPath: passingBinary(root), projectRoot, token: 'token-for-verifier-test' });
-      const knowledge = report.checks.filter((check) => check.id.startsWith('agent-knowledge-'));
-      expect(knowledge.length).toBeGreaterThan(0);
-      for (const check of knowledge) {
+      const bodyMarker = 'KNOWLEDGE-BODY-MARKER-7f3a';
+      const options = { homeDir: join(root, 'home'), binaryPath: passingBinary(root), projectRoot, token: 'token-for-verifier-test' };
+      spies.push(spyOn(globalThis, 'fetch').mockImplementation(stubKnowledgeHost({ crossed: false, bodyMarker })));
+      const split = await buildLiveVerificationReport(options);
+      for (const check of split.checks.filter((entry) => entry.id.startsWith('agent-knowledge-'))) {
         expect(check.status).toBe('pass');
-        expect(JSON.stringify(check)).not.toContain(marker);
-        expect(check.detail).toContain('omitted from release artifact');
+        expect(JSON.stringify(check)).not.toContain(bodyMarker);
       }
+
+      spies.splice(0).forEach((spy) => spy.mockRestore());
+      spies.push(spyOn(globalThis, 'fetch').mockImplementation(stubKnowledgeHost({ crossed: true, bodyMarker })));
+      const crossed = await buildLiveVerificationReport(options);
+      expect(crossed.checks.find((check) => check.id === 'agent-knowledge-search-isolated')?.status).toBe('fail');
+      expect(crossed.ok).toBe(false);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

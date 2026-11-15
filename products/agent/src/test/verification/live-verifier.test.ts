@@ -4,7 +4,6 @@ import { join, resolve } from 'node:path';
 import type { LiveVerificationReport } from '../../verification/live-verifier.ts';
 import {
   buildLiveVerificationReport,
-  findAgentKnowledgeResponseContamination,
   renderLiveVerificationReportMarkdown,
   sanitizeLiveVerificationReport,
 } from '../../verification/live-verifier.ts';
@@ -103,14 +102,6 @@ describe('live verification report', () => {
     expect(markdown).toContain('| Agent Knowledge CLI status command | warn | Agent Knowledge route is not available. |');
     expect(markdown).toContain('/api/goodvibes-agent/knowledge/status');
     expect(markdown).toContain('Result: PASS');
-  });
-
-  it('normalizes Agent Knowledge JSON scope aliases and still detects non-Agent live responses', () => {
-    expect(findAgentKnowledgeResponseContamination('{"ok":true,"spaceId":"default"}')).toBeNull();
-    expect(findAgentKnowledgeResponseContamination('{"metadata":{"knowledgeSpaceId":"default","namespace":"default"}}')).toBeNull();
-    expect(findAgentKnowledgeResponseContamination('spaceId: default')).toBe('default knowledge scope id');
-    expect(findAgentKnowledgeResponseContamination('{"node":{"kind":"homeGraphDevice"}}')).toBe('homegraph');
-    expect(findAgentKnowledgeResponseContamination('{"ok":true,"spaceId":"goodvibes-agent:default"}')).toBeNull();
   });
 
   it('sanitizes local paths, tokens, and private addresses before rendering release artifacts', () => {

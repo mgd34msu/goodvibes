@@ -1,5 +1,5 @@
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { createApprovalDerivedHandlers, registerGateRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
 import { installNativeHostedConversationOwner } from './native-hosted-conversation-composition.js';
@@ -137,6 +137,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       disposalScope.registry.add('feature settings bridge', bindFeatureSettingsBridge(configManager, featureFlags));
     }
     const runtimeDispatch = createDomainDispatch(options.runtimeStore);
+    // The daemon's approvals snapshot (approvals.list) reads the decisions the gate reports here.
+    disposalScope.registry.add('gate events into the runtime store', registerGateRuntimeEvents(options.runtimeBus, runtimeDispatch));
     // Late-bound governor admission keeps construction and background work on
     // the same pause policy; the governor is attached below before return.
     const cacheRegistry = new CacheRegistry();

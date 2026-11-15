@@ -64,6 +64,7 @@ import {
 
 
 import type { UntrustedContentPort } from '../browser/browser-types.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 
 export type { UntrustedSurface, UntrustedExposure };
 export type { OwnerApproval };
@@ -371,6 +372,10 @@ export class UntrustedContentLedger {
 
   /** Native turn/source incarnation, including an empty turn or same-value ingest. */
   getPublicationRevision(): number { return this.#publicationRevision; }
+
+  /** The publication revision as a revision source: every recorded read and every turn start moves it. */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
+  readonly #revisionSource = revisionSource('untrusted content', () => this.#publicationRevision);
 
   ingestedThisTurn(): readonly UntrustedIngest[] {
     const scope = currentUntrustedContentScope();

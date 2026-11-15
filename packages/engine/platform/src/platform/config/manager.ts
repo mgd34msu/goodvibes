@@ -54,6 +54,7 @@ import { announceIngestionNotice } from './settings-ingestion.js';
 import { SETTINGS_FLOOR_MARKER_KEY } from './settings-reader-floor.js';
 import { isProjectRestrictedKey, restrictProjectLayer } from './project-layer-restrictions.js';
 import { memoryBudgetRefusal, memoryTierOrderRefusal, nonSchemaKeyRefusal, schemaTypeRefusal } from './write-admission.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { freezePreparedData, normalizePreparedValue, preparedMutationLifecycle, preparedSchemaSignature, PreparedMutationRefusal, type PreparedMutationRecord,
   type PreparedConfigMutation, type PreparedConfigMutationTransition, type PreparedConfigMutationRequest,
   type PreparedConfigMutationFacts, type PreparedConfigMutationDestination,
@@ -404,6 +405,7 @@ export class ConfigManager {
   private profileFallback: ConfigProfileFallbackReader | null = null;
   private readonly invalidationListeners = new Set<() => void>();
   #permissionIncarnation = 0;
+  readonly #revisionSource = revisionSource('settings', () => this.#permissionIncarnation);
   private durablePolicy: DurablePolicyEpochOwner | undefined;
   private hydrating = true;
   private readonly incarnationListeners = new Set<() => void>();
@@ -566,7 +568,14 @@ export class ConfigManager {
 
   /** Install (or clear) the owner-profile read fallback. See ./profile-fallback.ts. */
   attachProfileFallback(reader: ConfigProfileFallbackReader | null): void {
+    if (this.profileFallback === reader) return;
     this.profileFallback = reader;
+    // Unset keys now read through a different fallback. Nothing is persisted,
+    // so the durable epoch stays; only the in-memory incarnation moves.
+    this.#permissionIncarnation++;
+    for (const listener of [...this.incarnationListeners]) {
+      try { listener(); } catch { /* A lifetime observer cannot defeat revocation. */ }
+    }
   }
 
   /** Owned async seam; a previous composition cannot clear its replacement. */
@@ -679,6 +688,9 @@ export class ConfigManager {
 
   /** Value-free owner revision, including save and failed/no-op mutation intent. */
   getConfigurationIncarnation(): number { return this.#permissionIncarnation; }
+
+  /** The configuration incarnation as a revision source: every setting change, reload from disk and save moves it. */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
 
   /** Actual persisted policy owners, safe to compare after restart. Never a permission grant. */
   getDurableConfigurationIncarnation(version: 1 | 2 = 2): string {

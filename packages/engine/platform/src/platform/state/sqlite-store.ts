@@ -1442,6 +1442,8 @@ export class SQLiteStore {
   }
   private imageEpoch = 0;
   private observationEpoch = 0;
+  /** Local statements and saves; with the image epoch it moves on every change of the content. */
+  #localWrites = 0;
   private persistedReadFrame: { db: SqlDatabase | null; owned: boolean; identity: string | undefined; local: string | undefined; persisted: SQLiteImageObservation | undefined; poisoned: boolean; localState: OwnedSqlDatabase | undefined; localRevision: bigint | undefined; localProbe: string | undefined; localIsolated: boolean; rows: Map<string, ReturnType<SqlDatabase['exec']>>; generations: Map<string, string | null>; assertCurrent: (verifyNative?: boolean) => void } | null = null;
   private admission: Promise<void> = Promise.resolve();
   private readonly activeBatches = new Set<Promise<void>>();
@@ -1536,7 +1538,18 @@ export class SQLiteStore {
 
   run(sql: string, params?: (string | number | Uint8Array | null)[]): void {
     this.observationEpoch += 1;
+    this.#localWrites += 1;
     this.getDb().run(sql, params);
+  }
+
+  /**
+   * Moves on every statement run through run(), every save (which covers
+   * statements a caller ran on the database handle directly) and every image
+   * this store adopts: its own guarded publication, a reload after another
+   * process saved, close and reopen. It only moves up.
+   */
+  contentRevision(): number {
+    return this.imageEpoch + this.#localWrites;
   }
 
   exec(sql: string, params?: (string | number)[]): Array<{ columns: string[]; values: unknown[][] }> {
@@ -2497,6 +2510,7 @@ export class SQLiteStore {
   async save(): Promise<boolean> {
     const dbPath = this.dbPath;
     if (!this.db) return false;
+    this.#localWrites += 1;
     if (!this.coordinated && (isEphemeralDbPath(dbPath) || !dbPath)) return false;
     if (this.saveBatchDepth > 0) {
       this.saveDirty = true;

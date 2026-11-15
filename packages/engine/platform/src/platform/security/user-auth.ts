@@ -3,6 +3,7 @@ import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { confirmFileDurable, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { SettingsAuthorityUnavailableError } from './settings-authority.js';
 
@@ -403,6 +404,13 @@ export class UserAuthManager {
   private readonly scryptParams: ScryptParams;
   /** Injectable clock, defaults to Date.now for production. */
   private readonly nowFn: () => number;
+  /**
+   * Moves when users, sessions or the two fault holds change, including a user
+   * file another process rewrote that this owner took in. A session reaching
+   * its expiry time moves it only when the session is removed.
+   */
+  #revision = 0;
+  readonly #revisionSource = revisionSource('local auth', () => this.#revision);
 
   constructor(config: UserAuthConfig) {
     if (!config.bootstrapFilePath) throw new Error('UserAuthManager requires an explicit bootstrapFilePath.');
@@ -436,6 +444,9 @@ export class UserAuthManager {
     }
   }
 
+  /** Local accounts and their sessions as a revision source. */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
+
   private rememberStore(users: Iterable<AuthUser>): void {
     this.storedUsers = new Map([...users].map(user => [user.username, user]));
     try { this.storedIdentity = fileObservationIdentity(this.userStorePath); } catch { this.storedIdentity = undefined; }
@@ -465,6 +476,7 @@ export class UserAuthManager {
     const next = new Map(onDisk.map(user => [user.username, user]));
     for (const username of this.foreignlyChangedUsers(next)) this.revokeSessionsForUser(username);
     this.users = next;
+    this.#revision++;
     this.rememberStore(onDisk);
   }
 
@@ -650,6 +662,7 @@ export class UserAuthManager {
       expiresAt: this.nowFn() + this.sessionTtlMs,
     };
     this.sessions.set(token, session);
+    this.#revision++;
     return session;
   }
 
@@ -659,6 +672,7 @@ export class UserAuthManager {
     if (!session) return null;
     if (this.nowFn() > session.expiresAt) {
       this.sessions.delete(token);
+      this.#revision++;
       return null;
     }
     return session;
@@ -696,10 +710,11 @@ export class UserAuthManager {
   }
 
   revokeSession(tokenOrId: string): boolean {
-    if (this.sessions.delete(tokenOrId)) return true;
+    if (this.sessions.delete(tokenOrId)) { this.#revision++; return true; }
     for (const [sessionToken, session] of this.sessions) {
       if (session.id === tokenOrId) {
         this.sessions.delete(sessionToken);
+        this.#revision++;
         return true;
       }
     }
@@ -714,6 +729,7 @@ export class UserAuthManager {
         removed++;
       }
     }
+    if (removed > 0) this.#revision++;
     return removed;
   }
 
@@ -784,6 +800,7 @@ export class UserAuthManager {
       try { writeBootstrapCredentialFile(this.bootstrapCredentialPath, normalized, nextPassword); }
       catch (error) {
         this.settingsFaulted = true;
+        this.#revision++;
         throw new Error(`The admin password was changed and saved, but the bootstrap credential file ${this.bootstrapCredentialPath} `
           + `could not be updated (${error instanceof Error ? error.message : String(error)}); it still holds the old password. `
           + 'Remove that file or rewrite it; settings changes from web sessions stay refused until the daemon restarts.', { cause: error });
@@ -813,6 +830,7 @@ export class UserAuthManager {
       this.settingsFaulted = state.faults.settings;
     }
     if (this.persistUsers) this.rememberStore(this.users.values());
+    this.#revision++;
   }
 
   inspect(): LocalAuthSnapshot {
@@ -844,6 +862,7 @@ export class UserAuthManager {
     for (const [token, session] of this.sessions.entries()) {
       if (session.expiresAt <= now) {
         this.sessions.delete(token);
+        this.#revision++;
       }
     }
   }
@@ -867,10 +886,11 @@ export class UserAuthManager {
           for (const username of this.foreignlyChangedUsers(merged)) if (!sameUser(merged.get(username), next.get(username))) this.revokeSessionsForUser(username);
           next = merged;
         } finally { release(); }
-      } catch (error) { this.persistFaulted = true; throw error; }
+      } catch (error) { this.persistFaulted = true; this.#revision++; throw error; }
       this.persistFaulted = false;
     }
     this.users = next;
+    this.#revision++;
     return true;
   }
 }

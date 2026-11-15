@@ -83,6 +83,7 @@ import { SharedSessionRuntimeBusBridge } from './session-broker-runtime-bus.js';
 import { handleSharedSessionIntent, PROVIDER_MESSAGE_KEY_FIELD } from './session-broker-intent.js';
 import { isDelegatedSessionInput } from './session-intents.js';
 import { submitDelegatedSessionMessage, type DelegatedSessionInputBinding, type DelegatedSessionSubmission } from './session-broker-delegated.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 
 /** Closed sessions are history, so the stored transcript is never trimmed. */
 const MAX_PERSISTED_MESSAGES = Infinity;
@@ -101,6 +102,18 @@ const SESSION_DELETION_RETENTION_MS = Number.POSITIVE_INFINITY;
 /** How long a started-but-unbound agent holds back a session's other messages if nothing ends the claim. */
 const SPAWN_IN_FLIGHT_MS = 30_000;
 
+/**
+ * Every session, message and input change replaces a map entry (records are
+ * rebuilt, buckets set back after a push), so counting set, delete and clear
+ * counts every change.
+ */
+class CountedMap<K, V> extends Map<K, V> {
+  constructor(private readonly changed: () => void) { super(); }
+  override set(key: K, value: V): this { this.changed(); return super.set(key, value); }
+  override delete(key: K): boolean { const removed = super.delete(key); if (removed) this.changed(); return removed; }
+  override clear(): void { if (this.size > 0) this.changed(); super.clear(); }
+}
+
 export class SharedSessionBroker {
   private readonly store: PersistentStore<SharedSessionStoreSnapshot>;
   /** The file this broker serves from, or null for an injected store. Boot folds/sweeps must NAME it, never re-derive it, see daemon/daemon-session-store-boot.ts. */
@@ -109,9 +122,11 @@ export class SharedSessionBroker {
   private readonly agentStatusProvider: SharedSessionAgentStatusProvider;
   private readonly messageSender: SharedSessionMessageSender;
   private readonly conversationGateConfig: ConversationGateConfigReader | undefined;
-  private readonly sessions = new Map<string, SharedSessionRecord>();
-  private readonly messages = new Map<string, SharedSessionMessage[]>();
-  private readonly inputs = new Map<string, SharedSessionInputRecord[]>();
+  #revision = 0;
+  readonly #revisionSource = revisionSource('shared sessions', () => this.#revision);
+  private readonly sessions: Map<string, SharedSessionRecord> = new CountedMap(() => { this.#revision++; });
+  private readonly messages: Map<string, SharedSessionMessage[]> = new CountedMap(() => { this.#revision++; });
+  private readonly inputs: Map<string, SharedSessionInputRecord[]> = new CountedMap(() => { this.#revision++; });
   private readonly runtimeBusBridge = new SharedSessionRuntimeBusBridge();
   private readonly writes = new StoreWriteQueue();
   private readonly changeListeners = new Set<() => void>();
@@ -169,6 +184,9 @@ export class SharedSessionBroker {
   }
 
   /** Liveness for turns running outside this broker (see session-broker-gc.ts's isExternallyLive). Set post-construction: the answering subsystem takes this broker as its spine. */
+  /** Sessions, their messages and inputs as a revision source. This broker is the only writer of its store. */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
+
   setExternalLivenessProbe(probe: ((session: SharedSessionRecord) => boolean) | null): void {
     this.externalLivenessProbe = probe;
   }

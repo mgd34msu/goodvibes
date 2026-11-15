@@ -35,6 +35,7 @@ import { NativeContinuationOwner, nativeContinuationParents, type NativeContinua
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import { describeOwnerLock, reclaimDeadOwnerLock, recordOwnerLockHolder, removeOwnerLockDirectory, waitWhileLockIsBeingTaken } from '../config/durable-policy-epoch.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 
 const TOKEN_PREFIX = 'gvp_';
 
@@ -239,6 +240,17 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/**
+ * What grants or limits access. A last-seen stamp is telemetry and changes no
+ * access; an absent and a false legacy revocation, or an absent and an empty
+ * grant list, are the same authority however the file was last written.
+ */
+function authorityText(snapshot: PairingTokenSnapshot): string {
+  return JSON.stringify(snapshot, (key, value: unknown) => key === 'lastSeenAt'
+    || (key === 'legacyRevoked' && value !== true)
+    || (key === 'continuations' && Array.isArray(value) && value.length === 0) ? undefined : value);
+}
+
 function generateTokenValue(): string {
   return TOKEN_PREFIX + randomBytes(24).toString('base64url');
 }
@@ -316,6 +328,10 @@ export class PairingTokenManager {
   // published inputs; normal native reads/issuance do not enter this path.
   private readonly publishedTokenRevisions = new Map<string, { createdAt: number; tokenHash: string; digest: string }>();
   private publishedRoot: { parents: NativeContinuationParents; digest: string } | undefined;
+  /** Moves when the published pairings, grants or legacy revocation change, by this process or another one it read. */
+  #authorityRevision = 0;
+  #publishedAuthority = '';
+  readonly #revisionSource = revisionSource('device pairings', () => this.#authorityRevision);
 
   constructor(filePath: string, options: PairingTokenManagerOptions = {}) {
     this.filePath = filePath;
@@ -346,7 +362,14 @@ export class PairingTokenManager {
       try { this.snapshot = this.readPersisted() ?? { tokens: [] }; } catch { /* fail closed */ }
     } finally { lock?.release(); }
     this.reindex();
+    this.#publishedAuthority = authorityText(this.snapshot);
   }
+
+  /**
+   * Pairing authority as a revision source. Another process's change shows
+   * once this owner reads the file (authenticate, list, a mutation).
+   */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
 
   /**
    * The configured cap, or null when there is none / it is unusable.
@@ -471,6 +494,8 @@ export class PairingTokenManager {
   }
 
   private publish(snapshot: PairingTokenSnapshot): void {
+    const authority = authorityText(snapshot);
+    if (authority !== this.#publishedAuthority) { this.#publishedAuthority = authority; this.#authorityRevision++; }
     this.snapshot = snapshot;
     if (snapshot.legacyRevoked === true) this.settingsObservedLegacyRevocation = true;
     this.reindex();

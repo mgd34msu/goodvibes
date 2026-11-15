@@ -21,6 +21,7 @@ import {
 } from './conversation-utils.js';
 import { applyDiffContent, parseDiffForApply } from './conversation-diff.js';
 import { logger } from '../utils/logger.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { archiveVerificationCompaction, detachVerificationMessages, forkVerificationArchive, isVerificationRuntimeMessage, mergeVerificationArchive, resetVerificationArchives,
   restoreVerificationBranch, restoreVerificationMessages, retainVerificationMessagePositions, switchVerificationArchive, updateVerificationMessage } from './verification/archive.js';
 import { retainStrictJudgmentJson } from '../gate/judgment-result.js';
@@ -158,10 +159,14 @@ export class ConversationManager {
   private streamingMessageIndex = -1;
   private undoStack: Message[][] = [];
   private _messagesRevision = 0;
+  readonly #revisionSource = revisionSource('conversation', () => this._messagesRevision);
   private _cachedLLMMessages: ProviderMessage[] | null = null;
   private _cachedLLMRevision = -1;
 
   constructor() {}
+
+  /** Every change to the message history (append, stream update, undo, branch switch, compaction, reset) as a revision source. */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
 
   private findToolName(callId: string): string | undefined {
     for (let i = this.messages.length - 1; i >= 0; i--) {

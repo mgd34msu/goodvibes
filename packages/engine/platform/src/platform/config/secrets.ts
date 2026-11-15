@@ -36,12 +36,13 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
 import { dirname, isAbsolute, resolve } from 'path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync, type Stats } from 'fs';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { observeImportFile, assertImportFileCurrent, type ImportFileObservation, type PreparedImportTransitionFacts } from './prepared-import.js';
 import type { PreparedConfigMutationReceipt } from './prepared-mutation.js';
 import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import type { ConfigManager } from './manager.js';
 import {
   SecretStoreUnreadableError,
@@ -350,6 +351,43 @@ export class SecretsManager {
   readonly #credentialSnapshotOwner = randomUUID();
   #credentialSnapshotSequence = 0;
   readonly #credentialSnapshots = new Map<string, { readonly chain: readonly unknown[]; readonly revision: string }>();
+  /** Identity of each store file as this owner last read or wrote it; a different one on a later read is another process's write. */
+  readonly #storeIdentities = new Map<string, string>();
+  #foreignStoreWrites = 0;
+  readonly #revisionSource = revisionSource('credentials', () => this.credentialMutationGeneration + this.#foreignStoreWrites);
+
+  /**
+   * Stored credentials as a revision source: every set, delete, import and
+   * daemon-key creation here, and a store file another process rewrote once
+   * this owner reads it. Environment variables and secret references resolved
+   * elsewhere are not covered.
+   */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
+
+  #observeStore(filePath: string, identity: string, ownWrite: boolean): void {
+    const previous = this.#storeIdentities.get(filePath);
+    this.#storeIdentities.set(filePath, identity);
+    if (!ownWrite && previous !== undefined && previous !== identity) this.#foreignStoreWrites++;
+  }
+
+  #noteOwnWrite(filePath: string): void {
+    try { this.#observeStore(filePath, storeIdentity(statSync(filePath)), true); }
+    catch { this.#storeIdentities.delete(filePath); }
+  }
+
+  /** Reads through one descriptor, so the identity costs no extra system call. */
+  #readStoreText(filePath: string): string {
+    let fd: number;
+    try { fd = openSync(filePath, 'r'); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') this.#observeStore(filePath, 'absent', false);
+      throw error;
+    }
+    try {
+      this.#observeStore(filePath, storeIdentity(fstatSync(fd)), false);
+      return readFileSync(fd, 'utf-8');
+    } finally { closeSync(fd); }
+  }
 
   /** Value-free local owner state; no credential names, paths, bytes or hashes. */
   getCredentialMutationState(): Readonly<{ generation: number; pending: boolean }> {
@@ -567,6 +605,7 @@ export class SecretsManager {
         uncertainPath = publication.path; current();
         if (publication.keyfile) writeFileSync(publication.path, publication.payload as string, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
         else writeJsonFileAtomic(publication.path, publication.payload, { mode: 0o600, cleanupStaleTemps: false, assertCurrent: current });
+        this.#noteOwnWrite(publication.path);
         completedPaths.push(publication.path);
         record.observations.find(observation => observation.path === publication.path)!.observation = observeImportFile(publication.path);
       }
@@ -655,6 +694,7 @@ export class SecretsManager {
           for (const publication of entry.publications) {
             current();
             writeJsonFileAtomic(publication.path, publication.payload, { mode: 0o600, cleanupStaleTemps: false });
+            this.#noteOwnWrite(publication.path);
             completedPaths.push(publication.path);
             observations.find(item => item.path === publication.path)!.stamp = deletionFileObservation(publication.path).stamp;
           }
@@ -785,7 +825,9 @@ export class SecretsManager {
       if (current.state === 'resolved') return current.value;
       const value = create();
       guard();
-      this.setOwned(key, value, { scope: 'daemon', medium: 'secure' }, assertCurrent ? { beforeWrite: guard, committed: () => {} } : undefined);
+      this.credentialMutationGeneration++;
+      try { this.setOwned(key, value, { scope: 'daemon', medium: 'secure' }, assertCurrent ? { beforeWrite: guard, committed: () => {} } : undefined); }
+      finally { this.credentialMutationGeneration++; }
       return value;
     }, paths.slice(1), guard);
   }
@@ -1387,7 +1429,7 @@ export class SecretsManager {
   private readEncryptedStore(filePath: string): SecureStoreReadResult {
     let raw: string;
     try {
-      raw = readFileSync(filePath, 'utf-8');
+      raw = this.#readStoreText(filePath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
       return { status: 'unreadable', reason: summarizeError(err) };
@@ -1464,12 +1506,13 @@ export class SecretsManager {
     // directory when it is missing, so establishing it here keeps the mode.
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
     writeJsonFileAtomic(filePath, store, { mode: 0o600 });
+    this.#noteOwnWrite(filePath);
   }
 
   private readPlaintextStore(filePath: string): PlaintextStoreReadResult {
     let raw: string;
     try {
-      raw = readFileSync(filePath, 'utf-8');
+      raw = this.#readStoreText(filePath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
       return { status: 'unreadable', reason: summarizeError(err) };
@@ -1503,5 +1546,10 @@ export class SecretsManager {
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
     const payload: PlaintextStore = { version: 1, secrets };
     writeJsonFileAtomic(filePath, payload, { mode: 0o600 });
+    this.#noteOwnWrite(filePath);
   }
+}
+
+function storeIdentity(stat: Stats): string {
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
 }

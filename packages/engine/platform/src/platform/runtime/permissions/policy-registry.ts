@@ -25,6 +25,7 @@ import { loadPolicyBundle } from './policy-loader.js';
 import type { DivergenceReport, SimulationMode } from './types.js';
 import type { EnforceGateResult } from './divergence-dashboard.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
+import { revisionSource, type RevisionSource } from '../../utils/revision.js';
 
 // ── Registry types ─────────────────────────────────────────────────────────────
 
@@ -490,6 +491,10 @@ export class PolicyRegistry {
 
   /** Only successful enforcement publications advance this lifetime. */
   public getPublicationRevision(): number { return this._publicationRevision; }
+
+  /** The publication revision as a revision source: load, simulate, promote and rollback move it. */
+  public get revisionSource(): RevisionSource { return this.#revisionSource; }
+  readonly #revisionSource = revisionSource('policy bundle', () => this._publicationRevision);
 
   /** Returns the candidate bundle version, or null if none loaded. */
   public getCandidate(): PolicyBundleVersion | null {

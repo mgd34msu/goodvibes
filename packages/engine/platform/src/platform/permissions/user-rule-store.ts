@@ -34,6 +34,7 @@ import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import type { RememberTier } from './approval-rules.js';
 
 /** A stored rule plus its provenance. */
@@ -132,6 +133,13 @@ export class UserPermissionRuleStore {
   /** What the file looked like when this process last read or wrote it; null until the first load succeeds. */
   private diskSignature: string | null = null;
   private publicationRevision = 0;
+  /**
+   * Moves on every change to what rules() or rememberedRules() return: a load,
+   * an add, a remembered rule, a delete, and another process's write. Unlike
+   * the publication revision it also covers remembered rules.
+   */
+  #changeRevision = 0;
+  readonly #revisionSource = revisionSource('permission rules', () => { this.refreshFromDisk(); return this.#changeRevision; });
   /** Whole mutations run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
 
@@ -192,6 +200,7 @@ export class UserPermissionRuleStore {
     }
     this.diskSignature = this.signatureOfFile();
     this.publicationRevision++;
+    this.#changeRevision++;
   }
 
   private signatureOfFile(): string {
@@ -224,6 +233,9 @@ export class UserPermissionRuleStore {
 
   /** Monotonic committed-publication identity, including same-value replacements. */
   getPublicationRevision(): number { return this.publicationRevision; }
+
+  /** Every rule change as a revision source. Reading it takes in another process's write first (one stat). */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
 
   /** All stored rules, including ones remembered during this process, newest first. */
   list(): readonly StoredUserPermissionRule[] {
@@ -336,6 +348,8 @@ export class UserPermissionRuleStore {
     ];
     const dropped = committed.length !== this.records.length;
     if (dropped) this.publicationRevision++;
+    // Every call follows a write, this process's or another's.
+    this.#changeRevision++;
     this.records = committed;
     this.remembered = remembered;
     return dropped;

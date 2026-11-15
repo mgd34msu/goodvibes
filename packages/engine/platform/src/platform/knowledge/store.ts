@@ -38,6 +38,7 @@ export type { KnowledgePreparedNodeWrites } from './store-node-activation.js';
 import { commitGuardedKnowledgeIssueReplacement, operatorReviewed } from './store-issue-replacement.js';
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow, commitKnowledgeNodeIssueWrites, type KnowledgeGuardedNodeIssueWrites } from './store-node-issue-writes.js';
 import { SQLitePersistedStateChangedError } from '../state/sqlite-store-persistence.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { KnowledgeStoreConflictError } from './store-conflict.js';
 import { SQLiteStore, SQLiteObservationRetiredError, captureSQLiteActivationPublication, type PersistedKnowledgeRecordSelector, type ExpectedKnowledgeRecordReadsetInput } from '../state/sqlite-store.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -258,6 +259,7 @@ export function knowledgeNodePublicationGeneration(store: KnowledgeStore, record
 
 export class KnowledgeStore {
   private readonly sqlite: SQLiteStore;
+  readonly #revisionSource = revisionSource('knowledge store', () => this.sqlite.contentRevision());
   private readonly dbPath: string;
   private readonly nodeActivationScope = Object.freeze({});
   private readonly nodeActivationConfidenceFloor: number | undefined;
@@ -540,6 +542,13 @@ export class KnowledgeStore {
     this.refreshing = reload;
     return reload;
   }
+
+  /**
+   * Every write to the knowledge content as a revision source, whole store.
+   * Another process's save shows here once this store adopts it
+   * (refreshIfChanged at the start of a read, or a refused save that reloads).
+   */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
 
   status(): KnowledgeStatus {
     return getKnowledgeStoreStatus(this.asReadView());

@@ -26,7 +26,7 @@ export { opaqueUuid } from './port/opaque-uuid.ts';
 
 export { observeJudgmentModel, reuseObservedJudgmentResult, type JudgmentModelObservation } from './port/model-observation.ts';
 
-export { assertSynchronousJudgmentGuard } from './port/attempt-guard.ts';
+export { assertSynchronousJudgmentGuard, type SynchronousCheck } from './port/attempt-guard.ts';
 
 export {
   createJudgeCache,

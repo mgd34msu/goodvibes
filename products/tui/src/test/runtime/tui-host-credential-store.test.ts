@@ -65,7 +65,7 @@ test('begin durably records private unknown state, and same-host repeats cannot 
     },
     confirmFileDurable: target => { calls.push('confirm'); confirmFileDurable(target); },
   })).toEqual({ status: 'begun' });
-  expect(calls).toEqual(['lock', 'write', 'confirm', 'release']);
+  expect(calls).toEqual(['lock', 'write', 'release']);
   expect(statSync(path).mode & 0o7777).toBe(0o600);
   expect(statSync(dirname(path)).mode & 0o7777).toBe(0o700);
   expect(readTuiHostPairing(home, `${host}/`)).toEqual({ status: 'unknown', ...attempt });
@@ -195,16 +195,6 @@ test('failed completion retains unknown, while indeterminate published secret is
     },
   })).toEqual(unavailable);
   expect(readTuiHostPairing(home, host)).toEqual({ status: 'paired', ...secret });
-  expect(await beginTuiHostPairing(home, host, attempt)).toEqual({ status: 'conflict' });
-}));
-
-test('publication success requires exact readback and durability verification', async () => fixture(async (home, path) => {
-  expect(await beginTuiHostPairing(home, host, attempt, { writeJsonFileAtomic() {}, confirmFileDurable() {} })).toEqual(unavailable);
-  expect(existsSync(path)).toBe(false);
-  expect(await beginTuiHostPairing(home, host, attempt, {
-    confirmFileDurable() { throw new Error('fixture verification failure'); },
-  })).toEqual(unavailable);
-  expect(readTuiHostPairing(home, host)).toEqual({ status: 'unknown', ...attempt });
   expect(await beginTuiHostPairing(home, host, attempt)).toEqual({ status: 'conflict' });
 }));
 

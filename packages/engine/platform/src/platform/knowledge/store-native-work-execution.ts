@@ -144,12 +144,29 @@ function validatedLedger(projectId: string, image: string): WorkLedgerState {
   validatedLedgers.set(projectId, { image, ledger });
   return ledger;
 }
-function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeExecutionOriginal, candidate?: SettlementSource, ledgers?: Map<string, WorkLedgerState>): NativeWorkExecutionTransaction {
+/**
+ * One storage's last validated ledger, keyed by the ledger's own format and
+ * revision columns. Every ledger write moves the revision (or, for a format
+ * upgrade, the format), so equal columns mean the same ledger: a read then
+ * selects two integers instead of the ledger's bytes.
+ */
+interface LedgerRevisionCache { entry?: { readonly version: unknown; readonly revision: unknown; readonly ledger: WorkLedgerState } }
+function readLedger(db: SqlReader, projectId: string, cache?: LedgerRevisionCache): WorkLedgerState {
+  const head = db.exec('SELECT format_version, revision FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0];
+  if (!head) return createEmptyWorkLedgerState(projectId);
+  const kept = cache?.entry;
+  if (kept && kept.version === head[0] && kept.revision === head[1]) return kept.ledger;
+  const image = db.exec('SELECT state_json FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0]?.[0];
+  if (image === undefined) throw new NativeWorkExecutionError('invalid');
+  const ledger = validatedLedger(projectId, String(image));
+  if (head[0] !== ledger.version || head[1] !== ledger.revision) throw new NativeWorkExecutionError('invalid');
+  if (cache) cache.entry = { version: head[0], revision: head[1], ledger };
+  return ledger;
+}
+function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeExecutionOriginal, candidate?: SettlementSource, ledgers?: Map<string, WorkLedgerState>, cache?: LedgerRevisionCache): NativeWorkExecutionTransaction {
   let ledger = ledgers?.get(projectId);
   if (!ledger) {
-    const ledgerRow = db.exec('SELECT format_version, revision, state_json FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0];
-    ledger = ledgerRow ? validatedLedger(projectId, String(ledgerRow[2])) : createEmptyWorkLedgerState(projectId);
-    if (ledgerRow && (ledgerRow[0] !== ledger.version || ledgerRow[1] !== ledger.revision)) throw new NativeWorkExecutionError('invalid');
+    ledger = readLedger(db, projectId, cache);
     ledgers?.set(projectId, ledger);
   }
   const record = readRecord(db, projectId, key, original);
@@ -251,13 +268,15 @@ function checkIntentTransition(current: NativeWorkExecutionTransaction, next: Na
 export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, beforeV2Write?: () => void, beforeCiV2Write?: () => void, beforeSettlementV2Write?: () => void): NativeWorkExecutionStorage {
   createEmptyWorkLedgerState(projectId);
   let closed = false; const pending = new Set<Promise<unknown>>(); let closing: Promise<void> | undefined;
+  // Filled only by reads of committed state, never by a read after a write in an open transaction.
+  const ledgerCache: LedgerRevisionCache = {};
   function transaction<T>(key: Lookup, decide: (current: NativeWorkExecutionTransaction) => NativeWorkExecutionMutation<T>, afterDurable?: (value: T, current: () => NativeWorkExecutionTransaction) => void, original?: NativeExecutionOriginal): Promise<T> {
     if (closed) return Promise.reject(new NativeWorkExecutionError('closed'));
     const lookup = { ...key };
     if (!lookup.attemptId || typeof lookup.attemptId !== 'string') return Promise.reject(new NativeWorkExecutionError('invalid'));
     let publishedOriginal = original;
     const work = sqlite.transactPersisted(db => {
-      const current = read(db, projectId, lookup, original);
+      const current = read(db, projectId, lookup, original, undefined, undefined, ledgerCache);
       // Parsed execution/intent sources are deeply immutable native originals.
       // Preserve their validation provenance while detaching mutable ledger and
       // historical settlement data from the transaction comparison baseline.
@@ -294,7 +313,7 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
       if (nextIntent) db.run('INSERT INTO native_work_execution_intents(project_id,attempt_id,format_version,state_json) VALUES (?,?,?,?) ON CONFLICT(project_id,attempt_id) DO UPDATE SET format_version=excluded.format_version,state_json=excluded.state_json', [projectId, nextIntent.target.attemptId, nextIntent.version, JSON.stringify(nextIntent)]);
       if (next) db.run('INSERT INTO native_work_executions(project_id,key_hash,format_version,state_json,attempt_id) VALUES (?,?,?,?,?) ON CONFLICT(project_id,key_hash) DO UPDATE SET format_version=excluded.format_version,state_json=excluded.state_json', [projectId, nativeExecutionStorageKey(next), next.version, JSON.stringify(next), next.target.attemptId]);
       return { changed: next !== null || nextIntent !== null, value: result.value };
-    }, refresh, afterDurable ? (value, db) => afterDurable(value, () => read(db, projectId, lookup, publishedOriginal)) : undefined).then(result => {
+    }, refresh, afterDurable ? (value, db) => afterDurable(value, () => read(db, projectId, lookup, publishedOriginal, undefined, undefined, ledgerCache)) : undefined).then(result => {
       if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value;
     });
     pending.add(work); void work.then(() => pending.delete(work), () => pending.delete(work)); return work;
@@ -302,8 +321,8 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
   return {
     continuations: createNativeCiContinuationStorage(sqlite, projectId, refresh, (db, key, original) => read(db, projectId, key, original), beforeCiV2Write),
     revision: () => sqlite.contentRevision(),
-    current(key, original) { if (closed) throw new NativeWorkExecutionError('closed'); return withValidationOriginal(original, () => sqlite.readPersisted(db => read(db, projectId, key, original))); },
-    currentByAttempt(attemptId, original) { if (closed) throw new NativeWorkExecutionError('closed'); if (!attemptId || typeof attemptId !== 'string') throw new NativeWorkExecutionError('invalid'); return withValidationOriginal(original, () => sqlite.readPersisted(db => read(db, projectId, { attemptId }, original))); },
+    current(key, original) { if (closed) throw new NativeWorkExecutionError('closed'); return withValidationOriginal(original, () => sqlite.readPersisted(db => read(db, projectId, key, original, undefined, undefined, ledgerCache))); },
+    currentByAttempt(attemptId, original) { if (closed) throw new NativeWorkExecutionError('closed'); if (!attemptId || typeof attemptId !== 'string') throw new NativeWorkExecutionError('invalid'); return withValidationOriginal(original, () => sqlite.readPersisted(db => read(db, projectId, { attemptId }, original, undefined, undefined, ledgerCache))); },
     transaction,
     transactionByAttempt(attemptId, decide, afterDurable, original) { return transaction({ attemptId }, decide, afterDurable, original); },
     settle(key, decide, assertCurrent, original) {
@@ -311,7 +330,7 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
       const lookup = { ...key }; durableKeyIdentity(lookup);
       let actualSource: NativeWorkExecutionRecord | undefined, candidate: SettlementSource | undefined;
       const operation = sqlite.transactPersisted(db => {
-        const current = read(db, projectId, lookup, original); actualSource = current.record ?? undefined;
+        const current = read(db, projectId, lookup, original, undefined, undefined, ledgerCache); actualSource = current.record ?? undefined;
         const proposed = decide({ ...current, ledger: structuredClone(current.ledger) });
         if (proposed && typeof (proposed as unknown as { then?: unknown }).then === 'function') { drainOwned(proposed); throw new NativeWorkExecutionError('invalid'); }
         const publication = proposed === null ? null : captureNativeSettlementPublication(proposed);

@@ -165,6 +165,13 @@ export interface HostedSessionAttachment {
   readonly historyAsOf?: number | undefined;
 }
 
+interface NativeCheckpointWrite {
+  readonly context: NativeConversationContinuation;
+  readonly done: Promise<void>;
+  /** The conversation revision the saved transcript was taken at. */
+  readonly revision: number;
+}
+
 interface LiveSession {
   record: HostedSessionRecord;
   /** Composed on demand: a restored session has none until it is attached or driven. */
@@ -720,6 +727,7 @@ export class HostedSessionManager {
       this.sessions.delete(sessionId);
       this.nativeCheckpoints.delete(sessionId);
       this.nativeCheckpointWrites.delete(sessionId);
+      this.nativeDurable.delete(sessionId);
       this.spine.forget(sessionId);
     }
     if (retired.length > 0) logger.info('[hosted-sessions] retired terminated sessions past their retention', { count: retired.length });
@@ -731,6 +739,7 @@ export class HostedSessionManager {
     live.released = true;
     this.nativeCheckpoints.delete(live.record.id);
     this.nativeCheckpointWrites.delete(live.record.id);
+    this.nativeDurable.delete(live.record.id);
   }
 
   /** End a hosted session on request. */
@@ -778,10 +787,15 @@ export class HostedSessionManager {
       this.assertNativeContinuation(source.continuation, permit);
     }
     if (!this.nativeCheckpoints.has(sessionId)) this.checkpointNative(live);
+    const before = this.nativeCheckpointWrites.get(sessionId);
     await live.runtime.submitNative(permit, input.id, input.correlationId);
     live.record = { ...live.record, messageCount: live.runtime.conversation.getMessageCount(), updatedAt: this.now() };
     // Unlike ordinary best-effort persistence, this failure prevents a completion receipt.
-    await this.options.store.save(live.record, live.runtime.conversation.toJSON(), { durable: true });
+    // A completed turn was already saved durably when it ended; wait for that
+    // save instead of writing the same transcript a second time.
+    const completed = this.nativeCheckpointWrites.get(sessionId);
+    if (completed && completed !== before && completed.revision === live.runtime.conversation.revisionSource.revision()) await completed.done;
+    else await this.saveNativeTranscript(live);
     if (!live.runtime.isRunning()) {
       try { this.checkpointNative(live); }
       catch { this.nativeCheckpoints.set(sessionId, null); }
@@ -794,7 +808,16 @@ export class HostedSessionManager {
   /** The conversation as a client renders it. Empty for a session with no loop yet. */
   /** Only completed, durably stored turn checkpoints may become admission context. */
   private readonly nativeCheckpoints = new Map<string, NativeConversationContinuation | null>();
-  private readonly nativeCheckpointWrites = new Map<string, { readonly context: NativeConversationContinuation; readonly done: Promise<void> }>();
+  private readonly nativeCheckpointWrites = new Map<string, NativeCheckpointWrite>();
+  /** The last transcript this process saved durably, by conversation revision. */
+  private readonly nativeDurable = new Map<string, { readonly revision: number; readonly context: NativeConversationContinuation | null }>();
+
+  private async saveNativeTranscript(live: LiveSession, context: NativeConversationContinuation | null = null): Promise<void> {
+    const runtime = live.runtime;
+    const revision = runtime?.conversation.revisionSource.revision();
+    await this.options.store.save(live.record, runtime?.conversation.toJSON() ?? null, { durable: true });
+    if (revision !== undefined) this.nativeDurable.set(live.record.id, { revision, context });
+  }
 
   private readonly nativeContinuationOwners = new NativeContinuationOwnerMap<LiveSession, ReturnType<typeof createNativeContinuationSnapshotOwner>>();
   private continuationOwner(live: LiveSession) {
@@ -816,28 +839,36 @@ export class HostedSessionManager {
     return context;
   }
 
-  /** The terminal event precedes the next queued user append. Snapshot there. */
-  private captureCompletedNativeCheckpoint(live: LiveSession): void {
-    if (!live.runtime || (!live.record.nativeConversation && !this.nativeCheckpoints.has(live.record.id))) return;
+  /**
+   * The terminal event precedes the next queued user append. Snapshot there and
+   * save the transcript durably: this is the one save of a completed native
+   * turn. True when that save was started, so the caller does not save again.
+   */
+  private captureCompletedNativeCheckpoint(live: LiveSession): boolean {
+    if (!live.runtime || (!live.record.nativeConversation && !this.nativeCheckpoints.has(live.record.id))) return false;
     let context: NativeConversationContinuation;
     try { context = this.snapshotNative(live); }
     catch {
       this.nativeCheckpointWrites.delete(live.record.id);
       this.nativeCheckpoints.set(live.record.id, null);
-      return;
+      return false;
     }
     const sessionId = live.record.id;
-    const transcript: unknown = structuredClone(live.runtime.conversation.toJSON());
-    let checkpoint!: { readonly context: NativeConversationContinuation; readonly done: Promise<void> };
+    const revision = live.runtime.conversation.revisionSource.revision();
+    // toJSON copies the messages, so a later append cannot change what is queued.
+    const transcript: unknown = live.runtime.conversation.toJSON();
+    let checkpoint!: NativeCheckpointWrite;
     const write = this.options.store.save(live.record, transcript, { durable: true }).then(() => {
+      this.nativeDurable.set(sessionId, { revision, context });
       if (this.nativeCheckpointWrites.get(sessionId) === checkpoint) this.nativeCheckpoints.set(sessionId, context);
     }, error => {
       if (this.nativeCheckpointWrites.get(sessionId) === checkpoint) this.nativeCheckpoints.set(sessionId, null);
       throw error;
     });
-    checkpoint = { context, done: write };
+    checkpoint = { context, done: write, revision };
     this.nativeCheckpointWrites.set(sessionId, checkpoint);
     void write.catch(() => {});
+    return true;
   }
 
   async captureNativeContinuation(sessionId: string): Promise<NativeConversationContinuation> {
@@ -852,12 +883,19 @@ export class HostedSessionManager {
       this.assertNativeContinuation(previous);
       return captureNativeConversationContinuation(previous);
     }
+    // The transcript the last turn saved durably is the continuation while no
+    // message has been added since: hand back that snapshot without saving again.
+    const revision = live.runtime?.conversation.revisionSource.revision();
+    const pending = this.nativeCheckpointWrites.get(sessionId);
+    if (pending && pending.revision === revision) { await pending.done; return pending.context; }
+    const saved = this.nativeDurable.get(sessionId);
+    if (saved?.context && saved.revision === revision) return saved.context;
     // Ordinary completed inputs may have appended since the preceding native
     // checkpoint. Freeze and durably publish the complete idle transcript now;
     // an appended new turn does not rewrite this submission-time snapshot.
     const context = this.snapshotNative(live);
     const completionAtCapture = this.nativeCheckpointWrites.get(sessionId);
-    await this.options.store.save(live.record, live.runtime?.conversation.toJSON() ?? null, { durable: true });
+    await this.saveNativeTranscript(live, context);
     this.assertNativeContinuation(context);
     if (this.nativeCheckpointWrites.get(sessionId) === completionAtCapture) this.nativeCheckpoints.set(sessionId, context);
     return context;
@@ -1159,9 +1197,9 @@ export class HostedSessionManager {
           ? { turnCount: live.record.turnCount + 1, lastTurnAt: this.now(), messageCount: live.runtime?.conversation.getMessageCount() ?? live.record.messageCount }
           : {}),
       };
-      if (status === 'idle' && detail === 'completed') this.captureCompletedNativeCheckpoint(live);
+      const savedDurably = status === 'idle' && detail === 'completed' && this.captureCompletedNativeCheckpoint(live);
       this.publish(event, live.record, { detail });
-      if (status === 'idle') void this.persist(live.record).catch(() => undefined);
+      if (status === 'idle' && !savedDurably) void this.persist(live.record).catch(() => undefined);
     };
     this.busUnsubscribers.push(
       bus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>('TURN_SUBMITTED', (envelope) => mark(envelope.sessionId, 'running', 'hosted-session-turn-started', 'a turn was submitted', envelope.payload.turnId)),

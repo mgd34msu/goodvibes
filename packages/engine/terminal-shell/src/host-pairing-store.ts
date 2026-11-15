@@ -1,6 +1,6 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, type Stats } from 'node:fs';
+import { lstatSync, mkdirSync, type Stats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { acquireCrossProcessLock, confirmFileDurable, writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
+import { BoundedJsonFile, confirmFileDurable, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 export const HOST_PAIRING_MAX_RECORDS = 32;
 export const HOST_PAIRING_MAX_BYTES = 256 * 1024;
 export interface HostPairingAttempt {
@@ -44,11 +44,7 @@ export type ClearHostPairingAttemptResult<Reason extends string = string> =
       readonly status: 'cleared' | 'conflict';
     }
   | HostPairingUnavailable<Reason>;
-export interface HostPairingIO {
-  readonly writeJsonFileAtomic: typeof writeJsonFileAtomic;
-  readonly confirmFileDurable: typeof confirmFileDurable;
-  readonly acquireCrossProcessLock: typeof acquireCrossProcessLock;
-}
+export type HostPairingIO = BoundedJsonFileIO;
 export function createHostPairingStore<const Reason extends string>(policy: {
   readonly unavailableReason: Reason;
   readonly surfaceRoot: string;
@@ -223,77 +219,33 @@ export function createHostPairingStore<const Reason extends string>(policy: {
     }
     return hostPairingStorePath(home);
   }
-  function secureFile(stat: Stats): void {
-    if (
-      !stat.isFile() ||
-      stat.isSymbolicLink() ||
-      !owned(stat) ||
-      stat.nlink !== 1 ||
-      (stat.mode & 0o7777) !== 0o600 ||
-      stat.size > HOST_PAIRING_MAX_BYTES
-    )
-      refuse();
-  }
-  const sameFile = (left: Stats, right: Stats): boolean =>
-    left.dev === right.dev &&
-    left.ino === right.ino &&
-    left.size === right.size &&
-    left.mtimeMs === right.mtimeMs &&
-    left.ctimeMs === right.ctimeMs;
-  function readFile(path: string): PairingFile | null {
-    let before: Stats;
-    try {
-      before = lstatSync(path);
-    } catch (error) {
-      if (missing(error)) return null;
-      throw error;
-    }
-    secureFile(before);
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    try {
-      const opened = fstatSync(fd);
-      secureFile(opened);
-      if (!sameFile(before, opened)) refuse();
-      const bytes = new Uint8Array(HOST_PAIRING_MAX_BYTES + 1);
-      let length = 0;
-      while (length < bytes.length) {
-        const count = readSync(fd, bytes, length, bytes.length - length, length);
-        if (!count) break;
-        length += count;
-      }
-      if (length > HOST_PAIRING_MAX_BYTES || !sameFile(opened, fstatSync(fd)) || !sameFile(opened, lstatSync(path))) refuse();
-      return validateFile(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length))));
-    } finally {
-      closeSync(fd);
-    }
-  }
-  const resolveIO = (io: Partial<HostPairingIO>): HostPairingIO => ({
-    writeJsonFileAtomic,
-    confirmFileDurable,
-    acquireCrossProcessLock,
-    ...io,
-  });
-  function confirmExact(home: string, path: string, file: PairingFile, io: HostPairingIO): void {
-    io.confirmFileDurable(path);
-    directories(home, false);
-    if (JSON.stringify(readFile(path)) !== JSON.stringify(file)) refuse();
-  }
+  /** Owner-only, single-link regular file; size and symlink rules are the bounded file's. */
+  const secureFile = (stat: Stats): boolean =>
+    stat.isFile() && !stat.isSymbolicLink() && owned(stat) && stat.nlink === 1 && (stat.mode & 0o7777) === 0o600;
+  const unavailableError = (): Error => new Error(policy.unavailableReason);
+  const storeFile = (path: string, io: Partial<HostPairingIO>): BoundedJsonFile<PairingFile | null> =>
+    new BoundedJsonFile<PairingFile | null>(path, {
+      maxBytes: HOST_PAIRING_MAX_BYTES, parse: validateFile, empty: () => null,
+      invalid: unavailableError, limit: unavailableError, accept: secureFile, io,
+    });
   /** Snapshot only: only a successful begin grants permission to make a new mint request. */
   function readHostPairing(homeDirectory: string, baseUrl: string, overrides: Partial<HostPairingIO> = {}): HostPairing<Reason> {
     try {
       const host = canonicalizePairingHost(baseUrl);
       if (!host) return unavailable();
       const path = directories(homeDirectory, false);
-      const file = readFile(path);
+      const store = storeFile(path, overrides);
+      const file = store.peek();
       if (!file) return { status: 'missing' };
-      // Recover visible, published-indeterminate state without removing or rewriting it.
-      confirmExact(homeDirectory, path, file, resolveIO(overrides));
+      // A file a crashed process published may not be durable yet: make it so
+      // before anything acts on it, without removing or rewriting it.
+      (overrides.confirmFileDurable ?? confirmFileDurable)(store.path);
       return file.records.find((record) => record.host === host)?.pairing ?? { status: 'missing' };
     } catch {
       return unavailable();
     }
   }
-  async function locked<T>(home: string, io: HostPairingIO, operation: (path: string) => T): Promise<T> {
+  async function locked<T>(home: string, io: Partial<HostPairingIO>, operation: (file: BoundedJsonFileTransaction<PairingFile | null>) => T): Promise<T> {
     const path = directories(home, true);
     // Reject a lock symlink/special file before entering the shared primitive.
     try {
@@ -302,19 +254,15 @@ export function createHostPairingStore<const Reason extends string>(policy: {
     } catch (error) {
       if (!missing(error)) throw error;
     }
-    const release = await io.acquireCrossProcessLock(`${path}.lock`, { strictOwnership: true });
-    try {
+    return storeFile(path, io).transact((file) => {
       directories(home, false);
-      return operation(path);
-    } finally {
-      release();
-    }
+      return operation(file);
+    });
   }
-  function publish(home: string, path: string, file: PairingFile, io: HostPairingIO): void {
-    if (file.records.length > HOST_PAIRING_MAX_RECORDS || Buffer.byteLength(JSON.stringify(file), 'utf8') > HOST_PAIRING_MAX_BYTES)
-      refuse();
-    io.writeJsonFileAtomic(path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
-    confirmExact(home, path, file, io);
+  /** Durable when this returns; a durability failure escapes and the caller reports the store unavailable. */
+  function publish(store: BoundedJsonFileTransaction<PairingFile | null>, file: PairingFile): void {
+    if (file.records.length > HOST_PAIRING_MAX_RECORDS) refuse();
+    store.write(file);
   }
   /** Persist uncertainty BEFORE POST. Existing attempts never authorize a second mint, even with the same ID. */
   async function beginHostPairing<Current extends (() => boolean) | undefined = undefined>(
@@ -328,15 +276,14 @@ export function createHostPairingStore<const Reason extends string>(policy: {
       const host = canonicalizePairingHost(baseUrl);
       if (!host) return unavailable();
       const pending: StoredPairing = { status: 'unknown', ...copyAttempt(attempt) };
-      const io = resolveIO(overrides);
-      const result = await locked(homeDirectory, io, (path) => {
+      const result = await locked(homeDirectory, overrides, (store) => {
         // Lock acquisition may wait. A known cancellation before publication
         // creates no attempt and must not require uncertain-outcome recovery.
         if (current && !current()) return { status: 'cancelled' as const };
-        const file: PairingFile = readFile(path) ?? { version: 1, records: [] };
+        const file: PairingFile = store.read() ?? { version: 1, records: [] };
         if (file.records.some((record) => record.host === host)) return { status: 'conflict' as const };
         file.records.push({ host, pairing: pending });
-        publish(homeDirectory, path, file, io);
+        publish(store, file);
         return { status: 'begun' as const };
       });
       // A missing currentness callback cannot produce cancellation.
@@ -361,14 +308,13 @@ export function createHostPairingStore<const Reason extends string>(policy: {
     try {
       const host = canonicalizePairingHost(baseUrl);
       if (!host || !identifier(attemptId, 256)) return unavailable();
-      const io = resolveIO(overrides);
-      return await locked(homeDirectory, io, (path) => {
-        const file = readFile(path);
+      return await locked(homeDirectory, overrides, (store) => {
+        const file = store.read();
         const index = file?.records.findIndex((record) => record.host === host) ?? -1;
         const current = file?.records[index]?.pairing;
         if (!file || !current || current.status !== 'unknown' || current.attemptId !== attemptId) return { status: 'conflict' as const };
         file.records.splice(index, 1);
-        publish(homeDirectory, path, file, io);
+        publish(store, file);
         return { status: 'cleared' as const };
       });
     } catch {
@@ -387,16 +333,15 @@ export function createHostPairingStore<const Reason extends string>(policy: {
       const host = canonicalizePairingHost(baseUrl);
       if (!host || !identifier(attemptId, 256)) return unavailable();
       const paired: StoredPairing = { status: 'paired', ...copySecret(secret) };
-      const io = resolveIO(overrides);
-      return await locked(homeDirectory, io, (path) => {
-        const file = readFile(path);
+      return await locked(homeDirectory, overrides, (store) => {
+        const file = store.read();
         const index = file?.records.findIndex((record) => record.host === host) ?? -1;
         const current = file?.records[index]?.pairing;
         if (!file || !current || current.status !== 'unknown' || current.attemptId !== attemptId || current.name !== paired.name) {
           return { status: 'conflict' as const };
         }
         file.records[index] = { host, pairing: paired };
-        publish(homeDirectory, path, file, io);
+        publish(store, file);
         return { status: 'paired' as const };
       });
     } catch {

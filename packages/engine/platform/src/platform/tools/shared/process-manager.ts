@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -75,10 +75,7 @@ const COMPLETED_PROCESS_TTL_MS = 30 * 60 * 1000;
 
 /** An admission check cannot promise to authorize a process after it exists. */
 function assertSynchronousAdmission(check: (() => void) | undefined, operation = 'admission'): void {
-  const result: unknown = check?.();
-  if (result === undefined) return;
-  drainOwned(result);
-  throw new Error(`Process ${operation} currentness must be synchronous and return void`);
+  assertSynchronousJudgmentGuard(check, () => new Error(`Process ${operation} currentness must be synchronous and return void`));
 }
 
 export interface ProcessInputOptions {

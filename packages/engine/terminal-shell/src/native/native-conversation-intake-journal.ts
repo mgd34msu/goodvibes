@@ -1,9 +1,8 @@
 import { nativeWorkExecutionIdentitySchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, type Stats } from 'node:fs';
+import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { dirname, resolve } from 'node:path';
-import { acquireCrossProcessLock, confirmFileDurable, writeJsonFileAtomic, } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
+import { BoundedJsonFile, writeJsonFileAtomic, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeSourceRefSchema, type NativeConversationIntakeSourceRef, type NativeConversationIntakeCaptureRequest, } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 export const NATIVE_INTAKE_JOURNAL_MAX_RECORDS = 16;
 export const NATIVE_INTAKE_JOURNAL_MAX_BYTES = 2 * 1024 * 1024;
@@ -35,11 +34,7 @@ export interface NativeIntakeJournalRecord {
     } | undefined;
     readonly execution?: NativeIntakeExecutionIntent | undefined;
 }
-export interface NativeIntakeJournalIO {
-    readonly writeJsonFileAtomic: typeof writeJsonFileAtomic;
-    readonly confirmFileDurable: typeof confirmFileDurable;
-    readonly acquireCrossProcessLock: typeof acquireCrossProcessLock;
-}
+export type NativeIntakeJournalIO = BoundedJsonFileIO;
 export class NativeIntakeJournalError extends Error {
     constructor(readonly code: 'invalid_binding' | 'invalid_command' | 'invalid_journal' | 'journal_limit' | 'conflict') {
         super(`Native intake journal: ${code}`);
@@ -53,7 +48,6 @@ interface JournalFile {
 const bindingKeys = ['endpoint', 'projectId', 'workspace', 'principalId'] as const;
 const ownKeys = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => (!!value && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)));
-const missing = (error: unknown): boolean => !!error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 function copyBinding(value: unknown): NativeIntakeJournalBinding {
     if (!ownKeys(value, bindingKeys) || !bindingKeys.every(key => typeof value[key] === 'string'
         && value[key].length > 0 && value[key].length <= 4096 && /\S/u.test(value[key]))) {
@@ -228,66 +222,6 @@ function readOwners(path: string): Map<string, JournalOwner> {
 // An owner on another machine or pid namespace cannot be checked from here, so it counts as alive.
 const heldElsewhere = (owner: JournalOwner | undefined): boolean => (owner !== undefined && owner.instance !== PROCESS_INSTANCE
     && (owner.host !== undefined && owner.host !== HOST_IDENTITY ? true : owner.pid !== process.pid && processAlive(owner.pid)));
-/** Check existing ancestors as well as the final file; never adopt symlink-backed state. */
-function assertDirectoryChain(path: string): void {
-    for (let current = dirname(path);; current = dirname(current)) {
-        try {
-            const stat = lstatSync(current);
-            if (!stat.isDirectory() || stat.isSymbolicLink())
-                throw new NativeIntakeJournalError('invalid_journal');
-        }
-        catch (error) {
-            if (!missing(error))
-                throw error;
-        }
-        if (dirname(current) === current)
-            break;
-    }
-}
-function readFile(path: string, policy: NativeIntakeJournalPolicy): JournalFile {
-    let stat: Stats;
-    try {
-        stat = lstatSync(path);
-    }
-    catch (error) {
-        if (missing(error))
-            return { version: 1, records: [] };
-        throw error;
-    }
-    if (!stat.isFile() || stat.isSymbolicLink())
-        throw new NativeIntakeJournalError('invalid_journal');
-    if (stat.size > NATIVE_INTAKE_JOURNAL_MAX_BYTES)
-        throw new NativeIntakeJournalError('journal_limit');
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
-    try {
-        const opened = fstatSync(fd);
-        if (!opened.isFile() || opened.ino !== stat.ino || opened.dev !== stat.dev)
-            throw new NativeIntakeJournalError('invalid_journal');
-        if (opened.size > NATIVE_INTAKE_JOURNAL_MAX_BYTES)
-            throw new NativeIntakeJournalError('journal_limit');
-        const bytes = new Uint8Array(NATIVE_INTAKE_JOURNAL_MAX_BYTES + 1);
-        let length = 0;
-        while (length < bytes.length) {
-            const count = readSync(fd, bytes, length, bytes.length - length, length);
-            if (!count)
-                break;
-            length += count;
-        }
-        if (length > NATIVE_INTAKE_JOURNAL_MAX_BYTES)
-            throw new NativeIntakeJournalError('journal_limit');
-        let value: unknown;
-        try {
-            value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length)));
-        }
-        catch {
-            throw new NativeIntakeJournalError('invalid_journal');
-        }
-        return validateFile(value, policy);
-    }
-    finally {
-        closeSync(fd);
-    }
-}
 /**
  * Host-owned, bounded restart journal with a shared durable implementation. Every mutation requires a strict lock
  * and durable publication. An AtomicWriteDurabilityError is deliberately allowed
@@ -297,28 +231,22 @@ function readFile(path: string, policy: NativeIntakeJournalPolicy): JournalFile 
  */
 export class NativeConversationIntakeJournal {
     readonly path: string;
-    private readonly io: NativeIntakeJournalIO;
     private readonly policy: NativeIntakeJournalPolicy;
+    private readonly file: BoundedJsonFile<JournalFile>;
     constructor(path: string, io: Partial<NativeIntakeJournalIO> = {}, policy: NativeIntakeJournalPolicy = { allowHosted: false, allowSelectedDiff: false }) {
         this.policy = Object.freeze({ allowHosted: policy.allowHosted === true, allowSelectedDiff: policy.allowSelectedDiff === true });
-        this.path = resolve(path);
-        this.io = { writeJsonFileAtomic, confirmFileDurable, acquireCrossProcessLock, ...io };
+        this.file = new BoundedJsonFile<JournalFile>(path, {
+            maxBytes: NATIVE_INTAKE_JOURNAL_MAX_BYTES, parse: value => validateFile(value, this.policy), empty: () => ({ version: 1, records: [] }),
+            invalid: () => new NativeIntakeJournalError('invalid_journal'), limit: () => new NativeIntakeJournalError('journal_limit'), io,
+        });
+        this.path = this.file.path;
     }
-    private async locked<T>(operation: () => T): Promise<T> {
-        assertDirectoryChain(this.path);
-        mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-        const release = await this.io.acquireCrossProcessLock(`${this.path}.lock`, { strictOwnership: true });
-        try {
-            assertDirectoryChain(this.path);
-            return operation();
-        }
-        finally {
-            release();
-        }
+    private locked<T>(operation: (journal: BoundedJsonFileTransaction<JournalFile>) => T): Promise<T> {
+        return this.file.transact(operation);
     }
     async read(binding: NativeIntakeJournalBinding): Promise<NativeIntakeJournalRecord | undefined> {
         const selected = copyBinding(binding);
-        return this.locked(() => readFile(this.path, this.policy).records.find(record => sameBinding(record.binding, selected)));
+        return (await this.file.read()).records.find(record => sameBinding(record.binding, selected));
     }
     /** null means absent, never an unconditional overwrite. */
     async save(binding: NativeIntakeJournalBinding, command: NativeConversationIntakeCaptureRequest, expectedRequestId: string | null, options: NativeIntakeJournalOptions = {}): Promise<void> {
@@ -330,8 +258,8 @@ export class NativeConversationIntakeJournal {
         if (expectedRequestId !== null && (typeof expectedRequestId !== 'string' || !expectedRequestId.length)) {
             throw new NativeIntakeJournalError('conflict');
         }
-        await this.locked(() => {
-            const file = readFile(this.path, this.policy);
+        await this.locked(journal => {
+            const file = journal.read();
             const index = file.records.findIndex(existing => sameBinding(existing.binding, record.binding));
             const current = file.records[index];
             if ((current?.command.requestId ?? null) !== expectedRequestId)
@@ -347,7 +275,7 @@ export class NativeConversationIntakeJournal {
             file.records.push(next);
             const owners = readOwners(this.ownersPath);
             evictForCapacity(file, held => heldElsewhere(owners.get(bindingKey(held.binding))));
-            this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+            journal.write(file);
             if (next.delivery === 'hosted')
                 this.recordOwner(file, next.binding, owners);
         });
@@ -363,7 +291,7 @@ export class NativeConversationIntakeJournal {
                 if (!kept.has(key))
                     owners.delete(key);
             owners.set(bindingKey(binding), { pid: process.pid, instance: PROCESS_INSTANCE, host: HOST_IDENTITY });
-            // Deliberately not `this.io`: that seam governs the journal's own bytes.
+            // Deliberately not the injected journal io: that seam governs the journal's own bytes.
             writeJsonFileAtomic(this.ownersPath, { version: 1, owners: Object.fromEntries(owners) }, { durable: false, mode: 0o600, indent: null, trailingNewline: false });
         }
         catch { /* the record stands; without an owner it can only be evicted, as before */ }
@@ -377,8 +305,8 @@ export class NativeConversationIntakeJournal {
         const parsed = nativeConversationIntakeSourceRefSchema.safeParse(source);
         if (!parsed.success || (!this.policy.allowSelectedDiff && parsed.data.continuation?.selectedDiff !== undefined) || parsed.data.inputId !== expected.inputId || parsed.data.continuation?.sessionId !== expected.continuation?.sessionId)
             throw new NativeIntakeJournalError('conflict');
-        await this.locked(() => {
-            const file = readFile(this.path, this.policy);
+        await this.locked(journal => {
+            const file = journal.read();
             const index = file.records.findIndex(record => sameBinding(record.binding, selected));
             const current = file.records[index];
             if (!current || !sameCommand(current.command, expected) || current.delivery !== 'hosted' || current.dispatch)
@@ -386,13 +314,11 @@ export class NativeConversationIntakeJournal {
             if (current.hostedSource) {
                 if (JSON.stringify(current.hostedSource) !== JSON.stringify(parsed.data))
                     throw new NativeIntakeJournalError('conflict');
-                this.io.confirmFileDurable(this.path);
+                journal.confirm();
                 return;
             }
             file.records[index] = { ...current, hostedSource: parsed.data };
-            if (Buffer.byteLength(JSON.stringify(file), 'utf8') > NATIVE_INTAKE_JOURNAL_MAX_BYTES)
-                throw new NativeIntakeJournalError('journal_limit');
-            this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+            journal.write(file);
         });
     }
     /** An ambiguous published claim is never cleared or replayed after restart. */
@@ -401,8 +327,8 @@ export class NativeConversationIntakeJournal {
         const expected = copyCommand(command, this.policy);
         if (!sourceRevision || sourceRevision.length > 200)
             throw new NativeIntakeJournalError('conflict');
-        return this.locked(() => {
-            const file = readFile(this.path, this.policy);
+        return this.locked(journal => {
+            const file = journal.read();
             const index = file.records.findIndex(record => sameBinding(record.binding, selected));
             const current = file.records[index];
             if (!current || !sameCommand(current.command, expected))
@@ -415,9 +341,7 @@ export class NativeConversationIntakeJournal {
                 return false;
             }
             file.records[index] = { ...current, dispatch: { sourceRevision } };
-            if (Buffer.byteLength(JSON.stringify(file), 'utf8') > NATIVE_INTAKE_JOURNAL_MAX_BYTES)
-                throw new NativeIntakeJournalError('journal_limit');
-            this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+            journal.write(file);
             return true;
         });
     }
@@ -429,8 +353,8 @@ export class NativeConversationIntakeJournal {
     async releaseTurnClaim(binding: NativeIntakeJournalBinding, command: NativeConversationIntakeCaptureRequest, sourceRevision: string): Promise<void> {
         const selected = copyBinding(binding);
         const expected = copyCommand(command, this.policy);
-        await this.locked(() => {
-            const file = readFile(this.path, this.policy);
+        await this.locked(journal => {
+            const file = journal.read();
             const index = file.records.findIndex(record => sameBinding(record.binding, selected));
             const current = file.records[index];
             if (!current || !sameCommand(current.command, expected))
@@ -441,7 +365,7 @@ export class NativeConversationIntakeJournal {
                 throw new NativeIntakeJournalError('conflict');
             const { dispatch: _claim, ...unclaimed } = current;
             file.records[index] = unclaimed;
-            this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+            journal.write(file);
         });
     }
     /**
@@ -451,8 +375,8 @@ export class NativeConversationIntakeJournal {
     async discardUncaptured(binding: NativeIntakeJournalBinding, command: NativeConversationIntakeCaptureRequest): Promise<void> {
         const selected = copyBinding(binding);
         const expected = copyCommand(command, this.policy);
-        await this.locked(() => {
-            const file = readFile(this.path, this.policy);
+        await this.locked(journal => {
+            const file = journal.read();
             const index = file.records.findIndex(record => sameBinding(record.binding, selected));
             const current = file.records[index];
             if (!current)
@@ -460,7 +384,7 @@ export class NativeConversationIntakeJournal {
             if (!sameCommand(current.command, expected) || current.dispatch || current.execution || current.hostedSource)
                 throw new NativeIntakeJournalError('conflict');
             file.records.splice(index, 1);
-            this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+            journal.write(file);
         });
     }
     /** Immutable target from the authenticated work receipt; never select a newer attempt. */
@@ -468,8 +392,8 @@ export class NativeConversationIntakeJournal {
         const selected = copyBinding(binding);
         const expected = copyCommand(command, this.policy);
         const captured = copyExecutionIntent(intent);
-        await this.locked(() => {
-            const file = readFile(this.path, this.policy);
+        await this.locked(journal => {
+            const file = journal.read();
             const index = file.records.findIndex(record => sameBinding(record.binding, selected));
             const current = file.records[index];
             if (!current || !sameCommand(current.command, expected) || current.dispatch)
@@ -477,24 +401,22 @@ export class NativeConversationIntakeJournal {
             if (current.execution) {
                 if (JSON.stringify(current.execution) !== JSON.stringify(captured))
                     throw new NativeIntakeJournalError('conflict');
-                this.io.confirmFileDurable(this.path);
+                journal.confirm();
                 return;
             }
             file.records[index] = { ...current, execution: captured };
-            if (Buffer.byteLength(JSON.stringify(file), 'utf8') > NATIVE_INTAKE_JOURNAL_MAX_BYTES)
-                throw new NativeIntakeJournalError('journal_limit');
-            this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+            journal.write(file);
         });
     }
     /** Confirm exact visible intent and durable file/ancestry before any replay POST. */
     async confirm(binding: NativeIntakeJournalBinding, command: NativeConversationIntakeCaptureRequest): Promise<void> {
         const selected = copyBinding(binding);
         const expected = copyCommand(command, this.policy);
-        await this.locked(() => {
-            const current = readFile(this.path, this.policy).records.find(record => sameBinding(record.binding, selected));
+        await this.locked(journal => {
+            const current = journal.read().records.find(record => sameBinding(record.binding, selected));
             if (!current || !sameCommand(current.command, expected))
                 throw new NativeIntakeJournalError('conflict');
-            this.io.confirmFileDurable(this.path);
+            journal.confirm();
         });
     }
 }

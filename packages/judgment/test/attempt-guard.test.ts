@@ -3,6 +3,13 @@ import { runInNewContext } from 'node:vm';
 import { assertSynchronousJudgmentGuard, createSystemOnePort, DEFAULT_MODEL, JudgmentError, noul } from '../src/index.ts';
 
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+/** A check whose promise-returning type was widened before it reached the guard: the run-time refusal is what holds. */
+const widened = (check: () => unknown): (() => unknown) => check;
+
+test('a promise-returning check does not compile', () => {
+  // @ts-expect-error an async check is refused by the type checker
+  expect(() => assertSynchronousJudgmentGuard(async () => {})).toThrow(JudgmentError);
+});
 
 test('synchronous attempt guards preserve receiver, callback order and original thrown errors', () => {
   const calls: string[] = [];
@@ -25,7 +32,7 @@ for (const value of [null, false, 0, '', 'private callback result']) test(`nonvo
 for (const mode of ['return', 'throw'] as const) test(`${mode}ed original rejected work is observed without replacing its refusal`, async () => {
   const work = Promise.withResolvers<void>();
   let seen: unknown;
-  try { assertSynchronousJudgmentGuard(() => { if (mode === 'throw') throw work.promise; return work.promise; }); }
+  try { assertSynchronousJudgmentGuard(widened(() => { if (mode === 'throw') throw work.promise; return work.promise; })); }
   catch (error) { seen = error; }
   if (mode === 'throw') expect(seen).toBe(work.promise);
   else expect(seen).toMatchObject({ kind: 'invalid-request' });
@@ -37,11 +44,11 @@ test('other-realm native work drains and borrowed thenables are not assimilated'
   const { work, reject } = runInNewContext('(() => { let reject; const work = new Promise((_, fail) => { reject = fail; }); return { work, reject }; })()') as { work: Promise<void>; reject: (error: Error) => void };
   let reads = 0;
   Object.defineProperty(work, 'then', { get() { reads++; throw new Error('Borrowed then'); } });
-  expect(() => assertSynchronousJudgmentGuard(() => work)).toThrow(JudgmentError);
+  expect(() => assertSynchronousJudgmentGuard(widened(() => work))).toThrow(JudgmentError);
   reject(new Error('Late cross-realm rejection'));
   const thenable = { get then() { reads++; throw new Error('Plain then accessor'); } };
   const proxy = new Proxy({}, { get() { reads++; throw new Error('Proxy getter'); } });
-  expect(() => assertSynchronousJudgmentGuard(() => thenable)).toThrow(JudgmentError);
+  expect(() => assertSynchronousJudgmentGuard(widened(() => thenable))).toThrow(JudgmentError);
   expect(() => assertSynchronousJudgmentGuard(() => proxy)).toThrow(JudgmentError);
   await tick(); expect(reads).toBe(0);
 });

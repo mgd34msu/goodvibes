@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { chmodSync, closeSync, existsSync, openSync, readSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MutationPublication } from '../utils/file-mutation.js';
@@ -223,11 +223,5 @@ export class HandlerSqliteStore {
 }
 
 function synchronousFence(assertCurrent: () => void): void {
-  let result: unknown;
-  try { result = assertCurrent(); }
-  catch (error) { drainOwned(error); throw error; }
-  if (result !== undefined) {
-    drainOwned(result);
-    throw new Error('HandlerSqliteStore currentness fence must be synchronous and return void');
-  }
+  assertSynchronousJudgmentGuard(assertCurrent, () => new Error('HandlerSqliteStore currentness fence must be synchronous and return void'));
 }

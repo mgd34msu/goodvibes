@@ -16,7 +16,7 @@ export type { ClientReaderArtifact, ClientReaderPackage, ClientReaderTarget } fr
 export { assertStagedClientReaderCompatible } from './client-reader-update.js';
 export { admitInstalledClientDataWriter, installedReaderCommand } from './installed-client-data-writer.js';
 export type { InstalledClientDataOptions } from './installed-client-data-writer.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * Verified binary updates with owned staging and compensating cohort renames.
  * Individual same-filesystem renames are atomic; the cohort and the brief gap
@@ -373,12 +373,7 @@ interface TransactionPaths {
   readonly claim: string;
 }
 function assertSynchronousCurrent(current: (() => void) | undefined): void {
-  let result: unknown;
-  try { result = current?.(); } catch (error) { drainOwned(error); throw error; }
-  if (result !== undefined) {
-    drainOwned(result);
-    throw new Error('update current restriction must complete synchronously without returning a value');
-  }
+  assertSynchronousJudgmentGuard(current, () => new Error('update current restriction must complete synchronously without returning a value'));
 }
 
 function transactionPaths(target: string): TransactionPaths {

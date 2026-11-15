@@ -622,6 +622,7 @@ function composeClientRuntimeServices(
     onSandboxedRun: approvalHandlers.onSandboxedRun,
     execContainment: options.execContainment,
     permissionManager,
+    toolCallHooks: hookDispatcher,
     contextAccountingHolder,
     fileCache,
     projectIndex,

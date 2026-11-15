@@ -1,98 +1,26 @@
 /**
  * companion-chat-turn-execution.ts
  *
- * The two turn-execution helpers used by CompanionChatManager._runTurn, split
- * out of companion-chat-manager.ts (see CHANGELOG) so the manager stays under
- * the repo's hand-authored file-size cap while regenerate/edit verbs are added.
- * These are a pure move: the logic is unchanged, the manager now passes the
- * dependencies it used to reach through `this`.
- *
- * - runToolExhaustionFinalizer: after the tool-call budget is exhausted, run one
- *   more streamed turn that is instructed not to call tools, returning its text.
- * - executeCompanionToolCalls: execute model-emitted tool calls through the
- *   permission boundary and publish per-call results, degrading honestly when a
- *   registry is present without a permission manager.
+ * executeCompanionToolCalls: the companion chat's binding of the one tool-batch
+ * executor. It runs model-emitted tool calls through the permission boundary
+ * and publishes per-call results, degrading honestly when a registry is
+ * present without a permission manager. The turn itself is core/turn-loop.ts.
  */
 
-import type { ConversationManager } from '../core/conversation.js';
 import type { CompanionChatTurnEvent } from './companion-chat-types.js';
-import type { CompanionLLMProvider } from './companion-chat-manager.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
 import type { ConfigManager } from '../config/manager.js';
+import type { AutonomousToolSource } from '../permissions/autonomous.js';
 import { executeToolCalls as executeOrchestratorToolCalls, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
-import { appendGoodVibesRuntimeAwarenessPrompt } from '../tools/goodvibes-runtime/index.js';
+import { maxParallelToolCalls } from '../core/tool-batch.js';
 
 type HookDispatcherLike = {
   fire(event: HookEvent): Promise<HookResult>;
 };
-
-/** The minimal session shape the finalizer needs (avoids importing the private InternalSession). */
-interface FinalizerSession {
-  readonly meta: {
-    readonly id: string;
-    readonly model: string | null;
-    readonly provider: string | null;
-    readonly reasoningEffort?: string | null | undefined;
-    readonly systemPrompt: string | null;
-  };
-  readonly conversation: ConversationManager;
-}
-
-export interface ToolExhaustionFinalizerDeps {
-  readonly provider: CompanionLLMProvider;
-  /** The pre-built finalizer system prompt (kept in the manager alongside its round cap). */
-  readonly finalizerPrompt: string;
-}
-
-/**
- * Run a single streamed turn after the per-turn tool-call budget is exhausted,
- * instructing the model not to call more tools, and return the collected text.
- */
-export async function runToolExhaustionFinalizer(
-  deps: ToolExhaustionFinalizerDeps,
-  session: FinalizerSession,
-  abortSignal: AbortSignal,
-  turnId: string,
-  publish: (event: CompanionChatTurnEvent) => void,
-): Promise<string> {
-  const sessionId = session.meta.id;
-  let finalContent = '';
-  const stream = deps.provider.chatStream([...session.conversation.getMessagesForLLM()], {
-    systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(
-      [session.meta.systemPrompt, deps.finalizerPrompt].filter(Boolean).join('\n\n'),
-    ),
-    routingContext: { sessionId, turnId },
-    model: session.meta.model,
-    provider: session.meta.provider,
-    reasoningEffort: session.meta.reasoningEffort,
-    abortSignal,
-  });
-
-  for await (const chunk of stream) {
-    if (abortSignal.aborted) break;
-
-    switch (chunk.type) {
-      case 'text_delta': {
-        const delta = chunk.delta ?? '';
-        finalContent += delta;
-        publish({ type: 'turn.delta', sessionId, turnId, delta });
-        break;
-      }
-      case 'error':
-        throw new Error(chunk.error ?? 'Provider streaming error');
-      case 'tool_call':
-      case 'tool_result':
-      case 'done':
-        break;
-    }
-  }
-
-  return finalContent;
-}
 
 export interface CompanionToolExecutionDeps {
   readonly toolRegistry: ToolRegistry | null;
@@ -100,6 +28,8 @@ export interface CompanionToolExecutionDeps {
   readonly hookDispatcher: HookDispatcherLike | null;
   readonly runtimeBus: RuntimeEventBus | null;
   readonly configManager?: Pick<ConfigManager, 'get'> | undefined;
+  /** The request the calls serve (the person's message): the goal autonomous admission judges each call against. */
+  readonly autonomousSource?: (() => AutonomousToolSource) | undefined;
 }
 
 /**
@@ -114,6 +44,8 @@ export async function executeCompanionToolCalls(
   publish: (event: CompanionChatTurnEvent) => void,
   sessionId: string,
   turnId: string,
+  /** The turn's cancellation, which reaches every call, and the receipts as they land. */
+  options: { readonly signal?: AbortSignal | undefined; readonly onSettled?: ((result: ToolResult) => void) | undefined } = {},
 ): Promise<ToolResult[]> {
   const toolRegistry = deps.toolRegistry;
   if (!toolRegistry) return [];
@@ -144,7 +76,11 @@ export async function executeCompanionToolCalls(
     hookDispatcher: deps.hookDispatcher,
     runtimeBus: deps.runtimeBus,
     sessionId,
+    autonomousSource: deps.autonomousSource,
+    turnSignal: options.signal,
+    onToolSettled: options.onSettled,
     toolBudget: () => toolBudgetFromConfig(deps.configManager),
+    maxParallel: () => maxParallelToolCalls(deps.configManager),
     emitterContext: (id) => ({
       sessionId,
       traceId: `${sessionId}:${id}`,

@@ -40,6 +40,7 @@ export const runtimeConfigDefaults = {
     eventBus: {
       maxListeners: 100,
     },
+    maxParallelToolCalls: 8,
     unifiedTasks: true,
     pluginLifecycle: false,
     mcpLifecycle: false,
@@ -635,6 +636,16 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
       'Maximum number of listeners per event channel (per-type and per-domain) before a warning is emitted in production ' +
       'or a RangeError is thrown in development mode. Raise this only if you have verified there is no subscriber leak.',
     ...intRange(1, 100_000),
+  },
+  {
+    key: 'runtime.maxParallelToolCalls',
+    type: 'number',
+    default: 8,
+    description:
+      'Most tool calls of one model response that run at the same time. Reads run side by side, and so do writes to files that do not overlap; ' +
+      'a command, an action the owner decides and a tool with undeclared effects always run alone, in the order the model asked. 1 runs every call one after another. ' +
+      'Applies to the main session, sub-agents and companion chat; read once per response.',
+    ...intRange(1, 64),
   },
   {
     key: 'telemetry.includeRawPrompts',

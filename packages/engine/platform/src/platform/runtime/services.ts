@@ -1083,6 +1083,7 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     localhostFetchApproval,
     onSandboxedRun,
     permissionManager: backgroundPermissionManager,
+    toolCallHooks: hookDispatcher,
     contextAccountingHolder,
     fileCache,
     projectIndex,

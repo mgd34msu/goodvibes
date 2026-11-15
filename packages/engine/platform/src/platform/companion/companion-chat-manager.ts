@@ -64,7 +64,6 @@ import {
 } from './companion-chat-branching.js';
 import {
   executeCompanionToolCalls,
-  runToolExhaustionFinalizer,
 } from './companion-chat-turn-execution.js';
 import { planCompanionSweep } from './companion-chat-gc.js';
 import type { CompanionSessionBrokerBridge } from './companion-chat-broker-bridge.js';
@@ -72,7 +71,8 @@ import { CompanionBrokerSync } from './companion-chat-broker-sync.js';
 import { CompanionChatRateLimiter } from './companion-chat-rate-limiter.js';
 import type { CompanionChatRateLimiterOptions } from './companion-chat-rate-limiter.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import type { ToolCall, ToolDefinition } from '../types/tools.js';
+import type { ToolCall, ToolDefinition, ToolResult } from '../types/tools.js';
+import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
@@ -1023,51 +1023,44 @@ export class CompanionChatManager {
       const toolDefinitions = this.toolRegistry?.getToolDefinitions() ?? [];
       if (prepareConversation) await prepareConversation();
 
-      let rounds = 0;
-      while (!abortSignal.aborted) {
-        rounds += 1;
+      const toolRegistry = this.toolRegistry;
+      // One request of the turn. The closing request after the round limit asks
+      // for an answer without tools, under the finalizer prompt.
+      const request = async ({ tools, signal, onDelta }: TurnRequest): Promise<TurnModelResponse> => {
+        uncommittedContent = '';
         const stream = this.provider.chatStream([...session.conversation.getMessagesForLLM()], {
-          routingContext: { sessionId, turnId, ...(userMsg ? { prompt: userMsg.content } : {}) },
-          systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(route.systemPrompt),
+          routingContext: { sessionId, turnId, ...(tools && userMsg ? { prompt: userMsg.content } : {}) },
+          systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(tools
+            ? route.systemPrompt
+            : [route.systemPrompt, TOOL_EXHAUSTION_FINALIZER_PROMPT].filter(Boolean).join('\n\n')),
           model: route.model,
           provider: route.provider,
           reasoningEffort: route.reasoningEffort,
-          tools: toolDefinitions,
-          abortSignal,
+          ...(tools ? { tools: toolDefinitions } : {}),
+          abortSignal: signal,
         });
-
-        uncommittedContent = '';
+        let content = '';
         const toolCalls: ToolCall[] = [];
-
         for await (const chunk of stream) {
-          if (abortSignal.aborted) break;
-
+          if (signal.aborted) break;
           switch (chunk.type) {
             case 'text_delta': {
               const delta = chunk.delta ?? '';
-              uncommittedContent += delta;
-              assistantContent += delta;
-              publish({ type: 'turn.delta', sessionId, turnId, delta });
+              content += delta;
+              onDelta(delta);
               break;
             }
             case 'tool_call': {
+              if (!tools) break;
               const toolCallId = chunk.toolCallId ?? '';
               const toolName = chunk.toolName ?? '';
               const toolInput = (chunk.toolInput ?? {}) as Record<string, unknown>;
-              publish({
-                type: 'turn.tool_call',
-                sessionId,
-                turnId,
-                toolCallId,
-                toolName,
-                toolInput,
-              });
-              if (toolCallId && toolName) {
-                toolCalls.push({ id: toolCallId, name: toolName, arguments: toolInput });
-              }
+              publish({ type: 'turn.tool_call', sessionId, turnId, toolCallId, toolName, toolInput });
+              if (toolCallId && toolName) toolCalls.push({ id: toolCallId, name: toolName, arguments: toolInput });
               break;
             }
             case 'tool_result': {
+              if (!tools) break;
               publish({
                 type: 'turn.tool_result',
                 sessionId,
@@ -1079,9 +1072,8 @@ export class CompanionChatManager {
               });
               break;
             }
-            case 'error': {
+            case 'error':
               throw new Error(chunk.error ?? 'Provider streaming error');
-            }
             case 'done':
               if (chunk.decisionRoute) decisionRoute = chunk.decisionRoute;
               if (chunk.usage) actualUsage = {
@@ -1093,56 +1085,44 @@ export class CompanionChatManager {
               break;
           }
         }
+        return { content, toolCalls };
+      };
 
-        if (abortSignal.aborted) break;
-
-        if (toolCalls.length === 0) {
-          session.conversation.addAssistantMessage(uncommittedContent);
-          uncommittedContent = '';
-          break;
-        }
-
-        const closeUnrun = (reason: string): void => {
-          for (const call of toolCalls) {
-            publish({ type: 'turn.tool_result', sessionId, turnId, toolCallId: call.id, toolName: call.name, result: reason, isError: true });
-          }
-        };
-
-        if (!this.toolRegistry) {
-          // Nothing will answer these calls, so they stay out of the history: a
-          // provider rejects a later turn that carries a tool call with no result.
-          if (uncommittedContent) session.conversation.addAssistantMessage(uncommittedContent);
-          uncommittedContent = '';
-          break;
-        }
-
-        if (rounds >= COMPANION_MAX_TOOL_ROUNDS) {
-          if (uncommittedContent) session.conversation.addAssistantMessage(uncommittedContent);
-          uncommittedContent = '';
-          closeUnrun(`Not run: this reply reached its limit of ${String(COMPANION_MAX_TOOL_ROUNDS)} tool rounds.`);
-          const finalText = await runToolExhaustionFinalizer(
-            { provider: this.provider, finalizerPrompt: TOOL_EXHAUSTION_FINALIZER_PROMPT },
-            { meta: { id: sessionId, model: route.model, provider: route.provider, reasoningEffort: route.reasoningEffort, systemPrompt: route.systemPrompt }, conversation: session.conversation },
-            abortSignal, turnId, publish,
-          );
-          assistantContent += finalText;
-          uncommittedContent = finalText;
-          if (!abortSignal.aborted) {
-            session.conversation.addAssistantMessage(finalText);
+      await runTurn({
+        signal: abortSignal,
+        request,
+        conversation: {
+          addAssistantMessage: (content, options) => {
+            session.conversation.addAssistantMessage(content, options);
             uncommittedContent = '';
-          }
-          break;
-        }
-
-        session.conversation.addAssistantMessage(uncommittedContent, { toolCalls });
-        uncommittedContent = '';
-
-        const toolResults = await executeCompanionToolCalls(
-          { toolRegistry: this.toolRegistry, permissionManager: this.permissionManager, hookDispatcher: this.hookDispatcher, runtimeBus: this.runtimeBus, configManager: this.configManager },
-          toolCalls, publish, sessionId, turnId,
-        );
-        session.conversation.addToolResults(toolResults);
-      }
+          },
+          addToolResults: (results) => session.conversation.addToolResults(results),
+        },
+        ...(toolRegistry ? {
+          executeTools: (calls: ToolCall[], { signal, onSettled }: { signal: AbortSignal; onSettled(result: ToolResult): void }) => executeCompanionToolCalls(
+            { toolRegistry, permissionManager: this.permissionManager, hookDispatcher: this.hookDispatcher, runtimeBus: this.runtimeBus, configManager: this.configManager,
+              autonomousSource: () => ({ goal: userMsg?.content ?? '', criteria: [] }) },
+            calls, publish, sessionId, turnId, { signal, onSettled },
+          ),
+        } : {}),
+      }, {
+        speaker: 'owner',
+        budget: { turns: COMPANION_MAX_TOOL_ROUNDS },
+        completion: { maxRejectedDrafts: 0, deadlineMs: 0 },
+        delegates: 'return',
+        sink: {
+          delta: (delta) => {
+            uncommittedContent += delta;
+            assistantContent += delta;
+            publish({ type: 'turn.delta', sessionId, turnId, delta });
+          },
+          unrunCalls: (calls, reason) => {
+            for (const call of calls) {
+              publish({ type: 'turn.tool_result', sessionId, turnId, toolCallId: call.id, toolName: call.name, result: reason, isError: true });
+            }
+          },
+        },
+      });
 
       // A detected abort (user cancel, session close, or shutdown) where the
       // provider ended its stream gracefully instead of throwing: finalize as

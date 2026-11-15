@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { runAgentTask, type AgentOrchestratorRunContext } from '../platform/src/platform/agents/orchestrator-runner.js';
 import { callingAgentId } from '../platform/src/platform/agents/calling-agent.js';
 import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
-import { MAX_PARALLEL_TOOL_CALLS, createAdmissionLock } from '../platform/src/platform/agents/parallel-tool-calls.js';
+import { DEFAULT_MAX_PARALLEL_TOOL_CALLS as MAX_PARALLEL_TOOL_CALLS } from '../platform/src/platform/core/tool-batch.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
@@ -225,9 +225,8 @@ describe('worker turn tool scheduling', () => {
     expect(h.record.status).toBe('cancelled');
   });
 
-  test('owner prompts for concurrent calls are asked one at a time', async () => {
+  test('admission of concurrent calls runs side by side: a second call is admitted while the first waits on its answer', async () => {
     const asks: string[] = [];
-    let asking = 0, overlap = 0;
     const firstAsked = gate();
     const answerFirst = gate();
     const permissionManager = {
@@ -235,45 +234,35 @@ describe('worker turn tool scheduling', () => {
       passesBoundary: () => true,
       check: async () => true,
       async checkDetailed(toolName: string) {
-        asking++; overlap = Math.max(overlap, asking);
         asks.push(toolName);
         if (toolName === 'r1') { firstAsked.open(); await answerFirst.opened; }
-        asking--;
         return { approved: true };
       },
     } as unknown as BackgroundPermissionManager;
-    const bothRunning = counter(2);
+    const r2Ran = gate();
     const h = setup([
-      { name: 'r1', mode: 'parallel', body: async () => { bothRunning.hit(); } },
-      { name: 'r2', mode: 'parallel', body: async () => { bothRunning.hit(); } },
+      { name: 'r1', mode: 'parallel', body: async () => {} },
+      { name: 'r2', mode: 'parallel', body: async () => { r2Ran.open(); } },
     ], (n) => n === 1 ? turnOf('r1', 'r2') : done, { permissionManager });
     const run = runAgentTask(h.context, h.record);
     await firstAsked.opened;
-    // The second call has reached admission but may not ask while the first is unanswered.
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    expect(asks).toEqual(['r1']);
+    await r2Ran.opened; // r2 was admitted and ran while r1's answer is still open
+    expect(asks).toEqual(['r1', 'r2']);
     answerFirst.open();
     await run;
-    expect(asks).toEqual(['r1', 'r2']);
-    expect(overlap).toBe(1);
-    await bothRunning.reached;
+    expect(h.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => (m as { callId: string }).callId))
+      .toEqual(['id-0-r1', 'id-1-r2']);
   });
 });
 
 describe('worker turn tool scheduling through the autonomous permission owner', () => {
-  test('calls overlap while their admissions are asked one at a time, results in call order', async () => {
+  test('calls overlap through the autonomous permission owner, results in call order', async () => {
     const config: PermissionConfigReader = {
       getAutonomousSnapshot: () => ({ permissions: { mode: 'yolo', tools: {} }, autoApprove: false, directory: '/synthetic/parallel' }),
       isAutoApproveEnabled: () => false, getWorkingDirectory: () => '/synthetic/parallel',
       getSnapshot: () => ({ permissions: { mode: 'yolo', tools: {} } }),
     } as PermissionConfigReader;
     const manager = new PermissionManager(undefined, config, new PolicyRuntimeState());
-    const realAdmit = manager.admitAutonomous.bind(manager);
-    let admitting = 0, admitPeak = 0;
-    (manager as { admitAutonomous: unknown }).admitAutonomous = async (...args: Parameters<typeof realAdmit>) => {
-      admitting++; admitPeak = Math.max(admitPeak, admitting);
-      try { return await realAdmit(...args); } finally { admitting--; }
-    };
     const entered = counter(2);
     const g = gate();
     const h = setup([
@@ -287,7 +276,6 @@ describe('worker turn tool scheduling through the autonomous permission owner', 
     await entered.reached;
     g.open();
     await run;
-    expect(admitPeak).toBe(1);
     expect(h.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => (m as { callId: string }).callId))
       .toEqual(['id-0-r1', 'id-1-r2']);
   });
@@ -335,25 +323,6 @@ describe('calling agent on a contract-unit tool call', () => {
     });
     await runAgentTask(h.context, h.record);
     expect(seen).toEqual([h.record.id]);
-  });
-});
-
-describe('admission lock', () => {
-  test('a waiter that is aborted gives up without letting later waiters jump the holder', async () => {
-    const lock = createAdmissionLock();
-    const holder = gate();
-    const order: string[] = [];
-    const first = lock(undefined, async () => { order.push('first'); await holder.opened; order.push('first done'); });
-    const controller = new AbortController();
-    const second = lock(controller.signal, async () => { order.push('second'); });
-    const third = lock(undefined, async () => { order.push('third'); });
-    controller.abort(new Error('stop'));
-    await expect(second).rejects.toThrow('stop');
-    await Promise.resolve(); await Promise.resolve();
-    expect(order).toEqual(['first']);
-    holder.open();
-    await Promise.all([first, third]);
-    expect(order).toEqual(['first', 'first done', 'third']);
   });
 });
 

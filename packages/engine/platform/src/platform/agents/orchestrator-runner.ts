@@ -67,7 +67,7 @@ import { claimStartedProcesses, cleanupLeakedProcesses, disposeSession, finishCa
 import { selfBoundedCallDeadline } from './tool-call-liveness.js';
 import { withCallingAgent } from './calling-agent.js';
 import { createWorkerContextAccountingSource } from './worker-context-accounting.js';
-import { createAdmissionLock, groupToolCalls, MAX_PARALLEL_TOOL_CALLS, runBounded } from './parallel-tool-calls.js';
+import { maxParallelToolCalls, planToolBatch, runBounded, toolCallLane } from '../core/tool-batch.js';
 
 // Model-definition resolution moved to orchestrator-runner-context-window.ts and
 // the run context to orchestrator-run-context.ts; both re-exported here so
@@ -231,10 +231,8 @@ async function executeToolCalls(
   // is the caller's cancellation path.
   const results: ToolResult[] = [];
   const staged: (RetainedToolObservation | undefined)[] = [];
-  // Asks to the owner are serialised across the calls of this turn.
-  const admit = createAdmissionLock();
-  const isParallelSafe = (call: (typeof toolCalls)[number]): boolean =>
-    toolRegistry.list?.().find(tool => tool.definition.name === call.name)?.definition.concurrency === 'parallel';
+  // Admission runs per call, side by side; an ask to the owner waits in the host's own queue of cards.
+  const definitions = new Map((toolRegistry.list?.() ?? []).map(tool => [tool.definition.name, tool.definition]));
 
   const runCall = async (originalCall: (typeof toolCalls)[number], index: number, signal: AbortSignal | undefined): Promise<void> => {
     assertObservationCurrent();
@@ -309,17 +307,15 @@ async function executeToolCalls(
         const [result] = await withCallingAgent(record.id, () => executeAutonomousToolCalls({
           autonomousSource: context.autonomousSource ?? (() => ({ goal: record.task, criteria: [] })),
           autonomousPort: context.autonomousPort, turnSignal: signal, toolRegistry, assertCurrent: assertCallCurrent,
-          permissionManager: { check: (...a: Parameters<typeof manager.check>) => admit(signal, async () => manager.check(...a)),
-            checkDetailed: (...a: Parameters<typeof manager.checkDetailed>) => admit(signal, async () => manager.checkDetailed(...a)),
-            admitAutonomous: (...a: Parameters<typeof admitAutonomous>) => admit(signal, () => admitAutonomous(...a)),
-            autonomousPreparation,
+          permissionManager: { check: manager.check.bind(manager), checkDetailed: manager.checkDetailed.bind(manager),
+            admitAutonomous, autonomousPreparation,
             ...(manager.prepareAutonomousOwner ? { prepareAutonomousOwner: manager.prepareAutonomousOwner.bind(manager) } : {}),
             ...(manager.projectAutonomousChoices ? { projectAutonomousChoices: manager.projectAutonomousChoices.bind(manager) } : {}),
             ...(manager.getMode ? { getMode: manager.getMode.bind(manager) } : {}),
             ...(manager.captureExecutionMode ? { captureExecutionMode: manager.captureExecutionMode.bind(manager) } : {}),
             ...(manager.retireAutonomousSource ? { retireAutonomousSource: manager.retireAutonomousSource.bind(manager) } : {}),
             ...(manager.releaseAutonomousChoices ? { releaseAutonomousChoices: manager.releaseAutonomousChoices.bind(manager) } : {}) },
-          hookDispatcher: null, runtimeBus: context.runtimeBus, sessionId: record.id,
+          hookDispatcher: context.hookDispatcher ?? null, runtimeBus: context.runtimeBus, sessionId: record.id,
           emitterContext: () => context.emitterContext(record.id),
           toolBudget: () => toolBudgetFromConfig(context.configManager),
           onToolExecuted(name, args, success) {
@@ -335,7 +331,7 @@ async function executeToolCalls(
       // like the foreground turn loop (denials return a structured ToolDenial).
       assertPermissionActive(signal);
       assertCallCurrent();
-      const permissionOutcome = await admit(signal, () => gateBackgroundToolCall(context, record, call.name, call.arguments as Record<string, unknown>, signal));
+      const permissionOutcome = await gateBackgroundToolCall(context, record, call.name, call.arguments as Record<string, unknown>, signal);
       assertPermissionActive(signal);
       assertCallCurrent();
       if (!permissionOutcome.approved) {
@@ -380,21 +376,24 @@ async function executeToolCalls(
     }
   };
 
-  for (const group of groupToolCalls(toolCalls.map((call, index) => ({ call, index })), ({ call }) => isParallelSafe(call))) {
+  const limit = maxParallelToolCalls(context.configManager);
+  const groups = planToolBatch(toolCalls, call => call.argumentError !== undefined
+    ? { kind: 'read', paths: [] }
+    : toolCallLane(definitions.get(call.name), call.arguments as Record<string, unknown>, context.workingDirectory));
+  for (const group of groups) {
     try {
       if (group.length === 1) {
-        await runCall(group[0]!.call, group[0]!.index, turnSignal);
+        await runCall(toolCalls[group[0]!]!, group[0]!, turnSignal);
         continue;
       }
       // Siblings share one abort so a run-level failure in one winds the rest
       // down through the same path as a cancelled turn.
       const batch = new AbortController();
       const callSignal = turnSignal ? AbortSignal.any([turnSignal, batch.signal]) : batch.signal;
-      await runBounded(group, MAX_PARALLEL_TOOL_CALLS, () => batch.abort(),
-        ({ call, index }) => runCall(call, index, callSignal));
+      await runBounded(group, limit, () => batch.abort(), index => runCall(toolCalls[index]!, index, callSignal));
     } finally {
       // The repeat history sees completed calls in call order, as if serial.
-      for (const { index } of group) {
+      for (const index of group) {
         const entry = staged[index];
         if (!entry) continue;
         staged[index] = undefined;

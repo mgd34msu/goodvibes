@@ -383,6 +383,7 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'relay.requireStepUpForMutations' ? boolean :
   K extends 'runtime.companionChatLimiter.perSessionLimit' ? number :
   K extends 'runtime.eventBus.maxListeners' ? number :
+  K extends 'runtime.maxParallelToolCalls' ? number :
   K extends 'runtime.unifiedTasks' ? boolean :
   K extends 'runtime.pluginLifecycle' ? boolean :
   K extends 'runtime.mcpLifecycle' ? boolean :

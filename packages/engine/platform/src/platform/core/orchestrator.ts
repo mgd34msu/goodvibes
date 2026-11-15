@@ -71,6 +71,7 @@ import {
   toolBudgetFromConfig,
   reconcileUnresolvedToolCalls,
 } from './orchestrator-tool-runtime.js';
+import { maxParallelToolCalls } from './tool-batch.js';
 import {
   checkContextWindowPreflight,
   emitContextOverflowError,
@@ -1443,6 +1444,8 @@ export class Orchestrator {
           : undefined,
         toolCallSignals: this.toolCallAborts,
         toolBudget: () => toolBudgetFromConfig(this.coreServices.configManager),
+        maxParallel: () => maxParallelToolCalls(this.coreServices.configManager),
+        workingDirectory: this.coreServices.configManager?.getWorkingDirectory() ?? undefined,
         onToolSettled: result => { settled.push(result); },
       }, turnId, calls);
     } catch (error) {

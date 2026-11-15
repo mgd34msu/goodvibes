@@ -163,6 +163,11 @@ type AgentOrchestratorToolDeps = {
    * omitted, background runs are ungated exactly as before background
    * permission enforcement existed.
    */
+  /**
+   * Fires the tool hooks for background and contract-unit calls, as for the main session.
+   * Kept apart from `hookDispatcher` so the workers' tools do not gain hook management.
+   */
+  readonly toolCallHooks?: { fire(event: import('../hooks/types.js').HookEvent): Promise<import('../hooks/types.js').HookResult> } | null | undefined;
   readonly permissionManager?:
     | Pick<
         import('../permissions/manager.js').PermissionManager,
@@ -979,6 +984,7 @@ export class AgentOrchestrator {
         providerOptimizer: this.toolDeps?.providerOptimizer,
         providerRegistry: this.toolDeps!.providerRegistry!,
         ...(this.toolDeps?.permissionManager ? { permissionManager: this.toolDeps.permissionManager } : {}),
+        ...(this.toolDeps?.toolCallHooks ? { hookDispatcher: this.toolDeps.toolCallHooks } : {}),
         getFullRegistry: () =>
           this.getFullRegistry(
             cwd,

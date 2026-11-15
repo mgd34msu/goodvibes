@@ -76,6 +76,8 @@ export interface RuntimeConfig {
   eventBus: {
     maxListeners: number;
   };
+  /** Most tool calls of one model response run at the same time. Default 8. */
+  maxParallelToolCalls: number;
   /** Unified RuntimeTask tracking across subsystems (restart to apply). Default true. */
   unifiedTasks: boolean;
   /** Structured plugin init/teardown lifecycle with health integration (restart to apply). Default false. */

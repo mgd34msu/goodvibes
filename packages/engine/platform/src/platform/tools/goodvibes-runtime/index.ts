@@ -53,6 +53,7 @@ export const GOODVIBES_RUNTIME_AWARENESS_PROMPT = [
   'A configuration value the user states, bot name, chat id, token, host, port, model, path, is a request to set it: call goodvibes_settings, then report the key and its persistedTo store. A value only repeated back in prose is not set.',
   'If the key or the intent is unclear, ask one short question; never write config the user did not ask for. Report settings from goodvibes_context with the store each came from; a value its owning runtime could not supply is unavailable, not unset.',
   'Never reveal raw secrets; report only redacted credential posture.',
+  'Issue independent tool calls together in one response (reads, searches, edits to different files): they run at the same time and the results come back in the order you asked. Calls that depend on an earlier result go in a later response.',
   // A setup request is the other half of the same failure: "set up the wake
   // word" was answered literally, leaving a product that could hear its name
   // and do nothing with what followed, because nobody asked what the request

@@ -130,6 +130,8 @@ export interface AgentOrchestratorRunContext {
    * the run ungated (e.g. isolated tests that wire no manager).
    */
   readonly permissionManager?: BackgroundPermissionManager | undefined;
+  /** Fires the tool hooks (Pre, Post, Fail, file) for this run's calls, as for the main session. Undefined fires none. */
+  readonly hookDispatcher?: { fire(event: import('../hooks/types.js').HookEvent): Promise<import('../hooks/types.js').HookResult> } | null | undefined;
   readonly getFullRegistry: () => ToolRegistry;
   readonly buildScopedRegistry: (allowedNames: string[], fullRegistry: ToolRegistry, captureAuthority?: import('../personal-capture/index.js').CaptureAuthorityDecision | undefined) => ToolRegistry;
   readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'getContextWindowForModel' | 'getKnownContextWindowForModel' | 'recordContextWindowRejection'>;

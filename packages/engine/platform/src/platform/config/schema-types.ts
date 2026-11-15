@@ -571,6 +571,7 @@ export type ConfigKey =
   | 'relay.requireStepUpForMutations'
   | 'runtime.companionChatLimiter.perSessionLimit'
   | 'runtime.eventBus.maxListeners'
+  | 'runtime.maxParallelToolCalls'
   | 'runtime.unifiedTasks'
   | 'runtime.pluginLifecycle'
   | 'runtime.mcpLifecycle'

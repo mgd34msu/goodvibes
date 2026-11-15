@@ -35,6 +35,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { DEFAULT_CEILING_TOKENS, capToolText } from '../runtime/tools/output-policy.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import { withCostOriginAsync, mcpServerOfToolName } from '../runtime/cost/cost-origin.js';
+import { DEFAULT_MAX_PARALLEL_TOOL_CALLS, planToolBatch, runBounded, toolCallLane } from './tool-batch.js';
 
 /** Event payloads leave the process; hook and permission messages can quote secrets from arguments. */
 function redactedErrorResult<T extends { readonly error?: string | undefined }>(result: T): T {
@@ -165,6 +166,14 @@ export type ToolExecutionDeps = {
    * breach cannot undo the call's effect; it is reported on the result.
    */
   toolBudget?: (() => ToolBudget | undefined) | undefined;
+  /** The cap on calls of one batch in flight at once, read once per batch (`maxParallelToolCalls`). Absent: the default of 8. */
+  maxParallel?: (() => number) | undefined;
+  /**
+   * The directory the tools resolve relative paths against. Lets a write with a
+   * relative path run beside one with an absolute path to another file; without
+   * it such a pair runs one after the other.
+   */
+  workingDirectory?: string | undefined;
 };
 
 const OUTPUT_CUT_GUIDANCE = 'Ask for a narrower part (a smaller path, range, query or page), or use the tool option that pages or limits its output.';
@@ -258,22 +267,47 @@ function toCancelledResult(callId: string, settled: ToolResult | null): ToolResu
   };
 }
 
+/** How each call of a batch may run beside the others, from the registry's declarations; every call runs alone when the registry cannot list them. */
+function batchLanes(deps: ToolExecutionDeps, calls: readonly ToolCall[]): number[][] {
+  if (calls.length < 2 || typeof deps.toolRegistry.list !== 'function') return calls.map((_, index) => [index]);
+  const definitions = new Map(deps.toolRegistry.list().map((tool) => [tool.definition.name, tool.definition]));
+  return planToolBatch(calls, (call) => call.argumentError !== undefined
+    ? { kind: 'read', paths: [] }
+    : toolCallLane(definitions.get(call.name), call.arguments, deps.workingDirectory));
+}
+
+/**
+ * The one tool-batch executor. Independent calls of one response run side by
+ * side (tool-batch.ts decides which, from declarations), each through its own
+ * admission, hooks and execution; at most `maxParallel` are in flight. Results
+ * come back in the model's order, one per call. A call that fails is a failed
+ * result and never fails its siblings. A throw (the turn was cancelled, or an
+ * admission owner refused to go on) stops new calls from starting, lets the
+ * running ones finish so their receipts reach `onToolSettled`, then rethrows.
+ */
 export async function executeToolCalls(
   deps: ToolExecutionDeps,
   turnId: string,
   calls: ToolCall[],
 ): Promise<ToolResult[]> {
-  const results: ToolResult[] = [];
-  for (const call of calls) {
+  const slots: (ToolResult | undefined)[] = new Array<ToolResult | undefined>(calls.length);
+  const runOne = async (index: number): Promise<void> => {
+    const call = calls[index]!;
     await deps.permissionManager.prepareAutonomousOwner?.(deps.turnSignal);
     deps.turnSignal?.throwIfAborted();
     deps.assertCurrent?.();
     const inheritedMode = currentExecutionMode();
     const selection = deps.permissionManager.captureExecutionMode?.();
     const mode = selection?.mode ?? deps.permissionManager.getMode?.() ?? inheritedMode ?? 'safe-owner';
-    results.push(...await withExecutionMode(mode, () => executeToolCallsInMode(deps, turnId, [call]), selection?.assertCurrent));
+    const [result] = await withExecutionMode(mode, () => executeToolCallsInMode(deps, turnId, [call]), selection?.assertCurrent);
+    slots[index] = result;
+  };
+  const limit = deps.maxParallel?.() ?? DEFAULT_MAX_PARALLEL_TOOL_CALLS;
+  for (const group of batchLanes(deps, calls)) {
+    if (group.length === 1) await runOne(group[0]!);
+    else await runBounded(group, limit, undefined, (index) => runOne(index));
   }
-  return results;
+  return slots.filter((result): result is ToolResult => result !== undefined);
 }
 
 async function executeToolCallsInMode(

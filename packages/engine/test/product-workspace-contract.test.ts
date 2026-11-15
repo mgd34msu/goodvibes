@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { inspectProductWorkspaces, moduleSpecifiers, productCheckCommands, PRODUCT_DEFINITIONS, selectProductWorkspaces, type ProductDefinition } from '../scripts/product-workspace-contract.ts';
+import { inspectProductWorkspaces, moduleSpecifiers, productCheckCommands, PRODUCT_DEFINITIONS, readProductWorkspaces, selectProductWorkspaces, type ProductDefinition } from '../scripts/product-workspace-contract.ts';
 import { executeProductCommands } from '../scripts/product-workspaces.ts';
 
 /** Upper bound for a child process; only a hung child ever reaches it. */
@@ -58,6 +58,21 @@ test('the product command runner executes the declared build and propagates its 
   expect(readFileSync(join(root, 'products/daemon/build-marker'), 'utf8')).toBe('built');
   write(root, 'products/daemon/scripts/build.ts', 'process.exit(7);');
   await expect(executeProductCommands(root, commands, 'build')).rejects.toThrow('daemon:build failed (exit code 7, signal none)');
+});
+
+test('a base project that its extender fully covers is compiled once, through the extender', () => {
+  const root = fixture();
+  write(root, 'products/daemon/tsconfig.json', { compilerOptions: { types: [] }, include: ['src', 'scripts'] });
+  write(root, 'products/daemon/tsconfig.test.json', { extends: './tsconfig.json', compilerOptions: { noEmit: true }, include: ['src', 'scripts'] });
+  const inspection = inspectProductWorkspaces(root, [definition]);
+  expect(inspection.findings).toEqual([]);
+  const programs = (products: Parameters<typeof productCheckCommands>[1]): string[] => productCheckCommands(root, products, 'typecheck')
+    .map((command) => command.kind === 'tsconfig' ? command.file.split('/').at(-1)! : command.script);
+  expect(programs(inspection.products)).toEqual(['tsconfig.test.json']);
+  expect(readProductWorkspaces(root, [definition])).toEqual(inspection.products);
+  // An extender that changes how the code is judged is a different program.
+  write(root, 'products/daemon/tsconfig.test.json', { extends: './tsconfig.json', compilerOptions: { strict: false }, include: ['src', 'scripts'] });
+  expect(programs(readProductWorkspaces(root, [definition]))).toEqual(['tsconfig.json', 'tsconfig.test.json']);
 });
 
 test('a product typecheck printing errors cannot report success with exit zero', async () => {

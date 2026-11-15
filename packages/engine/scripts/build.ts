@@ -24,17 +24,16 @@
  */
 import { execFileSync } from 'node:child_process';
 import { readdirSync, rmSync, statSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { relative, resolve } from 'node:path';
 
 import { AMBIENT_DECLARATIONS } from './engine-package-lists.ts';
+import { engineSourcesBuild, REPO_ROOT, runTscUnlocked } from './tsc-run.ts';
+import { typecheckFailures } from './typecheck-output-rule.ts';
 import { withWorkspaceLock } from './workspace-lock.ts';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ENGINE_ROOT = resolve(__dirname, '..');
+const ENGINE_ROOT = resolve(REPO_ROOT, 'packages/engine');
 // The old packages are the engine's top-level directories.
 const PACKAGES_ROOT = ENGINE_ROOT;
-const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 
 function run(command: string, args: readonly string[]): void {
   execFileSync(command, args, {
@@ -48,29 +47,32 @@ function run(command: string, args: readonly string[]): void {
  * Run tsc and return every file it emitted, absolute.
  *
  * `--listEmittedFiles` prints one `TSFILE: <path>` line per output. Captured
- * rather than inherited so the list can be read; the lines are echoed on so a
- * build still looks the same to whoever is watching it.
+ * rather than inherited so the list can be read; the other lines are echoed on
+ * so a build still looks the same to whoever is watching it, and are judged as
+ * compiler output: a printed diagnostic fails the build whatever the exit code.
  */
 function buildAndListEmitted(): Set<string> {
-  // The engine tsconfig.json (the old tsconfig.build.json), not the solution
-  // typecheck builds: that also names tsconfig.tests.json, which emits nothing
-  // and whose diagnostics belong to `bun run typecheck`. A red test tree must
-  // not stop the packages building.
-  const stdout = execFileSync('bunx', ['tsc', '-b', '--force', 'tsconfig.json', '--listEmittedFiles'], {
-    cwd: ENGINE_ROOT,
-    encoding: 'utf8',
-    // Errors still go straight to the terminal; only stdout is captured.
-    stdio: ['inherit', 'pipe', 'inherit'],
-    maxBuffer: 256 * 1024 * 1024,
-  });
+  // The engine solution (judgment and every engine package), not the test
+  // projects: their diagnostics belong to `bun run typecheck`, and a red test
+  // tree must not stop the packages building.
+  const step = engineSourcesBuild(true);
+  const result = runTscUnlocked(step.label, [...step.args, '--listEmittedFiles']);
   const emitted = new Set<string>();
-  for (const line of stdout.split('\n')) {
+  const output: string[] = [];
+  for (const line of result.output.split('\n')) {
     const trimmed = line.trim();
     if (trimmed.startsWith('TSFILE:')) {
-      emitted.add(resolve(ENGINE_ROOT, trimmed.slice('TSFILE:'.length).trim()));
+      emitted.add(resolve(REPO_ROOT, trimmed.slice('TSFILE:'.length).trim()));
       continue;
     }
-    if (trimmed.length > 0) console.log(trimmed);
+    if (trimmed.length > 0) output.push(trimmed);
+  }
+  if (output.length > 0) console.log(output.join('\n'));
+  const failures = typecheckFailures({ label: step.label, exitCode: result.exitCode, output: output.join('\n') });
+  if (failures.length > 0) {
+    for (const failure of failures) console.error(`  ${failure}`);
+    // Thrown, not exited, so the build lock is released on the way out.
+    throw new Error('build failed: the compiler reported errors (above); the package output was left as it wrote it. Fix them and run the build again.');
   }
   return emitted;
 }

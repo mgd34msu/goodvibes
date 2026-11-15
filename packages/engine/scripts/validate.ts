@@ -37,12 +37,14 @@ const STEPS: readonly Step[] = [
   script('internal-id:check'),
   script('architecture:check'),
   script('platform-console:check'),
+  // build is the one forced compile of the engine sources (judgment and every
+  // engine package), judged by its output as well as its exit code.
   script('build'),
-  // typecheck runs the composite solution (which now includes test/ and
-  // scripts/ via tsconfig.tests.json) AND the standalone type-test project,
-  // judging each by its output as well as its exit code. It supersedes the
-  // bare types:check that used to run here.
-  script('typecheck'),
+  // typecheck checks only what build did not compile: the test, type-test,
+  // integration and product projects, against the declarations build just
+  // wrote. Its source step is an up-to-date check here, and a refresh when a
+  // run resumes at this step.
+  { label: 'typecheck', command: 'bun', args: ['packages/engine/scripts/typecheck.ts', '--after-build'] },
   script('api:check'),
   // Beside api:check rather than inside it, because they ask opposite questions.
   // api:check iterates FROM the exports map and compares what each DECLARED

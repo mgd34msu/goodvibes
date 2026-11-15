@@ -16,7 +16,10 @@ export const PRODUCT_DEFINITIONS: readonly ProductDefinition[] = PRODUCT_NAMES.m
 export interface ProductWorkspace {
   readonly definition: ProductDefinition;
   readonly scripts: Readonly<Record<string, string>>;
+  /** The compiler programs a typecheck runs, each once. */
   readonly tsconfigs: readonly string[];
+  /** Some program reads engine declarations (dist), so they must be current before it is checked. */
+  readonly readsEngineDeclarations: boolean;
 }
 export interface ProductInspection {
   readonly products: readonly ProductWorkspace[];
@@ -93,44 +96,105 @@ function importFindings(root: string, product: ProductDefinition, files: readonl
   return findings;
 }
 
-function typeCoverage(directory: string, files: readonly string[]): { tsconfigs: string[]; findings: string[] } {
+interface ProductProject {
+  readonly file: string;
+  readonly config: { readonly config?: unknown; readonly error?: ts.Diagnostic };
+  /** Relative `extends` targets that are themselves tsconfig files of this product. */
+  readonly bases: readonly string[];
+  readonly parsed?: ts.ParsedCommandLine;
+}
+
+/** Every tsconfig of the product that is a compiler program, parsed once. */
+function productProjects(files: readonly string[]): readonly ProductProject[] {
   const candidates = files.filter((file) => /^tsconfig(?:\.[\w-]+)?\.json$/.test(basename(file)));
   const configs = new Map(candidates.map((file) => [file, ts.readConfigFile(file, ts.sys.readFile)]));
+  const basesOf = new Map<string, string[]>();
   const inherited = new Set<string>();
   for (const [file, config] of configs) {
     const value = object(config.config)?.extends;
-    const bases = typeof value === 'string' ? [value] : strings(value) ?? [];
-    for (const base of bases) {
+    const bases: string[] = [];
+    for (const base of typeof value === 'string' ? [value] : strings(value) ?? []) {
       if (!base.startsWith('.')) continue;
       const path = resolve(dirname(file), base);
-      if (configs.has(path)) inherited.add(path);
-      else if (configs.has(`${path}.json`)) inherited.add(`${path}.json`);
+      const found = configs.has(path) ? path : configs.has(`${path}.json`) ? `${path}.json` : undefined;
+      if (found !== undefined) { inherited.add(found); bases.push(found); }
     }
+    basesOf.set(file, bases);
   }
   // An options-only file inherited by a real project is not another compiler
   // program. Counting its implicit default include would also hide files the
   // actual projects exclude. Keep conventional and explicitly scoped projects.
-  const tsconfigs = candidates.filter((file) => {
+  return candidates.filter((file) => {
     const config = configs.get(file)!;
     const raw = object(config.config);
     return config.error !== undefined || basename(file) === 'tsconfig.json' || !inherited.has(file)
       || raw !== undefined && ['files', 'include', 'exclude', 'references'].some((key) => Object.hasOwn(raw, key));
+  }).map((file): ProductProject => {
+    const config = configs.get(file)!;
+    const project = { file, config, bases: basesOf.get(file) ?? [] };
+    return config.error !== undefined ? project : { ...project, parsed: ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(file), undefined, file) };
   });
+}
+
+// Options an extending project may set and still be a superset check of its
+// base: they change what is emitted or which ambient packages load, not how
+// the code is judged.
+const LOADING_ONLY_OPTIONS = new Set(['noEmit', 'types']);
+
+/**
+ * The programs a typecheck runs. A base project is dropped when a project
+ * extending it covers every one of its files and changes nothing but loading
+ * options: checking the base again would repeat the same program.
+ */
+function typecheckPrograms(projects: readonly ProductProject[]): readonly ProductProject[] {
+  const byFile = new Map(projects.map((project) => [project.file, project]));
+  const covered = new Set<string>();
+  for (const project of projects) {
+    const options = object(object(project.config.config)?.compilerOptions) ?? {};
+    if (project.parsed === undefined || !Object.keys(options).every((key) => LOADING_ONLY_OPTIONS.has(key))) continue;
+    const own = new Set(project.parsed.fileNames.map((name) => resolve(name)));
+    for (const base of project.bases) {
+      const parsed = byFile.get(base)?.parsed;
+      if (parsed !== undefined && parsed.fileNames.every((name) => own.has(resolve(name)))) covered.add(base);
+    }
+  }
+  return projects.filter((project) => !covered.has(project.file));
+}
+
+/**
+ * A program reads engine declarations unless it resolves the engine's `bun`
+ * export condition (source) without project references; with references, an
+ * import of a referenced project's source reads that project's declarations.
+ */
+function readsEngineDeclarations(project: ProductProject): boolean {
+  const parsed = project.parsed;
+  if (parsed === undefined) return false;
+  return !(parsed.options.customConditions ?? []).includes('bun') || (parsed.projectReferences?.length ?? 0) > 0;
+}
+
+function typeCoverage(directory: string, files: readonly string[], projects: readonly ProductProject[]): string[] {
   const covered = new Set<string>();
   const findings: string[] = [];
-  for (const file of tsconfigs) {
-    const config = configs.get(file)!;
-    if (config.error !== undefined) { findings.push(`${file}: invalid TypeScript configuration`); continue; }
-    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(file), undefined, file);
-    for (const diagnostic of parsed.errors) findings.push(`${file}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`);
-    for (const input of parsed.fileNames) covered.add(resolve(input));
+  for (const project of projects) {
+    if (project.parsed === undefined) { findings.push(`${project.file}: invalid TypeScript configuration`); continue; }
+    for (const diagnostic of project.parsed.errors) findings.push(`${project.file}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`);
+    for (const input of project.parsed.fileNames) covered.add(resolve(input));
   }
   for (const file of files) {
     const local = relative(directory, file);
     // Fixtures are source-shaped data, not files this product executes.
     if (/\.[cm]?tsx?$/.test(file) && !local.split(/[\\/]/).includes('fixtures') && !covered.has(file)) findings.push(`${file}: source/test/tooling file is outside every TypeScript project`);
   }
-  return { tsconfigs, findings };
+  return findings;
+}
+
+function manifestScripts(manifest: Record<string, unknown>): Readonly<Record<string, string>> {
+  return Object.fromEntries(Object.entries(object(manifest.scripts) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+}
+
+function productWorkspace(definition: ProductDefinition, scripts: Readonly<Record<string, string>>, projects: readonly ProductProject[]): ProductWorkspace {
+  const programs = typecheckPrograms(projects);
+  return { definition, scripts, tsconfigs: programs.map((project) => project.file), readsEngineDeclarations: programs.some(readsEngineDeclarations) };
 }
 
 /** Use the package's runtime entries and the browser build's HTML input. */
@@ -204,7 +268,7 @@ export function inspectProductWorkspaces(root: string, definitions: readonly Pro
       const deps = { ...object(manifest.dependencies), ...object(manifest.devDependencies), ...object(manifest.peerDependencies), ...object(manifest.optionalDependencies) };
       if (deps['@goodvibes-jev/engine'] !== 'workspace:*') findings.push(`${definition.path}: engine must be a workspace:* dependency`);
       for (const dependency of Object.keys(deps)) if (/^@[^/]+\/goodvibes-/.test(dependency)) findings.push(`${definition.path}: legacy dependency ${dependency}`);
-      const scripts = Object.fromEntries(Object.entries(object(manifest.scripts) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+      const scripts = manifestScripts(manifest);
       for (const name of ['build', 'typecheck', 'test']) {
         const script = scripts[name]?.trim();
         if (!script || /^(?:echo\b|printf\b|true$|:$|exit\s+0$)/.test(script) || /--pass(?:WithNoTests|-with-no-tests)/.test(script)) findings.push(`${definition.path}: ${name} must be a real failing check, not an empty-success command`);
@@ -214,12 +278,12 @@ export function inspectProductWorkspaces(root: string, definitions: readonly Pro
       }
       if (containedFile(directory, 'tsconfig.json') === undefined) findings.push(`${definition.path}: missing tsconfig.json`);
       const files = productFiles(directory);
-      const coverage = typeCoverage(directory, files);
-      findings.push(...coverage.findings);
+      const projects = productProjects(files);
+      findings.push(...typeCoverage(directory, files, projects));
       if (!files.some((file) => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file) && readFileSync(file, 'utf8').trim().length > 0)) findings.push(`${definition.path}: no actual test source`);
       findings.push(...entrypointFindings(directory, manifest, scripts).map((finding) => `${definition.path}: ${finding}`));
       findings.push(...importFindings(root, definition, files));
-      products.push({ definition, scripts, tsconfigs: coverage.tsconfigs });
+      products.push(productWorkspace(definition, scripts, projects));
     } catch (error) { findings.push(`${definition.path}: ${error instanceof Error ? error.message : String(error)}`); }
   }
   const directory = resolve(root, 'products');
@@ -227,6 +291,19 @@ export function inspectProductWorkspaces(root: string, definitions: readonly Pro
     if (entry.isDirectory() && !definitions.some((definition) => definition.name === entry.name)) findings.push(`products/${entry.name}: undeclared product workspace`);
   }
   return { products, missing, findings };
+}
+
+/**
+ * What build, test and typecheck need of each present product: its scripts and
+ * compiler programs. The full inspection (imports, entrypoints, file coverage)
+ * is `products:check`, which validate runs once; repeating it before every
+ * product command parsed every product source file again.
+ */
+export function readProductWorkspaces(root: string, definitions: readonly ProductDefinition[] = PRODUCT_DEFINITIONS): readonly ProductWorkspace[] {
+  return definitions.filter((definition) => existsSync(resolve(root, definition.path))).map((definition) => {
+    const directory = resolve(root, definition.path);
+    return productWorkspace(definition, manifestScripts(json(resolve(directory, 'package.json'))), productProjects(productFiles(directory)));
+  });
 }
 
 export type ProductCheckCommand =

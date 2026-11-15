@@ -47,7 +47,7 @@ describe('inbox/calendar workspace cards are real actions, not dead guidance', (
     expect(createAgentWorkspaceEditor(action!.editorKind!)).not.toBeNull();
   });
 
-  test('the advanced Google/Outlook OAuth cards are real, dispatchable editors that name the default connect route', () => {
+  test('the Google/Outlook OAuth client cards are real, dispatchable editors that name the connect route', () => {
     for (const [id, editorKind, route] of [
       ['personal-ops-calendar-google', 'calendar-oauth-google', '/calendar connect google'],
       ['personal-ops-calendar-outlook', 'calendar-oauth-outlook', '/calendar connect outlook'],

@@ -595,9 +595,11 @@ function buildCloseout(input: {
   readonly finishUserRoute: string;
 }): AgentSetupWizardCloseout {
   const critical = new Set(input.criticalStepIds);
+  // A critical step that is optional here (the connected host on an Agent used
+  // on its own) does not block closeout.
   const primaryBlocker = input.items.find((item) => (
     critical.has(item.id) && item.status === 'blocked'
-  )) ?? input.items.find((item) => critical.has(item.id) && item.status !== 'ready') ?? null;
+  )) ?? input.items.find((item) => critical.has(item.id) && item.status !== 'ready' && item.status !== 'optional') ?? null;
   const smokeReady = input.smokeVerdict
     ?? (input.smokeHistory.status === 'available' && input.smokeHistory.latestResult === 'ready-for-user-run');
   const latestSmoke = input.smokeHistory.status === 'available'

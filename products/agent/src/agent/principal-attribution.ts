@@ -59,6 +59,32 @@ export function formatPrincipalLabel(principal: ResolvedPrincipalSummary): strin
 /** How long a display-only principal lookup waits for the connected host. */
 const PRINCIPAL_RESOLVE_TIMEOUT_MS = 5_000;
 
+type PrincipalFetch = (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>;
+
+export interface PrincipalAttributionOptions {
+  readonly signal?: AbortSignal;
+  readonly fetch?: PrincipalFetch;
+}
+
+/** Resolves channel identities through one platform client, each distinct identity once. */
+export type ChannelPrincipalAttributionResolver = (channel: string, value: string) => Promise<ResolvedPrincipalAttribution>;
+
+function createPrincipalClient(connection: PrincipalAttributionConnection & { readonly token: string }, options: PrincipalAttributionOptions) {
+  return createBrowserGoodVibesPlatform({
+    baseUrl: connection.baseUrl,
+    authToken: connection.token,
+    // A single attempt is enough for a display-only lookup, this must not
+    // stall triage/inbox rendering behind retry backoff.
+    retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
+    // One attempt still waits as long as the host takes to answer; a hung host
+    // would stall rendering, so the lookup gives up and shows "unknown".
+    fetch: (input, init) => {
+      const signal = options.signal ?? AbortSignal.timeout(PRINCIPAL_RESOLVE_TIMEOUT_MS);
+      return (options.fetch ?? globalThis.fetch)(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
+    },
+  });
+}
+
 /**
  * Resolve a channel identity ({channel, value}) to its named principal for
  * honest inbound-attribution display.
@@ -72,41 +98,54 @@ export async function resolveChannelPrincipalAttribution(
   connection: PrincipalAttributionConnection,
   channel: string,
   value: string,
-  options: { readonly signal?: AbortSignal; readonly fetch?: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response> } = {},
+  options: PrincipalAttributionOptions = {},
 ): Promise<ResolvedPrincipalAttribution> {
-  if (!channel.trim() || !value.trim()) return UNKNOWN_ATTRIBUTION;
-  if (!connection.token) {
-    return { ...UNKNOWN_ATTRIBUTION, error: 'No connected-host operator token available for principal resolution.' };
-  }
-  try {
-    const platformClient = createBrowserGoodVibesPlatform({
-      baseUrl: connection.baseUrl,
-      authToken: connection.token,
-      // A single attempt is enough for a display-only lookup, this must not
-      // stall triage/inbox rendering behind retry backoff.
-      retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
-      // One attempt still waits as long as the host takes to answer; a hung host
-      // would stall rendering, so the lookup gives up and shows "unknown".
-      fetch: (input, init) => {
-        const signal = options.signal ?? AbortSignal.timeout(PRINCIPAL_RESOLVE_TIMEOUT_MS);
-        return (options.fetch ?? globalThis.fetch)(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
-      },
-    });
-    const payload: PrincipalsResolveInput = { channel, value };
-    // No `as OperatorMethodOutput<'principals.resolve'>` here: the platform's typed
-    // overload already returns it, so the assertion would be redundant, and a
-    // redundant assertion is not free, because it keeps compiling if the
-    // contract's output changes underneath it. That is how `as never` hid two
-    // breaking input changes for two rounds.
-    const result = await platformClient.operator.invoke('principals.resolve', payload);
-    if (!result.known || !result.principal) return UNKNOWN_ATTRIBUTION;
-    const principal: ResolvedPrincipalSummary = {
-      id: result.principal.id,
-      name: result.principal.name,
-      kind: result.principal.kind,
-    };
-    return { known: true, label: formatPrincipalLabel(principal), principal };
-  } catch (error) {
-    return { ...UNKNOWN_ATTRIBUTION, error: summarizeError(error) };
-  }
+  return createChannelPrincipalAttributionResolver(connection, options)(channel, value);
+}
+
+/**
+ * A resolver for a list view: one platform client for the whole list, and one
+ * `principals.resolve` request per distinct (channel, value), so twelve route
+ * bindings from one sender cost one request, not twelve.
+ */
+export function createChannelPrincipalAttributionResolver(
+  connection: PrincipalAttributionConnection,
+  options: PrincipalAttributionOptions = {},
+): ChannelPrincipalAttributionResolver {
+  const token = connection.token;
+  let client: ReturnType<typeof createPrincipalClient> | null = null;
+  const resolved = new Map<string, Promise<ResolvedPrincipalAttribution>>();
+  const resolveOne = async (channel: string, value: string): Promise<ResolvedPrincipalAttribution> => {
+    if (!token) {
+      return { ...UNKNOWN_ATTRIBUTION, error: 'No connected-host operator token available for principal resolution.' };
+    }
+    try {
+      client ??= createPrincipalClient({ baseUrl: connection.baseUrl, token }, options);
+      const payload: PrincipalsResolveInput = { channel, value };
+      // No `as OperatorMethodOutput<'principals.resolve'>` here: the platform's typed
+      // overload already returns it, so the assertion would be redundant, and a
+      // redundant assertion is not free, because it keeps compiling if the
+      // contract's output changes underneath it.
+      const result = await client.operator.invoke('principals.resolve', payload);
+      if (!result.known || !result.principal) return UNKNOWN_ATTRIBUTION;
+      const principal: ResolvedPrincipalSummary = {
+        id: result.principal.id,
+        name: result.principal.name,
+        kind: result.principal.kind,
+      };
+      return { known: true, label: formatPrincipalLabel(principal), principal };
+    } catch (error) {
+      return { ...UNKNOWN_ATTRIBUTION, error: summarizeError(error) };
+    }
+  };
+  return (channel, value) => {
+    if (!channel.trim() || !value.trim()) return Promise.resolve(UNKNOWN_ATTRIBUTION);
+    const key = `${channel}\u0000${value}`;
+    let pending = resolved.get(key);
+    if (!pending) {
+      pending = resolveOne(channel, value);
+      resolved.set(key, pending);
+    }
+    return pending;
+  };
 }

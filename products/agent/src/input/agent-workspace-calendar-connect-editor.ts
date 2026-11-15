@@ -1,17 +1,8 @@
 /**
- * Calendar connect card, promotes the "Calendar workflows" workspace
- * card from a dead guidance card into a real, dispatchable action.
- *
- * GROUNDED: unlike email, there is no external calendar account/CalDAV
- * connector anywhere in this codebase (no config schema, no credential path,
- * no service, /calendar is a purely local .ics-backed event store,
- * src/agent/calendar-registry.ts + src/input/commands/calendar-runtime.ts).
- * Building a credential-capturing "connect wizard" for a service that does
- * not exist would repeat exactly the dogfood finding this brief fixes
- * (advertising a capability that isn't dispatchable). The honest promotion
- * is: a real stepped form that adds a LOCAL calendar event through the
- * existing, already-safe /calendar add command, no credentials involved,
- * with the card's own wording stating plainly that this is local-only.
+ * Add-event card: a stepped form that adds one event to the local Agent
+ * calendar through the existing /calendar add command. No credentials are
+ * involved; connecting an external calendar is the OAuth client and subscribe
+ * cards beside it.
  *
  * This follows the ordinary generic command-editor pattern (like
  * agent-workspace-reminder-schedule-editor.ts): build one command string,
@@ -45,7 +36,7 @@ export function createCalendarConnectEditor(): AgentWorkspaceLocalEditor {
     mode: 'create',
     title: 'Add Calendar Event',
     selectedFieldIndex: 0,
-    message: 'No external calendar account is connected in this build (no CalDAV/Google/Outlook sync), this adds an event to your local Agent calendar. Type yes on the final field to confirm.',
+    message: 'Adds an event to your local Agent calendar. Type yes on the final field to confirm.',
     fields: [
       { id: 'title', label: 'Title', value: '', required: true, multiline: false, hint: 'Event title.' },
       { id: 'start', label: 'Start', value: '', required: true, multiline: false, hint: 'ISO date or datetime, for example 2026-08-01T09:00:00-05:00.' },

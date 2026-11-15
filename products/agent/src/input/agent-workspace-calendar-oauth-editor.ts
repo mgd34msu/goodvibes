@@ -1,13 +1,13 @@
 /**
- * Calendar OAuth advanced-credentials wizard.
+ * Calendar OAuth client card.
  *
- * The DEFAULT connect experience needs no card at all: `/calendar connect google`
- * (or `outlook`) uses the bundled project client id + PKCE and opens the browser.
- * This card is the ADVANCED override for power users who register their own app: it
- * captures a client id and (optionally) a client secret, stores them the same way
- * every other Agent credential is stored (id in config, secret through the secret
- * manager, never in plain config, never in a command string), then directs the user
- * to run the connect command to authorize.
+ * No client id ships with the product (calendar/oauth-providers.ts): calendar
+ * sync with Google or Outlook needs the owner's own OAuth app, and
+ * `/calendar connect google|outlook` refuses with `client-not-configured` until
+ * one is stored. This card is that first step: it stores a client id and
+ * (optionally) a client secret the same way every other Agent credential is
+ * stored (id in config, secret through the secret manager, never in plain
+ * config, never in a command string); the connect command then authorizes.
  *
  * Security: like the email connect wizard, this is a DIRECT host action, not a slash
  * command, the client secret never travels through the command-dispatch pipeline
@@ -46,42 +46,34 @@ export interface AgentWorkspaceCalendarOAuthConfigStatus {
 const PROVIDER_LABEL: Record<Provider, string> = { google: 'Google Calendar', microsoft: 'Microsoft Outlook' };
 const CONNECT_HINT: Record<Provider, string> = { google: '/calendar connect google', microsoft: '/calendar connect outlook' };
 
-/**
- * Build-state-aware card message (F1c): while the build still ships only the
- * bundled platform placeholder client id, /calendar connect always fails at the
- * config stage, so the old "most people can skip this" wording was a dead
- * end. Once a client id has been stored (through this same card), the
- * original skip-this-if-you-don't-need-it wording applies again.
- */
-function cardMessage(label: string, isConfigured: boolean): string {
+/** The card's message, read from whether a client id is already stored. */
+function cardMessage(label: string, provider: Provider, isConfigured: boolean): string {
   if (!isConfigured) {
     return (
-      `This build needs a client id to connect ${label}, it ships no project default yet. ` +
-      'Enter your own below, or follow these steps: register a free OAuth app with the provider ' +
-      '(Google Cloud Console, or the Azure portal for Microsoft), copy the client id it gives you ' +
-      '(no client secret needed for the desktop/public-client flow), then paste it in here. ' +
-      'A client secret (only for a confidential-client registration) is stored through the Agent ' +
-      'secret manager and never shown again.'
+      `Connecting ${label} needs your own OAuth client id (free, about five minutes). ` +
+      'Register an OAuth app with the provider (Google Cloud Console, or the Azure portal for ' +
+      'Microsoft), choose the desktop/public-client type, copy the client id it gives you, and paste it ' +
+      `below. Then run ${CONNECT_HINT[provider]} to authorize. A client secret is only needed for a ` +
+      'confidential-client registration; it is stored through the Agent secret manager and never shown again.'
     );
   }
   return (
-    `Advanced: use your OWN registered ${label} app instead of the bundled default. ` +
-    'Most people can skip this and just run the connect command. The client id is not a ' +
-    'secret; a client secret (only for a confidential-client registration) is stored through ' +
+    `A ${label} client id is already stored: run ${CONNECT_HINT[provider]} to authorize. ` +
+    'Use this form only to replace the stored client id or secret. A client secret is stored through ' +
     'the Agent secret manager and never shown again.'
   );
 }
 
-/** The advanced-credentials wizard for one provider. */
+/** The OAuth client form for one provider. */
 export function createCalendarOAuthEditor(provider: Provider, isConfigured = false): AgentWorkspaceLocalEditor {
   const label = PROVIDER_LABEL[provider];
   const kind: AgentWorkspaceEditorKind = provider === 'google' ? 'calendar-oauth-google' : 'calendar-oauth-outlook';
   return {
     kind,
     mode: 'create',
-    title: `Connect ${label} (advanced)`,
+    title: isConfigured ? `Replace ${label} OAuth client` : `Store ${label} OAuth client`,
     selectedFieldIndex: 0,
-    message: cardMessage(label, isConfigured),
+    message: cardMessage(label, provider, isConfigured),
     fields: [
       { id: 'clientId', label: 'Client ID', value: '', required: true, multiline: false, hint: `Your ${label} OAuth client id (Desktop/public client needs no secret).` },
       { id: 'clientSecret', label: 'Client secret (optional)', value: '', required: false, multiline: false, hint: 'Only for a confidential-client app. Stored through the secret manager, masked here.', redact: true },
@@ -113,11 +105,16 @@ export async function submitAgentWorkspaceCalendarOAuthEditor(
 
   const clientId = readField('clientId').trim();
   if (!clientId) {
-    host.localEditor = { ...editor, message: 'A client id is required for the advanced path.' };
+    host.localEditor = { ...editor, message: 'A client id is required.' };
     host.status = 'Client id is required.';
     return;
   }
 
+  const secret = readField('clientSecret');
+  const hasSecret = secret.trim().length > 0;
+  // Two writes, id first: a failure says which half is stored, so the result
+  // never claims nothing was saved after the id landed.
+  let idStored = false;
   try {
     const secretsManager = requireSecretsManager(context);
     ensureCalendarConfigDefaults(context.platform.configManager);
@@ -126,16 +123,14 @@ export async function submitAgentWorkspaceCalendarOAuthEditor(
       setDynamic: (key: ConfigKey, value: unknown) => void;
       save: () => void;
     };
-    // Client id is not a secret, a plain config value. It is daemon-owned like the
-    // secret ref below, so it routes the same way: both halves of the pair must land
-    // in the same store.
+    // The client id is not a secret: a plain config value, routed to its owner.
     const configManager = context.platform.configManager;
     const homeDir = configManager.getHomeDirectory();
     await routeConfigWrite(configManager, CALENDAR_OAUTH_CLIENT_ID_KEYS[provider], clientId, homeDir ? { homeDir } : {});
-    // Client secret (if any) goes through the secret-backed path: a ref in config,
-    // the raw value only in the secret manager.
-    const secret = readField('clientSecret');
-    if (secret.trim().length > 0) {
+    idStored = true;
+    // The client secret goes through the secret-backed writer, which routes to
+    // the same owner: a ref in config, the raw value only in the secret store.
+    if (hasSecret) {
       await persistSecretBackedConfigValue(cm, secretsManager, CALENDAR_OAUTH_CLIENT_SECRET_KEYS[provider] as unknown as ConfigKey, secret);
     }
     cm.save();
@@ -145,13 +140,16 @@ export async function submitAgentWorkspaceCalendarOAuthEditor(
     host.lastActionResult = {
       kind: 'refreshed',
       title: `${label} credentials stored`,
-      detail: `Your ${label} client id was saved${secret.trim() ? ' (and the client secret through the secret manager)' : ''}. Run ${CONNECT_HINT[provider]} to open the browser and authorize.`,
+      detail: `Your ${label} client id was saved${hasSecret ? ' (and the client secret through the secret manager)' : ''}. Run ${CONNECT_HINT[provider]} to open the browser and authorize.`,
       safety: 'safe',
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    const reason = error instanceof Error ? error.message : String(error);
+    const detail = idStored
+      ? `The client id was stored; the client secret was not: ${reason} Enter the secret again and press Enter, or run ${CONNECT_HINT[provider]} if your app needs no secret.`
+      : `Nothing was stored: ${reason}`;
     host.localEditor = { ...editor, message: detail };
     host.status = detail;
-    host.lastActionResult = { kind: 'error', title: 'Calendar credentials not stored', detail, safety: 'safe' };
+    host.lastActionResult = { kind: 'error', title: idStored ? `${label} client secret not stored` : `${label} credentials not stored`, detail, safety: 'safe' };
   }
 }

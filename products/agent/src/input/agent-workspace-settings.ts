@@ -1,8 +1,8 @@
 import { observeImportFile, assertImportFileCurrent, isSecretBearingConfigKey, type SubscriptionImportEntry } from '@goodvibes-jev/engine/platform/platform/config';
 import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
-import { existsSync, readFileSync } from 'node:fs';
+import { containsIssuerCredential, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
+import { readFileSync } from 'node:fs';
 import { getAgentSettingsSchema, readAgentSettingValue, type AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { PendingSubscriptionLogin, ProviderSubscription } from '@goodvibes-jev/engine/platform/platform/config';
 import { bindSettingSchemaDescriptors, setHarnessSetting } from '../agent/harness-control.ts';
@@ -124,11 +124,26 @@ interface TuiSubscriptionImportPlanEntry {
   readonly reason?: string;
 }
 
-interface TuiSettingsImportPlan {
+/**
+ * One import, computed from one read of the source files. The owner's form
+ * shows this plan and applying writes exactly this plan, so what was shown is
+ * what is written; nothing re-reads the files in between.
+ */
+export interface TuiSettingsImportPlan {
   readonly sources: readonly TuiSettingsImportSource[];
   readonly settings: readonly TuiSettingImportPlanEntry[];
   readonly subscriptions: readonly TuiSubscriptionImportPlanEntry[];
+  /** The subscription records to write; held here, never serialised into a preview. */
+  readonly subscriptionValues: readonly SubscriptionImportEntry[];
   readonly parseErrors: readonly string[];
+}
+
+/** The three source files, read once: user settings, project settings, subscriptions. */
+interface TuiImportSourceFile { readonly path: string; readonly raw: string | null; readonly error?: string }
+interface TuiImportSourceRead {
+  readonly userSettings: TuiImportSourceFile;
+  readonly projectSettings: TuiImportSourceFile;
+  readonly subscriptions: TuiImportSourceFile;
 }
 
 export interface TuiSettingsImportPreview {
@@ -175,10 +190,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function readJsonRecord(path: string): Record<string, unknown> | null {
-  if (!existsSync(path)) return null;
-  const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+function parseJsonRecord(raw: string | null): Record<string, unknown> | null {
+  if (raw === null) return null;
+  const parsed = JSON.parse(raw) as unknown;
   return isRecord(parsed) ? parsed : null;
+}
+
+/** One read of a source file; a missing file is `null`, any other failure is reported by the caller. */
+function readSourceFile(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function readImportSources(context: CommandContext): TuiImportSourceRead | null {
+  const paths = context.workspace?.shellPaths;
+  if (!paths) return null;
+  const read = (path: string): TuiImportSourceFile => {
+    try {
+      return { path, raw: readSourceFile(path) };
+    } catch (error) {
+      return { path, raw: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  return {
+    userSettings: read(paths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json')),
+    projectSettings: read(paths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json')),
+    subscriptions: read(paths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'subscriptions.json')),
+  };
 }
 
 function readNestedSettingValue(record: Record<string, unknown>, key: string): unknown {
@@ -260,94 +302,40 @@ function isPendingSubscriptionLogin(value: unknown): value is PendingSubscriptio
     && typeof value.createdAt === 'number';
 }
 
-function planTuiSubscriptions(context: CommandContext, parseErrors: string[]): readonly TuiSubscriptionImportPlanEntry[] {
-  const shellPaths = context.workspace.shellPaths;
+function planTuiSubscriptions(
+  context: CommandContext,
+  raw: string | null,
+  parseErrors: string[],
+): { readonly entries: readonly TuiSubscriptionImportPlanEntry[]; readonly values: readonly SubscriptionImportEntry[] } {
   const manager = context.platform.subscriptionManager;
-  const result: TuiSubscriptionImportPlanEntry[] = [];
-  if (!shellPaths || !manager) return result;
-
-  const sourcePath = shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'subscriptions.json');
+  const entries: TuiSubscriptionImportPlanEntry[] = [];
+  const values: SubscriptionImportEntry[] = [];
+  if (!manager) return { entries, values };
   try {
-    const store = readJsonRecord(sourcePath);
-    if (!store) return result;
+    const store = parseJsonRecord(raw);
+    if (!store) return { entries, values };
     for (const entry of readRecordMap(store, 'subscriptions')) {
       if (!isProviderSubscription(entry)) {
-        result.push({ kind: 'active', status: 'skipped', reason: 'active subscription with invalid shape' });
+        entries.push({ kind: 'active', status: 'skipped', reason: 'active subscription with invalid shape' });
         continue;
       }
-      if (valuesMatch(manager.get(entry.provider), entry)) {
-        result.push({ provider: entry.provider, kind: 'active', status: 'unchanged' });
-        continue;
-      }
-      result.push({ provider: entry.provider, kind: 'active', status: 'would_import' });
+      const unchanged = valuesMatch(manager.get(entry.provider), entry);
+      entries.push({ provider: entry.provider, kind: 'active', status: unchanged ? 'unchanged' : 'would_import' });
+      if (!unchanged) values.push({ kind: 'active', value: entry });
     }
     for (const entry of readRecordMap(store, 'pending')) {
       if (!isPendingSubscriptionLogin(entry)) {
-        result.push({ kind: 'pending', status: 'skipped', reason: 'pending subscription with invalid shape' });
+        entries.push({ kind: 'pending', status: 'skipped', reason: 'pending subscription with invalid shape' });
         continue;
       }
-      if (valuesMatch(manager.getPending(entry.provider), entry)) {
-        result.push({ provider: entry.provider, kind: 'pending', status: 'unchanged' });
-        continue;
-      }
-      result.push({ provider: entry.provider, kind: 'pending', status: 'would_import' });
+      const unchanged = valuesMatch(manager.getPending(entry.provider), entry);
+      entries.push({ provider: entry.provider, kind: 'pending', status: unchanged ? 'unchanged' : 'would_import' });
+      if (!unchanged) values.push({ kind: 'pending', value: entry });
     }
   } catch (error) {
     parseErrors.push(`subscriptions: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return result;
-}
-
-function applyTuiSubscriptions(context: CommandContext, parseErrors: string[]): {
-  readonly importedActive: string[];
-  readonly importedPending: string[];
-  readonly unchangedActive: string[];
-  readonly unchangedPending: string[];
-  readonly skipped: string[];
-} {
-  const shellPaths = context.workspace.shellPaths;
-  const manager = context.platform.subscriptionManager;
-  const result = {
-    importedActive: [] as string[],
-    importedPending: [] as string[],
-    unchangedActive: [] as string[],
-    unchangedPending: [] as string[],
-    skipped: [] as string[],
-  };
-  if (!shellPaths || !manager) return result;
-
-  const sourcePath = shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'subscriptions.json');
-  try {
-    const store = readJsonRecord(sourcePath);
-    if (!store) return result;
-    for (const entry of readRecordMap(store, 'subscriptions')) {
-      if (!isProviderSubscription(entry)) {
-        result.skipped.push('active subscription with invalid shape');
-        continue;
-      }
-      if (valuesMatch(manager.get(entry.provider), entry)) {
-        result.unchangedActive.push(entry.provider);
-        continue;
-      }
-      manager.saveSubscription(entry);
-      result.importedActive.push(entry.provider);
-    }
-    for (const entry of readRecordMap(store, 'pending')) {
-      if (!isPendingSubscriptionLogin(entry)) {
-        result.skipped.push('pending subscription with invalid shape');
-        continue;
-      }
-      if (valuesMatch(manager.getPending(entry.provider), entry)) {
-        result.unchangedPending.push(entry.provider);
-        continue;
-      }
-      manager.savePending(entry);
-      result.importedPending.push(entry.provider);
-    }
-  } catch (error) {
-    parseErrors.push(`subscriptions: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  return result;
+  return { entries, values };
 }
 
 export function agentWorkspaceSettingSchema(context: CommandContext | null, key: string): AgentConfigSetting | null {
@@ -409,12 +397,28 @@ export function buildAgentWorkspaceSettingActionEffect(
     const currentIndex = Math.max(0, names.indexOf(normalizeThemeName(currentValue)));
     return { kind: 'apply', setting, value: names[(currentIndex + 1) % names.length]! };
   }
-  if (setting.type === 'boolean') {
-    return { kind: 'apply', setting, value: !Boolean(currentValue) };
-  }
-  if (setting.type === 'enum' && setting.enumValues && setting.enumValues.length > 0) {
+  let cycled: unknown;
+  if (setting.type === 'boolean') cycled = !Boolean(currentValue);
+  else if (setting.type === 'enum' && setting.enumValues && setting.enumValues.length > 0) {
     const currentIndex = Math.max(0, setting.enumValues.indexOf(String(currentValue)));
-    return { kind: 'apply', setting, value: setting.enumValues[(currentIndex + 1) % setting.enumValues.length]! };
+    cycled = setting.enumValues[(currentIndex + 1) % setting.enumValues.length]!;
+  }
+  if (cycled !== undefined) {
+    // A permission setting decides what runs without asking, so its row shows
+    // the change first and saves on the next Enter instead of cycling at once.
+    if (String(setting.key).startsWith('permissions.')) {
+      const editor = createSettingEditor(setting, String(cycled), action);
+      return {
+        kind: 'editor',
+        editor: {
+          ...editor,
+          message: `Change ${setting.key} from ${String(currentValue ?? '(unset)')} to ${String(cycled)}? Press Enter to save, edit the value first, or Esc to leave it unchanged.`,
+        },
+        status: `Confirm ${setting.key}.`,
+        result: { kind: 'guidance', title: `Change ${setting.key}`, detail: setting.description, safety: action.safety },
+      };
+    }
+    return { kind: 'apply', setting, value: cycled };
   }
 
   return {
@@ -558,16 +562,24 @@ export async function applyAgentWorkspaceSettingValue(
   }
 }
 
-function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettingsImportPlan | null {
-  const shellPaths = context?.workspace?.shellPaths;
-  const configManager = context?.platform?.configManager;
-  if (!context || !shellPaths || !configManager) return null;
+/** Plan an import of the GoodVibes TUI settings: the three source files are read once. */
+export function planAgentWorkspaceTuiSettingsImport(context: CommandContext | null): TuiSettingsImportPlan | null {
+  if (!context) return null;
+  const read = readImportSources(context);
+  return read ? buildTuiSettingsImportPlan(context, read) : null;
+}
 
-  const sourceInputs: readonly Omit<TuiSettingsImportSource, 'status' | 'importableSettings' | 'error'>[] = [
+function buildTuiSettingsImportPlan(context: CommandContext, read: TuiImportSourceRead): TuiSettingsImportPlan | null {
+  const configManager = context.platform?.configManager;
+  if (!configManager) return null;
+
+  const sourceInputs: readonly (Omit<TuiSettingsImportSource, 'status' | 'importableSettings' | 'error'> & { readonly raw: string | null; readonly readError?: string })[] = [
     {
       id: 'goodvibes-tui:user-settings',
       label: 'goodvibes-tui user settings',
-      path: shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json'),
+      path: read.userSettings.path,
+      raw: read.userSettings.raw,
+      ...(read.userSettings.error ? { readError: read.userSettings.error } : {}),
       sourcePackage: 'goodvibes-tui',
       surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
       scope: 'user',
@@ -577,7 +589,9 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
     {
       id: 'goodvibes-tui:project-settings',
       label: 'goodvibes-tui project settings',
-      path: shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json'),
+      path: read.projectSettings.path,
+      raw: read.projectSettings.raw,
+      ...(read.projectSettings.error ? { readError: read.projectSettings.error } : {}),
       sourcePackage: 'goodvibes-tui',
       surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
       scope: 'project',
@@ -589,13 +603,19 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
   const blocked = new Map<string, { readonly value: unknown; readonly source: string }>();
   const parseErrors: string[] = [];
   const sources: TuiSettingsImportSource[] = [];
-  for (const source of sourceInputs) {
-    if (!existsSync(source.path)) {
+  for (const { raw, readError, ...source } of sourceInputs) {
+    if (readError) {
+      const message = `${source.label}: ${readError}`;
+      parseErrors.push(message);
+      sources.push({ ...source, status: 'error', importableSettings: 0, error: message });
+      continue;
+    }
+    if (raw === null) {
       sources.push({ ...source, status: 'missing', importableSettings: 0 });
       continue;
     }
     try {
-      const record = readJsonRecord(source.path);
+      const record = parseJsonRecord(raw);
       if (!record) {
         const message = `${source.label}: settings store is not an object`;
         parseErrors.push(message);
@@ -661,8 +681,9 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
     if (values.has(key)) continue;
     settings.push(skippedEntry(key, entry, 'Project settings files cannot change approval, permission, provider, tool, surface, automation or helper settings. Set it in your user settings instead.'));
   }
-  const subscriptions = planTuiSubscriptions(context, parseErrors);
-  return { sources, settings, subscriptions, parseErrors };
+  if (read.subscriptions.error) parseErrors.push(`subscriptions: ${read.subscriptions.error}`);
+  const subscriptions = planTuiSubscriptions(context, read.subscriptions.raw, parseErrors);
+  return { sources, settings, subscriptions: subscriptions.entries, subscriptionValues: subscriptions.values, parseErrors };
 }
 
 /** Private source capture for registered model admission. Never serialize this record. */
@@ -719,8 +740,11 @@ export function captureAgentWorkspaceTuiSettingsImport(context: CommandContext):
 }
 
 export function previewAgentWorkspaceTuiSettingsImport(context: CommandContext | null): TuiSettingsImportPreview | null {
-  const plan = buildTuiSettingsImportPlan(context);
-  if (!plan) return null;
+  const plan = planAgentWorkspaceTuiSettingsImport(context);
+  return plan ? previewFromPlan(plan) : null;
+}
+
+function previewFromPlan(plan: TuiSettingsImportPlan): TuiSettingsImportPreview {
   return {
     summary: {
       settingsToImport: plan.settings.filter((entry) => entry.status === 'would_import').length,
@@ -845,17 +869,77 @@ export function captureAgentWorkspaceTuiSettingsImportPreview(context: CommandCo
     return { status: 'loaded', content: project(record, []), redactions };
   });
   assertCurrent();
-  const preview = previewAgentWorkspaceTuiSettingsImport(context);
-  if (!preview) throw new ToolInputProjectionError('unavailable');
+  // The preview is planned from the bytes observed above, not from a second read.
+  const plan = buildTuiSettingsImportPlan(context, {
+    userSettings: { path: sources[0]!.path, raw: sources[0]!.observation.raw },
+    projectSettings: { path: sources[1]!.path, raw: sources[1]!.observation.raw },
+    subscriptions: { path: sources[2]!.path, raw: sources[2]!.observation.raw },
+  });
+  if (!plan) throw new ToolInputProjectionError('unavailable');
+  const preview = previewFromPlan(plan);
   assertAgentWorkspaceImportPreviewPrivacy({ preview, sources: sourceViews });
   assertCurrent();
   return { preview, sourceViews, assertCurrent };
 }
 
+/** Settings families the preview lists in full, because they change what runs without asking or where data goes. */
+const FULLY_LISTED_PREFIXES = ['permissions.', 'provider.'] as const;
+
+function settingFamily(key: string): string {
+  return key.split('.')[0] ?? key;
+}
+
+function planHasChanges(plan: TuiSettingsImportPlan): boolean {
+  return plan.settings.some((entry) => entry.status === 'would_import') || plan.subscriptionValues.length > 0;
+}
+
+/**
+ * What the owner sees before an import: counts per settings family, every
+ * permission and provider change in full, and subscriptions by provider name.
+ */
+export function describeAgentWorkspaceTuiSettingsImportPlan(plan: TuiSettingsImportPlan): string {
+  const changes = plan.settings.filter((entry) => entry.status === 'would_import');
+  const counts = new Map<string, number>();
+  for (const entry of changes) counts.set(settingFamily(entry.key), (counts.get(settingFamily(entry.key)) ?? 0) + 1);
+  const lines: string[] = [];
+  lines.push(changes.length > 0
+    ? `Settings to change: ${[...counts].map(([family, count]) => `${family} ${count}`).join(', ')}.`
+    : 'No settings to change.');
+  const listed = changes.filter((entry) => FULLY_LISTED_PREFIXES.some((prefix) => entry.key.startsWith(prefix)));
+  for (const entry of listed) {
+    lines.push(`  ${entry.key}: ${compactSettingValue(entry.key, entry.current)} -> ${compactSettingValue(entry.key, entry.incoming)} (${entry.source})`);
+  }
+  for (const entry of changes.filter((candidate) => !listed.includes(candidate))) {
+    lines.push(`  ${entry.key}: ${compactSettingValue(entry.key, entry.current)} -> ${compactSettingValue(entry.key, entry.incoming)}`);
+  }
+  const active = plan.subscriptionValues.filter((entry) => entry.kind === 'active').map((entry) => entry.value.provider);
+  const pending = plan.subscriptionValues.filter((entry) => entry.kind === 'pending').map((entry) => entry.value.provider);
+  if (active.length > 0) lines.push(`Provider sign-ins replaced: ${active.join(', ')}.`);
+  if (pending.length > 0) lines.push(`Pending provider sign-ins replaced: ${pending.join(', ')}.`);
+  const skipped = plan.settings.filter((entry) => entry.status === 'skipped');
+  if (skipped.length > 0) lines.push(`Not imported: ${skipped.map((entry) => `${entry.key} (${entry.reason ?? 'not importable'})`).join('; ')}.`);
+  if (plan.parseErrors.length > 0) lines.push(`Could not read: ${plan.parseErrors.join('; ')}.`);
+  return lines.join('\n');
+}
+
+/** Plan and apply in one step, for callers that already have the owner's yes. */
 export async function importAgentWorkspaceTuiSettings(context: CommandContext | null): Promise<TuiSettingsImportOutcome> {
+  return applyAgentWorkspaceTuiSettingsImport(context, planAgentWorkspaceTuiSettingsImport(context));
+}
+
+/**
+ * Write exactly `plan`: the settings it lists as changing and the provider
+ * sign-ins it holds. Before writing, the previous value of every changed
+ * setting goes to an undo file beside the Agent's own state, so an import
+ * can be reversed by hand.
+ */
+export async function applyAgentWorkspaceTuiSettingsImport(
+  context: CommandContext | null,
+  plan: TuiSettingsImportPlan | null,
+): Promise<TuiSettingsImportOutcome> {
   const shellPaths = context?.workspace?.shellPaths;
   const configManager = context?.platform?.configManager;
-  if (!context || !shellPaths || !configManager) {
+  if (!context || !shellPaths || !configManager || !plan) {
     return {
       status: 'GoodVibes settings import is unavailable in this runtime.',
       runtimeSnapshot: null,
@@ -867,74 +951,96 @@ export async function importAgentWorkspaceTuiSettings(context: CommandContext | 
       },
     };
   }
-
-  const plan = buildTuiSettingsImportPlan(context);
-  const values = plan?.settings ?? [];
-  const subscriptionParseErrors: string[] = [];
-  const subscriptions = applyTuiSubscriptions(context, subscriptionParseErrors);
-  const parseErrors: string[] = [...new Set([...(plan?.parseErrors ?? []), ...subscriptionParseErrors])];
-  const subscriptionImports = subscriptions.importedActive.length + subscriptions.importedPending.length;
-  const subscriptionUnchanged = subscriptions.unchangedActive.length + subscriptions.unchangedPending.length;
-
-  if (values.length === 0 && subscriptionImports === 0 && subscriptionUnchanged === 0 && subscriptions.skipped.length === 0) {
+  const parseErrors = plan.parseErrors;
+  if (plan.settings.length === 0 && plan.subscriptions.length === 0) {
     const detail = parseErrors.length > 0
       ? `No importable settings or subscriptions found. ${parseErrors.join('; ')}`
       : 'No GoodVibes settings or subscription store with importable Agent-owned state was found.';
     return {
       status: 'No GoodVibes settings imported.',
       runtimeSnapshot: null,
-      result: {
-        kind: parseErrors.length > 0 ? 'error' : 'guidance',
-        title: 'Nothing imported',
-        detail,
-        safety: 'safe',
-      },
+      result: { kind: parseErrors.length > 0 ? 'error' : 'guidance', title: 'Nothing imported', detail, safety: 'safe' },
     };
   }
 
+  const changing = plan.settings.filter((entry) => entry.status === 'would_import');
+  const undoPath = shellPaths.resolveUserPath('agent', 'settings-import-undo.json');
+  if (changing.length > 0) {
+    // Previous values of secret-bearing keys are not written to a plain file.
+    writeDocument(undoPath, {
+      createdAt: new Date().toISOString(),
+      settings: changing.map((entry) => isSecretLikeSettingKey(entry.key)
+        ? { key: entry.key, previous: null, restorable: false }
+        : { key: entry.key, previous: configManager.getStored(entry.key as Parameters<typeof configManager.getStored>[0]) ?? null, restorable: true }),
+    });
+  }
+
   const imported: string[] = [];
-  const unchanged: string[] = [];
   const skipped: string[] = [];
-  for (const entry of values) {
-    if (entry.status === 'skipped') {
-      skipped.push(`${entry.key}: ${entry.reason ?? 'not imported'}`);
-      continue;
-    }
-    const setting = agentWorkspaceSettingSchema(context, entry.key);
-    if (!setting || setting.kind === 'host') continue;
-    if (entry.status === 'unchanged' || valuesMatch(configManager.getStored(setting.key), entry.value)) {
-      unchanged.push(setting.key);
-      continue;
-    }
+  for (const entry of plan.settings) {
+    if (entry.status === 'skipped') skipped.push(`${entry.key}: ${entry.reason ?? 'not imported'}`);
+  }
+  for (const entry of changing) {
     try {
-      await setHarnessSetting(configManager, context?.platform?.secretsManager, setting.key, entry.value);
-      imported.push(`${setting.key} (${entry.source})`);
+      await setHarnessSetting(configManager, context.platform?.secretsManager, entry.key, entry.value);
+      imported.push(`${entry.key}: ${compactSettingValue(entry.key, entry.current)} -> ${compactSettingValue(entry.key, entry.incoming)}`);
     } catch (error) {
-      skipped.push(`${setting.key}: ${error instanceof Error ? error.message : String(error)}`);
+      skipped.push(`${entry.key}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  skipped.push(...subscriptions.skipped);
-  const changedCount = imported.length + subscriptionImports;
-  const unchangedCount = unchanged.length + subscriptionUnchanged;
+  const manager = context.platform.subscriptionManager;
+  const importedActive: string[] = [];
+  const importedPending: string[] = [];
+  for (const entry of plan.subscriptionValues) {
+    if (!manager) break;
+    if (entry.kind === 'active') {
+      manager.saveSubscription(entry.value);
+      importedActive.push(entry.value.provider);
+    } else {
+      manager.savePending(entry.value);
+      importedPending.push(entry.value.provider);
+    }
+  }
+  skipped.push(...plan.subscriptions.filter((entry) => entry.status === 'skipped').map((entry) => entry.reason ?? 'subscription skipped'));
+  const unchangedCount = plan.settings.filter((entry) => entry.status === 'unchanged').length
+    + plan.subscriptions.filter((entry) => entry.status === 'unchanged').length;
+  const changedCount = imported.length + importedActive.length + importedPending.length;
 
   return {
     status: changedCount > 0 ? `Imported ${changedCount} GoodVibes settings item(s).` : 'No GoodVibes settings changed.',
-    runtimeSnapshot: context ? buildAgentWorkspaceRuntimeSnapshot(context) : null,
+    runtimeSnapshot: buildAgentWorkspaceRuntimeSnapshot(context),
     result: {
       kind: skipped.length > 0 && changedCount === 0 ? 'error' : changedCount > 0 ? 'refreshed' : 'guidance',
       title: changedCount > 0 ? 'GoodVibes settings imported' : 'No settings changed',
       detail: [
-        imported.length > 0 ? `Imported: ${imported.slice(0, 10).join(', ')}${imported.length > 10 ? `, +${imported.length - 10} more` : ''}.` : '',
-        subscriptions.importedActive.length > 0 ? `Imported active subscription(s): ${subscriptions.importedActive.join(', ')}.` : '',
-        subscriptions.importedPending.length > 0 ? `Imported pending subscription(s): ${subscriptions.importedPending.join(', ')}.` : '',
+        ...(imported.length > 0 ? ['Imported:', ...imported.map((line) => `  ${line}`)] : []),
+        importedActive.length > 0 ? `Imported active subscription(s): ${importedActive.join(', ')}.` : '',
+        importedPending.length > 0 ? `Imported pending subscription(s): ${importedPending.join(', ')}.` : '',
         unchangedCount > 0 ? `${unchangedCount} item(s) already matched.` : '',
-        skipped.length > 0 ? `Skipped: ${skipped.slice(0, 5).join('; ')}${skipped.length > 5 ? `; +${skipped.length - 5} more` : ''}.` : '',
+        ...(skipped.length > 0 ? ['Skipped:', ...skipped.map((line) => `  ${line}`)] : []),
         parseErrors.length > 0 ? `Parse issues: ${parseErrors.join('; ')}.` : '',
-      ].filter((line) => line.length > 0).join(' '),
+        imported.length > 0 ? `Previous values were saved to ${undoPath}.` : '',
+      ].filter((line) => line.length > 0).join('\n'),
       safety: 'safe',
     },
   };
 }
+
+/** The confirm form the owner's import row opens over a plan. */
+export function createAgentWorkspaceSettingsImportEditor(plan: TuiSettingsImportPlan): AgentWorkspaceLocalEditor {
+  return {
+    kind: 'settings-import',
+    mode: 'create',
+    title: 'Import GoodVibes settings',
+    selectedFieldIndex: 0,
+    message: 'Review the changes in the result pane (PageUp and PageDown scroll it). Type yes to write exactly these; Esc leaves everything as it is.',
+    fields: [
+      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: `Type yes to apply ${plan.settings.filter((entry) => entry.status === 'would_import').length} setting change(s) and ${plan.subscriptionValues.length} provider sign-in(s).` },
+    ],
+  };
+}
+
+export { planHasChanges as agentWorkspaceTuiSettingsImportHasChanges };
 
 function createSettingEditor(setting: AgentConfigSetting, currentValue: string, action: AgentWorkspaceAction): AgentWorkspaceLocalEditor {
   const valueHint = setting.type === 'number'

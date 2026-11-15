@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_WORKSPACE_CATEGORIES } from '../../input/agent-workspace-categories.ts';
 import { AgentWorkspace } from '../../input/agent-workspace.ts';
-import { activateAgentWorkspaceSelection } from '../../input/agent-workspace-activation.ts';
+import { activateAgentWorkspaceSelection, createAgentWorkspaceEditor } from '../../input/agent-workspace-activation.ts';
 import type {
   AgentWorkspaceAction,
   AgentWorkspaceActionResult,
@@ -180,6 +180,8 @@ describe('Agent workspace command parity', () => {
             continue;
           }
           workspace.activateSelected();
+          // A form with nothing to fill in (a read) runs on the Enter that opens it and closes.
+          if (createAgentWorkspaceEditor(action.editorKind)?.fields.length === 0) continue;
           if (!workspace.localEditor) {
             failures.push(`${actionRef}: did not open an editor`);
           } else {

@@ -75,7 +75,7 @@ export function protectAgentHarnessResearchTool(tool: Tool, registry: ToolRegist
     const projected = await projector.project({ callId: 'research-editor-direct', name: tool.definition.name, args,
       signal: options?.signal, assertCurrent });
     try {
-      if (projected.status !== 'projected') return { success: false, error: 'Research editor preparation is held.' };
+      if (projected.status !== 'projected') return { success: false, error: 'Research report not run: the form fields are missing. Pass fields with sources and reportMarkdown, then call again.' };
       projected.assertCurrent?.();
       return await forwardHarnessCatalogCall(originalBody, input, projected.args, options, projected.assertCurrent);
     } finally { await projected.release?.(); }

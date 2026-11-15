@@ -12,7 +12,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     summary: 'Everything the assistant can do, one lane per kind of work.',
     detail: 'Pick the lane that matches what you want, or just close this and type. Every page here is also reachable later.',
     actions: [
-      { id: 'chat', label: 'Just start typing', detail: 'Close this workspace and ask for anything, research, reminders, email, documents, or scheduling.', kind: 'guidance', safety: 'safe' },
+      { id: 'chat', label: 'Just start typing', detail: 'Close this workspace and ask for anything, research, reminders, email, documents, or scheduling. Typing any letter here does the same, and the letter lands in the composer.', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
       { id: 'assistant-setup-lane', label: 'Finish setting up', detail: 'Sign in, pick a model, and connect the basics.', targetCategoryId: 'setup', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-personal-ops-lane', label: 'Inbox, calendar & reminders', detail: 'Daily personal operations in one place.', targetCategoryId: 'personal-ops', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-research-docs-lane', label: 'Research something', detail: 'Web research with visible runs, sources, and saved reports.', targetCategoryId: 'research', kind: 'workspace', safety: 'safe' },
@@ -41,6 +41,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       settingAction({ id: 'setup-save-history', label: 'Save history', detail: 'Toggle local conversation history persistence.', key: 'behavior.saveHistory' }),
       // Less common controls
       { id: 'subscription-logout', label: 'Sign out of a provider', detail: 'Remove one stored or pending provider subscription session after confirmation.', editorKind: 'subscription-logout', kind: 'editor', safety: 'safe' },
+      { id: 'subscription-inspect', label: 'Inspect a provider sign-in', detail: 'Show one provider subscription session: whether it is active or pending, its token type and expiry, and whether it overrides API keys. Never prints a token.', editorKind: 'subscription-inspect', kind: 'editor', safety: 'read-only' },
       { id: 'provider-add', label: 'Add a custom provider', detail: 'Add one OpenAI-compatible provider for Agent model routing.', editorKind: 'provider-add', kind: 'editor', safety: 'safe' },
       { id: 'secret-set-provider', label: 'Store a credential', detail: 'Store a provider or channel credential through the Agent secret manager.', editorKind: 'secret-set', kind: 'editor', safety: 'safe' },
       settingAction({ id: 'setup-secret-policy', label: 'Secret storage policy', detail: 'Choose how strongly Agent prefers secure secret storage.', key: 'storage.secretPolicy' }),
@@ -48,7 +49,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'setup-checkpoint-show', label: 'Show saved resume point', detail: 'Inspect the saved setup wizard resume point without writing setup state.', setupCheckpointOperation: 'show', kind: 'setup-checkpoint', safety: 'read-only' },
       { id: 'setup-checkpoint-mark-current', label: 'Save resume point', detail: 'Save the current setup wizard step as the Agent-owned resume point for the next launch.', setupCheckpointOperation: 'mark-current', kind: 'setup-checkpoint', safety: 'safe' },
       { id: 'setup-checkpoint-clear', label: 'Clear saved resume point', detail: 'Clear the saved setup wizard resume point after setup is complete or no longer useful.', setupCheckpointOperation: 'clear', kind: 'setup-checkpoint', safety: 'safe' },
-      { id: 'setup-skip-to-chat', label: 'Just start chatting (set up later)', detail: 'Close setup and go to the conversation. You can finish setup anytime with /agent.', kind: 'guidance', safety: 'safe' },
+      { id: 'setup-skip-to-chat', label: 'Just start chatting (set up later)', detail: 'Close setup and go to the conversation. You can finish setup anytime with /agent.', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
     ],
   },
   {
@@ -61,6 +62,9 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       // Essentials, chat route + reasoning
       { id: 'provider-use', label: 'Choose provider and model', detail: 'Open the shared provider/model picker for the main chat route.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'main', safety: 'safe' },
       settingAction({ id: 'account-reasoning', label: 'Reasoning effort', detail: 'Cycle the reasoning effort used when supported.', key: 'provider.reasoningEffort' }),
+      { id: 'provider-use-form', label: 'Use provider by name', detail: 'Switch the main chat route to a named provider and model by typing them, for when you already know the ids.', editorKind: 'provider-use', kind: 'editor', safety: 'safe' },
+      { id: 'model-pin', label: 'Pin a model', detail: 'Pin one model registry key to your model favorites so it is easy to reuse.', editorKind: 'model-pin', kind: 'editor', safety: 'safe' },
+      { id: 'model-unpin', label: 'Unpin a model', detail: 'Remove one model registry key from your model favorites.', editorKind: 'model-unpin', kind: 'editor', safety: 'safe' },
       // Advanced routes, most people can skip these
       { id: 'account-advanced-separator', label: 'Advanced routes (optional), most people can skip these', detail: 'Helper, tool, TTS, embedding, system-prompt, and cache routing are here when you need them. Chat works without any of these.', kind: 'guidance', safety: 'read-only' },
       settingAction({ id: 'account-embedding', label: 'Embedding provider', detail: 'Set the embedding provider for memory and retrieval.', key: 'provider.embeddingProvider' }),
@@ -90,6 +94,8 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     detail: 'Use this to choose how chat feels during normal work and long-running tasks.',
     actions: [
       settingAction({ id: 'behavior-hitl-mode', label: 'Interaction mode', detail: 'Cycle quiet, balanced, or operator interaction mode.', key: 'behavior.hitlMode' }),
+      { id: 'behavior-mode-domain', label: 'Verbosity per area', detail: 'Set minimal, normal or verbose output for one notification domain without changing the overall interaction mode.', editorKind: 'mode-domain', kind: 'editor', safety: 'safe' },
+      { id: 'behavior-effort-level', label: 'Type reasoning effort', detail: 'Type the reasoning effort (instant, low, medium or high) for normal chat turns when the model supports it.', editorKind: 'effort-level', kind: 'editor', safety: 'safe' },
       settingAction({ id: 'behavior-guidance-mode', label: 'Guidance mode', detail: 'Cycle off, minimal, or guided operational guidance.', key: 'behavior.guidanceMode' }),
       settingAction({ id: 'behavior-auto-compact', label: 'Auto-compact threshold', detail: 'Set the context percentage that triggers automatic compaction.', key: 'behavior.autoCompactThreshold' }),
       settingAction({ id: 'behavior-stale-context', label: 'Context warnings', detail: 'Toggle proactive warnings before compaction is required.', key: 'behavior.staleContextWarnings' }),
@@ -169,8 +175,8 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'personal-ops-google-client-manual', label: 'Paste a Google client id and secret', detail: 'Enter an OAuth client id and secret copied from the Google console. The secret is stored through the Agent secret manager and never rendered back.', editorKind: 'google-client-manual', kind: 'editor', safety: 'safe' },
       { id: 'personal-ops-calendar', label: 'Subscribe to a calendar', detail: 'Subscribe to an external calendar by its iCalendar (.ics) feed URL, Google "Secret address in iCal format", an Outlook published ICS link, or any .ics URL. Read-only, validated by fetching, merged into /calendar. The URL is stored through the Agent secret manager.', editorKind: 'calendar-subscribe-wizard', kind: 'editor', safety: 'safe' },
       { id: 'personal-ops-calendar-add', label: 'Add calendar event', detail: 'Add an event to the local Agent calendar with a stepped form (no external account required).', editorKind: 'calendar-connect', kind: 'editor', safety: 'safe' },
-      { id: 'personal-ops-calendar-google', label: 'Connect Google Calendar (advanced)', detail: 'Full two-way sync via OAuth. Default path: just run /calendar connect google (bundled app + PKCE). This card is the advanced override to use your OWN Google OAuth client id; a client secret is stored through the Agent secret manager.', editorKind: 'calendar-oauth-google', kind: 'editor', safety: 'safe' },
-      { id: 'personal-ops-calendar-outlook', label: 'Connect Microsoft Outlook (advanced)', detail: 'Full two-way sync via OAuth. Default path: just run /calendar connect outlook (bundled app + PKCE). This card is the advanced override to use your OWN Microsoft app registration; a client secret is stored through the Agent secret manager.', editorKind: 'calendar-oauth-outlook', kind: 'editor', safety: 'safe' },
+      { id: 'personal-ops-calendar-google', label: 'Connect Google Calendar', detail: 'Two-way Google Calendar sync needs your own OAuth client id (free, about five minutes); no client id ships with the product. Store it here once, then run /calendar connect google to authorize. The form says whether one is already stored. A client secret is stored through the Agent secret manager.', editorKind: 'calendar-oauth-google', kind: 'editor', safety: 'safe' },
+      { id: 'personal-ops-calendar-outlook', label: 'Connect Microsoft Outlook', detail: 'Two-way Outlook calendar sync needs your own Microsoft app registration (free, about five minutes); no client id ships with the product. Store it here once, then run /calendar connect outlook to authorize. The form says whether one is already stored. A client secret is stored through the Agent secret manager.', editorKind: 'calendar-oauth-outlook', kind: 'editor', safety: 'safe' },
       { id: 'personal-ops-notes', label: 'Scratchpad notes', detail: 'Open Agent-local notes for source triage, decisions, and handoff context.', targetCategoryId: 'notes', kind: 'workspace', safety: 'safe' },
       { id: 'personal-ops-note-create', label: 'Create note', detail: 'Capture temporary context as an Agent-local scratchpad note.', editorKind: 'note', kind: 'editor', safety: 'safe' },
       { id: 'personal-ops-reminder', label: 'Create reminder', detail: 'Create one connected reminder schedule with real timing, optional delivery target, and explicit confirmation.', editorKind: 'reminder-schedule', kind: 'editor', safety: 'safe' },
@@ -268,7 +274,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     summary: 'Transcript, prompt, context, and session controls.',
     detail: 'Use this workspace for the main TUI conversation: context review, compaction, prompt helpers, transcript navigation, session continuity, title, export, undo, redo, and retry.',
     actions: [
-      { id: 'conversation-return', label: 'Return to composer', detail: 'Close the workspace and keep working in the main Agent conversation.', kind: 'guidance', safety: 'safe' },
+      { id: 'conversation-return', label: 'Return to composer', detail: 'Close the workspace and keep working in the main Agent conversation.', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
       { id: 'conversation-context-refs', label: 'Context references', detail: 'Type @file, @folder, or @https://... in the composer to add bounded context to the main Agent turn. Use !@file only when you want raw file injection.', kind: 'guidance', safety: 'safe' },
       { id: 'conversation-save', label: 'Save current session', detail: 'Open a confirmed form that saves the current Agent session under a local name.', editorKind: 'session-save', kind: 'editor', safety: 'safe' },
       { id: 'conversation-load', label: 'Load saved session', detail: 'Open a confirmed form that loads one saved Agent session into the current conversation.', editorKind: 'session-load', kind: 'editor', safety: 'safe' },
@@ -281,6 +287,8 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'conversation-session-delete', label: 'Delete saved session', detail: 'Open a confirmed form before deleting one saved Agent session.', editorKind: 'session-delete', kind: 'editor', safety: 'safe' },
       { id: 'conversation-export-current', label: 'Export current conversation', detail: 'Open a confirmed form that exports the current Agent conversation to a workspace file.', editorKind: 'conversation-export', kind: 'editor', safety: 'safe' },
       { id: 'conversation-controls-find', label: 'Find transcript text', detail: 'Open a search form for the current Agent transcript.', editorKind: 'conversation-find', kind: 'editor', safety: 'read-only' },
+      { id: 'conversation-events', label: 'Show transcript events', detail: 'List the events of the current conversation (turns, tool calls, notices) by kind.', editorKind: 'conversation-events', kind: 'editor', safety: 'read-only' },
+      { id: 'conversation-groups', label: 'Show transcript groups', detail: 'List the grouped blocks of the current conversation by kind.', editorKind: 'conversation-groups', kind: 'editor', safety: 'read-only' },
       { id: 'conversation-image', label: 'Attach image', detail: 'Open an in-workspace image form for attaching a real image path and optional prompt.', editorKind: 'image-input', kind: 'editor', safety: 'safe' },
       { id: 'conversation-tts', label: 'Speak a prompt', detail: 'Open an in-workspace prompt form for spoken assistant replies through configured live TTS.', editorKind: 'tts-prompt', kind: 'editor', safety: 'safe' },
     ],
@@ -531,6 +539,11 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'approval-deny', label: 'Deny request', detail: 'Open a confirmed form for denying one pending connected-host approval request by id.', editorKind: 'approval-deny', kind: 'editor', safety: 'safe' },
       { id: 'approval-cancel', label: 'Cancel request', detail: 'Open a confirmed form for cancelling one pending connected-host approval request by id.', editorKind: 'approval-cancel', kind: 'editor', safety: 'safe' },
       { id: 'delegate-task', label: 'Delegate a build task', detail: 'Hand one explicit build, fix, or review task to GoodVibes TUI with the full original ask, reason, and success criteria.', editorKind: 'delegate-task', kind: 'editor', safety: 'delegates' },
+      { id: 'workplan-show', label: 'Show work plan', detail: 'Print the project work plan, its items, owners and status.', editorKind: 'workplan-show', kind: 'editor', safety: 'read-only' },
+      { id: 'workplan-add', label: 'Add work plan item', detail: 'Add one item to the project work plan with an owner, a source and notes.', editorKind: 'workplan-add', kind: 'editor', safety: 'safe' },
+      { id: 'workplan-status', label: 'Update work plan item', detail: 'Set the status of one work plan item by id.', editorKind: 'workplan-status', kind: 'editor', safety: 'safe' },
+      { id: 'workplan-delete', label: 'Remove work plan item', detail: 'Remove one work plan item by id after confirmation.', editorKind: 'workplan-delete', kind: 'editor', safety: 'safe' },
+      { id: 'workplan-clear-completed', label: 'Clear completed items', detail: 'Remove every completed item from the work plan after confirmation.', editorKind: 'workplan-clear-completed', kind: 'editor', safety: 'safe' },
       { id: 'work-activity', label: 'Activity', detail: 'Open the Activity view: running work, what needs you, what is coming up, and the recent activity feed (also Ctrl+O).', command: '/activity', kind: 'command', safety: 'read-only' },
     ],
   },
@@ -585,29 +598,4 @@ function freezeDeclaration<T>(value: T, visited = new Set<object>()): T {
   visited.add(value);
   for (const child of Object.values(value)) freezeDeclaration(child, visited);
   return Object.freeze(value);
-}
-
-export function renderAgentWorkspacePackageText(): string {
-  const lines: string[] = [];
-  for (const category of AGENT_WORKSPACE_CATEGORIES) {
-    lines.push(category.id, category.group, category.label, category.summary, category.detail);
-    for (const action of category.actions) {
-      lines.push(action.id, action.label, action.detail, action.kind);
-      const extras = [
-        action.command,
-        action.targetCategoryId ? `target:${action.targetCategoryId}` : '',
-        action.editorKind ? `editor:${action.editorKind}` : '',
-        action.settingKey ? `setting:${action.settingKey}` : '',
-        action.modelPickerTarget ? `model-picker-target:${action.modelPickerTarget}` : '',
-        action.modelPickerFlow ? `model-picker-flow:${action.modelPickerFlow}` : '',
-        action.settingsTarget ? `settings-target:${action.settingsTarget}` : '',
-        action.kind === 'settings-import' ? 'import:goodvibes-tui-settings' : '',
-        action.setupCheckpointOperation ? `setup-checkpoint:${action.setupCheckpointOperation}` : '',
-        action.localKind ? `local:${action.localKind}` : '',
-        action.localOperation ? `operation:${action.localOperation}` : '',
-      ];
-      for (const extra of extras) if (extra) lines.push(extra);
-    }
-  }
-  return lines.join('\n');
 }

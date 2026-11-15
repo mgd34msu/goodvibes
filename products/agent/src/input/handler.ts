@@ -417,6 +417,7 @@ export class InputHandler extends TerminalInputHandlerState {
       categoryId,
       (prompt) => this.dispatchAgentWorkspacePrompt(prompt, context),
       onlyGroup as import('./agent-workspace-types.ts').AgentWorkspaceCategoryGroup | undefined,
+      () => this.requestRender(),
     );
     this.requestRender();
   }
@@ -469,16 +470,18 @@ export class InputHandler extends TerminalInputHandlerState {
         this.requestRender();
         return;
       }
+      // The whole output goes to the result pane, which scrolls (PageUp and
+      // PageDown); nothing is cut. Output longer than a screen is also printed
+      // to the conversation, where it stays readable after the workspace closes.
+      const LONG_OUTPUT_LINES = 30;
       const buildCapturedDetail = (capturedLines: readonly string[]): string => {
-        const MAX_CHARS = 1500;
-        const MAX_LINES = 12;
-        const lines = capturedLines.slice(-MAX_LINES);
-        const joined = lines.join('\n');
-        if (joined.length > MAX_CHARS) {
-          return joined.slice(0, MAX_CHARS) + '\n… (output truncated)';
-        }
-        const omitted = capturedLines.length - lines.length;
-        return omitted > 0 ? `… (${omitted} line(s) truncated)\n${joined}` : joined || '(no output)';
+        const joined = capturedLines.join('\n');
+        if (joined.split('\n').length <= LONG_OUTPUT_LINES) return joined || '(no output)';
+        return `Full output also printed to the conversation. PageUp and PageDown scroll it here.\n${joined}`;
+      };
+      const printLongOutput = (capturedLines: readonly string[]): void => {
+        const joined = capturedLines.join('\n');
+        if (joined.split('\n').length > LONG_OUTPUT_LINES) context.print(joined);
       };
       const executeCommand = context.executeCommand;
       void captureCommandPrint(context, () => executeCommand(name, [...args])).then((outcome) => {
@@ -501,6 +504,7 @@ export class InputHandler extends TerminalInputHandlerState {
           // Most handlers report a failure by printing and returning, so the
           // outcome is read from what they printed.
           const failed = capturedOutputReportsFailure(outcome.lines);
+          printLongOutput(outcome.lines);
           this.agentWorkspace.lastActionResult = {
             kind: failed ? 'error' : 'dispatched',
             title: failed ? `${displayCommand} reported a problem` : `Result: ${displayCommand}`,
@@ -669,6 +673,8 @@ export class InputHandler extends TerminalInputHandlerState {
         (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),
         undefined,
         (prompt) => this.dispatchAgentWorkspacePrompt(prompt, context),
+        undefined,
+        () => this.requestRender(),
       );
     }
     this.agentWorkspace.cycleCategory(direction);

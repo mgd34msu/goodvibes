@@ -53,9 +53,12 @@ export function handleAgentWorkspaceToken(
     if (workspace.selectedActionCategory.id === 'work' && (!workspace.lastActionResult || token.ctrl === true) && (token.logicalName === 'pageup' || token.logicalName === 'pagedown')) workspace.workContextScroll = Math.max(0, workspace.workContextScroll + (token.logicalName === 'pageup' ? -RESULT_SCROLL_STEP : RESULT_SCROLL_STEP));
     else if (token.logicalName === 'pageup') workspace.scrollActionResult(-RESULT_SCROLL_STEP);
     else if (token.logicalName === 'pagedown') workspace.scrollActionResult(RESULT_SCROLL_STEP);
+    else if (token.ctrl === true && token.logicalName === 'r') workspace.refreshRuntimeSnapshot();
     else if (token.ctrl === true && token.logicalName === ']') workspace.cycleCategory('next');
     else if (token.ctrl === true && token.logicalName === '[') workspace.cycleCategory('prev');
-    else if (token.logicalName === 'enter' || token.logicalName === 'space') workspace.activateSelected(requestRender);
+    // Enter activates; Space does nothing here, so a stray space never runs a
+    // row or flips a setting.
+    else if (token.logicalName === 'enter') workspace.activateSelected(requestRender);
     else if (token.logicalName === 'left') workspace.focusCategories();
     else if (token.logicalName === 'right') workspace.focusActions();
     else if (token.logicalName === 'up') workspace.moveUp();
@@ -66,12 +69,13 @@ export function handleAgentWorkspaceToken(
   } else if (token.type === 'text') {
     if (workspace.actionSearchActive) workspace.appendActionSearchText(token.value);
     else if (token.value === '/') workspace.beginActionSearch();
-    else if (token.value === 'h') workspace.focusCategories();
-    else if (token.value === 'l') workspace.focusActions();
-    else if (token.value === 'j') workspace.moveDown();
-    else if (token.value === 'k') workspace.moveUp();
-    else if (token.value === 'r' || token.value === 'R') workspace.refreshRuntimeSnapshot();
-    else if (token.value === ' ') workspace.activateSelected(requestRender);
+    else if (token.value.trim().length > 0) {
+      // "Just start typing" is literal: the first printable character closes
+      // the workspace and is not consumed, so it lands in the composer.
+      workspace.closeToComposer();
+      requestRender();
+      return false;
+    }
   }
 
   requestRender();

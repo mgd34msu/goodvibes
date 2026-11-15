@@ -60,7 +60,10 @@ function readRecordArray(record: JsonRecord, key: string): readonly JsonRecord[]
 
 function readFlagValue(args: readonly string[], index: number, flag: string, errors: string[]): string | null {
   const value = args[index + 1];
-  if (!value || value.startsWith('--')) {
+  // Message and title are free text, so a value such as "--- status ---" is
+  // the text itself, not a missing value followed by another flag.
+  const freeText = flag === '--message' || flag === '--title';
+  if (!value || (!freeText && value.startsWith('--'))) {
     errors.push(`${flag} requires a value.`);
     return null;
   }
@@ -217,6 +220,7 @@ function printChannelDetail(
 function formatGuideStepStatus(status: string): string {
   if (status === 'complete') return '[x]';
   if (status === 'current') return '[>]';
+  if (status === 'then') return 'then';
   return '[ ]';
 }
 

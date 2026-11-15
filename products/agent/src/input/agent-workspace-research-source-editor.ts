@@ -31,7 +31,9 @@ function readOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : undefined;
 }
 
-const SECRET_QUERY_NAME = /token|secret|passw|apikey|api[-_]key|signature|credential|bearer|jwt|session|auth|^(?:key|sig|pwd)$/i;
+// Whole parameter names only: `author`, `authuser` and `tokenizer` are ordinary
+// query values, `token` and `access_token` are not.
+const SECRET_QUERY_NAME = /^(?:x[-_])?(?:(?:access|auth|id|refresh|session|client|private)[-_]?)?(?:token|secret|password|passwd|pwd|api[-_]?key|key|signature|sig|jwt|session(?:[-_]?id)?|sid|auth(?:orization)?|bearer|credentials?)$/i;
 
 /**
  * The form's URL goes into a prompt the model provider and transcript see before the tool can redact it,

@@ -9,7 +9,7 @@ import { createAgentResearchReportEditor } from './agent-workspace-research-repo
 import { createAgentResearchRunEditor } from './agent-workspace-research-run-editor.ts';
 import { createAgentResearchSourceEditor } from './agent-workspace-research-source-editor.ts';
 import { createReminderScheduleEditor } from './agent-workspace-reminder-schedule-editor.ts';
-import { createEmailConnectWizardEditor } from './agent-workspace-email-connect-editor.ts';
+import { createEmailConnectWizardEditor, type AgentWorkspaceEmailConnectPrefill } from './agent-workspace-email-connect-editor.ts';
 import { createCalendarConnectEditor } from './agent-workspace-calendar-connect-editor.ts';
 import { createCalendarSubscribeWizardEditor } from './agent-workspace-calendar-subscribe-editor.ts';
 import { createCalendarOAuthEditor } from './agent-workspace-calendar-oauth-editor.ts';
@@ -71,6 +71,9 @@ interface AgentWorkspaceActivationHost {
   hasCommandDispatch(): boolean;
   dispatchWorkspaceCommand(command: string, behavior?: 'inline' | 'compose' | 'exit', displayCommand?: string): void;
   commitActionSearchSelection(): boolean;
+  closeToComposer(): void;
+  /** The stored inbox settings, read when the inbox form opens. */
+  emailConnectPrefill?(): AgentWorkspaceEmailConnectPrefill | null;
 }
 
 export function activateAgentWorkspaceSelection(
@@ -115,6 +118,7 @@ export function activateAgentWorkspaceSelection(
       recentReviewerHandoffArtifacts: workspace.runtimeSnapshot?.recentReviewerHandoffArtifacts ?? [],
       reviewPacketDefaults: workspace.runtimeSnapshot?.reviewPacketDefaults ?? null,
       emailConnectStatus: workspace.runtimeSnapshot?.emailConnectStatus ?? null,
+      emailConnectPrefill: action.editorKind === 'email-connect-wizard' ? workspace.emailConnectPrefill?.() ?? null : null,
       calendarOAuthConfigStatus: workspace.runtimeSnapshot?.calendarOAuthConfigStatus ?? null,
     });
     if (!editor) {
@@ -135,6 +139,8 @@ export function activateAgentWorkspaceSelection(
       detail: editor.message,
       safety: action.safety,
     };
+    // A form with nothing to fill in (a read) runs on the Enter that opened it.
+    if (editor.fields.length === 0) workspace.submitEditorFieldOrForm(requestRender);
     return;
   }
   if (action.kind === 'local-selection' && action.localKind) {
@@ -147,6 +153,11 @@ export function activateAgentWorkspaceSelection(
   }
   if (action.kind === 'onboarding-complete') {
     workspace.completeOnboarding();
+    return;
+  }
+  // A row that exits with no command to run is a "back to the conversation" row.
+  if (action.commandBehavior === 'exit' && !action.command) {
+    workspace.closeToComposer();
     return;
   }
   if (action.kind === 'guidance' || !action.command) {
@@ -208,85 +219,91 @@ export function activateAgentWorkspaceSelection(
   workspace.dispatchWorkspaceCommand(action.command, action.commandBehavior);
 }
 
+type AgentWorkspaceEditorOptions = {
+  readonly runtimeStarterTemplates?: readonly AgentWorkspaceRuntimeStarterTemplateItem[];
+  readonly selectedRoutine?: AgentWorkspaceLocalLibraryItem | null;
+  readonly recentReviewerHandoffArtifacts?: readonly AgentWorkspaceRecentReviewerHandoffArtifact[];
+  readonly reviewPacketDefaults?: AgentWorkspaceReviewPacketDefaults | null;
+  readonly emailConnectStatus?: AgentWorkspaceEmailConnectStatus | null;
+  readonly emailConnectPrefill?: AgentWorkspaceEmailConnectPrefill | null;
+  readonly calendarOAuthConfigStatus?: AgentWorkspaceCalendarOAuthConfigStatus | null;
+};
+
+/**
+ * One constructor per form kind that is not built by a family table. A kind
+ * is opened by one lookup here, then the family tables, then the local
+ * registry editors.
+ */
+const EDITOR_CONSTRUCTORS: Partial<Record<AgentWorkspaceEditorKind, (o: AgentWorkspaceEditorOptions) => AgentWorkspaceLocalEditor>> = {
+  'email-connect-wizard': (o) => createEmailConnectWizardEditor(o.emailConnectStatus ?? null, o.emailConnectPrefill ?? null),
+  'calendar-connect': () => createCalendarConnectEditor(),
+  'calendar-subscribe-wizard': () => createCalendarSubscribeWizardEditor(),
+  'calendar-oauth-google': (o) => createCalendarOAuthEditor('google', o.calendarOAuthConfigStatus?.google ?? false),
+  'calendar-oauth-outlook': (o) => createCalendarOAuthEditor('microsoft', o.calendarOAuthConfigStatus?.microsoft ?? false),
+  'google-status': () => createGoogleStatusEditor(),
+  'google-connect': () => createGoogleConnectEditor(),
+  'google-reauthorize': () => createGoogleReauthorizeEditor(),
+  'google-forget': () => createGoogleForgetEditor(),
+  'google-setup-walkthrough': () => createGoogleWalkthroughEditor(),
+  'google-setup-app-password': () => createGoogleAppPasswordEditor(),
+  'google-adopt': () => createGoogleAdoptEditor(),
+  'google-client-file': () => createGoogleClientFileEditor(),
+  'google-client-manual': () => createGoogleClientManualEditor(),
+  'profile': (o) => createProfileEditor(o.runtimeStarterTemplates ?? []),
+  'learned-behavior': () => createLearnedBehaviorEditor(),
+  'web-research': () => createAgentWorkspaceWebResearchEditor('research'),
+  'web-fetch': () => createAgentWorkspaceWebResearchEditor('fetch'),
+  'research-run': () => createAgentResearchRunEditor(),
+  'research-source': () => createAgentResearchSourceEditor(),
+  'research-report': () => createAgentResearchReportEditor(),
+  'artifact-browser': () => createAgentArtifactBrowserEditor(),
+  'artifact-show': () => createAgentArtifactShowEditor(),
+  'artifact-export-file': () => createAgentArtifactExportEditor(),
+  'artifact-export-package': () => createAgentArtifactPackageEditor(),
+  'artifact-promote-knowledge': () => createAgentArtifactPromoteKnowledgeEditor(),
+  'document-browse': () => createAgentDocumentBrowseEditor(),
+  'document-show': () => createAgentDocumentShowEditor(),
+  'document-create': () => createAgentDocumentCreateEditor(),
+  'document-update': () => createAgentDocumentUpdateEditor(),
+  'document-review': () => createAgentDocumentReviewEditor(),
+  'document-comment': () => createAgentDocumentCommentEditor(),
+  'document-resolve-comment': () => createAgentDocumentResolveCommentEditor(),
+  'document-suggest': () => createAgentDocumentSuggestEditor(),
+  'document-accept-suggestion': () => createAgentDocumentAcceptSuggestionEditor(),
+  'document-reject-suggestion': () => createAgentDocumentRejectSuggestionEditor(),
+  'document-insert-artifact': () => createAgentDocumentInsertArtifactEditor(),
+  'document-attach-artifact': () => createAgentDocumentAttachArtifactEditor(),
+  'document-export': (o) => createAgentDocumentExportEditor(o.reviewPacketDefaults ?? null),
+  'document-reviewer-readiness': () => createAgentDocumentReviewerReadinessEditor(),
+  'document-review-packet-wizard': () => createAgentDocumentReviewPacketWizardEditor(),
+  'document-review-packet-preset': (o) => createAgentDocumentReviewPacketPresetEditor(o.reviewPacketDefaults ?? null),
+  'document-review-packet-preset-refresh': () => createAgentDocumentReviewPacketPresetRefreshEditor(),
+  'document-review-packet-share': (o) => createAgentDocumentReviewPacketShareEditor(o.reviewPacketDefaults ?? null),
+  'model-compare': () => createAgentModelCompareEditor(),
+  'local-model-benchmark': () => createAgentLocalModelBenchmarkEditor(),
+  'model-compare-review': () => createAgentModelCompareReviewEditor(),
+  'model-compare-handoff-diff': (o) => createAgentModelCompareHandoffDiffEditor(o.recentReviewerHandoffArtifacts ?? []),
+  'model-compare-judge': () => createAgentModelCompareJudgmentEditor(),
+  'model-compare-apply': (o) => createAgentModelCompareApplyEditor(o.reviewPacketDefaults ?? null),
+  'model-compare-route-decision': (o) => createAgentModelCompareRouteDecisionEditor(o.reviewPacketDefaults ?? null),
+  'model-compare-export': (o) => createAgentModelCompareExportEditor(o.reviewPacketDefaults ?? null),
+  'model-compare-analytics': () => createAgentModelCompareAnalyticsEditor(),
+  'knowledge-ask': () => createAgentKnowledgeQueryEditor('ask'),
+  'knowledge-search': () => createAgentKnowledgeQueryEditor('search'),
+  'reminder-schedule': () => createReminderScheduleEditor(),
+  'routine-schedule': (o) => createRoutineScheduleEditor(o.selectedRoutine ?? null),
+};
+
+const LOCAL_REGISTRY_EDITOR_KINDS = new Set<AgentWorkspaceEditorKind>(['memory', 'note', 'persona', 'skill', 'routine', 'knowledge-url']);
+
 export function createAgentWorkspaceEditor(
   editorKind: AgentWorkspaceEditorKind,
-  options: {
-    readonly runtimeStarterTemplates?: readonly AgentWorkspaceRuntimeStarterTemplateItem[];
-    readonly selectedRoutine?: AgentWorkspaceLocalLibraryItem | null;
-    readonly recentReviewerHandoffArtifacts?: readonly AgentWorkspaceRecentReviewerHandoffArtifact[];
-    readonly reviewPacketDefaults?: AgentWorkspaceReviewPacketDefaults | null;
-    readonly emailConnectStatus?: AgentWorkspaceEmailConnectStatus | null;
-    readonly calendarOAuthConfigStatus?: AgentWorkspaceCalendarOAuthConfigStatus | null;
-  } = {},
+  options: AgentWorkspaceEditorOptions = {},
 ): AgentWorkspaceLocalEditor | null {
-  if (editorKind === 'email-connect-wizard') return createEmailConnectWizardEditor(options.emailConnectStatus ?? null);
-  if (editorKind === 'calendar-connect') return createCalendarConnectEditor();
-  if (editorKind === 'calendar-subscribe-wizard') return createCalendarSubscribeWizardEditor();
-  if (editorKind === 'calendar-oauth-google') return createCalendarOAuthEditor('google', options.calendarOAuthConfigStatus?.google ?? false);
-  if (editorKind === 'calendar-oauth-outlook') return createCalendarOAuthEditor('microsoft', options.calendarOAuthConfigStatus?.microsoft ?? false);
-  if (editorKind === 'google-status') return createGoogleStatusEditor();
-  if (editorKind === 'google-connect') return createGoogleConnectEditor();
-  if (editorKind === 'google-reauthorize') return createGoogleReauthorizeEditor();
-  if (editorKind === 'google-forget') return createGoogleForgetEditor();
-  if (editorKind === 'google-setup-walkthrough') return createGoogleWalkthroughEditor();
-  if (editorKind === 'google-setup-app-password') return createGoogleAppPasswordEditor();
-  if (editorKind === 'google-adopt') return createGoogleAdoptEditor();
-  if (editorKind === 'google-client-file') return createGoogleClientFileEditor();
-  if (editorKind === 'google-client-manual') return createGoogleClientManualEditor();
-  if (editorKind === 'profile') return createProfileEditor(options.runtimeStarterTemplates ?? []);
-  if (editorKind === 'learned-behavior') return createLearnedBehaviorEditor();
-  if (editorKind === 'web-research') return createAgentWorkspaceWebResearchEditor('research');
-  if (editorKind === 'web-fetch') return createAgentWorkspaceWebResearchEditor('fetch');
-  if (editorKind === 'research-run') return createAgentResearchRunEditor();
-  if (editorKind === 'research-source') return createAgentResearchSourceEditor();
-  if (editorKind === 'research-report') return createAgentResearchReportEditor();
-  if (editorKind === 'artifact-browser') return createAgentArtifactBrowserEditor();
-  if (editorKind === 'artifact-show') return createAgentArtifactShowEditor();
-  if (editorKind === 'artifact-export-file') return createAgentArtifactExportEditor();
-  if (editorKind === 'artifact-export-package') return createAgentArtifactPackageEditor();
-  if (editorKind === 'artifact-promote-knowledge') return createAgentArtifactPromoteKnowledgeEditor();
-  if (editorKind === 'document-browse') return createAgentDocumentBrowseEditor();
-  if (editorKind === 'document-show') return createAgentDocumentShowEditor();
-  if (editorKind === 'document-create') return createAgentDocumentCreateEditor();
-  if (editorKind === 'document-update') return createAgentDocumentUpdateEditor();
-  if (editorKind === 'document-review') return createAgentDocumentReviewEditor();
-  if (editorKind === 'document-comment') return createAgentDocumentCommentEditor();
-  if (editorKind === 'document-resolve-comment') return createAgentDocumentResolveCommentEditor();
-  if (editorKind === 'document-suggest') return createAgentDocumentSuggestEditor();
-  if (editorKind === 'document-accept-suggestion') return createAgentDocumentAcceptSuggestionEditor();
-  if (editorKind === 'document-reject-suggestion') return createAgentDocumentRejectSuggestionEditor();
-  if (editorKind === 'document-insert-artifact') return createAgentDocumentInsertArtifactEditor();
-  if (editorKind === 'document-attach-artifact') return createAgentDocumentAttachArtifactEditor();
-  if (editorKind === 'document-export') return createAgentDocumentExportEditor(options.reviewPacketDefaults ?? null);
-  if (editorKind === 'document-reviewer-readiness') return createAgentDocumentReviewerReadinessEditor();
-  if (editorKind === 'document-review-packet-wizard') return createAgentDocumentReviewPacketWizardEditor();
-  if (editorKind === 'document-review-packet-preset') return createAgentDocumentReviewPacketPresetEditor(options.reviewPacketDefaults ?? null);
-  if (editorKind === 'document-review-packet-preset-refresh') return createAgentDocumentReviewPacketPresetRefreshEditor();
-  if (editorKind === 'document-review-packet-share') return createAgentDocumentReviewPacketShareEditor(options.reviewPacketDefaults ?? null);
-  if (editorKind === 'model-compare') return createAgentModelCompareEditor();
-  if (editorKind === 'local-model-benchmark') return createAgentLocalModelBenchmarkEditor();
-  if (editorKind === 'model-compare-review') return createAgentModelCompareReviewEditor();
-  if (editorKind === 'model-compare-handoff-diff') return createAgentModelCompareHandoffDiffEditor(options.recentReviewerHandoffArtifacts ?? []);
-  if (editorKind === 'model-compare-judge') return createAgentModelCompareJudgmentEditor();
-  if (editorKind === 'model-compare-apply') return createAgentModelCompareApplyEditor(options.reviewPacketDefaults ?? null);
-  if (editorKind === 'model-compare-route-decision') return createAgentModelCompareRouteDecisionEditor(options.reviewPacketDefaults ?? null);
-  if (editorKind === 'model-compare-export') return createAgentModelCompareExportEditor(options.reviewPacketDefaults ?? null);
-  if (editorKind === 'model-compare-analytics') return createAgentModelCompareAnalyticsEditor();
-  if (editorKind && isAgentWorkspaceBasicCommandEditorKind(editorKind)) return createAgentWorkspaceBasicCommandEditor(editorKind);
-  if (editorKind === 'knowledge-ask') return createAgentKnowledgeQueryEditor('ask');
-  if (editorKind === 'knowledge-search') return createAgentKnowledgeQueryEditor('search');
-  if (editorKind === 'reminder-schedule') return createReminderScheduleEditor();
-  if (editorKind === 'routine-schedule') return createRoutineScheduleEditor(options.selectedRoutine ?? null);
-  if (
-    editorKind === 'memory'
-    || editorKind === 'note'
-    || editorKind === 'persona'
-    || editorKind === 'skill'
-    || editorKind === 'routine'
-    || editorKind === 'knowledge-url'
-  ) {
-    return createLocalEditor(editorKind);
-  }
+  const construct = EDITOR_CONSTRUCTORS[editorKind];
+  if (construct) return construct(options);
+  if (isAgentWorkspaceBasicCommandEditorKind(editorKind)) return createAgentWorkspaceBasicCommandEditor(editorKind);
+  if (LOCAL_REGISTRY_EDITOR_KINDS.has(editorKind)) return createLocalEditor(editorKind as Parameters<typeof createLocalEditor>[0]);
   return null;
 }
 

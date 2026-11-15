@@ -1,13 +1,7 @@
 /**
- * Calendar connect card editor tests.
- *
- * Unlike email, there is no external calendar credential path anywhere in
- * this codebase (grounded: no CalDAV config schema, no connector, only the
- * local .ics-backed /calendar command). This editor is the honest promotion
- * of the dead "Calendar workflows" guidance card into a real dispatchable
- * action that adds a LOCAL event through the existing /calendar add command
- *, the generic command-editor dispatch pipeline (build a command string,
- * hand it to the shell-owned router), same shape as reminder-schedule.
+ * Add-event card editor tests: a stepped form that adds a local event through
+ * the existing /calendar add command (build a command string, hand it to the
+ * shell-owned router), same shape as reminder-schedule.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -20,10 +14,9 @@ function fieldReaderFrom(fields: Record<string, string>): (id: string) => string
 }
 
 describe('createCalendarConnectEditor', () => {
-  test('states plainly that no external calendar account is connected', () => {
+  test('says the event goes to the local Agent calendar', () => {
     const editor = createCalendarConnectEditor();
     expect(editor.kind).toBe('calendar-connect');
-    expect(editor.message).toContain('No external calendar account is connected');
     expect(editor.message.toLowerCase()).toContain('local');
   });
 

@@ -93,6 +93,37 @@ export interface PersistEmailConfigFieldResult {
 }
 
 /**
+ * The stored form of one non-secret `email.<field>` value, or why it is not
+ * valid. Pure: no write, no I/O, so a form can check every field before it
+ * stores any of them.
+ */
+export function validateEmailConfigFieldValue(
+  fieldName: string,
+  rawValue: string,
+): { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: string } {
+  if (fieldName === 'imapPort' || fieldName === 'smtpPort') {
+    const n = parseInt(rawValue, 10);
+    if (!isFinite(n) || n < 1 || n > 65535) {
+      return { ok: false, error: `Invalid port number: ${rawValue}. Must be an integer between 1 and 65535.` };
+    }
+    return { ok: true, value: n };
+  }
+  if (fieldName === 'smtpSecurity') {
+    if (rawValue !== 'tls' && rawValue !== 'starttls' && rawValue !== 'auto') {
+      return { ok: false, error: `Invalid smtpSecurity value: "${rawValue}". Valid values: tls, starttls, auto.` };
+    }
+    return { ok: true, value: rawValue };
+  }
+  if (fieldName === 'enabled') {
+    const lower = rawValue.toLowerCase();
+    if (lower === 'true' || lower === '1' || lower === 'yes') return { ok: true, value: true };
+    if (lower === 'false' || lower === '0' || lower === 'no') return { ok: true, value: false };
+    return { ok: false, error: `Invalid boolean value: ${rawValue}. Use true or false.` };
+  }
+  return { ok: true, value: rawValue };
+}
+
+/**
  * Persist one `email.<field>` config value through the single reviewed path:
  * non-secret fields go through cm.setDynamic after per-field validation; the
  * password field (fieldName 'passwordRef', rawValue is the RAW password) is
@@ -138,32 +169,9 @@ export async function persistEmailConfigField(
     return { ok: true, configKey, secretRef: storedRef };
   }
 
-  let coerced: unknown = rawValue;
-  if (fieldName === 'imapPort' || fieldName === 'smtpPort') {
-    const n = parseInt(rawValue, 10);
-    if (!isFinite(n) || n < 1 || n > 65535) {
-      return { ok: false, error: `Invalid port number: ${rawValue}. Must be an integer between 1 and 65535.`, configKey };
-    }
-    coerced = n;
-  } else if (fieldName === 'smtpSecurity') {
-    if (rawValue !== 'tls' && rawValue !== 'starttls' && rawValue !== 'auto') {
-      return {
-        ok: false,
-        error: `Invalid smtpSecurity value: "${rawValue}". Valid values: tls, starttls, auto.`,
-        configKey,
-      };
-    }
-    coerced = rawValue;
-  } else if (fieldName === 'enabled') {
-    const lower = rawValue.toLowerCase();
-    if (lower === 'true' || lower === '1' || lower === 'yes') {
-      coerced = true;
-    } else if (lower === 'false' || lower === '0' || lower === 'no') {
-      coerced = false;
-    } else {
-      return { ok: false, error: `Invalid boolean value: ${rawValue}. Use true or false.`, configKey };
-    }
-  }
+  const validated = validateEmailConfigFieldValue(fieldName, rawValue);
+  if (!validated.ok) return { ok: false, error: validated.error, configKey };
+  const coerced = validated.value;
 
   if (writeValue) await writeValue(configKey, coerced);
   else cm.setDynamic(configKey, coerced);

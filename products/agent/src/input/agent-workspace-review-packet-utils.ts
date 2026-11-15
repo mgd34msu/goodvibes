@@ -27,25 +27,18 @@ export function uniqueStrings(values: readonly (string | null | undefined)[], li
   return result;
 }
 
+// An artifact's kind is the purpose the producing tool recorded on it, never
+// its filename: a filename can come from an upload.
 export function isReviewerHandoffArtifact(artifact: ArtifactDescriptor): boolean {
-  const purpose = readArtifactMetadataString(artifact.metadata, 'purpose');
-  if (purpose === 'agent-model-compare-handoff') return true;
-  if (purpose.length > 0) return false;
-  return (artifact.filename ?? '').startsWith('blind-model-comparison-handoff-');
+  return readArtifactMetadataString(artifact.metadata, 'purpose') === 'agent-model-compare-handoff';
 }
 
 export function isModelCompareArtifact(artifact: ArtifactDescriptor): boolean {
-  const purpose = readArtifactMetadataString(artifact.metadata, 'purpose');
-  if (purpose === 'agent-model-compare') return true;
-  if (purpose.length > 0) return false;
-  return (artifact.filename ?? '').startsWith('blind-model-comparison-cmp_');
+  return readArtifactMetadataString(artifact.metadata, 'purpose') === 'agent-model-compare';
 }
 
 export function isModelCompareJudgmentArtifact(artifact: ArtifactDescriptor): boolean {
-  const purpose = readArtifactMetadataString(artifact.metadata, 'purpose');
-  if (purpose === 'agent-model-compare-judgment') return true;
-  if (purpose.length > 0) return false;
-  return (artifact.filename ?? '').startsWith('blind-model-comparison-judgment-');
+  return readArtifactMetadataString(artifact.metadata, 'purpose') === 'agent-model-compare-judgment';
 }
 
 export function isDocumentExportArtifact(artifact: ArtifactDescriptor): boolean {

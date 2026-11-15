@@ -366,8 +366,9 @@ describe('AgentWorkspace', () => {
 
     workspace.activateSelected();
 
+    // "Just start typing" closes the workspace and hands the keyboard back.
     expect(dispatched).toEqual([]);
-    expect(workspace.status).toContain('Close this workspace and ask for anything');
+    expect(workspace.active).toBe(false);
   });
 
   test('finishes onboarding by writing the user marker and closing the workspace', () => {
@@ -554,7 +555,8 @@ describe('AgentWorkspace', () => {
     feedText(workspace, '/');
     feedText(workspace, 'model');
     expect(workspace.actionSearchActive).toBe(true);
-    workspace.selectedActionIndex = 4;
+    workspace.selectedActionIndex = workspace.actionSearchResults.findIndex((result) => result.action.id === 'provider-use');
+    expect(workspace.selectedActionIndex).toBeGreaterThan(0);
     expect(workspace.selectedActionSearchResult?.category.id).toBe('account-model');
     expect(workspace.selectedActionSearchResult?.action.id).toBe('provider-use');
 
@@ -850,6 +852,12 @@ describe('AgentWorkspace', () => {
     workspace.selectedCategoryIndex = workspace.categories.findIndex((category) => category.id === 'setup');
     workspace.selectedActionIndex = workspace.actions.findIndex((action) => action.id === 'import-goodvibes-tui-settings');
     workspace.activateSelected();
+    // The row shows the plan first and writes nothing until the owner confirms it.
+    expect(workspace.localEditor?.kind).toBe('settings-import');
+    expect(subscriptionManager.get('openai')).toBeFalsy();
+    expect(workspace.lastActionResult?.detail).toContain('Provider sign-ins replaced: openai.');
+    feedText(workspace, 'yes');
+    feedKey(workspace, 'enter');
     await waitUntil(() => subscriptionManager.get('openai') !== undefined, 'the TUI subscription to be imported');
 
     expect(subscriptionManager.get('agent-only')?.accessToken).toBe('agent-token');
@@ -2805,11 +2813,12 @@ describe('AgentWorkspace', () => {
     } as unknown as CommandContext);
     const byId = new Map(snapshot.setupChecklist.map((item) => [item.id, item]));
 
-    expect(byId.get('runtime')?.status).toBe('recommended');
-    expect(byId.get('connected-host-auth')?.status).toBe('recommended');
+    // The host steps follow the session's reading of the host, never a token file.
+    expect(byId.get('runtime')?.status).not.toBe('ready');
+    expect(byId.get('connected-host-auth')?.status).not.toBe('ready');
     expect(byId.get('connected-host-auth')?.breadcrumb).toBe('Connected Host');
     expect(byId.get('provider-model')?.status).toBe('ready');
-    expect(byId.get('agent-knowledge')?.status).toBe('recommended');
+    expect(byId.get('agent-knowledge')?.status).toBe('optional');
     expect(byId.get('memory')?.status).toBe('ready');
     expect(byId.get('channels')?.status).toBe('ready');
     expect(byId.get('agent-knowledge')?.breadcrumb).toBe('Knowledge');
@@ -2890,8 +2899,8 @@ describe('AgentWorkspace', () => {
     } as unknown as CommandContext);
     const byId = new Map(snapshot.setupChecklist.map((item) => [item.id, item]));
 
-    expect(byId.get('connected-host-auth')?.status).toBe('recommended');
-    expect(byId.get('connected-host-auth')?.detail).toContain('Unverified:');
+    // Durable receipts never mark host auth ready; only a reading of the host does.
+    expect(byId.get('connected-host-auth')?.status).not.toBe('ready');
     expect(snapshot.setupWizard._diagnostic.stepHistory.filter((entry) => entry.kind === 'durable-receipt')).toHaveLength(3);
     expect(snapshot.setupWizard._diagnostic.receiptGaps.map((gap) => gap.stepId)).toEqual(['runtime']);
   });
@@ -2955,8 +2964,8 @@ describe('AgentWorkspace', () => {
     const byId = new Map(snapshot.setupChecklist.map((item) => [item.id, item]));
     const wizardSteps = new Map(snapshot.setupWizard.steps.map((step) => [step.id, step]));
 
-    expect(byId.get('connected-host-auth')?.status).toBe('recommended');
-    expect(wizardSteps.get('connected-host-auth')?.detail).toContain('Unverified:');
+    // Daemon receipt read models never mark host auth ready; only a reading of the host does.
+    expect(byId.get('connected-host-auth')?.status).not.toBe('ready');
     expect(wizardSteps.get('connected-host-auth')?.detail).not.toContain('super-secret');
     const durableHistory = snapshot.setupWizard._diagnostic.stepHistory.filter((entry) => entry.kind === 'durable-receipt');
     expect(durableHistory).toHaveLength(3);
@@ -4067,7 +4076,7 @@ describe('AgentWorkspace', () => {
     expect(dispatched).toEqual(['/delegate --review "Review the release workflow implementation"']);
   });
 
-  test('refresh key rereads the live runtime snapshot', () => {
+  test('Ctrl+R rereads the live runtime snapshot', () => {
     const workspace = new AgentWorkspace();
     const runtime = {
       model: 'openai:gpt-5.5',
@@ -4101,7 +4110,8 @@ describe('AgentWorkspace', () => {
     expect(workspace.runtimeSnapshot?.model).toBe('openai:gpt-5.5');
 
     runtime.model = 'anthropic:claude-sonnet-4.5';
-    handleAgentWorkspaceToken(workspace, { type: 'text', value: 'r' }, () => undefined, () => undefined);
+    // Ctrl+R: a key that cannot be text, so typing never refreshes by accident.
+    handleAgentWorkspaceToken(workspace, { type: 'key', name: 'r', logicalName: 'r', ctrl: true, meta: false, shift: false }, () => undefined, () => undefined);
 
     expect(workspace.runtimeSnapshot?.model).toBe('anthropic:claude-sonnet-4.5');
     expect(workspace.status).toContain('refreshed');

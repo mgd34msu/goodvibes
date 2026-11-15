@@ -187,9 +187,14 @@ describe('setup checklist inputs', () => {
   const authStatus = (input: AgentWorkspaceSetupChecklistInput) =>
     buildAgentWorkspaceSetupChecklist(input).find((item) => item.id === 'connected-host-auth')?.status;
 
-  test('connected-host auth is recommended only when no Agent home exists, whatever the path text says', () => {
-    expect(authStatus(checklistInput({ agentHomeUnavailable: true }))).toBe('recommended');
-    expect(authStatus(checklistInput({ connectedHostTokenPath: '(Agent home unavailable)' }))).toBe('blocked');
+  test('the host steps follow the reading of the host, not the token file', () => {
+    const checked = (reachable: boolean, credentialPresent: boolean, credentialAccepted: boolean) =>
+      ({ state: 'checked' as const, checkedAt: 1, reachable, credentialPresent, credentialAccepted, detail: 'd' });
+    expect(authStatus(checklistInput({ hostReading: { state: 'checking' } }))).toBe('recommended');
+    // The Agent used on its own: nothing to repair.
+    expect(authStatus(checklistInput({ hostReading: checked(false, false, false) }))).toBe('optional');
+    expect(authStatus(checklistInput({ hostReading: checked(true, true, false) }))).toBe('blocked');
+    expect(authStatus(checklistInput({ hostReading: checked(true, true, true) }))).toBe('ready');
   });
 });
 

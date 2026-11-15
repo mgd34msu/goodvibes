@@ -49,7 +49,7 @@ const submissionsInFlight = new WeakSet<object>();
 
 function runExclusive(host: DirectEditorHost, requestRender: (() => void) | undefined, run: () => Promise<void>): void {
   if (submissionsInFlight.has(host)) {
-    host.status = 'Still working on the previous submit. Wait for it to finish.';
+    host.status = 'Not started again: the previous submit is still running. Its result appears here when it finishes.';
     requestRender?.();
     return;
   }
@@ -94,7 +94,7 @@ export function trySubmitDirectHostActionEditor(
     return true;
   }
   if (GOOGLE_EDITOR_KINDS.has(editor.kind)) {
-    runExclusive(host, requestRender, () => submitAgentWorkspaceGoogleSetupEditor(host, editor, context, readField));
+    runExclusive(host, requestRender, () => submitAgentWorkspaceGoogleSetupEditor(host, editor, context, readField, requestRender));
     return true;
   }
   return false;

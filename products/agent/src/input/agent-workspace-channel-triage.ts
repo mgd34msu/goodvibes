@@ -9,7 +9,7 @@ import {
 } from './connected-host-routes.ts';
 import type { AgentWorkspaceChannelStatus } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
-import { resolveChannelPrincipalAttribution, UNKNOWN_PRINCIPAL_LABEL } from '../agent/principal-attribution.ts';
+import { createChannelPrincipalAttributionResolver, type ChannelPrincipalAttributionResolver, UNKNOWN_PRINCIPAL_LABEL } from '../agent/principal-attribution.ts';
 import { renderForModel, untrustedFrom } from '../agent/untrusted-content.ts';
 import { clampReadLimit } from '../tools/agent-harness-read-helpers.ts';
 
@@ -205,7 +205,9 @@ function deliveryTriage(result: ConnectedHostRouteResult, limit: number): Record
   const attempts = readRecordArray(root, 'attempts');
   const views = attempts.map(deliveryAttemptView);
   const attention = views.filter((attempt) => DELIVERY_ATTENTION_STATUSES.has(attempt.status));
-  const retryCandidates = views.filter((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered');
+  // Every failed or dead-lettered attempt is both the attention list and the
+  // retry list; one filter, one count.
+  const retryCandidates = attention;
   const inProgress = views.filter((attempt) => DELIVERY_IN_PROGRESS_STATUSES.has(attempt.status));
   return {
     route: result.route,
@@ -280,10 +282,10 @@ function surfaceMessageTriage(result: ConnectedHostRouteResult, limit: number): 
   };
 }
 
-async function routeBindingView(binding: JsonRecord, connection: ConnectedHostConnection): Promise<Record<string, unknown>> {
+async function routeBindingView(binding: JsonRecord, resolvePrincipal: ChannelPrincipalAttributionResolver): Promise<Record<string, unknown>> {
   const externalId = readString(binding, 'externalId');
   const surfaceKind = readString(binding, 'surfaceKind', 'unknown');
-  const attribution = await resolveChannelPrincipalAttribution(connection, surfaceKind, externalId);
+  const attribution = await resolvePrincipal(surfaceKind, externalId);
   return {
     id: readString(binding, 'id', 'binding'),
     kind: readString(binding, 'kind', 'unknown'),
@@ -320,7 +322,8 @@ async function routeBindingTriage(
   const root = isRecord(result.body) ? result.body : {};
   const bindings = readRecordArray(root, 'bindings');
   const sliced = bindings.slice(0, limit);
-  const bindingViews = await Promise.all(sliced.map((binding) => routeBindingView(binding, connection)));
+  const resolvePrincipal = createChannelPrincipalAttributionResolver(connection);
+  const bindingViews = await Promise.all(sliced.map((binding) => routeBindingView(binding, resolvePrincipal)));
   return {
     route: result.route,
     state: routeState(result, bindings.length === 0),
@@ -396,11 +399,10 @@ export async function buildAgentWorkspaceChannelTriage(
   const status = triageStatus({ readinessAttention, deliveryAttention, routeFailures });
   const messageCount = typeof surfaceMessages.totalMessages === 'number' ? surfaceMessages.totalMessages : 0;
   const bindingCount = typeof routeBindings.totalBindings === 'number' ? routeBindings.totalBindings : 0;
-  const retryCount = typeof deliveries.retryCandidateCount === 'number' ? deliveries.retryCandidateCount : 0;
   return {
     mode: 'channel_triage',
     status,
-    summary: `${readinessAttention} channel setup blocker(s), ${needsTargetCount} channel(s) without a default target, ${deliveryAttention} delivery attention item(s), ${retryCount} retry candidate(s), ${messageCount} visible surface message(s), ${bindingCount} route binding(s).`,
+    summary: `${readinessAttention} channel setup blocker(s), ${needsTargetCount} channel(s) without a default target, ${deliveryAttention} failed delivery attempt(s) to review or retry, ${messageCount} visible surface message(s), ${bindingCount} route binding(s).`,
     readiness,
     deliveries,
     surfaceMessages,
@@ -469,7 +471,7 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
     lines.push(`  unavailable: ${deliveries.kind}; ${deliveries.message}`);
   } else {
     const totals = isRecord(deliveries.totals) ? deliveries.totals : {};
-    lines.push(`  state: ${deliveries.state}; total: ${deliveries.totalAttempts}; attention: ${deliveries.attentionCount}; retry candidates: ${deliveries.retryCandidateCount}`);
+    lines.push(`  state: ${deliveries.state}; total: ${deliveries.totalAttempts}; failed or dead-lettered: ${deliveries.attentionCount}; in progress: ${deliveries.inProgressCount ?? 0}`);
     lines.push(`  totals: queued=${totals.queued ?? 0}; started=${totals.started ?? 0}; succeeded=${totals.succeeded ?? 0}; failed=${totals.failed ?? 0}; dead-lettered=${totals.deadLettered ?? 0}`);
     const retryCandidates = Array.isArray(deliveries.retryCandidates) ? deliveries.retryCandidates.filter(isRecord) : [];
     for (const attempt of retryCandidates.slice(0, 5)) {

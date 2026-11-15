@@ -91,7 +91,7 @@ function connectGuideMessage(): string {
       'connect, you need a client id:',
     '  1. Register a free OAuth app with the provider (Google Cloud Console, or the Azure portal for Microsoft).',
     '  2. Copy the client id it gives you, a desktop/public-client app needs no secret.',
-    '  3. Open /agent personal-ops -> "Connect Google Calendar (advanced)" or "Connect Microsoft Outlook (advanced)" and paste it in.',
+    '  3. Open /agent personal-ops -> "Connect Google Calendar" or "Connect Microsoft Outlook" and paste it in.',
     '  4. Run /calendar connect google (or outlook) again to authorize.',
   ].join('\n');
 }

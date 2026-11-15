@@ -3,6 +3,7 @@ import {
   submitAgentWorkspaceSubscriptionLoginFinishEditor,
   type AgentWorkspaceSubscriptionEditorHost,
 } from '../../input/agent-workspace-subscription-editor.ts';
+import { trySubmitDirectHostActionEditor } from '../../input/agent-workspace-direct-editor-submission.ts';
 import type { AgentWorkspaceLocalEditor } from '../../input/agent-workspace-types.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 
@@ -55,14 +56,17 @@ describe('subscription login finish', () => {
     const { context, calls } = makeContext(() => new Promise((resolve) => { finish = resolve; }));
     const host = makeHost();
 
-    const first = submitAgentWorkspaceSubscriptionLoginFinishEditor(host, finishEditor, context, fields('abc'));
-    const second = submitAgentWorkspaceSubscriptionLoginFinishEditor(host, finishEditor, context, fields('abc'));
-    await second;
+    const directHost = host as unknown as Parameters<typeof trySubmitDirectHostActionEditor>[0];
+    let settled: () => void = () => {};
+    const done = new Promise<void>((resolve) => { settled = resolve; });
+    trySubmitDirectHostActionEditor(directHost, finishEditor, context, fields('abc'), () => settled());
+    await Promise.resolve();
+    trySubmitDirectHostActionEditor(directHost, finishEditor, context, fields('abc'));
     expect(calls).toEqual(['abc']);
-    expect(host.status).toContain('already running');
+    expect(host.status).toContain('still running');
 
     finish(saved);
-    await first;
+    await done;
     expect(host.lastActionResult?.kind).toBe('refreshed');
     expect(host.localEditor).toBeNull();
   });

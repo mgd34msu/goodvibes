@@ -72,7 +72,7 @@ export function createGoogleStatusEditor(): AgentWorkspaceLocalEditor {
       'Report what Gmail and Calendar have configured, and, separately, whether Google credentials '
       + 'already exist on this machine that nothing is using yet. Reads only; nothing is changed and no '
       + 'credential is shown.',
-    fields: [confirmField('Type yes to read the current connection state.')],
+    fields: [],
   };
 }
 
@@ -243,21 +243,9 @@ function failed(host: AgentWorkspaceGoogleSetupEditorHost, editor: AgentWorkspac
 }
 
 /**
- * Ordering, because the result pane cannot show everything.
- *
- * The context column compacts a result to its first sentence, and the actions
- * column renders wrapped lines until the viewport ends, there is no scroll and
- * no "more below" marker on the result block, so a thirty-line setup report
- * loses its tail. Printing to the conversation instead is not available here:
- * the workspace's command context does not surface `print` into the transcript
- * (verified against a built binary, the same text typed as `/google status`
- * appears, the same call from a card does not).
- *
- * What is in our gift is the order. Every result therefore leads with the
- * outcome and the one thing outstanding, so that what survives the cut is the
- * part the person needs, and the verbose step-by-step is the tail that is lost
- * rather than the headline. The remaining clipping is a workspace renderer
- * limitation, not something this card can decide away.
+ * Every result leads with the outcome and the one thing outstanding, then the
+ * step-by-step record. The result pane scrolls (PageUp/PageDown), but the first
+ * screen is what a person reads, so the headline goes there.
  */
 
 /**
@@ -326,20 +314,20 @@ export async function submitAgentWorkspaceGoogleSetupEditor(
   editor: AgentWorkspaceLocalEditor,
   context: CommandContext | null,
   readField: FieldReader,
+  requestRender?: () => void,
 ): Promise<void> {
-  if (!isAffirmative(readField('confirm'))) {
-    notConfirmed(host, editor);
-    return;
-  }
-  if (!context) {
-    noContext(host, editor);
-    return;
-  }
-
   if (editor.kind === 'google-status') {
+    // The status card only reads, so it has no fields: it runs on the Enter
+    // that opened it, closes at once, and the pane shows the read.
+    host.localEditor = null;
+    if (!context) {
+      host.status = 'Google setup unavailable.';
+      host.lastActionResult = { kind: 'error', title: 'Google status unavailable', detail: 'No command context is available in this runtime.', safety: 'read-only' };
+      return;
+    }
+    host.status = 'Reading the Google connection state...';
     try {
       const text = await describeGoogleConnection(context);
-      host.localEditor = null;
       host.status = 'Google connection state read.';
       // Not a 'recap' result: that kind renders every line behind a green check,
       // which would put a tick against "Gmail: not connected."
@@ -350,8 +338,19 @@ export async function submitAgentWorkspaceGoogleSetupEditor(
         safety: 'read-only',
       };
     } catch (error) {
-      failed(host, editor, 'Google status unavailable', error);
+      const detail = error instanceof Error ? error.message : String(error);
+      host.status = detail;
+      host.lastActionResult = { kind: 'error', title: 'Google status unavailable', detail, safety: 'read-only' };
     }
+    return;
+  }
+
+  if (!isAffirmative(readField('confirm'))) {
+    notConfirmed(host, editor);
+    return;
+  }
+  if (!context) {
+    noContext(host, editor);
     return;
   }
 
@@ -380,13 +379,24 @@ export async function submitAgentWorkspaceGoogleSetupEditor(
     const transcript: string[] = [];
     try {
       host.status = reauthorizing ? 'Asking Google for a fresh consent...' : 'Connecting Google...';
-      // The consent link goes into the transcript the pane renders. A card has
-      // no console to print to, and the link is the ONE thing the person has to
-      // act on, so it is announced rather than opened: Google blocks automated
-      // browsers at its sign-in wall, and a link they click always works.
+      // The consent link is the one thing the person has to act on, and the
+      // flow then waits for that approval, so the link is shown the moment it
+      // exists, not when the flow ends. It is announced rather than opened:
+      // Google blocks automated browsers at its sign-in wall, and a link the
+      // person clicks always works. The form closes so the pane shows the link
+      // until the flow settles.
       const announce = (url: string): void => {
         transcript.push('Open this link and approve it:');
         transcript.push(url);
+        host.localEditor = null;
+        host.status = 'Waiting for you to approve the Google consent link.';
+        host.lastActionResult = {
+          kind: 'guidance',
+          title: 'Open this link and approve it',
+          detail: [url, '', 'This card finishes by itself once Google reports the approval.'].join('\n'),
+          safety: 'safe',
+        };
+        requestRender?.();
       };
       const outcome = reauthorizing
         ? await reauthorizeGoogle(context, collectingProgress(transcript), announce)

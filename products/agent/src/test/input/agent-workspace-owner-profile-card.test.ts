@@ -121,7 +121,7 @@ describe('Your Profile card: third-party containment', () => {
     });
     expect(submission.kind).toBe('dispatch');
     if (submission.kind !== 'dispatch') return;
-    expect(submission.command).toBe('/owner-profile person Sarah --named-by "email my sister the tickets"');
+    expect(submission.command).toBe('/owner-profile person Sarah');
     expect(submission.actionResult.detail).toContain('no call that lists everyone');
   });
 

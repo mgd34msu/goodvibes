@@ -23,18 +23,8 @@ export interface AgentWorkspaceSubscriptionEditorHost {
 
 export type AgentWorkspaceSubscriptionFieldReader = (id: string) => string;
 
-// Login start and finish are single-use against the provider: a second Enter while one is running
-// would spend the one-time code twice, and the loser would report a failure for a login that worked.
-const loginStepsInFlight = new WeakSet<AgentWorkspaceSubscriptionEditorHost>();
-
-function claimLoginStep(host: AgentWorkspaceSubscriptionEditorHost, what: string): boolean {
-  if (loginStepsInFlight.has(host)) {
-    host.status = `A subscription login step is already running; wait for it to finish before ${what} again.`;
-    return false;
-  }
-  loginStepsInFlight.add(host);
-  return true;
-}
+// Login start and finish are single-use against the provider. A second Enter while one is running
+// is refused by the one in-flight guard every direct form shares (agent-workspace-direct-editor-submission.ts).
 
 /** The submitted form is still the open one, so its result may close or reopen it. */
 function isFormStillOpen(host: AgentWorkspaceSubscriptionEditorHost, editor: AgentWorkspaceLocalEditor): boolean {
@@ -65,7 +55,6 @@ export async function submitAgentWorkspaceSubscriptionLoginStartEditor(
     host.status = 'Subscription login start not confirmed.';
     return;
   }
-  if (!claimLoginStep(host, 'starting')) return;
   try {
     const provider = readField('provider') || 'openai';
     const openBrowser = isAffirmative(readField('openBrowser'));
@@ -95,8 +84,6 @@ export async function submitAgentWorkspaceSubscriptionLoginStartEditor(
     host.clampSelection();
   } catch (error) {
     reportLoginFailure(host, editor, 'Subscription login start failed', error);
-  } finally {
-    loginStepsInFlight.delete(host);
   }
 }
 
@@ -111,7 +98,6 @@ export async function submitAgentWorkspaceSubscriptionLoginFinishEditor(
     host.status = 'Subscription login finish not confirmed.';
     return;
   }
-  if (!claimLoginStep(host, 'finishing')) return;
   let saved: ProviderSubscription | null = null;
   try {
     const provider = readField('provider') || 'openai';
@@ -143,8 +129,6 @@ export async function submitAgentWorkspaceSubscriptionLoginFinishEditor(
     host.clampSelection();
   } catch (error) {
     reportLoginFailure(host, editor, 'Subscription login finish failed', error);
-  } finally {
-    loginStepsInFlight.delete(host);
   }
   // The session is saved by now. A failing follow-up must not turn that into a "login failed" report.
   if (saved) {

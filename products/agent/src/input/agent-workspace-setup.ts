@@ -1,4 +1,5 @@
 import type { AgentBehaviorDiscoverySummary } from '../agent/behavior-discovery-summary.ts';
+import { agentWorkspaceHostSetupReading, type AgentWorkspaceHostSetupReading } from './agent-workspace-setup-host-status.ts';
 
 export type AgentWorkspaceSetupStatus = 'ready' | 'recommended' | 'optional' | 'blocked';
 
@@ -17,6 +18,8 @@ export interface AgentWorkspaceSetupChecklistInput {
   readonly connectedHostTokenPresent: boolean;
   readonly connectedHostTokenReadable: boolean;
   readonly connectedHostTokenPath: string;
+  /** The host reading to use; defaults to the session's held reading for `runtimeBaseUrl` and the credential path. */
+  readonly hostReading?: AgentWorkspaceHostSetupReading;
   readonly connectedHostTokenError?: string | null;
   /** True when no Agent home directory is known, so no token file could be looked for at all. */
   readonly agentHomeUnavailable?: boolean;
@@ -70,26 +73,76 @@ export function buildAgentWorkspaceSetupChecklist(input: AgentWorkspaceSetupChec
     : item));
 }
 
+interface HostSetupItems {
+  readonly runtime: Pick<AgentWorkspaceSetupChecklistItem, 'status' | 'detail'>;
+  readonly auth: Pick<AgentWorkspaceSetupChecklistItem, 'status' | 'detail'>;
+  readonly knowledge: Pick<AgentWorkspaceSetupChecklistItem, 'status' | 'detail'>;
+}
+
+/** The two host steps and Agent Knowledge, from the session's reading of the host. */
+function hostSetupItems(input: AgentWorkspaceSetupChecklistInput, reading: AgentWorkspaceHostSetupReading): HostSetupItems {
+  const checkAgain = 'Ctrl+R in this workspace checks again.';
+  if (reading.state === 'checking') {
+    const detail = `Checking the connected host at ${input.runtimeBaseUrl}...`;
+    return {
+      runtime: { status: 'recommended', detail },
+      auth: { status: 'recommended', detail },
+      knowledge: { status: 'optional', detail: 'Agent Knowledge lives on the connected host; its state follows the host check.' },
+    };
+  }
+  const at = ` Checked ${new Date(reading.checkedAt).toLocaleTimeString()}. ${checkAgain}`;
+  if (!reading.reachable && !reading.credentialPresent) {
+    // The Agent used on its own: nothing to repair, host features are optional.
+    return {
+      runtime: { status: 'optional', detail: `${reading.detail} Start goodvibes-daemon when you want host features (schedules, channels, Agent Knowledge).${at}` },
+      auth: { status: 'optional', detail: `Needed only with a connected host.${at}` },
+      knowledge: { status: 'optional', detail: 'Agent Knowledge needs the connected host.' },
+    };
+  }
+  if (!reading.reachable) {
+    // A credential says a host was paired, but the Agent still works without
+    // it, so a host that is down is a recommendation, not a blocker.
+    return {
+      runtime: { status: 'recommended', detail: `${reading.detail} Start goodvibes-daemon, or check controlPlane.host and controlPlane.port.${at}` },
+      auth: { status: 'recommended', detail: `Not checked: the host did not answer.${at}` },
+      knowledge: { status: 'optional', detail: 'Agent Knowledge needs the connected host.' },
+    };
+  }
+  if (!reading.credentialAccepted) {
+    return {
+      runtime: { status: 'ready', detail: `A host answers at ${input.runtimeBaseUrl}.${at}` },
+      auth: {
+        status: 'blocked',
+        detail: reading.credentialPresent
+          ? `${reading.detail} Run goodvibes-agent setup pair --apply to get a fresh credential.${at}`
+          : `${reading.detail} Run goodvibes-agent setup pair --apply to pair this Agent with the host (the credential goes to ${input.connectedHostTokenPath}).${at}`,
+      },
+      knowledge: { status: 'optional', detail: 'Agent Knowledge needs an accepted host credential.' },
+    };
+  }
+  return {
+    runtime: { status: 'ready', detail: `${reading.detail}${at}` },
+    auth: { status: 'ready', detail: `The host accepted this Agent's credential.${at}` },
+    knowledge: { status: 'optional', detail: 'Ingest source-backed material into the isolated Agent Knowledge segment when you want it (Knowledge).' },
+  };
+}
+
 function buildChecklistItems(input: AgentWorkspaceSetupChecklistInput): readonly AgentWorkspaceSetupChecklistItem[] {
   const providerReady = input.provider !== 'unknown' && input.model !== 'unknown';
-  // A synchronous snapshot has no fresh host-bound authority evidence.
-  const connectedHostAuthStatus: AgentWorkspaceSetupStatus = input.connectedHostTokenReadable || input.agentHomeUnavailable === true
-    ? 'recommended' : 'blocked';
+  const host = hostSetupItems(input, input.hostReading ?? agentWorkspaceHostSetupReading(input.runtimeBaseUrl, input.connectedHostTokenPath));
   const hasActivePersona = input.activePersonaName !== '(none)' && input.activePersonaName !== '(unavailable)';
   const discoveredBehaviorCount = input.discoveredPersonas.count + input.discoveredSkills.count + input.discoveredRoutines.count;
   return [
     {
       id: 'runtime',
       label: 'Connected host',
-      status: 'recommended',
-      detail: `Unverified: Agent is configured to connect to ${input.runtimeBaseUrl}; protected host routes also need the Agent companion token below.`,
+      ...host.runtime,
       breadcrumb: 'Connected Host',
     },
     {
       id: 'connected-host-auth',
       label: 'Connected-host auth',
-      status: connectedHostAuthStatus,
-      detail: 'Unverified: run asynchronous setup status to check the selected host and current credential. A readable token or historical receipt does not prove a paired owner for native intake.',
+      ...host.auth,
       breadcrumb: 'Connected Host',
     },
     {
@@ -121,8 +174,7 @@ function buildChecklistItems(input: AgentWorkspaceSetupChecklistInput): readonly
     {
       id: 'agent-knowledge',
       label: 'Agent Knowledge',
-      status: 'recommended',
-      detail: 'Check isolated Agent Knowledge status, then ingest source-backed material into the Agent segment only.',
+      ...host.knowledge,
       breadcrumb: 'Knowledge',
     },
     {

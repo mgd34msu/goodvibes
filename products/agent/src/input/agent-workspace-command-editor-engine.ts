@@ -140,7 +140,9 @@ export function editorMessageSubmission(
 ): AgentWorkspaceCommandEditorSubmission {
   return {
     kind: 'editor',
-    editor: { ...editor, message },
+    // A message written here is always a refusal of the submit, so the tone is
+    // stated with it rather than inferred later.
+    editor: { ...editor, message, messageTone: 'warn' },
     status,
   };
 }
@@ -156,5 +158,9 @@ export function buildCommandEditorSubmissionFromTable<K extends string>(
   readField: AgentWorkspaceFieldReader,
   table: Readonly<Record<K, AgentWorkspaceCommandSubmissionHandler>>,
 ): AgentWorkspaceCommandEditorSubmission {
-  return table[kind](editor, readField);
+  // Callers narrow `kind` with a cast, so a kind missing from the table is
+  // reported on the form instead of failing as a TypeError at submit.
+  const handler = Object.hasOwn(table, kind) ? table[kind] : undefined;
+  if (!handler) return editorMessageSubmission(editor, `This form (${kind}) has no submit handler, so nothing was run.`);
+  return handler(editor, readField);
 }

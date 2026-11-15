@@ -22,10 +22,13 @@ import { deleteAgentWorkspaceMemoryEditor, submitAgentWorkspaceMemoryEditor } fr
 import { jumpAgentWorkspaceSelection, moveAgentWorkspaceSelection, selectAgentWorkspaceCategory } from './agent-workspace-navigation.ts';
 import { appendAgentWorkspaceActionSearchText, backspaceAgentWorkspaceActionSearch, beginAgentWorkspaceActionSearch, clearAgentWorkspaceActionSearch, commitAgentWorkspaceActionSearchSelection, searchAgentWorkspaceActions } from './agent-workspace-search.ts';
 import { applyAgentWorkspaceSetupCheckpointAction } from './agent-workspace-setup-checkpoint-action.ts';
-import { agentWorkspaceSettingSchema, applyAgentWorkspaceSettingValue, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, importAgentWorkspaceTuiSettings, isAgentWorkspaceActionVisible, type AgentWorkspaceSettingActionDisplay } from './agent-workspace-settings.ts';
+import { agentWorkspaceSettingSchema, agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, createAgentWorkspaceSettingsImportEditor, describeAgentWorkspaceTuiSettingsImportPlan, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
+import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
 import { syncAgentWorkspaceLiveCounters } from './agent-workspace-live-counters.ts';
 import { trySubmitDirectHostActionEditor } from './agent-workspace-direct-editor-submission.ts';
+import { readAgentWorkspaceEmailConnectPrefill, type AgentWorkspaceEmailConnectPrefill } from './agent-workspace-email-connect-editor.ts';
 import { submitAgentWorkspaceLocalDeleteEditor, submitAgentWorkspaceMemoryDeleteEditor, type AgentWorkspaceDeleteSubmissionHost } from './agent-workspace-delete-submission.ts';
 import type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryGroup, AgentWorkspaceCommandDispatcher, AgentWorkspaceEditorField, AgentWorkspaceFocusPane, AgentWorkspaceLocalEditor, AgentWorkspaceLocalEditorKind, AgentWorkspaceLocalLibraryItem, AgentWorkspaceLocalOperation, AgentWorkspacePromptDispatcher, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, shouldShowOnboardingFinishFooter } from './agent-workspace-onboarding-finish.ts';
@@ -49,10 +52,13 @@ export class AgentWorkspace {
   public lastActionResult: AgentWorkspaceActionResult | null = null;
   private _localEditor: AgentWorkspaceLocalEditor | null = null;
   private researchSubmission: AbortController | null = null;
+  /** The import plan the open confirm form shows; applying writes exactly this. */
+  private pendingSettingsImport: TuiSettingsImportPlan | null = null;
   get localEditor(): AgentWorkspaceLocalEditor | null { return this._localEditor; }
   set localEditor(editor: AgentWorkspaceLocalEditor | null) {
     this.researchSubmission?.abort();
     this.researchSubmission = null;
+    if (editor?.kind !== 'settings-import') this.pendingSettingsImport = null;
     this._localEditor = editor ? settleEditorMessageTone(this._localEditor, editor) : null;
   }
   public actionSearchActive = false;
@@ -70,7 +76,8 @@ export class AgentWorkspace {
   private _revealedOnboardingCategoryIds = new Set<string>(); // monotonic reveal set
   private _awaitingRecapDismiss = false; // true while showing recap before final close
 
-  open(context: CommandContext, dispatchCommand: AgentWorkspaceCommandDispatcher, categoryId?: string, dispatchPrompt?: AgentWorkspacePromptDispatcher, onlyGroup?: AgentWorkspaceCategoryGroup): void {
+  open(context: CommandContext, dispatchCommand: AgentWorkspaceCommandDispatcher, categoryId?: string, dispatchPrompt?: AgentWorkspacePromptDispatcher, onlyGroup?: AgentWorkspaceCategoryGroup, requestRender?: () => void): void {
+    this.requestRender = requestRender ?? null;
     this.context?.nativeWorkLedger?.close();
     this.context = context;
     this.workContextScroll = 0;
@@ -112,6 +119,32 @@ export class AgentWorkspace {
       }
     }
     this.clampSelection();
+    // Opened by the shell for a person: take the host reading the setup steps
+    // show. A caller with no way to repaint (a model reading the catalogue)
+    // has its own asynchronous setup status and does not start one.
+    if (this.requestRender) this.readHostSetup(false);
+  }
+
+  private requestRender: (() => void) | null = null;
+
+  /**
+   * The setup steps for the connected host read the session's reading of it.
+   * The first open takes one bounded reading; when it lands the snapshot is
+   * rebuilt so the steps show the answer instead of "checking".
+   */
+  private readHostSetup(force: boolean): void {
+    const context = this.context;
+    if (!context) return;
+    void checkAgentWorkspaceHostSetup(context, { force }).then(() => {
+      if (this.context !== context || !this.active) return;
+      this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+      if (this._onlyGroup === 'ONBOARDING') {
+        this._onboardingState = computeOnboardingStateFromSnapshot(this.runtimeSnapshot, context.workspace?.shellPaths);
+        if (this._onboardingState) updateRevealedOnboardingCategories(this._onboardingState, this._revealedOnboardingCategoryIds);
+      }
+      this.clampSelection();
+      this.requestRender?.();
+    });
   }
 
   reopen(): void {
@@ -129,6 +162,12 @@ export class AgentWorkspace {
     this._onlyGroup = null;
     this._onboardingState = null;
     this._awaitingRecapDismiss = false;
+  }
+
+  /** Close the workspace and hand the keyboard back to the composer. */
+  closeToComposer(): void {
+    if (this.context?.dismissAgentWorkspace?.()) return;
+    this.close();
   }
 
   get nativeWorkLedgerState(): import('../runtime/native-work-ledger.ts').NativeWorkLedgerState {
@@ -246,8 +285,9 @@ export class AgentWorkspace {
       return;
     }
     this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(this.context);
-    this.status = 'Runtime context refreshed.';
-    this.lastActionResult = { kind: 'refreshed', title: 'Runtime context refreshed', detail: 'Provider, model, session, local memory, runtime endpoint, and Agent knowledge route posture were re-read from the live command context.' };
+    this.readHostSetup(true);
+    this.status = 'Runtime context refreshed; checking the connected host again.';
+    this.lastActionResult = { kind: 'refreshed', title: 'Runtime context refreshed', detail: 'Provider, model, session, local memory, runtime endpoint, and Agent knowledge route posture were re-read from the live command context. The connected host is being checked again; its setup steps update when it answers.' };
   }
 
   /** Render-path live counter mirror (see syncAgentWorkspaceLiveCounters). */ syncLiveCountersForRender(): void { syncAgentWorkspaceLiveCounters({ context: this.context, runtimeSnapshot: this.runtimeSnapshot, setRuntimeSnapshot: (snapshot) => { this.runtimeSnapshot = snapshot; }, clampSelection: () => this.clampSelection() }); }
@@ -344,6 +384,10 @@ export class AgentWorkspace {
 
   dispatchWorkspaceCommand(command: string, behavior?: 'inline' | 'compose' | 'exit', displayCommand?: string): void {
     this.dispatchCommand?.(command, behavior, displayCommand);
+  }
+
+  emailConnectPrefill(): AgentWorkspaceEmailConnectPrefill | null {
+    return readAgentWorkspaceEmailConnectPrefill(this.context);
   }
 
   dispatchWorkspacePrompt(prompt: string): void {
@@ -474,8 +518,26 @@ export class AgentWorkspace {
     void this.applySettingValue(effect.setting, effect.value, requestRender);
   }
 
+  /**
+   * The import row reads the sources once into a plan and shows it; nothing is
+   * written until the owner confirms the form, and then exactly that plan is.
+   */
   importTuiSettings(requestRender?: () => void): void {
-    void this.importTuiSettingsAsync(requestRender);
+    const plan = planAgentWorkspaceTuiSettingsImport(this.context);
+    if (!plan || !agentWorkspaceTuiSettingsImportHasChanges(plan)) {
+      void this.applyTuiSettingsImport(plan, requestRender);
+      return;
+    }
+    const editor = createAgentWorkspaceSettingsImportEditor(plan);
+    this.localEditor = editor;
+    this.pendingSettingsImport = plan;
+    this.status = 'Review the GoodVibes settings import, then type yes to apply it.';
+    this.lastActionResult = {
+      kind: 'guidance',
+      title: 'GoodVibes settings import: what would change',
+      detail: describeAgentWorkspaceTuiSettingsImportPlan(plan),
+      safety: 'safe',
+    };
   }
 
   applySetupCheckpointAction(action: AgentWorkspaceAction, requestRender?: () => void): void {
@@ -512,8 +574,8 @@ export class AgentWorkspace {
     requestRender?.();
   }
 
-  private async importTuiSettingsAsync(requestRender?: () => void): Promise<void> {
-    const outcome = await importAgentWorkspaceTuiSettings(this.context);
+  private async applyTuiSettingsImport(plan: TuiSettingsImportPlan | null, requestRender?: () => void): Promise<void> {
+    const outcome = await applyAgentWorkspaceTuiSettingsImport(this.context, plan);
     this.runtimeSnapshot = outcome.runtimeSnapshot ?? this.runtimeSnapshot;
     this.clampSelection();
     this.status = outcome.status;
@@ -586,6 +648,17 @@ export class AgentWorkspace {
         message: `${missing.label} is required before saving.`,
       };
       this.status = `${missing.label} is required.`;
+      return;
+    }
+    if (editor.kind === 'settings-import') {
+      const plan = this.pendingSettingsImport;
+      if (!isAffirmative(this.editorField('confirm')) || !plan) {
+        this.localEditor = { ...editor, message: plan ? 'Not applied. Type yes, then press Enter, or Esc to leave everything as it is.' : 'This import is no longer open; choose Import GoodVibes settings again.' };
+        this.status = 'GoodVibes settings import not confirmed.';
+        return;
+      }
+      this.localEditor = null;
+      void this.applyTuiSettingsImport(plan, requestRender);
       return;
     }
     if (trySubmitDirectHostActionEditor(this, editor, this.context, (id) => this.editorField(id), requestRender)) return;

@@ -124,29 +124,11 @@ describe('calendar OAuth advanced-credentials wizard', () => {
     expect(editor.fields.at(-1)?.id).toBe('confirm');
   });
 
-  // F1c: the card's message is build-state-aware, it must stop claiming
-  // "most people can skip this and just run the connect command" while a
-  // bare connect always fails at the config stage (the placeholder state),
-  // and it should keep that original skip-this wording once a client id has
-  // actually been configured.
-  test('placeholder state: the card states a client id is needed, not that most people can skip it', () => {
-    const google = createCalendarOAuthEditor('google', false);
-    expect(google.message).toContain('This build needs a client id');
-    expect(google.message).not.toContain('Most people can skip this');
-
-    const microsoft = createCalendarOAuthEditor('microsoft', false);
-    expect(microsoft.message).toContain('This build needs a client id');
-    expect(microsoft.message).not.toContain('Most people can skip this');
-  });
-
-  test('configured state: the card keeps the original skip-this-if-you-do-not-need-it wording', () => {
-    const google = createCalendarOAuthEditor('google', true);
-    expect(google.message).toContain('Most people can skip this and just run the connect command');
-    expect(google.message).not.toContain('This build needs a client id');
-
-    const microsoft = createCalendarOAuthEditor('microsoft', true);
-    expect(microsoft.message).toContain('Most people can skip this and just run the connect command');
-    expect(microsoft.message).not.toContain('This build needs a client id');
+  test('the card message follows the stored state: first step when no client id, authorize when one is stored', () => {
+    for (const provider of ['google', 'microsoft'] as const) {
+      expect(createCalendarOAuthEditor(provider, false).message).toContain('needs your own OAuth client id');
+      expect(createCalendarOAuthEditor(provider, true).message).toContain('already stored');
+    }
   });
 
   test('stores the client id in config and the secret through the secret manager, never echoing it', async () => {
@@ -365,8 +347,6 @@ describe('calendar connect/disconnect/accounts commands', () => {
     expect(out).toContain('/calendar connect outlook');
     expect(out).toContain('This build has no built-in Google/Microsoft sign-in configured');
     expect(out).toContain('Register a free OAuth app');
-    expect(out).toContain('Connect Google Calendar (advanced)');
-    expect(out).toContain('Connect Microsoft Outlook (advanced)');
     expect(out).toContain('/agent personal-ops');
     expect(out).not.toBe('Usage: /calendar connect <google|outlook> [--device]');
   });

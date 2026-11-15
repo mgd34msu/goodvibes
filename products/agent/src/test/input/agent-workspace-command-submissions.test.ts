@@ -72,7 +72,12 @@ describe('channel send form', () => {
     const editor = createAgentWorkspaceChannelCommandEditor('channel-send');
     const result = buildAgentWorkspaceChannelCommandEditorSubmission(editor, reader({ ...base, channel: 'slack:ops', webhook: 'https://hooks.example.test/T1/secret' }));
     expect(result.kind).toBe('editor');
-    if (result.kind === 'editor') expect(result.editor.message).toContain('only one target');
+  });
+
+  test('no target field keeps the form open with the typed message', () => {
+    const editor = createAgentWorkspaceChannelCommandEditor('channel-send');
+    const result = buildAgentWorkspaceChannelCommandEditorSubmission(editor, reader(base));
+    expect(result.kind).toBe('editor');
   });
 
   test('the webhook URL is masked in the result pane but sent in full', () => {

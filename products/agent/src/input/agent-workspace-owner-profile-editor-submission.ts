@@ -80,7 +80,7 @@ const OWNER_PROFILE_SUBMISSION_HANDLERS: Readonly<
       );
     }
     return dispatchCommandEditorSubmission(
-      `/owner-profile person ${quoteSlashCommandArg(readField('name'))} --named-by ${quoteSlashCommandArg(readField('namedBy'))}`,
+      `/owner-profile person ${quoteSlashCommandArg(readField('name'))}`,
       'Looking up one person',
       'The workspace handed a single-person profile lookup to the shell-owned command router. There is no call that lists everyone.',
       'read-only',

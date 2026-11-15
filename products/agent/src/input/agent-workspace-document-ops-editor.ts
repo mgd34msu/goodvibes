@@ -57,7 +57,6 @@ export function createAgentDocumentReviewerReadinessEditor(): AgentWorkspaceLoca
     selectedFieldIndex: 0,
     message: 'Inspect unresolved document comments, proposed suggestions, missing source artifacts, unrevealed comparisons, route-change decisions, and reviewer handoff evidence before export, archive, or route update.',
     fields: [
-      { id: 'scope', label: 'Scope', value: 'documents-and-compare', required: false, multiline: false, hint: 'Read-only preflight for Document Ops reviewer readiness.' },
       { id: 'includeRoutes', label: 'Repair routes', value: 'yes', required: false, multiline: false, hint: 'yes/no. Yes includes exact inspect and repair routes for the next action.' },
     ],
   };

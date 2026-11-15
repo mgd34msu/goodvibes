@@ -199,7 +199,7 @@ describe('submitAgentWorkspaceEmailConnectWizardEditor', () => {
     expect(host.runtimeSnapshot).not.toBeNull();
   });
 
-  test('failed connection: settings are saved, email stays disabled, honest error names the real stage, no false success', async () => {
+  test('failed connection: nothing is stored, the form stays open, the error names the real stage', async () => {
     const { manager } = makeMemorySecretsManager();
     const context = makeContext(tmpDir, manager);
     const host = makeHost();
@@ -218,7 +218,9 @@ describe('submitAgentWorkspaceEmailConnectWizardEditor', () => {
 
     const cm = context.platform.configManager as unknown as { get: (k: string) => unknown };
     expect(cm.get('email.enabled')).not.toBe(true);
-    // The host settings were still saved so the user does not have to retype them
-    expect(cm.get('email.imapHost')).toBe('imap.example.test');
+    // A failed test stores nothing: a working configuration is never replaced by a broken one.
+    expect(cm.get('email.imapHost')).not.toBe('imap.example.test');
+    expect(cm.get('email.passwordRef')).toBeFalsy();
+    expect(host.localEditor).not.toBeNull();
   });
 });

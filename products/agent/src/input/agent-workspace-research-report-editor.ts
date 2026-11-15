@@ -3,6 +3,7 @@ import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platfo
 import { prepareAgentResearchReportInput } from '../agent/research-report-input.ts';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -229,12 +230,22 @@ export async function submitProtectedAgentResearchReport(
     const result = buildAgentResearchReportPromptSubmission(editor, read, promptDispatchAvailable, args);
     prepared.assertCurrent(); operation.assertCurrent?.(); operation.signal?.throwIfAborted();
     commit(result);
-  } catch {
+  } catch (error) {
     // Stale/cancelled operations must not resurrect an old editor or its status.
     operation.assertCurrent?.(); operation.signal?.throwIfAborted();
-    const detail = owner ? 'Research report preparation is held. No prompt was submitted.'
+    const detail = owner ? `Research report not submitted: ${researchHoldReason(error)}`
       : 'Research report preparation is unavailable until a trusted local screening owner is configured.';
     commit({ kind: 'editor', editor: { ...editor, message: detail }, status: detail,
       actionResult: { kind: 'error', title: 'Research report held', detail, safety: 'safe' } });
   } finally { await prepared?.release(); }
+}
+
+/** Why preparation stopped, in the owner's terms, with the next step. */
+function researchHoldReason(error: unknown): string {
+  if (error instanceof ToolInputProjectionError) {
+    if (error.problem === 'unconfigured') return 'no screening owner is configured in this session. Turn on "Allow hosted report screening" under Research, then press Enter again.';
+    if (error.problem === 'unavailable' || error.problem === 'capacity') return 'the screening service is unavailable right now. Press Enter to try again in a moment.';
+    return 'the report was held by screening: it is larger than one report may be, or a source could not be screened. Shorten the report or remove a source, then press Enter again.';
+  }
+  return `${error instanceof Error ? error.message : String(error)} Fix the form, then press Enter again.`;
 }

@@ -134,7 +134,7 @@ describe('/channels command', () => {
     const output = printed.join('\n');
     expect(output).toContain('Channel Setup Guide');
     expect(output).toContain('current channel: Telegram (telegram)');
-    expect(output).toContain('progress: 5/8 Choose target');
+    expect(output).toContain('progress: 5/5 Choose target');
     expect(output).toContain('[>] Choose target: /channels show telegram');
     expect(output).toContain('Review allowlist');
     expect(output).toContain('/channels policies');
@@ -322,7 +322,7 @@ describe('/channels command', () => {
 
     const output = printed.join('\n');
     expect(output).toContain('Channel Triage');
-    expect(output).toContain('summary: 0 channel setup blocker(s), 1 channel(s) without a default target, 1 delivery attention item(s), 1 retry candidate(s), 1 visible surface message(s), 1 route binding(s).');
+    expect(output).toContain('summary: 0 channel setup blocker(s), 1 channel(s) without a default target, 1 failed delivery attempt(s) to review or retry, 1 visible surface message(s), 1 route binding(s).');
     expect(output).toContain('inbox: visible_surface_messages; provider inbox feed not_published_by_current_channel_contract');
     expect(output).toContain('delivery-1: failed webhook https://hooks.example.test/...');
     expect(output).toContain('error=HTTP 500 token=[redacted]');

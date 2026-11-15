@@ -24,7 +24,8 @@ export interface AgentWorkspaceChannelStatus {
 }
 
 export type AgentWorkspaceChannelSetupGuideStatus = 'ready' | 'attention' | 'setup-needed';
-export type AgentWorkspaceChannelSetupGuideStepStatus = 'complete' | 'current' | 'pending';
+/** `then` marks a step that follows a configured channel and is not counted as progress. */
+export type AgentWorkspaceChannelSetupGuideStepStatus = 'complete' | 'current' | 'pending' | 'then';
 export type AgentWorkspaceChannelSetupGuideStepSafety = 'read-only' | 'settings' | 'confirmed';
 
 export interface AgentWorkspaceChannelSetupGuideStep {
@@ -365,31 +366,53 @@ function summarizeGuideChannel(channel: AgentWorkspaceChannelStatus): string {
 }
 
 function rankedChannelGuideChannels(channels: readonly AgentWorkspaceChannelStatus[]): readonly AgentWorkspaceChannelStatus[] {
+  // A channel whose configuration could not be read needs attention most.
   const rank = (channel: AgentWorkspaceChannelStatus): number => {
-    if (channel.setupState === 'needs-config') return 0;
-    if (channel.setupState === 'needs-target') return 1;
-    if (channel.setupState === 'disabled') return 2;
-    return 3;
+    if (channel.setupState === 'unknown') return 0;
+    if (channel.setupState === 'needs-config') return 1;
+    if (channel.setupState === 'needs-target') return 2;
+    if (channel.setupState === 'ready') return 3;
+    return 4;
   };
   return [...channels].sort((left, right) => rank(left) - rank(right) || left.label.localeCompare(right.label));
 }
 
+/**
+ * The channel the guide is about: one the owner named, else the first channel
+ * he enabled (or whose configuration could not be read). Nothing enabled means
+ * no channel has been chosen yet, so the guide starts at "Choose channel".
+ */
 function currentGuideChannel(channels: readonly AgentWorkspaceChannelStatus[]): AgentWorkspaceChannelStatus | null {
-  const ranked = rankedChannelGuideChannels(channels);
-  return ranked[0] ?? null;
+  return rankedChannelGuideChannels(channels).find((channel) => channel.enabled || channel.setupState === 'unknown') ?? null;
 }
 
-function currentGuideStepId(channel: AgentWorkspaceChannelStatus | null): string {
+/** Steps whose completion follows from the channel's configuration. */
+const GUIDE_PROGRESS_STEPS = [
+  'choose-channel',
+  'enable-channel',
+  'inspect-setup-schema',
+  'configure-secrets',
+  'choose-delivery-target',
+] as const;
+
+/** Steps that follow a configured channel; nothing records them, so they are not counted as progress. */
+const GUIDE_THEN_STEPS = ['review-policy', 'run-live-checks', 'send-explicit-test'] as const;
+
+type GuideStepId = typeof GUIDE_PROGRESS_STEPS[number] | typeof GUIDE_THEN_STEPS[number];
+
+function currentGuideStepId(channel: AgentWorkspaceChannelStatus | null): typeof GUIDE_PROGRESS_STEPS[number] | null {
   if (!channel) return 'choose-channel';
   if (!channel.enabled) return 'enable-channel';
-  if (channel.setupState === 'needs-config') return 'inspect-setup-schema';
+  if (channel.setupState === 'needs-config' || channel.setupState === 'unknown') return 'inspect-setup-schema';
   if (channel.setupState === 'needs-target') return 'choose-delivery-target';
-  return 'review-policy';
+  return null;
 }
 
-function guideStepStatus(stepId: string, currentStepId: string, order: readonly string[]): AgentWorkspaceChannelSetupGuideStepStatus {
-  const stepIndex = order.indexOf(stepId);
-  const currentIndex = order.indexOf(currentStepId);
+function guideStepStatus(stepId: GuideStepId, currentStepId: typeof GUIDE_PROGRESS_STEPS[number] | null): AgentWorkspaceChannelSetupGuideStepStatus {
+  if ((GUIDE_THEN_STEPS as readonly string[]).includes(stepId)) return 'then';
+  if (currentStepId === null) return 'complete';
+  const stepIndex = GUIDE_PROGRESS_STEPS.indexOf(stepId as typeof GUIDE_PROGRESS_STEPS[number]);
+  const currentIndex = GUIDE_PROGRESS_STEPS.indexOf(currentStepId);
   if (stepIndex < currentIndex) return 'complete';
   if (stepIndex === currentIndex) return 'current';
   return 'pending';
@@ -399,16 +422,6 @@ function buildGuideSteps(channel: AgentWorkspaceChannelStatus | null): readonly 
   const channelId = channel?.id ?? '<channel-id>';
   const channelLabel = channel?.label ?? 'a channel';
   const currentStepId = currentGuideStepId(channel);
-  const order = [
-    'choose-channel',
-    'enable-channel',
-    'inspect-setup-schema',
-    'configure-secrets',
-    'choose-delivery-target',
-    'review-policy',
-    'run-live-checks',
-    'send-explicit-test',
-  ] as const;
   const missingConfig = channel && channel.missingRequiredKeys.length > 0
     ? channel.missingRequiredKeys.join(', ')
     : 'the required secret refs or host-owned settings';
@@ -416,7 +429,7 @@ function buildGuideSteps(channel: AgentWorkspaceChannelStatus | null): readonly 
     ? channel.defaultTargetKeys.join(', ')
     : 'an explicit delivery target';
   const makeStep = (
-    id: typeof order[number],
+    id: GuideStepId,
     label: string,
     detail: string,
     userRoute: string,
@@ -425,7 +438,7 @@ function buildGuideSteps(channel: AgentWorkspaceChannelStatus | null): readonly 
   ): AgentWorkspaceChannelSetupGuideStep => ({
     id,
     label,
-    status: guideStepStatus(id, currentStepId, order),
+    status: guideStepStatus(id, currentStepId),
     detail,
     userRoute,
     modelRoute,
@@ -488,14 +501,23 @@ function buildGuideSteps(channel: AgentWorkspaceChannelStatus | null): readonly 
       `channels action:"channel" channelId:"${channelId}" includeParameters:true`,
       'read-only',
     ),
-    makeStep(
-      'send-explicit-test',
-      'Send explicit test',
-      'Send one test message only after the user asks for that exact target and confirms the send.',
-      `/channels send --channel ${channelId}:route:Label --message "Test from GoodVibes Agent" --yes`,
-      'agent_channel_send explicitUserRequest:"..."',
-      'confirmed',
-    ),
+    channel?.defaultTarget === 'configured'
+      ? makeStep(
+        'send-explicit-test',
+        'Send explicit test',
+        `Send one test message to the configured ${channelLabel} default target, only after the user asks for it and confirms the send.`,
+        `/channels send --channel ${channelId} --message "Test from GoodVibes Agent" --yes`,
+        `agent_channel_send channel:"${channelId}"`,
+        'confirmed',
+      )
+      : makeStep(
+        'send-explicit-test',
+        'Send explicit test',
+        `A test send needs a target: configure ${targetKeys} for ${channelLabel}, or name the route the user gives on the send itself.`,
+        `/channels show ${channelId}`,
+        `channels action:"channel" channelId:"${channelId}" includeParameters:true`,
+        'confirmed',
+      ),
   ];
 }
 
@@ -520,15 +542,21 @@ export function buildAgentWorkspaceChannelSetupGuide(
       : 'setup-needed';
   const steps = buildGuideSteps(current);
   const currentStep = steps.find((step) => step.status === 'current') ?? null;
+  const progressSteps = steps.filter((step) => step.status !== 'then');
+  const completedSteps = progressSteps.filter((step) => step.status === 'complete').length;
   const summary = status === 'attention'
     ? `${attentionChannels} enabled channel(s) need setup. Start with ${current?.label ?? 'the first attention channel'}.`
     : status === 'ready'
       ? `${readyChannels}/${channels.length} channel(s) ready. Review allowlists and use explicit delivery tests only on request.`
-      : 'No channel is ready yet. Choose one channel, enable it intentionally, then configure only that surface.';
+      : current
+      ? `${current.label} is enabled and not ready yet. Finish its setup, then configure only the surfaces you want.`
+      : 'No channel is enabled yet. Choose one channel, enable it intentionally, then configure only that surface.';
   return {
     status,
     summary,
-    progressLabel: currentStep ? `${steps.findIndex((step) => step.id === currentStep.id) + 1}/${steps.length} ${currentStep.label}` : `0/${steps.length}`,
+    progressLabel: currentStep
+      ? `${completedSteps + 1}/${progressSteps.length} ${currentStep.label}`
+      : `${completedSteps}/${progressSteps.length} set up; then review the allowlist, run live checks and send a test`,
     totalChannels: channels.length,
     enabledChannels,
     readyChannels,

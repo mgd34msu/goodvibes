@@ -167,7 +167,6 @@ export function createAgentModelCompareRouteDecisionEditor(defaults: AgentWorksp
       : 'Record that the current Agent model route should stay unchanged for a revealed saved judgment.',
     fields: [
       { id: 'artifactId', label: 'Judgment artifact id', value: artifactId, required: true, multiline: false, hint: artifactHint },
-      { id: 'decision', label: 'Decision', value: 'left-unchanged', required: true, multiline: false, hint: 'left-unchanged. Use Apply Compare Winner for route updates.' },
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to save the route-decision receipt without changing the selected model.' },
     ],
   };

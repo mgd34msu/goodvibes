@@ -10,219 +10,229 @@
  *
  * `agent-workspace-types.ts` re-exports both names, so every existing import
  * site keeps working and there is one public place to import them from.
+ *
+ * The kinds are one list of values and the types are read from it, so code
+ * can enumerate every form (a reachability check walks the list against the
+ * workspace rows) and the union cannot drift from the list.
  */
 
-export type AgentWorkspaceLocalEditorKind = 'memory' | 'note' | 'persona' | 'skill' | 'routine' | 'profile';
+export const AGENT_WORKSPACE_LOCAL_EDITOR_KINDS = ['memory', 'note', 'persona', 'skill', 'routine', 'profile'] as const;
 
-export type AgentWorkspaceEditorKind =
-  | AgentWorkspaceLocalEditorKind
-  | 'web-research'
-  | 'web-fetch'
-  | 'research-run'
-  | 'research-source'
-  | 'research-report'
-  | 'knowledge-url'
-  | 'knowledge-urls'
-  | 'knowledge-file'
-  | 'knowledge-bookmarks'
-  | 'knowledge-browser-history'
-  | 'knowledge-connector-ingest'
-  | 'knowledge-connector-show'
-  | 'knowledge-connector-doctor'
-  | 'knowledge-reindex'
-  | 'knowledge-search'
-  | 'knowledge-ask'
-  | 'knowledge-get'
-  | 'knowledge-map'
-  | 'knowledge-review-issue'
-  | 'knowledge-consolidate'
-  | 'knowledge-packet'
-  | 'knowledge-explain'
+export type AgentWorkspaceLocalEditorKind = typeof AGENT_WORKSPACE_LOCAL_EDITOR_KINDS[number];
+
+export const AGENT_WORKSPACE_EDITOR_KINDS = [
+  ...AGENT_WORKSPACE_LOCAL_EDITOR_KINDS,
+  'web-research',
+  'web-fetch',
+  'research-run',
+  'research-source',
+  'research-report',
+  'knowledge-url',
+  'knowledge-urls',
+  'knowledge-file',
+  'knowledge-bookmarks',
+  'knowledge-browser-history',
+  'knowledge-connector-ingest',
+  'knowledge-connector-show',
+  'knowledge-connector-doctor',
+  'knowledge-reindex',
+  'knowledge-search',
+  'knowledge-ask',
+  'knowledge-get',
+  'knowledge-map',
+  'knowledge-review-issue',
+  'knowledge-consolidate',
+  'knowledge-packet',
+  'knowledge-explain',
   // The owner profile, what the platform knows about HIM. Distinct from the
   // 'profile' kind above, which is an isolated Agent profile home; nothing here
   // is called `profile` unqualified, for the reason docs/owner-profile.md §3
   // gives.
-  | 'owner-profile-read'
-  | 'owner-profile-get'
-  | 'owner-profile-person'
-  | 'owner-profile-provenance'
-  | 'owner-profile-set'
-  | 'owner-profile-forget'
-  | 'owner-profile-forget-note'
-  | 'owner-profile-status'
-  | 'document-browse'
-  | 'document-show'
-  | 'document-create'
-  | 'document-update'
-  | 'document-review'
-  | 'document-comment'
-  | 'document-resolve-comment'
-  | 'document-suggest'
-  | 'document-accept-suggestion'
-  | 'document-reject-suggestion'
-  | 'document-insert-artifact'
-  | 'document-attach-artifact'
-  | 'document-export'
-  | 'document-reviewer-readiness'
-  | 'document-review-packet-wizard'
-  | 'document-review-packet-preset'
-  | 'document-review-packet-preset-refresh'
-  | 'memory-search'
-  | 'memory-get'
-  | 'memory-explain'
-  | 'memory-promote'
-  | 'memory-link'
-  | 'memory-export'
-  | 'memory-import'
-  | 'memory-handoff-export'
-  | 'memory-handoff-inspect'
-  | 'memory-handoff-import'
-  | 'memory-vector-rebuild'
-  | 'persona-search'
-  | 'persona-show'
-  | 'skill-search'
-  | 'skill-show'
-  | 'routine-search'
-  | 'routine-show'
-  | 'mcp-server'
-  | 'mcp-tools-server'
-  | 'mcp-repair'
-  | 'notify-webhook'
-  | 'notify-webhook-remove'
-  | 'notify-webhook-clear'
-  | 'notify-webhook-test'
-  | 'notify-send'
-  | 'secret-set'
-  | 'secret-link'
-  | 'secret-test'
-  | 'secret-delete'
-  | 'tts-prompt'
-  | 'image-input'
-  | 'artifact-browser'
-  | 'artifact-show'
-  | 'artifact-export-file'
-  | 'artifact-export-package'
-  | 'artifact-promote-knowledge'
-  | 'media-generate'
-  | 'model-compare'
-  | 'local-model-benchmark'
-  | 'model-compare-review'
-  | 'model-compare-handoff-diff'
-  | 'model-compare-judge'
-  | 'model-compare-apply'
-  | 'model-compare-route-decision'
-  | 'model-compare-export'
-  | 'model-compare-analytics'
-  | 'skill-bundle'
-  | 'skill-bundle-search'
-  | 'skill-bundle-show'
-  | 'skill-bundle-update'
-  | 'skill-bundle-enable'
-  | 'skill-bundle-disable'
-  | 'skill-bundle-review'
-  | 'skill-bundle-stale'
-  | 'skill-bundle-delete'
-  | 'persona-discovery-import'
-  | 'routine-discovery-import'
-  | 'skill-discovery-import'
-  | 'skill-standard-import'
-  | 'skill-standard-export'
-  | 'learned-behavior'
-  | 'profile-template-export'
-  | 'profile-template-import'
-  | 'profile-template-show'
-  | 'profile-template-from-discovered'
-  | 'profile-from-discovered'
-  | 'profile-show'
-  | 'profile-default'
-  | 'profile-default-clear'
-  | 'profile-delete'
-  | 'provider-add'
-  | 'provider-remove'
-  | 'provider-use'
-  | 'provider-inspect'
-  | 'provider-routes'
-  | 'provider-account-repair'
-  | 'auth-show'
-  | 'auth-repair'
-  | 'auth-bundle-export'
-  | 'auth-bundle-inspect'
-  | 'trust-bundle-export'
-  | 'trust-bundle-inspect'
-  | 'support-bundle-export'
-  | 'support-bundle-inspect'
-  | 'support-bundle-import'
-  | 'subscription-inspect'
-  | 'subscription-login-start'
-  | 'subscription-login-finish'
-  | 'subscription-logout'
-  | 'subscription-bundle-export'
-  | 'subscription-bundle-inspect'
-  | 'voice-enable'
-  | 'voice-disable'
-  | 'voice-bundle-export'
-  | 'voice-bundle-inspect'
-  | 'conversation-export'
-  | 'conversation-events'
-  | 'conversation-groups'
-  | 'conversation-find'
-  | 'effort-level'
-  | 'channel-show'
-  | 'channel-doctor'
-  | 'channel-setup'
-  | 'channel-send'
-  | 'document-review-packet-share'
-  | 'session-save'
-  | 'session-load'
-  | 'session-rename'
-  | 'session-resume'
-  | 'session-info'
-  | 'session-export-saved'
-  | 'session-search'
-  | 'session-delete'
-  | 'session-fork'
-  | 'session-graph'
-  | 'task-list-filter'
-  | 'task-show'
-  | 'task-output'
-  | 'health-repair'
-  | 'approval-review'
-  | 'approval-approve'
-  | 'approval-deny'
-  | 'approval-cancel'
-  | 'automation-job-run'
-  | 'automation-job-pause'
-  | 'automation-job-resume'
-  | 'automation-run-cancel'
-  | 'automation-run-retry'
-  | 'schedule-run'
-  | 'schedule-edit'
-  | 'routine-receipt'
-  | 'schedule-receipt'
-  | 'mode-preset'
-  | 'mode-domain'
-  | 'setting-set'
-  | 'model-pin'
-  | 'model-unpin'
-  | 'delegate-task'
-  | 'workplan-add'
-  | 'workplan-show'
-  | 'workplan-status'
-  | 'workplan-delete'
-  | 'workplan-clear-completed'
-  | 'routine-schedule'
-  | 'reminder-schedule'
-  | 'email-connect-wizard'
-  | 'calendar-connect'
-  | 'calendar-subscribe-wizard'
-  | 'calendar-oauth-google'
-  | 'calendar-oauth-outlook'
-  | 'google-status'
-  | 'google-connect'
-  | 'google-reauthorize'
-  | 'google-forget'
-  | 'google-setup-walkthrough'
-  | 'google-setup-app-password'
-  | 'google-adopt'
-  | 'google-client-file'
-  | 'google-client-manual';
+  'owner-profile-read',
+  'owner-profile-get',
+  'owner-profile-person',
+  'owner-profile-provenance',
+  'owner-profile-set',
+  'owner-profile-forget',
+  'owner-profile-forget-note',
+  'owner-profile-status',
+  'document-browse',
+  'document-show',
+  'document-create',
+  'document-update',
+  'document-review',
+  'document-comment',
+  'document-resolve-comment',
+  'document-suggest',
+  'document-accept-suggestion',
+  'document-reject-suggestion',
+  'document-insert-artifact',
+  'document-attach-artifact',
+  'document-export',
+  'document-reviewer-readiness',
+  'document-review-packet-wizard',
+  'document-review-packet-preset',
+  'document-review-packet-preset-refresh',
+  'memory-search',
+  'memory-get',
+  'memory-explain',
+  'memory-promote',
+  'memory-link',
+  'memory-export',
+  'memory-import',
+  'memory-handoff-export',
+  'memory-handoff-inspect',
+  'memory-handoff-import',
+  'memory-vector-rebuild',
+  'persona-search',
+  'persona-show',
+  'skill-search',
+  'skill-show',
+  'routine-search',
+  'routine-show',
+  'mcp-server',
+  'mcp-tools-server',
+  'mcp-repair',
+  'notify-webhook',
+  'notify-webhook-remove',
+  'notify-webhook-clear',
+  'notify-webhook-test',
+  'notify-send',
+  'secret-set',
+  'secret-link',
+  'secret-test',
+  'secret-delete',
+  'tts-prompt',
+  'image-input',
+  'artifact-browser',
+  'artifact-show',
+  'artifact-export-file',
+  'artifact-export-package',
+  'artifact-promote-knowledge',
+  'media-generate',
+  'model-compare',
+  'local-model-benchmark',
+  'model-compare-review',
+  'model-compare-handoff-diff',
+  'model-compare-judge',
+  'model-compare-apply',
+  'model-compare-route-decision',
+  'model-compare-export',
+  'model-compare-analytics',
+  'skill-bundle',
+  'skill-bundle-search',
+  'skill-bundle-show',
+  'skill-bundle-update',
+  'skill-bundle-enable',
+  'skill-bundle-disable',
+  'skill-bundle-review',
+  'skill-bundle-stale',
+  'skill-bundle-delete',
+  'persona-discovery-import',
+  'routine-discovery-import',
+  'skill-discovery-import',
+  'skill-standard-import',
+  'skill-standard-export',
+  'learned-behavior',
+  'profile-template-export',
+  'profile-template-import',
+  'profile-template-show',
+  'profile-template-from-discovered',
+  'profile-from-discovered',
+  'profile-show',
+  'profile-default',
+  'profile-default-clear',
+  'profile-delete',
+  'provider-add',
+  'provider-remove',
+  'provider-use',
+  'provider-inspect',
+  'provider-routes',
+  'provider-account-repair',
+  'auth-show',
+  'auth-repair',
+  'auth-bundle-export',
+  'auth-bundle-inspect',
+  'trust-bundle-export',
+  'trust-bundle-inspect',
+  'support-bundle-export',
+  'support-bundle-inspect',
+  'support-bundle-import',
+  'subscription-inspect',
+  'subscription-login-start',
+  'subscription-login-finish',
+  'subscription-logout',
+  'subscription-bundle-export',
+  'subscription-bundle-inspect',
+  'voice-enable',
+  'voice-disable',
+  'voice-bundle-export',
+  'voice-bundle-inspect',
+  'conversation-export',
+  'conversation-events',
+  'conversation-groups',
+  'conversation-find',
+  'effort-level',
+  'channel-show',
+  'channel-doctor',
+  'channel-setup',
+  'channel-send',
+  'document-review-packet-share',
+  'session-save',
+  'session-load',
+  'session-rename',
+  'session-resume',
+  'session-info',
+  'session-export-saved',
+  'session-search',
+  'session-delete',
+  'session-fork',
+  'session-graph',
+  'task-list-filter',
+  'task-show',
+  'task-output',
+  'health-repair',
+  'approval-review',
+  'approval-approve',
+  'approval-deny',
+  'approval-cancel',
+  'automation-job-run',
+  'automation-job-pause',
+  'automation-job-resume',
+  'automation-run-cancel',
+  'automation-run-retry',
+  'schedule-run',
+  'schedule-edit',
+  'routine-receipt',
+  'schedule-receipt',
+  'mode-preset',
+  'mode-domain',
+  'setting-set',
+  'settings-import',
+  'model-pin',
+  'model-unpin',
+  'delegate-task',
+  'workplan-add',
+  'workplan-show',
+  'workplan-status',
+  'workplan-delete',
+  'workplan-clear-completed',
+  'routine-schedule',
+  'reminder-schedule',
+  'email-connect-wizard',
+  'calendar-connect',
+  'calendar-subscribe-wizard',
+  'calendar-oauth-google',
+  'calendar-oauth-outlook',
+  'google-status',
+  'google-connect',
+  'google-reauthorize',
+  'google-forget',
+  'google-setup-walkthrough',
+  'google-setup-app-password',
+  'google-adopt',
+  'google-client-file',
+  'google-client-manual',
+] as const;
+
+export type AgentWorkspaceEditorKind = typeof AGENT_WORKSPACE_EDITOR_KINDS[number];

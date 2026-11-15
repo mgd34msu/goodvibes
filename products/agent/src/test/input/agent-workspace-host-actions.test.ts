@@ -100,7 +100,7 @@ describe('calendar credentials on a connected host', () => {
     });
     let secondRenders = 0;
     trySubmitDirectHostActionEditor(h, editor, ctx, fields, () => { secondRenders += 1; });
-    expect(h.status).toContain('Still working');
+    expect(h.status).toContain('still running');
     expect(secondRenders).toBe(1);
     connected.release();
     await first;
@@ -214,7 +214,7 @@ describe('inbox connect form', () => {
     expect(cm.get('email.enabled' as never)).not.toBe(true);
   });
 
-  test('a password that cannot be stored (a thrown failure) leaves the earlier fields as they were', async () => {
+  test('a password that cannot be stored says what was stored and leaves the inbox disabled', async () => {
     const { ctx, cm } = contextAt(makeProjectTempDir('host-actions-email-throw'));
     const h = host();
     await submitAgentWorkspaceEmailConnectWizardEditor(h, createEmailConnectWizardEditor(null), ctx, reader({ ...VALID, confirm: 'no' }));
@@ -223,9 +223,12 @@ describe('inbox connect form', () => {
       ...secrets,
       set: async () => { throw new Error('secret store unavailable'); },
     };
-    await submitAgentWorkspaceEmailConnectWizardEditor(h, createEmailConnectWizardEditor(null), ctx, reader(VALID));
+    await submitAgentWorkspaceEmailConnectWizardEditor(h, createEmailConnectWizardEditor(null), ctx, reader(VALID), () => ({
+      testConnection: async () => ({ ok: true }),
+    }));
     expect(h.lastActionResult?.kind).toBe('error');
     expect(h.status).toContain('secret store unavailable');
+    expect(cm.get('email.enabled' as never)).not.toBe(true);
     expect(cm.get('email.imapHost' as never)).toBe(before);
     expect(cm.get('email.imapHost' as never)).not.toBe('imap.example.test');
   });

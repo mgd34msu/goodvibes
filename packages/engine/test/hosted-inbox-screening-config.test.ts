@@ -16,6 +16,7 @@ import {
 } from '../platform/src/platform/config/index.js';
 import { getFeatureFlagConfig } from '../platform/src/platform/runtime/feature-flags/flag-config-map.js';
 import { SurfaceRegistry } from '../platform/src/platform/channels/surface-registry.js';
+import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -75,7 +76,13 @@ describe('hosted inbox screening configuration boundary', () => {
   test('screening consent preserves terminal availability and does not enable inbox adapters', () => {
     const { manager } = fixture();
     manager.set('surfaces.hostedInboxScreening', 'abacus-typesafe-provider-managed');
-    const surfaces = new SurfaceRegistry(manager).syncConfiguredSurfaces();
+    const registry = new SurfaceRegistry(manager);
+    const plugins = new ChannelPluginRegistry();
+    for (const [surface, displayName] of [['tui', 'Terminal UI'], ['slack', 'Slack'], ['discord', 'Discord']] as const) {
+      plugins.register({ id: surface, surface, displayName, capabilities: ['ingress'] } as never);
+    }
+    registry.attachPluginRegistry(plugins);
+    const surfaces = registry.syncConfiguredSurfaces();
     expect(surfaces.find((surface) => surface.kind === 'tui')?.enabled).toBe(true);
     expect(surfaces.find((surface) => surface.kind === 'slack')?.enabled).toBe(false);
     expect(surfaces.find((surface) => surface.kind === 'discord')?.enabled).toBe(false);

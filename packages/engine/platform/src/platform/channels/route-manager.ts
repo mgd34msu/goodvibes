@@ -16,6 +16,17 @@ import type { AutomationSurfaceKind } from '../automation/types.js';
 import { AutomationRouteStore } from '../automation/store/routes.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled } from '../runtime/feature-flags/index.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
+
+/**
+ * A thread or per-message binding nobody has written through for this long is
+ * dropped when the bindings load: its conversation is over, and a reply to it
+ * later simply binds again.
+ */
+const IDLE_THREAD_BINDING_MS = 30 * 24 * 60 * 60 * 1000;
+/** How long last-seen times and per-message values wait in memory before they are written. */
+const TOUCH_FLUSH_DELAY_MS = 60_000;
 
 export interface UpsertRouteBindingInput {
   readonly id?: string | undefined;
@@ -94,17 +105,29 @@ const DIFFED_BINDING_FIELDS = ['sessionPolicy', 'threadPolicy', 'deliveryGuarant
 
 /**
  * The fields an upsert actually changed (`lastSeenAt` and `updatedAt` move on every touch and are not changes).
- * `metadata` is not diffed: adapters put per-message values in it (update, event and message ids), so it differs on
- * every inbound message and would make each one an update. The new metadata is still stored.
+ * `metadata` values are not diffed: adapters put per-message values in it (update, event and message ids), so it
+ * differs on every inbound message and would make each one an update. A metadata key the binding did not have yet
+ * is a change.
  */
 function changedBindingFields(previous: AutomationRouteBinding, next: AutomationRouteBinding): string[] {
-  return DIFFED_BINDING_FIELDS.filter((field) => previous[field] !== next[field]);
+  const changed: string[] = DIFFED_BINDING_FIELDS.filter((field) => previous[field] !== next[field]);
+  if (Object.keys(next.metadata).some((key) => !Object.hasOwn(previous.metadata, key))) changed.push('metadata');
+  return changed;
+}
+
+function isIdleThreadBinding(binding: AutomationRouteBinding, now: number): boolean {
+  return (binding.kind === 'thread' || binding.kind === 'message') && now - binding.lastSeenAt > IDLE_THREAD_BINDING_MS;
 }
 
 export class RouteBindingManager {
   private readonly store: AutomationRouteStore;
   private readonly incarnations = new Map<string, string>();
   private readonly bindings = new Map<string, AutomationRouteBinding>();
+  /** Natural key to binding id, so an inbound message finds its binding without a scan. */
+  private readonly byNaturalKey = new Map<string, string>();
+  /** In-memory changes (last-seen, per-message values) not written yet. */
+  private dirty = false;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private runtimeDispatch: DomainDispatch | null = null;
   private runtimeBus: RuntimeEventBus | null = null;
   private readonly featureFlags: RouteBindingFeatureFlags | null;
@@ -178,11 +201,68 @@ export class RouteBindingManager {
   private async load(): Promise<void> {
     const snapshot = await this.store.load();
     this.bindings.clear();
-    for (const binding of snapshot.routes) {
-      this.bindings.set(binding.id, binding);
+    this.byNaturalKey.clear();
+    const now = Date.now();
+    let reaped = 0;
+    // Oldest first, so the newest binding owns a natural key two rows share.
+    for (const binding of [...snapshot.routes].sort((a, b) => a.lastSeenAt - b.lastSeenAt)) {
+      if (isIdleThreadBinding(binding, now)) { reaped += 1; continue; }
+      this.place(binding);
       this.runtimeDispatch?.syncRouteBinding(binding, 'routes.load');
     }
     this.loaded = true;
+    if (reaped > 0) {
+      logger.info('Route bindings: dropped thread bindings idle for more than 30 days', { reaped });
+      this.markDirty();
+    }
+  }
+
+  private place(binding: AutomationRouteBinding): void {
+    const previous = this.bindings.get(binding.id);
+    if (previous) {
+      const previousKey = routeNaturalKey(previous);
+      if (this.byNaturalKey.get(previousKey) === binding.id) this.byNaturalKey.delete(previousKey);
+    }
+    this.bindings.set(binding.id, binding);
+    this.byNaturalKey.set(routeNaturalKey(binding), binding.id);
+  }
+
+  private unplace(bindingId: string): void {
+    const previous = this.bindings.get(bindingId);
+    if (!previous) return;
+    const key = routeNaturalKey(previous);
+    if (this.byNaturalKey.get(key) === bindingId) this.byNaturalKey.delete(key);
+    this.bindings.delete(bindingId);
+  }
+
+  /** Remember an in-memory change and write it with the next real change, or within a minute. */
+  private markDirty(): void {
+    this.dirty = true;
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      void this.flush().catch((error: unknown) => {
+        logger.warn('Route bindings: last-seen times could not be written; they are kept in memory', { error: summarizeError(error) });
+      });
+    }, TOUCH_FLUSH_DELAY_MS);
+    (this.flushTimer as unknown as { unref?: () => void }).unref?.();
+  }
+
+  /**
+   * Write in-memory changes (last-seen times, per-message values) now. The
+   * daemon calls this when it stops; otherwise they are written within a
+   * minute or with the next real change, whichever comes first.
+   */
+  async flush(): Promise<void> {
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+    if (!this.dirty || !this.loaded) return;
+    this.dirty = false;
+    try {
+      await this.store.save(sortBindings(this.bindings.values()));
+    } catch (error) {
+      this.dirty = true;
+      throw error;
+    }
   }
 
   /**
@@ -194,12 +274,15 @@ export class RouteBindingManager {
    */
   private async commit(bindingId: string, next: AutomationRouteBinding | undefined): Promise<void> {
     const previous = this.bindings.get(bindingId);
-    if (next) this.bindings.set(bindingId, next); else this.bindings.delete(bindingId);
+    if (next) this.place(next); else this.unplace(bindingId);
+    const wasDirty = this.dirty;
+    this.dirty = false;
     try {
       await this.store.save(sortBindings(this.bindings.values()));
     } catch (error) {
+      this.dirty = wasDirty;
       if (this.bindings.get(bindingId) === next) {
-        if (previous) this.bindings.set(bindingId, previous); else this.bindings.delete(bindingId);
+        if (previous) this.place(previous); else this.unplace(bindingId);
       }
       throw error;
     }
@@ -225,14 +308,13 @@ export class RouteBindingManager {
 
   resolve(surfaceKind: AutomationSurfaceKind, externalId: string, threadId?: string): AutomationRouteBinding | undefined {
     if (!this.isEnabled()) return undefined;
-    const binding = this.listBindings().find((entry) => {
-      if (entry.surfaceKind !== surfaceKind) return false;
-      if (entry.externalId !== externalId) return false;
-      if (threadId) {
-        return entry.threadId === threadId || entry.channelId === threadId;
-      }
-      return true;
-    });
+    // The most recently seen match, in one pass (no sort of every binding).
+    let binding: AutomationRouteBinding | undefined;
+    for (const entry of this.bindings.values()) {
+      if (entry.surfaceKind !== surfaceKind || entry.externalId !== externalId) continue;
+      if (threadId && entry.threadId !== threadId && entry.channelId !== threadId) continue;
+      if (!binding || entry.lastSeenAt > binding.lastSeenAt || (entry.lastSeenAt === binding.lastSeenAt && entry.id < binding.id)) binding = entry;
+    }
     if (!binding) return undefined;
     const eventSurfaceKind = toEventSurfaceKind(binding.surfaceKind);
     if (this.runtimeBus) {
@@ -257,9 +339,8 @@ export class RouteBindingManager {
     this.requireEnabled('upsert route bindings');
     await this.start();
     const now = Date.now();
-    const previous = input.id
-      ? this.bindings.get(input.id)
-      : this.listBindings().find((entry) => routeNaturalKey(entry) === routeNaturalKey(input));
+    const knownId = input.id ?? this.byNaturalKey.get(routeNaturalKey(input));
+    const previous = knownId ? this.bindings.get(knownId) : undefined;
     const binding: AutomationRouteBinding = {
       id: input.id ?? previous?.id ?? `route-${randomUUID()}`,
       kind: input.kind,
@@ -283,7 +364,16 @@ export class RouteBindingManager {
         ...(input.metadata ?? {}),
       },
     };
-    await this.commit(binding.id, binding);
+    // Every inbound message upserts its route, and usually only `lastSeenAt`
+    // and per-message values moved. Those stay in memory (written within a
+    // minute); the file is written only when something durable changed.
+    const changedFields = previous ? changedBindingFields(previous, binding) : [];
+    if (previous && changedFields.length === 0 && previous.surfaceId === binding.surfaceId && previous.kind === binding.kind) {
+      this.place(binding);
+      this.markDirty();
+    } else {
+      await this.commit(binding.id, binding);
+    }
     this.runtimeDispatch?.syncRouteBinding(binding, 'routes.upsert');
 
     const eventSurfaceKind = toEventSurfaceKind(binding.surfaceKind);
@@ -291,10 +381,7 @@ export class RouteBindingManager {
       const targetId = binding.sessionId ?? binding.runId ?? binding.jobId ?? binding.externalId;
       const targetKind = binding.sessionId ? 'session' : binding.runId ? 'run' : binding.jobId ? 'job' : 'message';
       if (previous) {
-        // Every inbound message upserts its route, and usually only `lastSeenAt`
-        // moved. An UPDATED event names what really changed, and a touch alone is
-        // not one.
-        const changedFields = changedBindingFields(previous, binding);
+        // An UPDATED event names what really changed, and a touch alone is not one.
         if (changedFields.length > 0) {
           emitRouteBindingUpdated(this.runtimeBus, {
             sessionId: binding.sessionId ?? 'routes',
@@ -335,7 +422,14 @@ export class RouteBindingManager {
         replyTargetId,
       },
     };
-    await this.commit(bindingId, updated);
+    // A new reply target on a binding that already had one is a per-message
+    // value: kept in memory and written within a minute, like last-seen.
+    if (updated.threadId === binding.threadId && Object.hasOwn(binding.metadata, 'replyTargetId')) {
+      this.place(updated);
+      this.markDirty();
+    } else {
+      await this.commit(bindingId, updated);
+    }
     this.runtimeDispatch?.syncRouteBinding(updated, 'routes.reply-target');
     const eventSurfaceKind = toEventSurfaceKind(updated.surfaceKind);
     if (this.runtimeBus) {
@@ -424,6 +518,19 @@ export class RouteBindingManager {
       });
     }
     return true;
+  }
+
+  /**
+   * A session closed: its thread and per-message bindings are over. Channel
+   * and direct-conversation bindings stay, since the next message in that
+   * conversation reuses them. Returns how many were removed.
+   */
+  async releaseSession(sessionId: string): Promise<number> {
+    if (!this.isEnabled()) return 0;
+    await this.start();
+    const ended = [...this.bindings.values()].filter((binding) => binding.sessionId === sessionId && (binding.kind === 'thread' || binding.kind === 'message'));
+    for (const binding of ended) await this.removeBinding(binding.id);
+    return ended.length;
   }
 
   recordFailure(surfaceKind: AutomationSurfaceKind, externalId: string, error: string): void {

@@ -153,7 +153,7 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
       externalId: from,
       channelId: from,
       title: from,
-      metadata: { ...payload, messageId, to },
+      metadata: { messageId, to },
     },
     text,
     logLabel: 'handleTelephonySurfaceWebhook',

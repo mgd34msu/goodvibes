@@ -65,6 +65,32 @@ export interface ChannelIngressAlarmDeps {
 }
 
 /**
+ * What happened to one inbound message, the only thing the alarm reads.
+ *
+ * - `processed`: the surface took the message (answered, started, continued).
+ * - `refused`: the request was turned away on purpose, a policy refusal, an
+ *   answer that was consumed, a bad signature, a malformed body. Redelivery
+ *   cannot change it and it says nothing about whether processing works, so
+ *   it neither starts nor ends a failure run.
+ * - `failed`: the message could not be processed and may be lost.
+ */
+export type IngressOutcome = 'processed' | 'refused' | 'failed';
+
+/**
+ * The one rule for turning an ingress answer into an outcome. A thrown error is
+ * `failed` at the caller. A missing answer is `refused` (nothing handled it).
+ * 408, 409 (could not be started), 429 and 5xx are failures; every other 4xx is
+ * a refusal; anything below 400 was processed.
+ */
+export function ingressOutcome(answer: Response | number | null | undefined): IngressOutcome {
+  if (answer === null || answer === undefined) return 'refused';
+  const status = typeof answer === 'number' ? answer : answer.status;
+  if (status >= 500 || status === 408 || status === 409 || status === 429) return 'failed';
+  if (status >= 400) return 'refused';
+  return 'processed';
+}
+
+/**
  * Per-surface latch over inbound-processing failures.
  *
  * Deliberately not per-message and not per-error-text: the question the owner
@@ -160,6 +186,12 @@ export class ChannelIngressAlarm {
       + `${previous.count === 1 ? 'message was' : 'messages were'} skipped while it was failing; `
       + 'those are not retried, so anything you sent in that window is worth sending again.',
     );
+  }
+
+  /** Record one message's outcome: only `processed` ends a run, only `failed` starts or extends one. */
+  record(surface: ChannelSurface, outcome: IngressOutcome, detail: string): void {
+    if (outcome === 'processed') this.recordSuccess(surface);
+    else if (outcome === 'failed') this.recordFailure(surface, detail);
   }
 
   /**

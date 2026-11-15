@@ -1,7 +1,8 @@
 /**
- * Owner allowlist gate for chat channels: the allowlist self-seeds from the
- * first identified sender (whoever pairs/configures the channel proves it by
- * messaging first, no separate add-yourself step exists), unknown senders are
+ * Owner allowlist gate for chat channels: with the owner inbox attached, the
+ * first unknown sender on an unowned surface is held as a claim the owner
+ * accepts; a host without an inbox seeds the first identified sender. Unknown
+ * senders are
  * ignored with one log line and no session, and a paired owner can approve,
  * deny, or steer a pending permission ask by replying in the channel, routed
  * through the same ApprovalBroker the TUI and webui use.
@@ -12,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.js';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
+import { createOwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.js';
 import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
 import { useApprovalReadings } from './helpers/approval-readings.ts';
 import { waitFor } from './_helpers/test-timeout.js';
@@ -111,6 +113,46 @@ describe('owner allowlist self-seeding', () => {
     }
     const ignored = infoLines.filter((line) => line.message.includes('unknown sender ignored'));
     expect(ignored.length).toBe(1);
+  });
+});
+
+describe('owner claim through the owner inbox', () => {
+  test('the first unknown sender is held as a claim; only an accepted claim makes them the owner', async () => {
+    const policy = makePolicyManager();
+    const dir = mkdtempSync(join(tmpdir(), 'gv-channel-owner-claim-'));
+    scratchDirs.push(dir);
+    const inbox = createOwnerInbox({ questionsPath: join(dir, 'owner-inbox.jsonl') });
+    policy.attachOwnerInbox(inbox);
+
+    const stranger = await policy.evaluateIngress({ surface: 'telegram', userId: 'U-STRANGER', conversationKind: 'direct', text: 'hi' });
+    expect(stranger).toMatchObject({ allowed: false, reason: 'owner-claim-pending' });
+    expect(policy.getPolicy('telegram').allowlistUserIds).toEqual([]);
+    const owner = await policy.evaluateIngress({ surface: 'telegram', userId: 'U-OWNER', conversationKind: 'direct', text: 'hello' });
+    expect(owner.allowed).toBe(false);
+
+    const claims = inbox.listNow({ kinds: ['claim'], status: 'open' });
+    expect(claims).toHaveLength(2);
+    const ownerClaim = claims.find((item) => item.metadata?.['userId'] === 'U-OWNER')!;
+    expect((await inbox.answer(ownerClaim.id, { option: 'accept' }, { actor: 'owner', surface: 'tui' })).applied).toBe(true);
+    await waitFor(() => policy.getPolicy('telegram').ownerId === 'U-OWNER');
+
+    expect(policy.getPolicy('telegram').allowlistUserIds).toEqual(['U-OWNER']);
+    expect((await policy.evaluateIngress({ surface: 'telegram', userId: 'U-OWNER', conversationKind: 'direct', text: 'again' })).allowed).toBe(true);
+    expect((await policy.evaluateIngress({ surface: 'telegram', userId: 'U-STRANGER', conversationKind: 'direct', text: 'again' })).allowed).toBe(false);
+    await waitFor(() => inbox.listNow({ kinds: ['claim'], status: 'open' }).length === 0);
+    inbox.dispose();
+  });
+
+  test('an open surface admits every sender and raises no claim', async () => {
+    const policy = makePolicyManager();
+    const dir = mkdtempSync(join(tmpdir(), 'gv-channel-owner-open-'));
+    scratchDirs.push(dir);
+    const inbox = createOwnerInbox({ questionsPath: join(dir, 'owner-inbox.jsonl') });
+    policy.attachOwnerInbox(inbox);
+    await policy.upsertPolicy('slack', { open: true });
+    expect((await policy.evaluateIngress({ surface: 'slack', userId: 'U-ANY', conversationKind: 'channel', channelId: 'C1', text: 'hi' })).allowed).toBe(true);
+    expect(inbox.listNow({ kinds: ['claim'] })).toHaveLength(0);
+    inbox.dispose();
   });
 });
 

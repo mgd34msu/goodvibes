@@ -7,8 +7,10 @@ const fixture = useGatewayFixture({ hostSessions: false });
 
 test('channel route observes the composed real surface registry', async () => {
   const response = await fixture().fetch('/api/surfaces'); expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ surfaces: fixture().services.surfaceRegistry.list() });
-  expect(fixture().services.surfaceRegistry.list().length).toBeGreaterThan(0);
+  const body = await response.json() as { surfaces: Array<{ id: string; enabled: boolean; state: string }> };
+  const listed = await fixture().services.surfaceRegistry.list();
+  expect(body.surfaces.map(({ id, enabled, state }) => [id, enabled, state])).toEqual(listed.map(({ id, enabled, state }) => [id, enabled, state]));
+  expect(listed.length).toBeGreaterThan(0);
 });
 test('integration route observes provider runtime snapshots from the real registry', async () => {
   const response = await fixture().fetch('/api/providers'); expect(response.status).toBe(200);

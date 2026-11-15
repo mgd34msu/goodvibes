@@ -3,39 +3,12 @@ import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicy
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
-import { peekChannelStatusContent, prepareChannelStatusContent } from '../platform/src/platform/channels/status-reading.js';
 import { readTouchesSecrets, forgetReadSecrets } from '../platform/src/platform/permissions/credential-read-defaults.js';
 
 let previous: JudgmentPort | undefined, installed = false;
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; forgetReadSecrets(); });
 const under = <T>(policy: DecisionModelPolicy, operation: () => T) => withDecisionModelPolicy(() => policy, operation);
 function install(port: JudgmentPort) { previous = installJudgmentPort(port); installed = true; }
-
-test.each(['Classic - Off', 'Preferred'] as const)('%s retains original progress notices without a semantic filter', async policy => {
-  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic decision outage'); }); install(fake.port);
-  await under(policy, async () => {
-    await prepareChannelStatusContent(['Reading src/config.ts.', 'Thinking…']);
-    expect(decisionModelPolicyState().operation).toBe('classic');
-    expect(peekChannelStatusContent('Reading src/config.ts.')).toBeUndefined();
-    const attempted = fake.requests.length;
-    expect(policy === 'Classic - Off' ? attempted === 0 : attempted > 0).toBe(true);
-    await prepareChannelStatusContent(['The build completed.']);
-    expect(fake.requests).toHaveLength(attempted);
-  });
-});
-
-test('Classic cannot hide a progress notice using an earlier cached semantic no', async () => {
-  const fake = fakePort(() => noulAnswer(0.01)); install(fake.port);
-  await under('Default - On', async () => {
-    await prepareChannelStatusContent(['Thinking…']);
-    expect(peekChannelStatusContent('Thinking…')).toBe(false);
-  });
-  const attempted = fake.requests.length;
-  await under('Classic - Off', async () => {
-    expect(peekChannelStatusContent('Thinking…')).toBeUndefined();
-    await prepareChannelStatusContent(['Thinking…']); expect(fake.requests).toHaveLength(attempted);
-  });
-});
 
 test('Classic read escalation does not reuse a cached semantic absence of secrets', async () => {
   const fake = fakePort(() => noulAnswer(0.01)); install(fake.port);

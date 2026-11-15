@@ -65,6 +65,8 @@ export interface TelegramWebhookInfo {
   readonly url: string;
   readonly pendingUpdateCount: number;
   readonly lastErrorMessage: string | undefined;
+  /** When Telegram last failed to deliver an update, in Unix seconds. */
+  readonly lastErrorDate?: number | undefined;
 }
 
 /** Who the configured bot token belongs to, per Telegram's own getMe. */
@@ -258,6 +260,7 @@ export class TelegramBotApi {
       url: result.url,
       pendingUpdateCount: result.pending_update_count,
       lastErrorMessage: typeof result?.last_error_message === 'string' ? result.last_error_message : undefined,
+      ...(typeof result.last_error_date === 'number' && Number.isSafeInteger(result.last_error_date) ? { lastErrorDate: result.last_error_date } : {}),
     };
   }
 

@@ -23,6 +23,12 @@ import { clearSurfaceSecret, storeSurfaceSecret } from './surface-secrets.js';
 
 interface BuiltinAccountActionContext {
   readonly deps: BuiltinChannelRuntimeDeps;
+  /**
+   * Re-arm Telegram receiving (stop, re-read settings and credentials, start)
+   * and answer what it is doing now. Absent when the host keeps no Telegram
+   * ingress on this node.
+   */
+  readonly restartTelegramIngress?: (() => Promise<{ readonly kind: string; readonly reason: string } | null>) | undefined;
   readonly buildAccount: (surface: ChannelSurface) => Promise<ChannelAccountRecord>;
   readonly resolveAccount: (surface: ChannelSurface, accountId: string) => Promise<ChannelAccountRecord | null>;
 }
@@ -120,6 +126,22 @@ export async function runBuiltinAccountAction(
         metadata: { pending: false },
       };
     case 'start':
+      if (surface === 'telegram' && account.enabled && context.restartTelegramIngress) {
+        const status = await context.restartTelegramIngress();
+        const refreshed = await context.buildAccount(surface);
+        const receiving = status !== null && status.kind !== 'inactive' && status.kind !== 'stopped';
+        return {
+          ...base,
+          ok: receiving,
+          account: refreshed,
+          state: refreshed.state,
+          authState: refreshed.authState,
+          message: status === null
+            ? 'Telegram receiving is not available on this node: the host keeps no cursor storage for it.'
+            : receiving ? `Telegram receiving restarted: ${status.reason}` : `Telegram receiving did not start: ${status.reason}`,
+          metadata: { ingress: status },
+        };
+      }
       if (providerSurface && context.deps.providerRuntime) {
         const runtimeResult = await context.deps.providerRuntime.start(providerSurface);
         const refreshed = await context.buildAccount(surface);

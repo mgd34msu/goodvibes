@@ -110,3 +110,20 @@ export function isSurfaceDeliveryEnabled(
   }
   return Boolean(surfaces.matrix.enabled || surfaces.matrix.homeserverUrl || surfaces.matrix.defaultRoomId || process.env.MATRIX_HOMESERVER);
 }
+
+/**
+ * Whether a surface is switched on: the one rule `surfaces.list`, delivery and
+ * the channel accounts read. The terminal is on unless turned off; the web
+ * surface follows `web.enabled` or `controlPlane.enabled`; a channel follows
+ * the delivery rule above (its setting, a credential or its environment
+ * variable, and an explicit off always wins). Anything else is off.
+ */
+export function isSurfaceEnabled(configManager: ConfigManager, surface: string): boolean {
+  if (surface === 'tui') {
+    const surfaces = configManager.getCategory('surfaces');
+    return !('tui' in surfaces && surfaces.tui !== null && typeof surfaces.tui === 'object'
+      && 'enabled' in surfaces.tui && surfaces.tui.enabled === false);
+  }
+  if (surface === 'web') return Boolean(configManager.get('web.enabled') || configManager.get('controlPlane.enabled'));
+  return CONFIGURED_SURFACES.has(surface) && isSurfaceDeliveryEnabled(configManager, surface as SurfaceDeliveryTarget);
+}

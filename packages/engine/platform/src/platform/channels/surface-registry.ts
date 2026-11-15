@@ -1,8 +1,8 @@
 import { createDomainDispatch } from '../runtime/store/index.js';
-import { resolveWebBinding } from '../daemon/host-resolver.js';
-import { isSurfaceIngressEnabled } from '../daemon/surface-policy.js';
+import { isSurfaceEnabled } from '../daemon/surface-policy.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
-import type { SurfaceRecord } from '../runtime/store/domains/surfaces.js';
+import type { SurfaceConnectionState, SurfaceRecord } from '../runtime/store/domains/surfaces.js';
+import type { ChannelHealthState, ChannelStatusSnapshot } from './types.js';
 import { ConfigManager } from '../config/manager.js';
 import type { ChannelPluginRegistry } from './plugin-registry.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
@@ -31,6 +31,8 @@ export class SurfaceRegistry {
   private pluginRegistry: ChannelPluginRegistry | null = null;
   private runtimeBus: Pick<RuntimeEventBus, 'emit'> | null = null;
   private configUnsubscribes: Array<() => void> = [];
+  /** The health snapshots the last `list()` read, by surface. */
+  private health = new Map<string, ChannelStatusSnapshot>();
 
   constructor(configManager: ConfigManager, runtimeStore?: RuntimeStore, featureFlags?: FeatureFlagReader) {
     this.configManager = configManager;
@@ -98,155 +100,65 @@ export class SurfaceRegistry {
     }
   }
 
-  syncConfiguredSurfaces(): SurfaceRecord[] {
-    const configuredAt = now();
-    const pluginDescriptors = this.pluginRegistry?.listDescriptors() ?? [];
-    const enabledForSurface = (surface: string): boolean => {
-      if (!isSurfaceFeatureGateEnabled(this.featureFlags, surface)) return false;
-      if (!isSurfaceIngressEnabled(this.configManager, surface)) return false;
-      if (surface === 'tui') {
-        const surfaces = this.configManager.getCategory('surfaces');
-        return !('tui' in surfaces && surfaces.tui !== null && typeof surfaces.tui === 'object'
-          && 'enabled' in surfaces.tui && surfaces.tui.enabled === false);
-      }
-      if (surface === 'web') return Boolean(this.configManager.get('web.enabled') || this.configManager.get('controlPlane.enabled'));
-      if (surface === 'slack') return Boolean(this.configManager.get('surfaces.slack.enabled'));
-      if (surface === 'discord') return Boolean(this.configManager.get('surfaces.discord.enabled'));
-      if (surface === 'ntfy') return Boolean(this.configManager.get('surfaces.ntfy.enabled'));
-      if (surface === 'webhook') {
-        return Boolean(
-          this.configManager.get('surfaces.webhook.enabled')
-          || this.configManager.get('surfaces.webhook.defaultTarget')
-          || this.configManager.get('surfaces.webhook.secret'),
-        );
-      }
-      const surfaces = this.configManager.getCategory('surfaces');
-      if (surface === 'telegram') return Boolean(surfaces.telegram.enabled || surfaces.telegram.botToken || surfaces.telegram.defaultChatId);
-      if (surface === 'homeassistant') return Boolean(surfaces.homeassistant.enabled || surfaces.homeassistant.instanceUrl || surfaces.homeassistant.webhookSecret);
-      if (surface === 'google-chat') return Boolean(surfaces.googleChat.enabled || surfaces.googleChat.webhookUrl || surfaces.googleChat.spaceId);
-      if (surface === 'signal') return Boolean(surfaces.signal.enabled || surfaces.signal.bridgeUrl || surfaces.signal.account);
-      if (surface === 'whatsapp') return Boolean(surfaces.whatsapp.enabled || surfaces.whatsapp.accessToken || surfaces.whatsapp.phoneNumberId);
-      if (surface === 'telephony') return Boolean(surfaces.telephony.enabled || surfaces.telephony.bridgeUrl || surfaces.telephony.accountSid || surfaces.telephony.defaultRecipient);
-      if (surface === 'imessage') return Boolean(surfaces.imessage.enabled || surfaces.imessage.bridgeUrl || surfaces.imessage.account);
-      if (surface === 'msteams') return Boolean(surfaces.msteams.enabled || surfaces.msteams.appId || surfaces.msteams.defaultConversationId);
-      if (surface === 'bluebubbles') return Boolean(surfaces.bluebubbles.enabled || surfaces.bluebubbles.serverUrl || surfaces.bluebubbles.defaultChatGuid);
-      if (surface === 'mattermost') return Boolean(surfaces.mattermost.enabled || surfaces.mattermost.baseUrl || surfaces.mattermost.defaultChannelId);
-      if (surface === 'matrix') return Boolean(surfaces.matrix.enabled || surfaces.matrix.homeserverUrl || surfaces.matrix.defaultRoomId);
-      return false;
-    };
-    const accountIdForSurface = (surface: string): string | undefined => {
-      const surfaces = this.configManager.getCategory('surfaces');
-      if (surface === 'slack') return String(this.configManager.get('surfaces.slack.workspaceId') || '') || undefined;
-      if (surface === 'discord') return String(this.configManager.get('surfaces.discord.applicationId') || '') || undefined;
-      if (surface === 'telegram') return surfaces.telegram.botUsername || surfaces.telegram.defaultChatId || undefined;
-      if (surface === 'homeassistant') return surfaces.homeassistant.deviceId || surfaces.homeassistant.defaultConversationId || undefined;
-      if (surface === 'google-chat') return surfaces.googleChat.appId || surfaces.googleChat.spaceId || undefined;
-      if (surface === 'signal') return surfaces.signal.account || surfaces.signal.defaultRecipient || undefined;
-      if (surface === 'whatsapp') return surfaces.whatsapp.phoneNumberId || surfaces.whatsapp.defaultRecipient || undefined;
-      if (surface === 'telephony') return surfaces.telephony.accountSid || surfaces.telephony.fromNumber || surfaces.telephony.defaultRecipient || undefined;
-      if (surface === 'imessage') return surfaces.imessage.account || surfaces.imessage.defaultChatId || undefined;
-      if (surface === 'msteams') return surfaces.msteams.botId || surfaces.msteams.defaultConversationId || undefined;
-      if (surface === 'bluebubbles') return surfaces.bluebubbles.account || surfaces.bluebubbles.defaultChatGuid || undefined;
-      if (surface === 'mattermost') return surfaces.mattermost.teamId || surfaces.mattermost.defaultChannelId || undefined;
-      if (surface === 'matrix') return surfaces.matrix.userId || surfaces.matrix.defaultRoomId || undefined;
-      return undefined;
-    };
-    const records: SurfaceRecord[] = pluginDescriptors.length > 0 ? pluginDescriptors.map((descriptor) => ({
-      id: `surface:${descriptor.surface}`,
-      kind: descriptor.surface,
-      label: descriptor.displayName,
-      enabled: enabledForSurface(descriptor.surface),
-      state: enabledForSurface(descriptor.surface) ? 'healthy' : 'disabled',
-      configuredAt,
-      lastSeenAt: configuredAt,
-      ...(accountIdForSurface(descriptor.surface) ? { accountId: accountIdForSurface(descriptor.surface) } : {}),
-      capabilities: [...descriptor.capabilities],
-      metadata: {},
-    })) : [
-      {
-        id: 'surface:tui',
-        kind: 'tui',
-        label: 'Terminal UI',
-        enabled: enabledForSurface('tui'),
-        state: enabledForSurface('tui') ? 'healthy' : 'disabled',
-        configuredAt,
-        lastSeenAt: configuredAt,
-        capabilities: ['ingress', 'egress', 'session_binding'],
-        metadata: {},
-      },
-      {
-        id: 'surface:web',
-        kind: 'web',
-        label: 'Web control plane',
-        enabled: enabledForSurface('web'),
-        state: enabledForSurface('web') ? 'healthy' : 'disabled',
-        configuredAt,
-        capabilities: ['ingress', 'egress', 'threaded_reply'],
-        metadata: {
-          // Anchored to the web binding resolver, the raw stored value can be
-          // 0/NaN/malformed; consumers render the validated truth.
-          port: resolveWebBinding({ hostMode: this.configManager.get('web.hostMode'), host: this.configManager.get('web.host'), port: this.configManager.get('web.port') }).port,
-          baseUrl: this.configManager.get('web.publicBaseUrl'),
-        },
-      },
-      {
-        id: 'surface:slack',
-        kind: 'slack',
-        label: 'Slack',
-        enabled: enabledForSurface('slack'),
-        state: enabledForSurface('slack') ? 'healthy' : 'disabled',
-        configuredAt,
-        ...(accountIdForSurface('slack') ? { accountId: accountIdForSurface('slack') } : {}),
-        capabilities: ['ingress', 'egress', 'threaded_reply', 'interactive_actions'],
-        metadata: {
-          defaultChannel: this.configManager.get('surfaces.slack.defaultChannel'),
-        },
-      },
-      {
-        id: 'surface:discord',
-        kind: 'discord',
-        label: 'Discord',
-        enabled: enabledForSurface('discord'),
-        state: enabledForSurface('discord') ? 'healthy' : 'disabled',
-        configuredAt,
-        ...(accountIdForSurface('discord') ? { accountId: accountIdForSurface('discord') } : {}),
-        capabilities: ['ingress', 'egress', 'interactive_actions'],
-        metadata: {
-          defaultChannelId: this.configManager.get('surfaces.discord.defaultChannelId'),
-          guildId: this.configManager.get('surfaces.discord.guildId'),
-        },
-      },
-      {
-        id: 'surface:ntfy',
-        kind: 'ntfy',
-        label: 'ntfy',
-        enabled: enabledForSurface('ntfy'),
-        state: enabledForSurface('ntfy') ? 'healthy' : 'disabled',
-        configuredAt,
-        capabilities: ['ingress', 'egress', 'delivery_only'],
-        metadata: {
-          baseUrl: this.configManager.get('surfaces.ntfy.baseUrl'),
-          topic: this.configManager.get('surfaces.ntfy.topic'),
-          chatTopic: this.configManager.get('surfaces.ntfy.chatTopic'),
-          agentTopic: this.configManager.get('surfaces.ntfy.agentTopic'),
-          remoteTopic: this.configManager.get('surfaces.ntfy.remoteTopic'),
-        },
-      },
-      {
-        id: 'surface:webhook',
-        kind: 'webhook',
-        label: 'Generic webhook',
-        enabled: enabledForSurface('webhook'),
-        state: enabledForSurface('webhook') ? 'healthy' : 'disabled',
-        configuredAt,
-        capabilities: ['ingress', 'egress', 'delivery_only'],
-        metadata: {
-          defaultTarget: this.configManager.get('surfaces.webhook.defaultTarget'),
-          timeoutMs: this.configManager.get('surfaces.webhook.timeoutMs'),
-        },
-      },
-    ];
+  /**
+   * The surface list as it is now: one record per registered plugin, `enabled`
+   * from the one rule (`isSurfaceEnabled` behind the surface's feature gate)
+   * and `state` from that surface's health snapshot, the same answer channel
+   * status and the health watcher read. Built on each call, so a surface turned
+   * on or a channel that died shows at once; a change since the last call is
+   * published on the runtime store and bus. Cost: one status read per plugin.
+   */
+  async list(): Promise<SurfaceRecord[]> {
+    const snapshots = new Map<string, ChannelStatusSnapshot>();
+    try {
+      for (const snapshot of await this.pluginRegistry?.listStatus() ?? []) snapshots.set(snapshot.surface, snapshot);
+    } catch (error) {
+      logger.warn('Surface health could not be read; listing surfaces without it', { error: summarizeError(error) });
+    }
+    this.health = snapshots;
+    return this.publish(this.buildRecords());
+  }
 
+  /**
+   * Re-read which surfaces are switched on now and publish what changed, with
+   * the health last read by `list()`; a fresh health reading follows in the
+   * background. For callers that need the answer synchronously.
+   */
+  syncConfiguredSurfaces(): SurfaceRecord[] {
+    const records = this.publish(this.buildRecords());
+    if (this.pluginRegistry) {
+      void this.list().catch((error: unknown) => {
+        logger.warn('Surface health could not be refreshed', { error: summarizeError(error) });
+      });
+    }
+    return records;
+  }
+
+  private surfaceEnabled(surface: string): boolean {
+    return isSurfaceFeatureGateEnabled(this.featureFlags, surface) && isSurfaceEnabled(this.configManager, surface);
+  }
+
+  private buildRecords(): SurfaceRecord[] {
+    const at = now();
+    return (this.pluginRegistry?.listDescriptors() ?? []).map((descriptor) => {
+      const enabled = this.surfaceEnabled(descriptor.surface);
+      const snapshot = this.health.get(descriptor.surface);
+      return {
+        id: `surface:${descriptor.surface}`,
+        kind: descriptor.surface,
+        label: descriptor.displayName,
+        enabled,
+        state: !enabled ? 'disabled' : snapshot ? connectionState(snapshot.state) : 'connecting',
+        configuredAt: this.surfaces.get(`surface:${descriptor.surface}`)?.configuredAt ?? at,
+        lastSeenAt: at,
+        ...(snapshot?.accountId ? { accountId: snapshot.accountId } : {}),
+        capabilities: [...descriptor.capabilities],
+        metadata: snapshot ? { health: snapshot.state } : {},
+      } satisfies SurfaceRecord;
+    }).sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  private publish(records: SurfaceRecord[]): SurfaceRecord[] {
     // A surface that dropped out of this list (its feature gate went off, its
     // plugin was unregistered) must not stay `healthy` in the runtime store from
     // an earlier sync. The store has no removal, so it is published as disabled.
@@ -261,13 +173,29 @@ export class SurfaceRegistry {
     this.surfaces.clear();
     for (const record of records) {
       this.surfaces.set(record.id, record);
+      const before = previous.get(record.id);
+      if (before && before.enabled === record.enabled && before.state === record.state && before.accountId === record.accountId
+        && before.capabilities.join() === record.capabilities.join()) continue;
       this.runtimeDispatch?.syncSurface(record, 'surfaces.sync');
-      this.publishChange(previous.get(record.id), record, 'the surface was turned off (its setting, feature gate or ingress policy)');
+      this.publishChange(before, record, 'the surface was turned off (its setting, feature gate or ingress policy)');
     }
     return records;
   }
+}
 
-  list(): SurfaceRecord[] {
-    return [...this.surfaces.values()].sort((a, b) => a.label.localeCompare(b.label));
+/** How a channel's health answer reads in the surface list (the exact state is in `metadata.health`). */
+function connectionState(state: ChannelHealthState): SurfaceConnectionState {
+  switch (state) {
+    case 'healthy':
+    case 'unknown':
+      return 'healthy';
+    case 'degraded':
+    case 'unresolved':
+      return 'degraded';
+    case 'dead':
+    case 'unconfigured':
+      return 'error';
+    case 'disabled':
+      return 'disabled';
   }
 }

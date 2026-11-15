@@ -52,7 +52,7 @@ export async function handleIMessageSurfaceWebhook(req: Request, context: Surfac
         channelId: chatId,
         threadId,
         title: chatId,
-        metadata: ingressMetadata(payload),
+        metadata: {},
       },
       text: message,
       logLabel: 'handleIMessageSurfaceWebhook',

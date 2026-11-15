@@ -146,7 +146,5 @@ registry.register(planningGoal);
 import { systemMessagePresentation } from './system-message-presentation.js';
 registry.register(systemMessagePresentation);
 
-import { channelStatusContent } from '../channels/status-reading.js';
 import { browserLaunchCause } from '../browser/launch-reading.js';
-registry.register(channelStatusContent);
 registry.register(browserLaunchCause);

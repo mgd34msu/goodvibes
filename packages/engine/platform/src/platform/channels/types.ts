@@ -349,6 +349,16 @@ export interface ChannelPolicyRecord {
   readonly allowlistGroupIds: readonly string[];
   readonly allowedCommands: readonly string[];
   readonly groupPolicies: readonly ChannelGroupPolicyRecord[];
+  /**
+   * A shared channel: while every allowlist is empty, every sender is admitted
+   * and no owner claim is raised. Off by default, so the first unknown sender
+   * on an unowned surface raises a claim the owner accepts or declines.
+   */
+  readonly open?: boolean | undefined;
+  /** The owner the surface answers: the sender whose claim was accepted. */
+  readonly ownerId?: string | undefined;
+  /** When `ownerId` became the owner (epoch ms). */
+  readonly ownerSince?: number | undefined;
   readonly updatedAt: number;
   readonly metadata: Record<string, unknown>;
 }

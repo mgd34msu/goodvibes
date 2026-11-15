@@ -151,7 +151,7 @@ function ntfyTopicBinding(body: Record<string, unknown>, topic: string): UpsertR
     externalId: topic,
     channelId: topic,
     title: typeof body.title === 'string' ? body.title : topic,
-    metadata: ingressMetadata(body),
+    metadata: {},
   };
 }
 

@@ -13,6 +13,17 @@ import type {
 import { isRecord } from '../utils/record-coerce.js';
 import { logger } from '../utils/logger.js';
 import { judgmentInputProblem } from '../gate/judgment-input.js';
+import type { OwnerInbox, OwnerItem } from '../control-plane/owner-inbox.js';
+
+/** The part of the owner inbox an owner claim uses. */
+export type ChannelOwnerClaimInbox = Pick<OwnerInbox, 'postNow' | 'listNow' | 'subscribe' | 'withdraw'>;
+
+/** Owner claims open at once on one surface; a further unknown sender waits without a new question. */
+const MAX_OPEN_CLAIMS_PER_SURFACE = 3;
+/** Declined claimants remembered per surface, so a stranger is not asked about again. */
+const MAX_DECLINED_CLAIMANTS = 50;
+const CLAIM_KEY_PREFIX = 'channel-owner:';
+const DECLINED_CLAIMANTS_KEY = 'declinedOwnerClaims';
 
 interface ChannelPolicySnapshot extends Record<string, unknown> {
   readonly policies: readonly ChannelPolicyRecord[];
@@ -93,8 +104,9 @@ export interface ChannelAllowlistSubject {
  *   list. A listed group admits everyone in it; a listed person is admitted
  *   wherever they write.
  * - An empty list restricts nobody; when every list that applies is empty the
- *   message is admitted. An empty user list also means the surface has no
- *   owner yet (see `evaluateIngress`).
+ *   message is admitted. Every list empty also means the surface has no owner
+ *   yet, which `decideIngress` turns into an owner claim unless the surface is
+ *   `open`.
  */
 export function admitByAllowlists(
   lists: ChannelAllowlists,
@@ -130,7 +142,7 @@ export function describeActorAdmission(
     return {
       admitted: true,
       reason: policy.allowlistUserIds.length === 0
-        ? 'No owner is set on this surface yet, so every sender is admitted until the first identified sender becomes its owner.'
+        ? 'No owner is set on this surface yet. The first message from an unknown sender raises an owner claim (in /questions, or the web UI inbox); accept it to make that sender the owner, or set the surface policy open for a shared channel.'
         : `Actor '${actorId}' is on the surface's user list.`,
     };
   }
@@ -238,6 +250,9 @@ function validateChannelPolicyRecord(value: unknown): void {
     if (!Array.isArray(value['groupPolicies'])) throwInvalidChannelPolicySnapshot();
     for (const groupPolicy of value['groupPolicies']) validateChannelGroupPolicyRecord(groupPolicy);
   }
+  validateOptionalBoolean(value['open']);
+  validateOptionalString(value['ownerId']);
+  if (value['ownerSince'] !== undefined && !isFiniteNumber(value['ownerSince'])) throwInvalidChannelPolicySnapshot();
   if (value['updatedAt'] !== undefined && !isFiniteNumber(value['updatedAt'])) throwInvalidChannelPolicySnapshot();
   if (value['metadata'] !== undefined && !isRecord(value['metadata'])) throwInvalidChannelPolicySnapshot();
 }
@@ -286,6 +301,9 @@ export class ChannelPolicyManager {
   private auditFlushTimer: ReturnType<typeof setTimeout> | null = null;
   /** Whole-store writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
+  /** Where owner claims are asked; absent, the first identified sender becomes the owner. */
+  private ownerInbox: ChannelOwnerClaimInbox | null = null;
+  private ownerInboxUnsubscribe: (() => void) | null = null;
 
   constructor(
     options: {
@@ -343,6 +361,105 @@ export class ChannelPolicyManager {
 
   getPolicy(surface: ChannelSurface): ChannelPolicyRecord {
     return this.policies.get(surface) ?? defaultPolicy(surface);
+  }
+
+  /**
+   * Ask the owner, through the owner inbox, before an unknown sender becomes a
+   * surface's owner. Once attached, the first message from an unknown sender on
+   * a surface with no allowlist (and not `open`) is held as a claim the owner
+   * accepts or declines from any surface that lists the inbox; the sender is
+   * answered only after it is accepted. Returns the detach function.
+   */
+  attachOwnerInbox(inbox: ChannelOwnerClaimInbox): () => void {
+    this.ownerInboxUnsubscribe?.();
+    this.ownerInbox = inbox;
+    const settle = (item: OwnerItem): void => {
+      if (item.kind !== 'claim' || !item.key?.startsWith(CLAIM_KEY_PREFIX) || item.status !== 'answered') return;
+      void this.settleOwnerClaim(item).catch((error: unknown) => {
+        logger.error('An accepted channel owner claim could not be saved; the sender is not the owner yet', {
+          claimId: item.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    };
+    this.ownerInboxUnsubscribe = inbox.subscribe(settle);
+    // An answer given before this attach (a restart in between) still counts; settling is idempotent.
+    for (const item of inbox.listNow({ kinds: ['claim'], status: 'closed' })) settle(item);
+    return () => {
+      this.ownerInboxUnsubscribe?.();
+      this.ownerInboxUnsubscribe = null;
+      if (this.ownerInbox === inbox) this.ownerInbox = null;
+    };
+  }
+
+  /** The owner answered a claim: accept makes the sender the owner, decline is remembered. */
+  private async settleOwnerClaim(item: OwnerItem): Promise<void> {
+    await this.start();
+    const surface = item.metadata?.['surface'];
+    const userId = item.metadata?.['userId'];
+    const groupPolicyId = item.metadata?.['groupPolicyId'];
+    if (typeof surface !== 'string' || typeof userId !== 'string') return;
+    const policy = this.getPolicy(surface as ChannelSurface);
+    if (item.answer?.option !== 'accept') {
+      const declined = Array.isArray(policy.metadata[DECLINED_CLAIMANTS_KEY])
+        ? (policy.metadata[DECLINED_CLAIMANTS_KEY] as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      if (declined.includes(userId)) return;
+      this.updatePolicy(policy.surface, { metadata: { ...policy.metadata, [DECLINED_CLAIMANTS_KEY]: [...declined, userId].slice(-MAX_DECLINED_CLAIMANTS) } });
+      await this.persist();
+      return;
+    }
+    const group = typeof groupPolicyId === 'string' ? policy.groupPolicies.find((entry) => entry.id === groupPolicyId) : undefined;
+    const owners = group ? group.allowlistUserIds ?? [] : policy.allowlistUserIds;
+    if (!owners.includes(userId)) {
+      this.updatePolicy(policy.surface, group
+        ? { groupPolicies: policy.groupPolicies.map((entry) => entry === group ? { ...entry, allowlistUserIds: [...owners, userId] } : entry) }
+        : { allowlistUserIds: [...owners, userId], ...(policy.ownerId ? {} : { ownerId: userId, ownerSince: Date.now() }) });
+      await this.persist();
+    }
+    logger.info('Channel owner claim accepted', { surface: policy.surface, userId });
+    // The surface has an owner now; the other senders' claims are moot.
+    for (const other of this.ownerInbox?.listNow({ kinds: ['claim'], status: 'open' }) ?? []) {
+      if (other.key?.startsWith(`${CLAIM_KEY_PREFIX}${policy.surface}:`)) {
+        void this.ownerInbox?.withdraw(other.id, `${policy.surface} now has an owner`).catch(() => { /* already closed */ });
+      }
+    }
+  }
+
+  /** Raise (or find) the owner claim for this sender, unless the cap or a decline says not to. */
+  private raiseOwnerClaim(input: ChannelIngressPolicyInput, decision: ChannelPolicyDecision): void {
+    const inbox = this.ownerInbox;
+    const userId = input.userId;
+    if (!inbox || !userId) return;
+    const policy = decision.policy;
+    const declined = policy.metadata[DECLINED_CLAIMANTS_KEY];
+    if (Array.isArray(declined) && declined.includes(userId)) return;
+    const prefix = `${CLAIM_KEY_PREFIX}${input.surface}:`;
+    const key = `${prefix}${userId}`.slice(0, 200);
+    const open = inbox.listNow({ kinds: ['claim'], status: 'open' }).filter((item) => item.key?.startsWith(prefix));
+    if (!open.some((item) => item.key === key) && open.length >= MAX_OPEN_CLAIMS_PER_SURFACE) return;
+    const name = typeof input.metadata?.['displayName'] === 'string' ? ` (${String(input.metadata['displayName']).slice(0, 60)})` : '';
+    const shownId = userId.slice(0, 80);
+    const where = input.conversationKind === 'direct' ? 'a direct message' : `a ${normalizeConversationKind(input)} message`;
+    try {
+      inbox.postNow({
+        kind: 'claim',
+        key,
+        title: `Make ${shownId}${name} the owner of ${input.surface}?`,
+        detail: `${where} arrived on ${input.surface} from ${shownId}${name}, and ${input.surface} has no owner yet, so it was not answered. `
+          + 'Accept to make this sender the owner: the surface then answers them, and only them until you add others with the allowlist edit. '
+          + 'Decline if this is not you. For a shared channel, set the surface policy open instead.',
+        options: ['accept', 'decline'],
+        askedBy: `${input.surface} channel`,
+        metadata: {
+          surface: input.surface,
+          userId,
+          ...(decision.matchedGroupPolicy && decision.matchedGroupPolicy.allowlistUserIds !== undefined ? { groupPolicyId: decision.matchedGroupPolicy.id } : {}),
+        },
+      }, `${input.surface} channel`);
+    } catch (error) {
+      logger.warn('Channel owner claim could not be raised', { surface: input.surface, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   async upsertPolicy(
@@ -432,6 +549,11 @@ export class ChannelPolicyManager {
     } else if (!listed.allowed) {
       allowed = false;
       reason = listed.reason;
+    } else if (this.ownerInbox && !policy.open && input.userId && allowlistUserIds.length === 0
+      && allowlistGroupIds.length === 0 && allowlistChannelIds.length === 0) {
+      // No owner and not open: the sender waits for the owner's answer to a claim.
+      allowed = false;
+      reason = 'owner-claim-pending';
     } else if (requireMention && !input.mentioned && !bypassMention) {
       allowed = false;
       reason = 'mention-required';
@@ -452,23 +574,27 @@ export class ChannelPolicyManager {
   async evaluateIngress(input: ChannelIngressPolicyInput, options: { readonly recordDenied?: boolean } = {}): Promise<ChannelPolicyDecision> {
     await this.start();
     const decision = this.decideIngress(input);
+    if (decision.reason === 'owner-claim-pending') this.raiseOwnerClaim(input, decision);
     // Source-scoped callers may refuse fresh denials without retaining text.
     if (!decision.allowed && options.recordDenied === false) return decision;
     const { allowed, policy, matchedGroupPolicy } = decision;
     let reason = decision.reason;
     const allowlistUserIds = matchedGroupPolicy?.allowlistUserIds ?? policy.allowlistUserIds;
-    // Owner allowlist self-seeding: a surface with no owner allowlist adopts
-    // the first identified sender as its owner, whoever pairs/configures the
-    // channel proves it by sending the first message, and no separate
-    // add-yourself step exists. From then on unknown senders are ignored.
+    const allowlistGroupIds = matchedGroupPolicy?.allowlistGroupIds ?? policy.allowlistGroupIds;
+    const allowlistChannelIds = matchedGroupPolicy?.allowlistChannelIds ?? policy.allowlistChannelIds;
+    // A host with no owner inbox (an embedder) cannot ask, so there the first
+    // identified sender on a surface with no allowlist becomes its owner, and
+    // status names who and since when. With the inbox attached, decideIngress
+    // has already held that sender as a claim.
     let effectivePolicy = policy;
-    if (allowed && allowlistUserIds.length === 0 && input.userId) {
+    if (allowed && !this.ownerInbox && !policy.open && allowlistUserIds.length === 0
+      && allowlistGroupIds.length === 0 && allowlistChannelIds.length === 0 && input.userId) {
       // Publish ownership before awaiting disk so another ingress cannot also
       // seed the empty scope. An explicit group override owns its own seed.
       const before = this.policies.get(input.surface);
       effectivePolicy = this.updatePolicy(input.surface, matchedGroupPolicy?.allowlistUserIds !== undefined
         ? { groupPolicies: policy.groupPolicies.map(entry => entry === matchedGroupPolicy ? { ...entry, allowlistUserIds: [input.userId!] } : entry) }
-        : { allowlistUserIds: [input.userId] });
+        : { allowlistUserIds: [input.userId], ownerId: input.userId, ownerSince: Date.now() });
       try {
         await this.persist();
       } catch (error) {

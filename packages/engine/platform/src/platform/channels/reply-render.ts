@@ -1,4 +1,3 @@
-import { peekChannelStatusContent } from './status-reading.js';
 /**
  * Rendering for channel replies: runtime event -> render event -> message body.
  *
@@ -260,16 +259,6 @@ const MAX_PROGRESS_STATUS_CHARS = 160;
 const TURN_COUNTER_PREFIX = /^turn\s+\d+\s*(?:[·:•\-–—]\s*)?/i;
 
 /**
- * Status text that says only that the machine is running.
- *
- * Owner ruling: never emit a placeholder that carries no information a person
- * can act on, if the only thing you have to say is that a turn started, say
- * nothing. `Turn 1 · Thinking…` is both halves of that at once, and it was the
- * single most-delivered notification body on the owner's phone.
- */
-
-
-/**
  * Reduce whatever the caller passed as progress to ONE bounded line a person
  * can act on, or null when it says nothing.
  *
@@ -281,11 +270,15 @@ const TURN_COUNTER_PREFIX = /^turn\s+\d+\s*(?:[·:•\-–—]\s*)?/i;
  *
  * Callers must still pass a STATUS ("what is happening now"), never content:
  * `AgentRecord.progress` is exactly that, and `streamingContent` is not.
+ *
+ * Whether a line is a placeholder is the producer's fact, not a reading: the
+ * orchestrator stamps "Turn N · Thinking…" and its other machine lines
+ * `operator` (agents/progress-audience.ts), so they never reach this function,
+ * and every notice built from a template here is specific by construction.
  */
 export function channelStatusLine(rawText: string, maxChars = MAX_PROGRESS_STATUS_CHARS): string | null {
   const collapsed = rawText.replace(/\s+/g, ' ').trim().replace(TURN_COUNTER_PREFIX, '').trim();
   if (!collapsed) return null;
-  if (peekChannelStatusContent(rawText) === false) return null;
   return trimText(collapsed, maxChars);
 }
 

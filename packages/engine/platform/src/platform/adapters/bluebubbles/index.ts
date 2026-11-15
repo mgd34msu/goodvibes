@@ -1,4 +1,4 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
@@ -85,7 +85,6 @@ export async function handleBlueBubblesSurfaceWebhook(req: Request, context: Sur
         channelId: conversationId,
         title: senderId ?? conversationId,
         metadata: {
-          ...ingressMetadata(payload),
           ...(messageId ? { messageId } : {}),
           ...(chatGuid ? { chatGuid } : {}),
           ...(senderId ? { senderId } : {}),

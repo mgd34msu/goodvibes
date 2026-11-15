@@ -1,4 +1,4 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
@@ -108,10 +108,7 @@ export async function handleMattermostSurfaceWebhook(req: Request, context: Surf
         channelId,
         threadId,
         title: readString(body.channel_name) ?? channelId,
-        metadata: {
-          ...ingressMetadata(body),
-          ...(post ? { post } : {}),
-        },
+        metadata: {},
       },
       text: task,
       logLabel: 'handleMattermostSurfaceWebhook',

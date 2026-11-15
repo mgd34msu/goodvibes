@@ -1,4 +1,4 @@
-import { prepareChannelStatusContent } from './status-reading.js';
+import { classifyFailure } from '@goodvibes-jev/engine/errors';
 import type { RuntimeEventBus, RuntimeEventEnvelope, AnyRuntimeEvent } from '../runtime/events/index.js';
 import type { ContractEvent } from '../../events/contract.js';
 import type {
@@ -15,7 +15,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 
 import { markEventsDelivered, selectUndeliveredEvents } from './reply-delta.js';
-import { buildRenderedFinalParts, buildRenderedText, normalizeChannelRenderEventFromRuntime } from './reply-render.js';
+import { buildRenderedFinalParts, buildRenderedText, normalizeChannelRenderEventFromRuntime, type ChannelReplyRenderOptions, type ChannelReplyStyle } from './reply-render.js';
 import { DEFAULT_POLICY } from './reply-policy.js';
 import type { ChannelRenderAudience } from './render-audience.js';
 
@@ -97,18 +97,16 @@ interface ReplyPipelineDeps {
   /** Records a reply that reached its conversation in the delivery ledger. */
   readonly onDelivered?: DeliveredChannelReplyReporter | undefined;
   /**
-   * How long a progress or final delivery waits for the status-substance
-   * reading before it renders the notice unread. Defaults to 5 seconds.
+   * The reply style the producing run was started with (`AgentRecord.replyStyle`).
+   * Without it, a run attached to a contract counts as a report and any other
+   * run's text is delivered as written.
    */
-  readonly statusReadingTimeoutMs?: number | undefined;
-  /** Reads whether notices say anything specific; defaults to the judged battery. */
-  readonly prepareStatusContent?: ((contents: readonly string[], signal: AbortSignal) => Promise<void>) | undefined;
+  readonly replyStyleOf?: ((agentId: string) => ChannelReplyStyle | undefined) | undefined;
   /** Pause between attempts at a final reply; defaults to a timer. */
   readonly waitBeforeRetry?: ((ms: number) => Promise<void>) | undefined;
 }
 
-const DEFAULT_STATUS_READING_TIMEOUT_MS = 5_000;
-/** Pauses before the second and third attempt at a final reply a channel refused with an error. */
+/** Pauses before the second and third attempt at a final reply a channel refused with a transient error. */
 const FINAL_RETRY_BACKOFF_MS = [1_000, 4_000] as const;
 
 interface ReplyBufferState {
@@ -174,8 +172,7 @@ export class ChannelReplyPipeline {
   private readonly unsubscribers: Array<() => void> = [];
   private undeliveredReporter: UndeliveredChannelReplyReporter | null;
   private deliveredReporter: DeliveredChannelReplyReporter | null;
-  private readonly statusReadingTimeoutMs: number;
-  private readonly prepareStatusContent: (contents: readonly string[], signal: AbortSignal) => Promise<void>;
+  private readonly replyStyleOf: ((agentId: string) => ChannelReplyStyle | undefined) | null;
   private readonly waitBeforeRetry: (ms: number) => Promise<void>;
 
   constructor(deps: ReplyPipelineDeps) {
@@ -184,8 +181,7 @@ export class ChannelReplyPipeline {
     this.now = deps.now ?? (() => Date.now());
     this.undeliveredReporter = deps.onUndelivered ?? null;
     this.deliveredReporter = deps.onDelivered ?? null;
-    this.statusReadingTimeoutMs = deps.statusReadingTimeoutMs ?? DEFAULT_STATUS_READING_TIMEOUT_MS;
-    this.prepareStatusContent = deps.prepareStatusContent ?? ((contents, signal) => prepareChannelStatusContent(contents, { signal }));
+    this.replyStyleOf = deps.replyStyleOf ?? null;
     this.waitBeforeRetry = deps.waitBeforeRetry ?? ((ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
     this.attachRuntimeBus(deps.runtimeBus ?? null);
   }
@@ -342,8 +338,7 @@ export class ChannelReplyPipeline {
     // what it SAID is the final's to deliver.
     const freshEvents = selectUndeliveredEvents(state, state.events.filter((event) => event.phase !== 'final'));
     if (freshEvents.length === 0 && explicit.trim().length === 0) return null;
-    await this.readStatusNotices([explicit, ...freshEvents.filter(event => event.kind === 'status' && event.audience === 'owner').map(event => event.text ?? '')]);
-    const text = buildRenderedText(explicit, freshEvents, policy, 'progress');
+    const text = buildRenderedText(explicit, freshEvents, policy, 'progress', this.renderOptions(state));
     if (!text) return null;
     // Identical content is never republished, forced or not. `force` exists to
     // bypass the pacing interval for something worth interrupting for; it is
@@ -411,8 +406,7 @@ export class ChannelReplyPipeline {
     // (agents/conversational-reply-recovery.ts).
     const candidateEvents = finalEvents.length > 0 ? finalEvents : state.events;
     const renderEvents = selectUndeliveredEvents(state, candidateEvents);
-    await this.readStatusNotices(renderEvents.filter(event => event.kind === 'status' && event.audience === 'owner').map(event => event.text ?? ''));
-    const parts = buildRenderedFinalParts(explicitText, renderEvents, policy);
+    const parts = buildRenderedFinalParts(explicitText, renderEvents, policy, this.renderOptions(state));
     const text = parts.join('\n\n');
     // Nothing to say, so say nothing, but close the run out.
     //
@@ -673,22 +667,14 @@ export class ChannelReplyPipeline {
   }
 
   /**
-   * Read how substantive the notices are, but never let the model decide whether
-   * the reply goes out: this runs inside the per-agent chain, so a hung reading
-   * would hold every later delivery for that agent, the final answer included.
-   * Past the budget (or on any failure) the notices render unread.
+   * The producing run's reply style decides whether the prose completion form
+   * is reduced to its summary (see reply-render.ts). The host states it; a run
+   * attached to a contract is a report run when the host does not.
    */
-  private async readStatusNotices(contents: readonly string[]): Promise<void> {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const expired = new Promise<void>((resolve) => {
-      timer = setTimeout(() => { controller.abort(); resolve(); }, this.statusReadingTimeoutMs);
-    });
-    try {
-      await Promise.race([this.prepareStatusContent(contents, controller.signal).catch(() => { /* Unsettled notices remain visible. */ }), expired]);
-    } finally {
-      clearTimeout(timer);
-    }
+  private renderOptions(state: ReplyBufferState): ChannelReplyRenderOptions {
+    const stated = this.replyStyleOf?.(state.pending.agentId);
+    if (stated) return { replyStyle: stated };
+    return typeof state.pending.contractId === 'string' && state.pending.contractId.length > 0 ? { replyStyle: 'report' } : {};
   }
 
   private async resolvePolicy(surface: ChannelSurface): Promise<ChannelRenderPolicy> {
@@ -703,10 +689,13 @@ export class ChannelReplyPipeline {
   }
 
   /**
-   * A channel that throws (a rate limit, a dropped connection) usually accepts
-   * the same message a moment later. Only the part that failed is retried, so a
-   * long answer never repeats parts the reader already has; after the last
-   * attempt the error reaches the caller, which reports the reply undelivered.
+   * A channel that throws a transient error (a rate limit, a dropped
+   * connection) usually accepts the same message a moment later. Only the part
+   * that failed is retried, so a long answer never repeats parts the reader
+   * already has. A failure the error table calls permanent (a rejected token, a
+   * malformed request) is not retried: the same send would fail the same way.
+   * After the last attempt the error reaches the caller, which reports the
+   * reply undelivered with its body.
    */
   private async dispatchFinalWithRetry(
     state: ReplyBufferState,
@@ -719,14 +708,15 @@ export class ChannelReplyPipeline {
         return await this.dispatch(state, policy, 'final', text, events);
       } catch (error) {
         const backoff = FINAL_RETRY_BACKOFF_MS[attempt];
-        if (backoff === undefined) throw error;
+        const failure = classifyFailure(error);
+        if (backoff === undefined || failure?.retryable === false) throw error;
         logger.warn('Agent reply delivery failed; retrying', {
           surface: state.pending.surfaceKind,
           agentId: state.pending.agentId,
           attempt: attempt + 1,
           reason: summarizeError(error),
         });
-        await this.waitBeforeRetry(backoff);
+        await this.waitBeforeRetry(Math.max(backoff, Math.min(failure?.retryAfterMs ?? 0, 10_000)));
       }
     }
   }

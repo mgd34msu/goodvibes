@@ -25,8 +25,6 @@ function harness(options: { renderPolicy?: () => Promise<never>; hold?: () => Pr
     },
     routeBindings: { captureReplyTarget: async () => {} },
     now: () => 10_000_000,
-    statusReadingTimeoutMs: 1,
-    prepareStatusContent: () => new Promise<void>(() => {}),
   } as unknown as ConstructorParameters<typeof ChannelReplyPipeline>[0]);
   const track = (agentId: string, extra: Record<string, unknown> = {}, surfaceKind = 'telegram') => pipeline.trackPending({
     agentId, surfaceKind, task: 'status', createdAt: 0, routeId: 'r', ...extra,

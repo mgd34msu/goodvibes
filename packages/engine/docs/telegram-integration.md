@@ -299,14 +299,29 @@ Telegram errors, or another process polling the same token), or polling is
 blocked by a conflict. The reason names which. One poll that succeeds returns
 the status to `healthy`. The ingress status also carries a `kind` that says what
 it is doing about receiving: `receiving`, `blocked`, `retrying`, `stopped` (stopped
-on this node, on purpose) or `inactive` (cannot receive; the reason says what to
-fix).
+on this node, on purpose) or `inactive` (cannot receive until a setting changes;
+the reason says which).
+
+Receiving stops for good only when Telegram rejects the bot token. Any other
+failure (a cursor that cannot be read or saved, a payment reply that cannot be
+archived, a malformed answer from Telegram or an intermediary) shows `retrying`
+with the reason and when it resumes; the cursor is re-read from disk and
+polling resumes on a growing delay of up to a minute. The `start` account
+action (`telegram_account_action start`) restarts receiving at once.
 
 **Webhook registration failed.**
-A network failure, a Telegram server error or a rate limit is retried with a
-growing delay, up to six attempts, and the status says it is retrying. A
-rejected token or any other refusal is not retried; fix the setting it names
-and restart the Telegram surface.
+Registration is retried with a growing delay, up to a minute apart, for as long
+as the surface is enabled in webhook mode, and the status says `retrying` with
+the reason; the tunnel or public address coming up later is enough. A rejected
+token is not retried; fix the setting it names. Any settings change restarts
+registration at once.
+
+**Webhook registered, but messages do not arrive.**
+Once a minute the daemon asks Telegram (`getWebhookInfo`) whether its
+deliveries reach the daemon. A new delivery error, a growing queue of waiting
+updates, or a different registered address turns the status `blocked` and the
+channel `degraded` with Telegram's own reason, which raises the dead-channel
+alert on another channel. The next clean reading clears it.
 
 **`401 Unauthorized`.**
 The token is wrong, revoked, or has stray whitespace. The daemon stops polling
@@ -329,10 +344,11 @@ from each bot's own saved offset. Switching bots does not reuse or overwrite the
 other bot's cursor. The account ID partitions the queue; it does not authorize
 an incoming message or payment answer.
 
-An unreadable, unsupported or damaged cursor stops polling and stays intact.
-The daemon does not jump to the newest message or discard the backlog. A failed
-cursor save also stops polling before the next request can confirm that offset.
-The channel's status gives the recovery reason. Restore the original state and
+An unreadable, unsupported or damaged cursor holds polling and stays intact:
+the status says `retrying` with the reason, and the daemon reads the cursor
+again on each retry, so polling resumes by itself once it loads. The daemon
+does not jump to the newest message or discard the backlog. A failed cursor
+save holds polling the same way before the next request can confirm that offset. Restore the original state and
 inspect missed messages before restarting ingress; do not delete the cursor to
 hide the failure. Version 1 cursors have no bot binding. In WebUI, open
 **Settings → Surfaces → Telegram cursor recovery** and choose **Review saved

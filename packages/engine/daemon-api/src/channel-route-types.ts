@@ -78,7 +78,8 @@ export interface ChannelPolicyServiceLike {
 }
 
 export interface SurfaceRegistryLike {
-  list(): readonly unknown[];
+  /** Built on each call from the live enabled rule and each surface's health. */
+  list(): Promise<readonly unknown[]>;
 }
 
 /**

@@ -82,7 +82,6 @@ export async function handleHomeAssistantSurfaceWebhook(
     channelId,
     title: readString(body.title) ?? 'Home Assistant',
     metadata: {
-      ...body,
       directoryKind: conversationKind === 'direct' ? 'user' : conversationKind,
       source: 'homeassistant',
       messageId,

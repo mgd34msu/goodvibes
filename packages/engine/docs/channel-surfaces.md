@@ -205,6 +205,13 @@ auth token for direct Twilio telephony; the surface's token or password
 elsewhere. A connection observed to be open is healthy whatever the credentials
 say, so tokenless ntfy reads healthy and can carry the dead-channel notice.
 
+`surfaces.list` is built on each call: one record per registered surface,
+`enabled` from the same switched-on rule delivery uses (its setting, a
+credential or its environment variable; an explicit off wins) and `state` from
+that surface's health answer (`healthy`, `degraded`, `error` for a dead or
+unconfigured channel, `disabled`), with the exact health in `metadata.health`.
+A surface turned on, or a channel that died, shows without a restart.
+
 Every channel tool and operator action call ends in one of four outcomes: ok,
 not found, refused, or unknown action (with the surface's valid action ids).
 Only ok is reported as success; the others carry the reason and the next step.
@@ -219,7 +226,18 @@ only while the surface is switched on.
 A direct conversation is admitted when the surface's user list is empty or
 holds its sender. A group, channel or thread is admitted when the conversation
 is on the group or channel list, or its sender is on the user list. Empty lists
-restrict nobody, and an empty user list means the surface has no owner yet.
+restrict nobody.
+
+A surface with every list empty has no owner yet. The first message from an
+unknown sender is not answered; it raises an owner claim in the owner inbox
+(`/questions` in the terminal apps, the web UI inbox, any owned channel) naming
+the sender. Accepting it puts that sender on the user list and records the
+policy's `ownerId` and `ownerSince`; declining it is remembered, so the same
+sender is not asked about again. At most three claims per surface are open at
+once. For a shared channel, set the surface policy `open: true`: every sender
+is admitted while the lists are empty and no claim is raised. A host without an
+owner inbox makes the first identified sender the owner and records the same
+two fields.
 
 An allowlist edit names its `kind` (`user`, `channel` or `group`) unless every
 entry is a typed id (`user:U0123`, `channel:C0123`). Names and handles are
@@ -253,7 +271,9 @@ or Home Assistant service target before dispatching work.
   topics use daemon-owned remote chat and inherit the daemon/TUI provider/model.
   A message the daemon fails to process is delivered again a few times; if it
   still fails, it is skipped so the messages behind it keep flowing, and the
-  owner is told it was skipped. A topic whose stream keeps dropping, or that
+  owner is told it was skipped. A message refused on purpose (an answer that
+  was consumed, a command the policy does not allow) is neither retried nor
+  counted as a failure. A topic whose stream keeps dropping, or that
   the server refuses, reports `degraded` or `dead` with the reason.
 - Home Assistant uses signed ingress, isolated remote sessions, Assist
   submit-and-wait conversation routes, event-bus delivery, setup manifest

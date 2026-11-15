@@ -23,6 +23,7 @@ import {
 } from '../adapters/index.js';
 import { fetchWithTimeout } from '../utils/fetch-with-timeout.js';
 import { logger } from '../utils/logger.js';
+import { ingressOutcome } from './ingress-alarm.js';
 import { summarizeError } from '../utils/error-display.js';
 
 export type ProviderRuntimeSurface = 'slack' | 'discord' | 'ntfy';
@@ -113,11 +114,6 @@ async function postSlackResponseUrl(url: string, body: Record<string, unknown>):
   });
   if (!response.ok) throw new Error(`Slack response_url answered HTTP ${response.status}`);
   await response.arrayBuffer();
-}
-
-/** A server failure (5xx) or a capacity refusal (429): the request was not started. Other 4xx answers are policy outcomes. */
-function isUnservedStatus(status: number): boolean {
-  return status === 429 || status >= 500;
 }
 
 const SLACK_NOT_STARTED_TEXT = 'I could not start that request right now. Please try again in a moment.';
@@ -471,11 +467,10 @@ export class ChannelProviderRuntimeManager {
       this.deps.ingressAlarm?.recordFailure('slack', detail);
       throw error;
     }
-    // A refusal such as a spawn failure (5xx) or a capacity refusal (429) is a
-    // failure of this surface; a policy block (other 4xx) is an expected
-    // outcome, not one. Either way the person is answered, so it is accepted.
-    if (response instanceof Response && isUnservedStatus(response.status)) {
-      this.deps.ingressAlarm?.recordFailure('slack', `Slack request was refused (HTTP ${response.status})`);
+    // Either way the person is answered, so the envelope is accepted; the
+    // alarm hears only whether the message was processed (see ingressOutcome).
+    if (response instanceof Response) {
+      this.deps.ingressAlarm?.record('slack', ingressOutcome(response), `Slack request could not be started (HTTP ${response.status})`);
     } else {
       this.deps.ingressAlarm?.recordSuccess('slack');
     }
@@ -495,7 +490,7 @@ export class ChannelProviderRuntimeManager {
     try {
       let body: { text?: unknown; response_type?: unknown } = {};
       try { body = await response.clone().json() as typeof body; } catch { /* not a JSON answer */ }
-      const unserved = isUnservedStatus(response.status);
+      const unserved = ingressOutcome(response) === 'failed';
       const text = typeof body.text === 'string' && body.text.trim()
         ? body.text
         : unserved ? SLACK_NOT_STARTED_TEXT : '';
@@ -519,9 +514,8 @@ export class ChannelProviderRuntimeManager {
   private async handleDiscordDispatch(dispatch: DiscordGatewayDispatch, discord: DiscordIntegration): Promise<void> {
     await handleDiscordGatewayDispatchPayload(dispatch, this.deps.buildSurfaceAdapterContext(), discord)
       .then((response) => {
-        // Same rule as Slack: the adapter's refusal to start the request is this surface failing, not succeeding.
-        if (response instanceof Response && isUnservedStatus(response.status)) {
-          this.deps.ingressAlarm?.recordFailure('discord', `Discord request was refused (HTTP ${response.status})`);
+        if (response instanceof Response) {
+          this.deps.ingressAlarm?.record('discord', ingressOutcome(response), `Discord request could not be started (HTTP ${response.status})`);
         } else {
           this.deps.ingressAlarm?.recordSuccess('discord');
         }
@@ -555,24 +549,24 @@ export class ChannelProviderRuntimeManager {
       messageId: message.id ?? '(none)',
     });
     let detail: string;
-    let permanent = false;
     try {
       const response = await handleNtfySurfacePayload(message, this.deps.buildSurfaceAdapterContext());
-      if (response.ok) {
+      const outcome = ingressOutcome(response);
+      if (outcome !== 'failed') {
+        // Processed, or refused on purpose (a consumed answer, a command the
+        // policy does not allow): neither is a processing failure, and a
+        // refusal says the same thing every time, so it is not delivered again.
         if (message.id) this.ntfyMessageFailures.delete(`${topic}\u0000${message.id}`);
-        this.deps.ingressAlarm?.recordSuccess('ntfy');
+        this.deps.ingressAlarm?.record('ntfy', outcome, '');
         return;
       }
       detail = `ntfy dispatch failed (HTTP ${response.status})`;
-      // A refusal (policy, malformed, unknown) says the same thing every time.
-      permanent = response.status >= 400 && response.status < 500
-        && response.status !== 408 && response.status !== 409 && response.status !== 429;
     } catch (error) {
       detail = summarizeError(error);
     }
     const key = message.id ? `${topic}\u0000${message.id}` : null;
     const attempt = key ? (this.ntfyMessageFailures.get(key) ?? 0) + 1 : NTFY_MESSAGE_ATTEMPTS;
-    if (key && !permanent && attempt < NTFY_MESSAGE_ATTEMPTS) {
+    if (key && attempt < NTFY_MESSAGE_ATTEMPTS) {
       // Throwing ends this stream; the reconnect resumes from the last message
       // finished, so this one is delivered again.
       this.ntfyMessageFailures.delete(key);

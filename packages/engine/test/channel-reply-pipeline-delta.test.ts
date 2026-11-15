@@ -1,7 +1,3 @@
-import { beforeEach, afterEach } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
 /**
  * Channel reply defects observed live against a real daemon.
  *
@@ -271,10 +267,11 @@ describe('internal completion-report JSON never reaches the channel body', () =>
 describe('the report reaches nobody in its prose form either', () => {
   // What the owner actually received for "Hey, are you there?", the JSON form
   // was already stripped, so the agent filed the same report as prose and it
-  // shipped verbatim.
+  // shipped verbatim. The prose form is reduced only for a report run (one
+  // attached to a contract); a conversational answer is delivered as written.
   test('a filled-in report template is reduced to the answer it carries', async () => {
     const h = harness('ntfy');
-    h.track('agent-prose');
+    h.track('agent-prose', { contractId: 'contract-agent-prose' });
     await h.complete('agent-prose', [
       '## Summary',
       "Yes, I'm here. The daemon is running and the ntfy route is bound.",
@@ -298,7 +295,7 @@ describe('the report reaches nobody in its prose form either', () => {
 
   test('the inline label form is stripped too', async () => {
     const h = harness('ntfy');
-    h.track('agent-inline');
+    h.track('agent-inline', { contractId: 'contract-agent-inline' });
     await h.complete('agent-inline', [
       'Summary: The release is tagged and CI is green on every job.',
       'Changes: None.',
@@ -313,7 +310,7 @@ describe('the report reaches nobody in its prose form either', () => {
 
   test('the bulleted label form is stripped too', async () => {
     const h = harness('telegram');
-    h.track('agent-bullets');
+    h.track('agent-bullets', { contractId: 'contract-agent-bullets' });
     await h.complete('agent-bullets', [
       '- Summary: Two files changed; the flag defaults to on.',
       '- Changes: src/flags.ts, src/config.ts',
@@ -326,7 +323,7 @@ describe('the report reaches nobody in its prose form either', () => {
 
   test('prose written before the report survives it', async () => {
     const h = harness('telegram');
-    h.track('agent-preamble');
+    h.track('agent-preamble', { contractId: 'contract-agent-preamble' });
     await h.complete('agent-preamble', [
       'The parser was reading the header twice. Fixed.',
       '',
@@ -347,7 +344,7 @@ describe('the report reaches nobody in its prose form either', () => {
 
   test('a report whose summary says nothing sends nothing at all', async () => {
     const h = harness('ntfy');
-    h.track('agent-hollow');
+    h.track('agent-hollow', { contractId: 'contract-agent-hollow' });
     await h.complete('agent-hollow', [
       'Summary: None.',
       'Changes: None.',
@@ -363,7 +360,7 @@ describe('the report reaches nobody in its prose form either', () => {
 
   test('ordinary prose that merely mentions a section word is left alone', async () => {
     const h = harness('telegram');
-    h.track('agent-prose-safe');
+    h.track('agent-prose-safe', { contractId: 'contract-agent-prose-safe' });
     const answer = 'Summary: the API is down. I checked the health endpoint twice and it timed out both times.';
     await h.complete('agent-prose-safe', answer);
 
@@ -374,7 +371,7 @@ describe('the report reaches nobody in its prose form either', () => {
 
   test('a heading-shaped sentence without a colon is not a section boundary', async () => {
     const h = harness('telegram');
-    h.track('agent-prose-safe2');
+    h.track('agent-prose-safe2', { contractId: 'contract-agent-prose-safe2' });
     const answer = [
       'Summary: I rewrote the changelog entry.',
       'Changes to the release process are still pending your call.',
@@ -456,15 +453,15 @@ describe('progress notifications carry a status line, never the answer', () => {
     expect(h.published).toHaveLength(0);
   });
 
-  test('a turn counter and a placeholder are never published, however long the run', async () => {
+  test('a placeholder the orchestrator stamps for the operator is never published, however long the run', async () => {
     const h = harness('ntfy');
     h.track('agent-placeholder');
     h.advance(10 * 60_000);
     // The single most-delivered notification body on the owner's phone.
-    expect(await h.pipeline.deliverProgress('agent-placeholder', 'Turn 1 · Thinking…', true, 'owner')).toBeNull();
-    expect(await h.pipeline.deliverProgress('agent-placeholder', 'Turn 12 · Thinking...', true, 'owner')).toBeNull();
-    expect(await h.pipeline.deliverProgress('agent-placeholder', 'Working…', true, 'owner')).toBeNull();
-    expect(await h.pipeline.deliverProgress('agent-placeholder', 'Starting', true, 'owner')).toBeNull();
+    expect(await h.pipeline.deliverProgress('agent-placeholder', 'Turn 1 · Thinking…', true, 'operator')).toBeNull();
+    expect(await h.pipeline.deliverProgress('agent-placeholder', 'Turn 12 · Thinking...', true, 'operator')).toBeNull();
+    expect(await h.pipeline.deliverProgress('agent-placeholder', 'Working…', true, 'operator')).toBeNull();
+    expect(await h.pipeline.deliverProgress('agent-placeholder', 'Starting', true, 'operator')).toBeNull();
     expect(h.published).toHaveLength(0);
   });
 
@@ -485,9 +482,9 @@ describe('progress notifications carry a status line, never the answer', () => {
     const h = harness('ntfy');
     h.track('agent-hello');
     // What a real run does in its first seconds, in order.
-    await h.progress('agent-hello', 'Turn 1 · Thinking…');
+    await h.progress('agent-hello', 'Turn 1 · Thinking…', 'operator');
     h.advance(1_200);
-    await h.progress('agent-hello', 'Turn 2 · Thinking…');
+    await h.progress('agent-hello', 'Turn 2 · Thinking…', 'operator');
     h.advance(1_500);
     await h.complete('agent-hello', "Yes, I'm here and the daemon is running.");
 
@@ -505,15 +502,3 @@ describe('progress notifications carry a status line, never the answer', () => {
     expect(progressBodies.some((b) => b.includes('FINAL ANSWER TEXT'))).toBe(false);
   });
 });
-
-let previousStatusPort: JudgmentPort | undefined;
-const placeholders = new Set(['Turn 1 · Thinking…', 'Turn 2 · Thinking…', 'Turn 12 · Thinking...', 'Working…', 'Starting']);
-beforeEach(() => {
-  const readings = fakePort((_name, _question, state) => {
-    const content = (state as { content: string }).content;
-    if (!placeholders.has(content)) throw new Error('No scripted status classification for this delivery fixture.');
-    return noulAnswer(0);
-  });
-  previousStatusPort = installJudgmentPort({ model: readings.port.model, ask: request => request.context?.battery === 'engine.channels.status-content' ? readings.port.ask(request) : previousStatusPort!.ask(request) });
-});
-afterEach(() => installJudgmentPort(previousStatusPort));

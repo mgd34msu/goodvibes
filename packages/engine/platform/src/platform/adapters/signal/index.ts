@@ -101,7 +101,7 @@ export async function handleSignalSurfaceWebhook(req: Request, context: SurfaceA
         channelId: conversationId,
         threadId,
         title: conversationId,
-        metadata: { ...ingressMetadata(payload), ...(groupId ? { groupId } : {}), senderId: sender },
+        metadata: { ...(groupId ? { groupId } : {}), senderId: sender },
       },
       text: message,
       logLabel: 'handleSignalSurfaceWebhook',

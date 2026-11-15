@@ -1,4 +1,4 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, ingressMetadata } from '../helpers.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
@@ -97,7 +97,6 @@ export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceA
         threadId,
         title: roomId,
         metadata: {
-          ...ingressMetadata(payload),
           ...(eventId ? { eventId } : {}),
           ...(msgtype ? { msgtype } : {}),
           ...(replyToMessageId ? { replyToMessageId } : {}),

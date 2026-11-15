@@ -1397,8 +1397,12 @@ describe('feature flag safe-default gates', () => {
     const configManager = testConfigManager(join(dir, 'config'));
     configManager.set('surfaces.slack.enabled', true);
 
+    const slackDescriptor = new ChannelPluginRegistry();
+    slackDescriptor.register({ id: 'slack', surface: 'slack', displayName: 'Slack', capabilities: ['egress'] } as never);
     const disabledSurfaces = new SurfaceRegistry(configManager, undefined, flags([]));
     const enabledSurfaces = new SurfaceRegistry(configManager, undefined, flags(['slack-surface']));
+    disabledSurfaces.attachPluginRegistry(slackDescriptor);
+    enabledSurfaces.attachPluginRegistry(slackDescriptor);
     expect(disabledSurfaces.syncConfiguredSurfaces().find((surface) => surface.kind === 'slack')?.enabled).toBe(false);
     expect(enabledSurfaces.syncConfiguredSurfaces().find((surface) => surface.kind === 'slack')?.enabled).toBe(true);
 
@@ -1422,6 +1426,9 @@ describe('feature flag safe-default gates', () => {
     const configManager = testConfigManager(join(dir, 'config'));
     configManager.set('web.enabled', true);
     const registry = new SurfaceRegistry(configManager, undefined, flags(['web-surface']));
+    const webDescriptor = new ChannelPluginRegistry();
+    webDescriptor.register({ id: 'web', surface: 'web', displayName: 'Web control plane', capabilities: ['ingress'] } as never);
+    registry.attachPluginRegistry(webDescriptor);
 
     expect(registry.syncConfiguredSurfaces().find((surface) => surface.kind === 'web')?.enabled).toBe(true);
   }));

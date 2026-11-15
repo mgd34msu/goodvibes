@@ -19,8 +19,6 @@ function harness(failures: number, captureFails = false) {
     },
     routeBindings: { captureReplyTarget: async () => { if (captureFails) throw new Error('route binding is gone'); } },
     now: () => 10_000_000,
-    statusReadingTimeoutMs: 1,
-    prepareStatusContent: () => new Promise<void>(() => {}),
     waitBeforeRetry: async (ms: number) => { waits.push(ms); },
     onUndelivered: (reply: { body: string; reason: string }) => undelivered.push(reply),
   } as unknown as ConstructorParameters<typeof ChannelReplyPipeline>[0]);

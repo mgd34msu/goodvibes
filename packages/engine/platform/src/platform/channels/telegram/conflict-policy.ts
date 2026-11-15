@@ -32,7 +32,9 @@
  * 3. **Nothing here is ever terminal.** A stuck webhook can be removed by a
  *    person at any moment; a competing consumer is frequently transient, a
  *    test daemon, a second checkout, a stale process. Both must recover on
- *    their own, so the caller keeps polling either way.
+ *    their own, so the caller keeps polling either way. The receive loop
+ *    holds the same rule for every failure (ingress.ts): only a rejected bot
+ *    token stops it.
  * 4. Crossing the escalation threshold changes only how LOUDLY it is said.
  *
  * Kept pure so every branch is provable without a socket, a fake server, or a

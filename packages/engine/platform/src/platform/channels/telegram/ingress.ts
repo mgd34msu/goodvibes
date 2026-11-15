@@ -33,7 +33,7 @@ import { isSecretRefInput, normalizeSecretRef, resolveSecretInput } from '../../
 import { looksLikeSecretRef } from '../../config/secret-ref-refusal.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { IngressProcessingHealth, type ChannelIngressAlarm } from '../ingress-alarm.js';
+import { IngressProcessingHealth, ingressOutcome, type ChannelIngressAlarm } from '../ingress-alarm.js';
 import { TelegramApiError, TelegramBotApi, TelegramUpdateResponseError, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
 import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError } from './receive-progress.js';
 import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramPollingCursor } from './offset-store.js';
@@ -65,20 +65,26 @@ const TELEGRAM_WEBHOOK_PATH = '/webhook/telegram';
  * failed long poll is routine; three is an outage the owner should see.
  */
 const RECEIVE_FAILURES_BEFORE_DEGRADED = 3;
-/** Webhook registration attempts before setup gives up and says so. */
-const WEBHOOK_REGISTRATION_ATTEMPTS = 6;
+/**
+ * How often an armed webhook asks Telegram whether its deliveries arrive: the
+ * channel health sweep's period, so a dead tunnel shows at the next sweep.
+ */
+const WEBHOOK_DELIVERY_CHECK_MS = 60_000;
 
 export type TelegramIngressMode = 'polling' | 'webhook' | 'inactive';
 
 /**
  * What the ingress is doing about receiving, apart from which mode it is in.
  *
- *   receiving  polling returned, or the webhook is registered
- *   blocked    polling is up but something else holds the bot or its cursor
- *   retrying   polling is up and failing every poll, or restarted after failing
- *              and has not yet returned one
+ *   receiving  polling returned, or the webhook is registered and Telegram
+ *              reports no delivery failure
+ *   blocked    polling is up but something else holds the bot or its cursor, or
+ *              the webhook is registered and Telegram cannot deliver to it
+ *   retrying   polling or webhook registration is failing and is retried on
+ *              the backoff; `reason` says why and when
  *   stopped    stopped on this node, on purpose
- *   inactive   cannot receive; `reason` says what to fix
+ *   inactive   cannot receive until a setting changes (a rejected token, a
+ *              missing setting); `reason` says what to fix
  */
 export type TelegramIngressKind = 'receiving' | 'blocked' | 'retrying' | 'stopped' | 'inactive';
 
@@ -176,17 +182,6 @@ export function describeWebhookUrlProblem(rawUrl: string): string | null {
   return null;
 }
 
-/**
- * Whether a failed setWebhook is worth another try: the network, Telegram's
- * own 5xx, or a flood wait. A 4xx other than 429, or a reply that did not
- * confirm the registration, is an answer, not an outage.
- */
-function isTransientRegistrationFailure(error: unknown): boolean {
-  if (!(error instanceof TelegramApiError)) return false;
-  const code = error.errorCode ?? error.httpStatus;
-  return code === null || code === 429 || code >= 500;
-}
-
 export class TelegramIngressSupervisor {
   private stopped = true;
   private generation = 0;
@@ -213,6 +208,10 @@ export class TelegramIngressSupervisor {
    * only a poll that comes back proves it receives again.
    */
   private receiveFailure: string | null = null;
+  /** Why Telegram says an armed webhook's deliveries are not arriving, while that lasts. */
+  private webhookDeliveryFailure: string | null = null;
+  /** Polls that came back, counted so a rebuilt receiver resets its backoff once it works again. */
+  private completedPolls = 0;
   /** Times each update was fetched again after the processor answered 429/5xx; cleared once it is handled. */
   private readonly updateRetries = new Map<number, number>();
   /** The token the latest start() resolved, compared when a secret changes. */
@@ -246,8 +245,11 @@ export class TelegramIngressSupervisor {
     // Merged rather than stored on `currentStatus`: the mode transitions below
     // REPLACE that object wholesale, so a processing failure recorded there
     // would be erased by the next routine status refresh.
-    const failures = [this.receiveFailure ?? undefined, this.processing.lastError].filter((entry): entry is string => Boolean(entry));
-    return failures.length === 0 ? this.currentStatus : { ...this.currentStatus, lastError: failures.join('; ') };
+    const delivery = this.currentStatus.mode === 'webhook' ? this.webhookDeliveryFailure : null;
+    const failures = [this.receiveFailure ?? undefined, delivery ?? undefined, this.processing.lastError].filter((entry): entry is string => Boolean(entry));
+    if (failures.length === 0) return this.currentStatus;
+    const base = delivery !== null && this.currentStatus.kind === 'receiving' ? { ...this.currentStatus, kind: 'blocked' as const, reason: delivery } : this.currentStatus;
+    return { ...base, lastError: failures.join('; ') };
   }
 
   /**
@@ -451,7 +453,6 @@ export class TelegramIngressSupervisor {
       // Each acknowledged native registration gets its own private credential.
       // Keep configured shared-secret ingress for embedders, without native proof.
       let secret: string;
-      let registering = false;
       try {
         secret = managed ? `gvtw_${randomBytes(24).toString('base64url')}` : await this.resolveWebhookSecret();
         if (!live()) { lifetime.abort(); return this.status; }
@@ -480,9 +481,7 @@ export class TelegramIngressSupervisor {
             });
           } finally { cursor.release(); }
         }
-        registering = true;
         await api.setWebhook(url, secret || undefined, lifetime.signal);
-        registering = false;
         if (!live()) { lifetime.abort(); return this.status; }
         if (managed && !currentCredentials()) {
           lifetime.abort();
@@ -509,26 +508,27 @@ export class TelegramIngressSupervisor {
           return this.settle('inactive', 'Telegram webhook registration failed: the bot token was rejected. '
             + 'Check surfaces.telegram.botToken; retrying cannot fix a revoked or mistyped token.');
         }
-        if (registering && attempt < WEBHOOK_REGISTRATION_ATTEMPTS && isTransientRegistrationFailure(error)) {
-          const delayMs = Math.min(BACKOFF_MIN_MS * 2 ** (attempt - 1), BACKOFF_MAX_MS);
-          const status = this.settle('inactive', `Telegram webhook registration failed (attempt ${attempt} of `
-            + `${WEBHOOK_REGISTRATION_ATTEMPTS}); retrying in ${Math.ceil(delayMs / 1_000)}s. `
-            + 'Check bot credentials and public HTTPS connectivity');
-          this.retryWebhookRegistration(lifetime, delayMs, () => register(attempt + 1));
-          return status;
-        }
-        lifetime.abort();
-        // A held polling lock or a damaged cursor file is not a credentials or
-        // connectivity problem; say what it is.
-        if (error instanceof TelegramOffsetStoreError) return this.settle('inactive', `Telegram webhook registration did not start: ${error.message}`);
-        return this.settle('inactive', `Telegram webhook registration failed${attempt > 1 ? ` after ${attempt} attempts` : ''}; `
-          + 'check bot credentials and public HTTPS connectivity, then restart the Telegram surface');
+        // Everything else is retried on the capped backoff while the surface
+        // stays enabled in webhook mode: the network or tunnel not up yet,
+        // Telegram unable to resolve the public host, a held or damaged cursor.
+        // A settings change restarts setup at once.
+        const delayMs = Math.min(BACKOFF_MIN_MS * 2 ** Math.min(attempt - 1, 16), BACKOFF_MAX_MS);
+        // A held polling lock or a damaged cursor file is not a connectivity problem; say what it is.
+        const cause = error instanceof TelegramOffsetStoreError
+          ? error.message
+          : 'check that web.publicBaseUrl reaches this daemon over HTTPS';
+        const failure = `Telegram webhook registration failed (attempt ${attempt}); retrying in ${Math.ceil(delayMs / 1_000)}s: ${cause}`;
+        logger.error('Telegram is enabled but is NOT receiving messages', { surface: 'telegram', action: failure });
+        this.setStatus('retrying', 'webhook', failure, false, failure);
+        this.retryWebhookRegistration(lifetime, delayMs, () => register(attempt + 1));
+        return this.currentStatus;
       }
       if (!secret) {
         logger.warn('Telegram ingress: webhook registered without a secret token', {
           detail: 'set surfaces.telegram.webhookSecret so inbound callbacks can be verified',
         });
       }
+      this.watchWebhookDelivery(api, url, lifetime);
       return this.settle('webhook', `Telegram updates will be delivered to ${url}`, false);
     };
     // Publish setup ownership before injected provider/resolver code can run.
@@ -558,6 +558,57 @@ export class TelegramIngressSupervisor {
     }, delayMs);
     (timer as unknown as { unref?: () => void }).unref?.();
     lifetime.signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  /**
+   * "Registered" is not "delivered": Telegram keeps the evidence of whether its
+   * deliveries arrive (the updates it is holding and its last delivery error),
+   * so an armed webhook asks for it on the health sweep's period. A new error,
+   * a growing queue or a different registered address shows the surface
+   * degraded with Telegram's own reason, which raises the dead-channel alert;
+   * the next clean reading clears it. One provider call per period, none per
+   * message; the timer ends with the registration's lifetime.
+   */
+  private watchWebhookDelivery(api: TelegramBotApi, url: string, lifetime: AbortController): void {
+    this.webhookDeliveryFailure = null;
+    let since = Math.floor((this.deps.now?.() ?? Date.now()) / 1_000);
+    let lastPending: number | null = null;
+    let checking = false;
+    const check = async (): Promise<void> => {
+      if (checking || lifetime.signal.aborted) return;
+      checking = true;
+      try {
+        const info = await api.getWebhookInfo(lifetime.signal);
+        if (lifetime.signal.aborted || this.abort !== lifetime) return;
+        const problems: string[] = [];
+        if (info.url !== url) problems.push(info.url ? `Telegram now delivers to a different address (${info.url})` : 'Telegram has no webhook registered for this bot');
+        if (info.lastErrorDate !== undefined && info.lastErrorDate >= since) {
+          problems.push(`Telegram reports its last delivery failed: ${info.lastErrorMessage ?? 'no reason given'}`);
+        }
+        if (lastPending !== null && info.pendingUpdateCount > lastPending) {
+          problems.push(`${info.pendingUpdateCount} updates are waiting at Telegram`);
+        }
+        lastPending = info.pendingUpdateCount;
+        since = Math.floor((this.deps.now?.() ?? Date.now()) / 1_000);
+        const failure = problems.length > 0
+          ? `Telegram cannot deliver to ${url}: ${problems.join('; ')}. Check that web.publicBaseUrl reaches this daemon over HTTPS.`
+          : null;
+        if (failure !== this.webhookDeliveryFailure) {
+          if (failure) logger.error('Telegram is enabled but is NOT receiving messages', { surface: 'telegram', action: failure });
+          else logger.info('Telegram ingress: webhook deliveries are arriving again', { surface: 'telegram' });
+          this.webhookDeliveryFailure = failure;
+        }
+      } catch (error) {
+        if (!lifetime.signal.aborted) {
+          logger.warn('Telegram ingress: could not read webhook delivery status', { surface: 'telegram', error: summarizeError(error) });
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    const timer = setInterval(() => { void check(); }, WEBHOOK_DELIVERY_CHECK_MS);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    lifetime.signal.addEventListener('abort', () => { clearInterval(timer); }, { once: true });
   }
 
   private async startPolling(
@@ -632,27 +683,43 @@ export class TelegramIngressSupervisor {
       return this.settle('inactive', 'The Telegram bot identity cannot select a saved cursor. Check its bot token before restarting ingress.');
     }
     const start = store.load();
-    if (start.mode === 'blocked') {
-      lifetime.abort();
-      logger.error('Telegram polling stopped because its saved cursor needs inspection', { kind: start.kind });
-      return this.settle('inactive', start.reason);
-    }
+    const createStore = (): TelegramOffsetStore => new TelegramOffsetStore(this.deps.offsetFilePath, api.botId, this.beforeCursorWrite, this.beforeReceiveSpanWrite);
     // Reserve the runner before any dependency can synchronously reenter stop.
     // Waiting for another local receiver does not attach payment-source proof.
-    this.loop = this.runOwnedPolling(api, store, lifetime.signal, attachSource, priorWebhook)
+    this.loop = this.runOwnedPolling(api, store, createStore, lifetime.signal, attachSource, priorWebhook)
       .finally(() => { lifetime.abort(); });
+    if (start.mode === 'blocked') {
+      // The loop retries the cursor on the backoff; nothing is confirmed until it loads.
+      const failure = `Telegram receiving is waiting for its saved cursor: ${start.reason}`;
+      logger.error('Telegram is enabled but is NOT receiving messages', { surface: 'telegram', kind: start.kind, action: failure });
+      this.setStatus('retrying', 'polling', failure, true, failure);
+      return this.currentStatus;
+    }
     return this.settle('polling',
       `long-polling Telegram getUpdates for bot ${api.botId} (no public URL required)`, true);
   }
 
   // ── the poll loop ─────────────────────────────────────────────────────────
 
-  private async runOwnedPolling(api: TelegramBotApi, store: TelegramOffsetStore, lifetime: AbortSignal,
+  /**
+   * Own one receiving session for this bot, and keep owning it. Only a rejected
+   * token ends receiving (runPollLoop settles that, and a token change restarts
+   * it). Every other failure, a cursor that would not load or save, a payment
+   * reply that could not be archived, a malformed batch, a lease that would not
+   * release, rebuilds the cursor from disk and resumes on the backoff, with the
+   * reason in the status, the same way a 409 recovers.
+   */
+  private async runOwnedPolling(api: TelegramBotApi, initialStore: TelegramOffsetStore, createStore: () => TelegramOffsetStore,
+    lifetime: AbortSignal,
     attach: (cursor: TelegramPollingCursor, progress: TelegramPollingReceiveProgress) => TelegramSourceAccountLease | undefined,
     priorWebhook = false): Promise<void> {
     await Promise.resolve();
     let reportedBusy = false;
-    while (!this.stopped && !lifetime.aborted && this.abort?.signal === lifetime) {
+    let store = initialStore;
+    let gap = priorWebhook;
+    let backoffMs = BACKOFF_MIN_MS;
+    const owned = (): boolean => !this.stopped && !lifetime.aborted && this.abort?.signal === lifetime;
+    while (owned()) {
       let cursor: TelegramPollingCursor;
       try { cursor = store.retainPolling(); }
       catch (error) {
@@ -662,41 +729,54 @@ export class TelegramIngressSupervisor {
           if (!reportedBusy) {
             reportedBusy = true;
             try { this.deps.onConcurrentConsumerConflict?.(reason); }
-            catch {
-              this.setStatus('inactive', 'inactive', 'Telegram receiver coordination failed. Inspect its original cursor owner.');
-              logger.error('Telegram polling stopped because receiver coordination failed', { surface: 'telegram' });
-              return;
+            catch (listenerError) {
+              logger.warn('Telegram receiver coordination listener failed', { surface: 'telegram', error: summarizeError(listenerError) });
             }
           }
           await this.delay(BACKOFF_MIN_MS); continue;
         }
-        const failure = error instanceof TelegramOffsetStoreError ? error : new TelegramOffsetStoreError('unavailable');
-        this.setStatus('inactive', 'inactive', failure.message);
-        logger.error('Telegram polling stopped because its saved cursor needs inspection', { kind: failure.kind }); return;
+        await this.retryReceiving(error, backoffMs);
+        backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
+        store = createStore();
+        continue;
       }
+      reportedBusy = false;
+      const pollsBefore = this.completedPolls;
+      let failure: unknown = null;
       try {
         lifetime.throwIfAborted();
-        if (this.stopped || this.abort?.signal !== lifetime) return;
+        if (!owned()) return;
         const progress = new TelegramPollingReceiveProgress(lifetime, this.deps.now ?? Date.now, cursor);
-        if (priorWebhook) progress.gap();
+        // Receive coverage is unknown across a webhook period or a rebuilt cursor.
+        if (gap) progress.gap();
         const source = attach(cursor, progress);
         await this.runPollLoop(api, cursor, lifetime, source, progress);
       } catch (error) {
-        if (!lifetime.aborted && !this.stopped) {
-          this.setStatus('inactive', 'inactive', 'Telegram original receive owner became unavailable. Inspect its cursor and channel status.');
-          logger.error('Telegram polling stopped because its receive owner became unavailable', { surface: 'telegram', error: summarizeError(error) });
-        }
+        failure = error;
       } finally {
         // Even an injected getUpdates that ignores abort must finish before a
         // replacement receiver can acquire and confirm this queue's offsets.
         try { cursor.release(); }
-        catch {
-          this.setStatus('inactive', 'inactive', 'The original Telegram cursor lease could not be released. Inspect its saved owner before restarting ingress.');
-          logger.error('Telegram polling could not release its cursor lease', { surface: 'telegram' });
-        }
+        catch (releaseError) { failure ??= releaseError; }
       }
-      return;
+      // runPollLoop returns on its own only when stopped or the token was rejected.
+      if (!owned() || failure === null) return;
+      if (this.completedPolls > pollsBefore) backoffMs = BACKOFF_MIN_MS;
+      await this.retryReceiving(failure, backoffMs);
+      backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
+      store = createStore();
+      gap = true;
     }
+  }
+
+  /** Say why receiving is not working and when it resumes, then wait that long. */
+  private async retryReceiving(error: unknown, delayMs: number): Promise<void> {
+    if (this.stopped) return;
+    const detail = error instanceof Error && error.message ? error.message : summarizeError(error);
+    const failure = `Telegram receiving failed and resumes in ${Math.ceil(delayMs / 1_000)}s: ${detail}`;
+    logger.error('Telegram is enabled but is NOT receiving messages', { surface: 'telegram', action: failure });
+    this.setStatus('retrying', 'polling', failure, true, failure);
+    await this.delay(delayMs);
   }
 
   private async runPollLoop(
@@ -721,6 +801,7 @@ export class TelegramIngressSupervisor {
           signal: lifetime,
         });
         lifetime.throwIfAborted(); entered.assertCurrent();
+        this.completedPolls += 1;
         backoffMs = BACKOFF_MIN_MS;
         conflictRecoveries = 0;
         failedPolls = 0;
@@ -760,19 +841,11 @@ export class TelegramIngressSupervisor {
         if (retryAfterMs !== null) await this.delay(retryAfterMs);
       } catch (error) {
         if (this.stopped || lifetime.aborted || (error instanceof Error && error.name === 'AbortError')) return;
-        if (error instanceof TelegramOffsetStoreError) {
-          this.setStatus('inactive', 'inactive', error.message);
-          logger.error('Telegram polling stopped before confirming an unpersisted cursor', { kind: error.kind });
-          return;
-        }
-        if (error instanceof PaymentReplyHistoryError) {
-          this.setStatus('inactive', 'inactive', error.message);
-          logger.error('Telegram polling stopped before confirming an unsaved payment reply'); return;
-        }
-        if (error instanceof TelegramUpdateResponseError || error instanceof TelegramReceiveCoverageError) {
-          this.setStatus('inactive', 'inactive', error.message);
-          logger.error('Telegram receive progress became unavailable'); return;
-        }
+        // The cursor, the payment reply archive or the receive record could not
+        // be trusted: nothing past it is confirmed. The owner rebuilds them and
+        // resumes (runOwnedPolling).
+        if (error instanceof TelegramOffsetStoreError || error instanceof PaymentReplyHistoryError
+          || error instanceof TelegramUpdateResponseError || error instanceof TelegramReceiveCoverageError) throw error;
         if (error instanceof TelegramApiError && error.errorCode === 409) receiveProgress?.gap();
 
         const terminal = await this.handlePollError(error, api, () => {
@@ -1043,8 +1116,8 @@ export class TelegramIngressSupervisor {
           sendMessage: (input) => api.sendMessage(input),
           ...(sourceAccount ? { acquireSourceAccount: sourceAccount.acquire } : {}),
         });
-        const retryable = response.status === 429 || response.status >= 500;
-        if (retryable && updateId !== null) {
+        const outcome = ingressOutcome(response);
+        if (outcome === 'failed' && updateId !== null) {
           const attempts = (this.updateRetries.get(updateId) ?? 0) + 1;
           if (attempts < UPDATE_RETRY_LIMIT) {
             this.updateRetries.set(updateId, attempts);
@@ -1056,7 +1129,8 @@ export class TelegramIngressSupervisor {
           this.processing.recordFailure(`Telegram update was refused ${UPDATE_RETRY_LIMIT} times (HTTP ${response.status}) and was skipped`, { updateId });
         } else {
           if (!response.ok) receiveProgress?.gap(scope);
-          this.processing.recordSuccess();
+          if (outcome === 'processed') this.processing.recordSuccess();
+          else if (outcome === 'failed') this.processing.recordFailure(`Telegram update could not be processed (HTTP ${response.status}) and was skipped`, { updateId });
         }
       } catch (error) {
         if (error instanceof PaymentReplyHistoryError) throw error;

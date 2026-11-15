@@ -1,6 +1,6 @@
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { SharedApprovalRecord } from '../control-plane/index.js';
-import type { ChannelIngressAlarm } from './ingress-alarm.js';
+import { ingressOutcome, type ChannelIngressAlarm } from './ingress-alarm.js';
 import { outcomeFromLegacyValue, unknownChannelAction, type ChannelActionOutcome } from './action-outcome.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { Tool } from '../types/tools.js';
@@ -206,14 +206,10 @@ export class ChannelPluginRegistry {
     if (!this.ingressAlarm) return plugin.handleInbound(req);
     try {
       const response = await plugin.handleInbound(req);
-      // Adapters answer a failure they cannot process with a 5xx Response rather
-      // than throwing; a surface that answers 503 to everything is not healthy.
-      // A 4xx is a refusal of one request (policy, malformed), not a fault.
-      if (response && response.status >= 500) {
-        this.ingressAlarm.recordFailure(plugin.surface, `${plugin.surface} inbound answered HTTP ${response.status}`);
-      } else {
-        this.ingressAlarm.recordSuccess(plugin.surface);
-      }
+      // Adapters answer a failure they cannot process with a failure status
+      // rather than throwing. A refused or unauthenticated request says nothing
+      // about processing, so it neither starts nor ends a failure run.
+      this.ingressAlarm.record(plugin.surface, ingressOutcome(response), `${plugin.surface} inbound answered HTTP ${response?.status ?? 'nothing'}`);
       return response;
     } catch (error) {
       this.ingressAlarm.recordFailure(plugin.surface, summarizeError(error));

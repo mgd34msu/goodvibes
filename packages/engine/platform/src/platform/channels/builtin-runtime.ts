@@ -751,6 +751,11 @@ export class BuiltinChannelRuntime {
   ): Promise<ChannelAccountLifecycleResult> {
     return runBuiltinAccountAction({
       deps: this.deps,
+      restartTelegramIngress: async () => {
+        if (!this.deps.telegramOffsetPath) return null;
+        await this.startIngress();
+        return this.telegramIngressStatus();
+      },
       buildAccount: (currentSurface) => this.buildAccount(currentSurface),
       resolveAccount: (currentSurface, currentAccountId) => this.resolveAccount(currentSurface, currentAccountId),
     }, surface, action, accountId, input);

@@ -26,6 +26,7 @@ const POLICY_BOOLEAN_FIELDS = [
   'allowGroupMessages',
   'allowThreadMessages',
   'allowTextCommandsWithoutMention',
+  'open',
 ] as const;
 const POLICY_MODE_FIELDS = ['dmPolicy', 'groupPolicy'] as const;
 const POLICY_LIST_FIELDS = ['allowlistUserIds', 'allowlistChannelIds', 'allowlistGroupIds', 'allowedCommands'] as const;
@@ -160,7 +161,7 @@ export function createDaemonChannelRouteHandlers(
   context: DaemonChannelRouteContext,
 ): DaemonChannelRouteHandlers {
   return {
-    getSurfaces: () => Response.json({ surfaces: context.surfaceRegistry.list() }),
+    getSurfaces: async () => Response.json({ surfaces: await context.surfaceRegistry.list() }),
     getChannelAccounts: () => context.channelPlugins.listAccounts().then((accounts) => Response.json({ accounts })),
     getChannelSurfaceAccounts: (surface) => context.channelPlugins
       .listAccounts(surface as ChannelSurface)

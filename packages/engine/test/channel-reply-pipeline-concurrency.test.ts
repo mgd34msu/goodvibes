@@ -1,7 +1,3 @@
-import { beforeEach, afterEach } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
 /**
  * The notification watermark race, observed live against a real daemon.
  *
@@ -162,7 +158,7 @@ describe('concurrent progress deliveries with a slow dispatch', () => {
     h.advance(30_000);
     h.emitProgress('agent-race', 'Turn 1 · Rate limited, retrying in 60s…');
     h.advance(30_000);
-    const polled = h.pipeline.deliverProgress('agent-race', 'Turn 1 · Thinking…', true, 'owner');
+    const polled = h.pipeline.deliverProgress('agent-race', 'Turn 1 · Thinking…', true, 'operator');
 
     await polled;
     await h.settle();
@@ -182,7 +178,7 @@ describe('concurrent progress deliveries with a slow dispatch', () => {
       h.emitProgress('agent-serial', `Turn 1 · step ${i}`);
       h.advance(30_000);
     }
-    void h.pipeline.deliverProgress('agent-serial', 'Turn 1 · Thinking…', true, 'owner');
+    void h.pipeline.deliverProgress('agent-serial', 'Turn 1 · Thinking…', true, 'operator');
     await h.settle();
 
     expect(h.maxConcurrentDispatches()).toBe(1);
@@ -241,15 +237,3 @@ describe('concurrent progress deliveries with a slow dispatch', () => {
     expect(h.published).toHaveLength(2);
   }, 60_000);
 });
-
-let previousStatusPort: JudgmentPort | undefined;
-const placeholders = new Set(['Turn 1 · Thinking…', 'Turn 2 · Thinking…', 'Turn 12 · Thinking...', 'Working…', 'Starting']);
-beforeEach(() => {
-  const readings = fakePort((_name, _question, state) => {
-    const content = (state as { content: string }).content;
-    if (!placeholders.has(content)) throw new Error('No scripted status classification for this delivery fixture.');
-    return noulAnswer(0);
-  });
-  previousStatusPort = installJudgmentPort({ model: readings.port.model, ask: request => request.context?.battery === 'engine.channels.status-content' ? readings.port.ask(request) : previousStatusPort!.ask(request) });
-});
-afterEach(() => installJudgmentPort(previousStatusPort));

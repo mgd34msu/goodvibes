@@ -15,20 +15,26 @@ function registryWith(status: number | 'throw') {
     },
   } as unknown as Parameters<ChannelPluginRegistry['register']>[0]);
   registry.setIngressAlarm({
-    recordSuccess: (surface: string) => { calls.push(`ok:${surface}`); },
-    recordFailure: (surface: string) => { calls.push(`fail:${surface}`); return true; },
+    record: (surface: string, outcome: string) => { calls.push(`${outcome}:${surface}`); },
+    recordSuccess: (surface: string) => { calls.push(`processed:${surface}`); },
+    recordFailure: (surface: string) => { calls.push(`failed:${surface}`); return true; },
   } as unknown as Parameters<ChannelPluginRegistry['setIngressAlarm']>[0]);
   return { registry, calls };
 }
 
 describe('inbound health', () => {
-  test('a 5xx answer is a failure and a 4xx refusal is not', async () => {
+  test('a 5xx answer is a failure, and a refusal or an unauthenticated request is neither failure nor success', async () => {
     const failing = registryWith(503);
     await failing.registry.handleInbound('/webhook/telegram', new Request('http://x/webhook/telegram'));
-    expect(failing.calls).toEqual(['fail:telegram']);
-    const refusing = registryWith(403);
-    await refusing.registry.handleInbound('/webhook/telegram', new Request('http://x/webhook/telegram'));
-    expect(refusing.calls).toEqual(['ok:telegram']);
+    expect(failing.calls).toEqual(['failed:telegram']);
+    for (const status of [401, 403]) {
+      const refusing = registryWith(status);
+      await refusing.registry.handleInbound('/webhook/telegram', new Request('http://x/webhook/telegram'));
+      expect(refusing.calls).toEqual(['refused:telegram']);
+    }
+    const processed = registryWith(200);
+    await processed.registry.handleInbound('/webhook/telegram', new Request('http://x/webhook/telegram'));
+    expect(processed.calls).toEqual(['processed:telegram']);
   });
 });
 
@@ -47,7 +53,7 @@ describe('surface registry', () => {
     const registry = new SurfaceRegistry(configManager({}), store);
     registry.attachPluginRegistry(plugins);
     registry.syncConfiguredSurfaces();
-    expect(store.getState().surfaces.surfaces.get('surface:matrix')?.state).toBe('healthy');
+    expect(store.getState().surfaces.surfaces.get('surface:matrix')?.enabled).toBe(true);
     registry.attachPluginRegistry(new ChannelPluginRegistry());
     registry.syncConfiguredSurfaces();
     expect(store.getState().surfaces.surfaces.get('surface:matrix')?.state).toBe('disabled');
@@ -64,6 +70,9 @@ describe('surface registry', () => {
     const emitted: Array<{ type: string; surfaceId: string }> = [];
     const bus = { emit: (_domain: string, envelope: { payload: { type: string; surfaceId: string } }) => { emitted.push(envelope.payload); } };
     const registry = new SurfaceRegistry(config);
+    const plugins = new ChannelPluginRegistry();
+    plugins.register({ id: 'surface:slack', surface: 'slack', displayName: 'Slack', capabilities: ['ingress'] } as never);
+    registry.attachPluginRegistry(plugins);
     registry.syncConfiguredSurfaces();
     registry.attachRuntimeBus(bus as never);
     expect(emitted).toEqual([]);
@@ -72,8 +81,11 @@ describe('surface registry', () => {
     expect(emitted.map((event) => [event.type, event.surfaceId])).toEqual([['SURFACE_ENABLED', 'surface:slack']]);
   });
 
-  test('the fallback records leave accountId off when none is configured', () => {
+  test('a record leaves accountId off when the surface reports none', () => {
     const registry = new SurfaceRegistry(configManager({ 'surfaces.slack.enabled': true }));
+    const plugins = new ChannelPluginRegistry();
+    plugins.register({ id: 'surface:slack', surface: 'slack', displayName: 'Slack', capabilities: ['ingress'] } as never);
+    registry.attachPluginRegistry(plugins);
     const slack = registry.syncConfiguredSurfaces().find((record) => record.kind === 'slack')!;
     expect('accountId' in slack).toBe(false);
   });

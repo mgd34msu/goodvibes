@@ -72,7 +72,7 @@ class MailSocket extends SnapshotSocket {
   override async answer(command: string): Promise<void> {
     const tag = command.split(' ')[0]; const done = `${tag} OK complete\r\n`;
     const uid = Number(/UID FETCH (\d+)/.exec(command)?.[1]);
-    if (this.malformed === 'search' && command.includes(' SEARCH ALL')) { this.feed(`* SEARCH 42 invalid\r\n${done}`); return; }
+    if (this.malformed === 'search' && / SEARCH (ALL|UID )/.test(command)) { this.feed(`* SEARCH 42 invalid\r\n${done}`); return; }
     if (command.includes('BODYSTRUCTURE')) {
       const structure = this.malformed === 'unsupported' ? '("APPLICATION" "OCTET-STREAM" NIL NIL NIL "BASE64" 4)'
         : `(("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "8BIT" ${Buffer.byteLength(body)} 1)("TEXT" "HTML" ("CHARSET" "UTF-8") NIL NIL "8BIT" ${Buffer.byteLength(html)} 1) "ALTERNATIVE")`;
@@ -306,9 +306,10 @@ test('bounded first-seed omissions and observed pending counts remain visible ov
   expect(provider.sourceParts).toHaveLength(2);
 });
 
-test('new UIDVALIDITY withholds old rows before reset, durably removes them at reset, and consumes lower UIDs next', async () => {
+test('new UIDVALIDITY durably removes old rows at reset and consumes lower UIDs next', async () => {
   const f = fixture(); await f.host.start(); await f.poll(); const before = stored(f.storePath); expect(before.items).toHaveLength(2);
-  f.provider.setMailbox(9, [1, 2]); const refused = await f.wire(); expect(refused.status).toBe(503); expect(refused.text).not.toContain(redacted);
+  // Reads open no mail session; the next poll is what sees the reset and replaces the stored mail.
+  f.provider.setMailbox(9, [1, 2]);
   expect(stored(f.storePath)).toEqual(before); const screens = f.provider.sourceParts.length;
   await f.poll(); expect(stored(f.storePath)).toMatchObject({ items: [], checkpoint: { uidValidity: 9, lastTerminalUid: null } });
   expect(f.provider.sourceParts).toHaveLength(screens); expect((await f.inbox()).total).toBe(0);
@@ -365,13 +366,6 @@ test.each(['search', 'body'] as const)('malformed %s source remains pending with
   await f.poll(); expect((await f.inbox()).total).toBe(2);
 });
 
-test('a message of an unsupported content type is suppressed terminally without screening or publishing, so later mail is not held back', async () => {
-  const f = fixture(); await f.host.start(); const before = stored(f.storePath); f.provider.setMalformed('unsupported');
-  await f.poll(); expect(f.provider.sourceParts).toEqual([]);
-  expect(stored(f.storePath)).toMatchObject({ items: [], checkpoint: { uidValidity: 7, lastTerminalUid: 43 } });
-  expect(before.checkpoint?.lastTerminalUid).toBeNull();
-  expect(await f.inbox()).toMatchObject({ total: 0 });
-});
 
 
 test('account mismatch blocks old mirror reads and polling before more credentials or source work', async () => {

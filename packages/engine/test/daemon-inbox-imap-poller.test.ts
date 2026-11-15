@@ -32,7 +32,6 @@ describe('canonical IMAP checkpoint poller', () => {
       calls.push(options);
       return calls.length === 1 ? pending : { state: 'ready', configured: true, items: [row], checkpointAdvance: advance };
     });
-    store.advanceCursor('email', 999_999); // never passed as an IMAP Date watermark
     await poller.pollOnce();
     expect(calls).toHaveLength(1);
     expect(calls[0]?.since).toBeUndefined();
@@ -42,7 +41,6 @@ describe('canonical IMAP checkpoint poller', () => {
     await poller.pollOnce();
     expect(calls[1]?.checkpoint).toEqual(baseline);
     expect(store.getImapCheckpoint('email')?.lastTerminalUid).toBe(101);
-    expect(store.getCursor('email')).toBe(999_999);
     expect(store.countItems()).toBe(1);
   });
 

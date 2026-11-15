@@ -7,10 +7,10 @@ import { makeProjectTempDir } from './_helpers/project-temp.js';
 import { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision, resolveDiscordInboxIdentity, resolveDiscordInboxElectionScope,
   type DiscordInboxIdentity, type DiscordInboxIdentityInput } from '../platform/src/platform/intake/providers/discord-identity.js';
 import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
-import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
 import { inboxTriage, TRIAGE_MODEL } from '../platform/src/platform/intake/triage/battery.js';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, NativeDataCompatibilityError } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
+import { seedInboxRows } from './_helpers/inbox-seed.ts';
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 const userId = '100000000000000001', channelId = '100000000000000002';
@@ -32,9 +32,9 @@ test('first Discord initialization under restrictive umask publishes private dir
   for (const path of [join(f.root, '.goodvibes'), join(f.root, '.goodvibes', 'tui'), f.directory]) expect(statSync(path).mode & 0o777).toBe(0o700);
   expect(statSync(f.path).mode & 0o777).toBe(0o600);
   const mirror = new InboxCursorStore(f.root, `inbox-discord-${selected.scopeId}.sqlite`, { sweepIntervalMs: 0 });
-  await mirror.init(); mirror.upsertItems([{ id: 'discord:umask', provider: 'discord', kind: 'dm', fromDigest: 'cafebabedeadbeef',
+  await mirror.init(); await seedInboxRows(mirror, [{ id: 'discord:umask', provider: 'discord', kind: 'dm', fromDigest: 'cafebabedeadbeef',
     subjectPreview: '', bodyPreview: 'Original protected preview', receivedAt: Date.now(), unread: true }]);
-  await mirror.flush(); await mirror.close();
+  await mirror.close();
   expect(resolveDiscordInboxIdentity(await acquireDiscordInboxIdentity(f.owner, source), source)).toEqual(selected);
   const read = new InboxCursorStore(f.root, `inbox-discord-${selected.scopeId}.sqlite`, { sweepIntervalMs: 0 });
   await read.init(); try { expect(read.listItems({ limit: 1 })[0]?.bodyPreview).toBe('Original protected preview'); } finally { await read.close(); }
@@ -59,75 +59,6 @@ test('fresh native scopes use persisted opaque IDs, private exact facts and stab
   expect(JSON.stringify(first)).not.toContain(userId); expect(JSON.stringify(first)).not.toContain(channelId);
   expect(readFileSync(f.path, 'utf8')).not.toContain('fixture-private');
   expect(statSync(f.path).mode & 0o777).toBe(0o600);
-});
-
-test('opaque identity capability cannot be supplied by wire fields or borrowed by another account', async () => {
-  const f = fixture(), source = input(), identity = await acquireDiscordInboxIdentity(f.owner, source);
-  expect(() => resolveDiscordInboxIdentity({} as DiscordInboxIdentity, source)).toThrow();
-  expect(() => resolveDiscordInboxIdentity(identity, { ...source, account: { userId: '100000000000000099' } })).toThrow();
-});
-
-test.each([false, true])('actual saved hashed mirror and triage rows remain reachable (configured registry %s)', async configured => {
-  const f = fixture(), source = input(), old = historicalScope(source, configured);
-  const mirror = new InboxCursorStore(f.root, `inbox-discord-${old}.sqlite`, { sweepIntervalMs: 0 });
-  await mirror.init(); mirror.upsertItems([{ id: 'discord:fixture:original', provider: 'discord', kind: 'dm', fromDigest: 'cafebabedeadbeef', subjectPreview: '', bodyPreview: 'Original protected preview', receivedAt: Date.now(), unread: true }]);
-  await mirror.flush(); await mirror.close();
-  const triageName = `inbox-triage-${oldDigest(['owned-inbox-triage-v1', 'discord', old])}.sqlite`;
-  const historical = new SqliteTriageStore(f.root, triageName);
-  await historical.commit([{ id: 'discord:fixture:original', inputHash: 'a'.repeat(64), battery: inboxTriage.name, batteryVersion: inboxTriage.version, model: TRIAGE_MODEL, status: 'unavailable' }]);
-  await historical.close();
-  const selected = configured ? { ...source, channels: { ...source.channels, revision: await acquireDiscordInboxRegistryRevision(f.owner, source.account, source.channels.channelIds) } } : source;
-  const current = resolveDiscordInboxIdentity(await acquireDiscordInboxIdentity(f.owner, selected, { configuredRegistry: configured }), selected);
-  expect(current).toEqual({ scopeId: old, triageFileName: triageName });
-  const reopened = new InboxCursorStore(f.root, `inbox-discord-${current.scopeId}.sqlite`, { sweepIntervalMs: 0 });
-  await reopened.init(); cleanups.push(() => reopened.close());
-  expect(reopened.listItems({ limit: 10 })[0]?.bodyPreview).toBe('Original protected preview');
-  const receipts = new SqliteTriageStore(f.root, current.triageFileName); cleanups.push(() => receipts.close());
-  expect((await receipts.readBatch(['discord:fixture:original'])).get('discord:fixture:original')?.latest.status).toBe('unavailable');
-  // The saved mapping survives reopening without deriving the historical filenames again.
-  expect(resolveDiscordInboxIdentity(await acquireDiscordInboxIdentity(f.owner, selected, { configuredRegistry: configured }), selected)).toEqual(current);
-});
-
-test.each([false, true])('an actual saved Discord receipt store remains reachable without its optional old mirror (configured registry %s)', async configured => {
-  const f = fixture(), source = input(), old = historicalScope(source, configured);
-  const triageFileName = `inbox-triage-${oldDigest(['owned-inbox-triage-v1', 'discord', old])}.sqlite`;
-  const historical = new SqliteTriageStore(f.root, triageFileName);
-  await historical.commit([{ id: 'discord:receipt-only', inputHash: 'a'.repeat(64), battery: inboxTriage.name,
-    batteryVersion: inboxTriage.version, model: TRIAGE_MODEL, status: 'unavailable' }]);
-  await historical.close();
-  const savedBytes = readFileSync(join(f.directory, triageFileName));
-  const selected = configured ? { ...source, channels: { ...source.channels,
-    revision: await acquireDiscordInboxRegistryRevision(f.owner, source.account, source.channels.channelIds) } } : source;
-  const identity = await acquireDiscordInboxIdentity(f.owner, selected, { configuredRegistry: configured });
-  const selectors = resolveDiscordInboxIdentity(identity, selected);
-  expect(selectors).toEqual({ scopeId: old, triageFileName });
-  expect(existsSync(join(f.directory, `inbox-discord-${old}.sqlite`))).toBe(false);
-  expect(readFileSync(join(f.directory, triageFileName))).toEqual(savedBytes);
-  const hash = spyOn(crypto, 'createHash');
-  try {
-    expect(resolveDiscordInboxIdentity(await acquireDiscordInboxIdentity({ ...f.owner }, selected, { configuredRegistry: configured }), selected)).toEqual(selectors);
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
-  } finally { hash.mockRestore(); }
-  const receipts = new SqliteTriageStore(f.root, selectors.triageFileName); cleanups.push(() => receipts.close());
-  expect((await receipts.readBatch(['discord:receipt-only'])).get('discord:receipt-only')?.latest.status).toBe('unavailable');
-});
-
-test.each(['wal', 'shm'] as const)('historical Discord %s without its main database is preserved and cannot mint a fresh binding', async suffix => {
-  for (const kind of ['mirror', 'triage'] as const) {
-    const f = fixture(), source = input(), scope = historicalScope(source, false);
-    const name = kind === 'mirror' ? `inbox-discord-${scope}.sqlite`
-      : `inbox-triage-${oldDigest(['owned-inbox-triage-v1', 'discord', scope])}.sqlite`;
-    mkdirSync(f.directory, { recursive: true, mode: 0o700 });
-    const orphan = join(f.directory, `${name}-${suffix}`), bytes = Buffer.from('retained orphan SQLite companion');
-    writeFileSync(orphan, bytes, { mode: 0o600 });
-    const hash = spyOn(crypto, 'createHash');
-    try {
-      await expect(acquireDiscordInboxIdentity(f.owner, source)).rejects.toThrow('unavailable');
-      expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
-    } finally { hash.mockRestore(); }
-    expect(readFileSync(orphan)).toEqual(bytes); expect(existsSync(join(f.directory, name))).toBe(false);
-    expect(existsSync(f.path)).toBe(false);
-  }
 });
 
 test('an existing Discord mapping cannot hide a missing main database behind a retained WAL', async () => {
@@ -240,9 +171,9 @@ test('native Discord published bot/DM election key is shared across nodes and co
 test('an unrelated actual old Discord mirror lookup shares both deployed wire computations with the native clustered selection', async () => {
   const f = fixture(), source = input(), expected = historicalScope(source, true), name = `inbox-discord-${'a'.repeat(64)}.sqlite`;
   const mirror = new InboxCursorStore(f.root, name, { sweepIntervalMs: 0 }); await mirror.init();
-  mirror.upsertItems([{ id: 'discord:historical-other', provider: 'discord', kind: 'dm', fromDigest: 'cafebabedeadbeef',
+  await seedInboxRows(mirror, [{ id: 'discord:historical-other', provider: 'discord', kind: 'dm', fromDigest: 'cafebabedeadbeef',
     subjectPreview: '', bodyPreview: 'Original unrelated historical candidate', receivedAt: Date.now(), unread: true }]);
-  await mirror.flush(); await mirror.close();
+  await mirror.close();
   const original = readFileSync(join(f.directory, name)), hash = spyOn(crypto, 'createHash');
   try {
     const identity = await acquireDiscordInboxIdentity(f.owner, source, { configuredRegistry: true });

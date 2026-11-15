@@ -6,15 +6,12 @@ import { writeNativeInstallationFixture, writeNativeReaderInstallationFixture } 
 import { DaemonServer, HttpListener, PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { persistProviders, loadPersistedProviders, type DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { HostedSessionManager, HostedSessionStore, HostedWorkspaceFloors, HOSTED_SESSION_WIRE_EVENT, type HostedSessionRecord, type HostedSessionUpdatePayload, type HostedWorkspaceFloor } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { inboxTriage, createOwnedTriagedInboxSource, registerInboxSurface, runInboxTriage, SqliteTriageStore, type TriageReceipt } from '@goodvibes-jev/engine/platform/platform/intake';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import * as contractRuntime from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createDaemonHost, daemonHostLifecycle, type DaemonHost } from '../../runtime/daemon-host.js';
-import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, nativeReaderCapabilities, realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { useDaemonHostFixture } from '../helpers/daemon-host-fixture.js';
@@ -1288,99 +1285,6 @@ test('actual native root publishes the imported payment-hold requirement through
   expect(() => assertNativeReaderCompatible(native.execPath, '3.1.1', realUpdateFileIo)).toThrow('requires GoodVibes 3.1.2');
   await fx.host.close();
   expect(() => assertNativeReaderCompatible(native.execPath, '3.1.1', realUpdateFileIo)).toThrow('requires GoodVibes 3.1.2');
-});
-
-for (const outcome of ['missing', 'rejected'] as const) test(`actual native handler publishes the failed-triage reader floor before storing a ${outcome} port result`, async () => {
-  const native = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-failed-triage-reader-floor'), '3.1.2', process.arch === 'arm64' ? 'arm64' : 'x64');
-  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
-  if (!artifact) throw new Error('Native fixture admission missing');
-  let attempts = 0;
-  let receipts: readonly TriageReceipt[] = [];
-  const port: JudgmentPort | undefined = outcome === 'missing' ? undefined : {
-    model: 'jev-1.13.0', async ask() { attempts++; throw new Error('Synthetic triage transport unavailable'); },
-  };
-  const fx = fixture(undefined, {
-    async createRuntime(options) {
-      const runtime = await createRuntimeServices({ ...options, inboxFactory: async (context, _routing, controls) => {
-        // Borrow the real root's format hook; neither this factory nor the
-        // scorer knows the native installation or can manufacture its floor.
-        expect(controls.beforeInboxTriageReceiptWrite).toBeFunction();
-        receipts = await runInboxTriage([{ id: 'failed-preview', surface: 'email', snippet: 'Synthetic preview with no settled judgment.' }], {
-          workingDirectory: context.workingDirectory, ...(port ? { port } : {}), beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite,
-        });
-        return registerInboxSurface(context, { ...controls, beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, adapters: new Map() });
-      } });
-      keep(spyOn(runtime.serviceRegistry, 'resolveSecret').mockResolvedValue(''));
-      return runtime;
-    },
-    createServer() { return inertNativeHostServer(); },
-  }, { updateArtifact: artifact, hasOverriddenHome: false });
-  const floor = join(native.execPath, '..', NATIVE_READER_REQUIREMENT_FILE);
-  expect(existsSync(floor)).toBe(false);
-  await fx.host.start();
-  expect(attempts).toBe(outcome === 'missing' ? 0 : 1);
-  expect(receipts).toEqual([{ id: 'failed-preview', battery: inboxTriage.name, batteryVersion: inboxTriage.version, receiptVersion: 3, status: 'unavailable' }]);
-  const reopened = new SqliteTriageStore(fx.workingDir);
-  try {
-    const saved = (await reopened.readBatch(['failed-preview'])).get('failed-preview');
-    expect(saved).toEqual({ latest: receipts[0], settled: null });
-    expect(readFileSync(reopened.dbPath).includes(Buffer.from('"inputHash"'))).toBe(false);
-  } finally { await reopened.close(); }
-  expect(JSON.parse(readFileSync(floor, 'utf8')).formats).toContain('inbox-triage-failed-bindings-v3');
-  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.1', realUpdateFileIo)).toThrow('requires GoodVibes 3.1.2');
-  const current = nativeReaderCapabilities('3.1.2');
-  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, {
-    ...current, formats: current.formats.filter(format => format !== 'inbox-triage-failed-bindings-v3'),
-  })).toThrow();
-  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, current)).not.toThrow();
-  await fx.host.close();
-});
-
-test('actual native daemon mirror and settled receipt publication declare source-revision capability before an older reader can resume', async () => {
-  const native = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-triage-native-source-floor'), '3.1.2', process.arch === 'arm64' ? 'arm64' : 'x64');
-  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
-  if (!artifact) throw new Error('Native fixture admission missing');
-  const decision = fakePort(name => { if (!name.endsWith('spam') && !name.endsWith('urgency')) throw new Error('Unexpected triage wire question'); return noulAnswer(name.endsWith('urgency') ? .99 : .01); });
-  let receipts: readonly (TriageReceipt | import('@goodvibes-jev/engine/platform/platform/intake').TriagePreview)[] = [];
-  const fx = fixture(undefined, {
-    async createRuntime(options) {
-      const runtime = await createRuntimeServices({ ...options, inboxFactory: async (context, _routing, controls) => {
-        const source = await createOwnedTriagedInboxSource(context, {
-          providerId: 'fixture', accountScopeId: 'original-account', storeFileName: 'native-source-mirror.sqlite', triageStoreFileName: 'native-source-receipts.sqlite',
-          beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite,
-          adapters: new Map([['fixture', { id: 'fixture', pollIntervalMs: 3_600_000, async poll() { return { items: [{
-            id: 'fixture:one', provider: 'fixture', kind: 'dm' as const, fromDigest: 'redacted-unit-sender', subjectPreview: 'Original protected subject',
-            bodyPreview: 'Original protected message', receivedAt: Date.now(), unread: true,
-          }], state: 'ready' as const, configured: true }; } }]]),
-          acquireReadLease: async () => Object.assign(async () => {}, { assertCurrent() {} }),
-          authority: { providerId: 'fixture', accountScopeId: 'original-account', destinationId: 'synthetic-only', retention: 'ephemeral-no-log',
-            port: decision.port, signal: new AbortController().signal, assertCurrent() {} },
-        });
-        try { await source.ready; receipts = (await source.runInboxTriage()).receipts; return source; }
-        catch (error) { await source.close(); throw error; }
-      } });
-      keep(spyOn(runtime.serviceRegistry, 'resolveSecret').mockResolvedValue('')); return runtime;
-    },
-    createServer() { return inertNativeHostServer(); },
-  }, { updateArtifact: artifact, hasOverriddenHome: false });
-  const floor = join(native.execPath, '..', NATIVE_READER_REQUIREMENT_FILE); expect(existsSync(floor)).toBe(false);
-  await fx.host.start();
-  expect(decision.requests).toHaveLength(1);
-  expect(receipts).toMatchObject([{ receiptVersion: 4, status: 'settled', source: { providerId: 'fixture', accountScopeId: 'original-account' } }]);
-  const receipt = receipts[0];
-  if (!receipt || receipt.receiptVersion !== 4) throw new Error('Expected the actual settled native source receipt, not a preview');
-  const disk = new SqliteTriageStore(fx.workingDir, 'native-source-receipts.sqlite');
-  try {
-    expect((await disk.readBatch(['fixture:one'])).get('fixture:one')?.latest).toEqual(receipt);
-    const bytes = readFileSync(disk.dbPath); expect(bytes.includes(Buffer.from('inputHash'))).toBe(false);
-    expect(bytes.includes(Buffer.from('Original protected subject'))).toBe(false); expect(bytes.includes(Buffer.from('Original protected message'))).toBe(false);
-  } finally { await disk.close(); }
-  expect(JSON.parse(readFileSync(floor, 'utf8')).formats).toContain('inbox-triage-source-revisions-v1');
-  const current = nativeReaderCapabilities('3.1.2');
-  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, { ...current,
-    formats: current.formats.filter(format => format !== 'inbox-triage-source-revisions-v1') })).toThrow();
-  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, current)).not.toThrow();
-  await fx.host.close();
 });
 
 for (const retirement of ['payload', 'binding'] as const) test(`native ${retirement} retirement during runtime acquisition prevents listener construction and drains the acquired graph`, async () => {

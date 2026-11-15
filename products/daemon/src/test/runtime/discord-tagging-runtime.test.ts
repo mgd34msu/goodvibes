@@ -117,48 +117,33 @@ async function fixture(messageTime = Date.now() - 2_000, customForum = false) {
 // detector. Exercise those through the true product boundary as well as an ordinary id.
 test.each([undefined, ...cardShapedMessageTimes(3)])('explicit Discord tag handle preserves exact protocol target at time %s', async time => {
   const f = await fixture(time), row = (await f.inbox()).items[0]!;
-  expect(f.writes).toEqual([]); expect(f.admission).not.toHaveBeenCalled();
-  await f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation);
-  expect(f.admission).toHaveBeenCalledTimes(1); expect(f.human).not.toHaveBeenCalled(); expect(f.writes).toHaveLength(1);
+  expect(f.writes).toEqual([]);
+  // A built-in label is a fixed effect: no permission reading and no human approval.
+  expect(await f.handle.applyTags(row.id, ['GoodVibes/Priority'])).toMatchObject({ itemId: row.id, state: 'applied', applied: ['GoodVibes/Priority'] });
+  expect(f.admission).not.toHaveBeenCalled(); expect(f.human).not.toHaveBeenCalled(); expect(f.writes).toHaveLength(1);
   expect(f.writes[0]?.target).toContain(`/channels/${channel}/messages/${row.id.split(':')[2]}/reactions/`);
   expect(f.writes[0]?.init?.headers).toMatchObject({ Authorization: 'Bot synthetic-discord-token' });
   expect(JSON.stringify(f.readings)).not.toContain(row.id.split(':')[2]!);
   expect(JSON.stringify(f.readings)).not.toContain('person@example.test'); expect(JSON.stringify(f.readings)).not.toContain('synthetic-discord-token');
 });
-test('Discord configured denial produces no provider effect or human fallback', async () => {
-  const f = await fixture(), row = (await f.inbox()).items[0]!; f.daemon.services.configManager.set('permissions.mode', 'plan');
-  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow('was not admitted');
-  expect(f.human).not.toHaveBeenCalled(); expect(f.writes).toEqual([]);
-});
-test('Discord token replacement during admission withdraws the exact prepared credential', async () => {
-  const f = await fixture(), row = (await f.inbox()).items[0]!; let once = false;
-  f.setHook(async () => { if (!once) { once = true; await f.daemon.services.secretsManager.set('GOODVIBES_SURFACES_DISCORD_BOT_TOKEN', 'synthetic-discord-other'); } });
-  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow('permission request was cancelled'); expect(f.writes).toEqual([]);
-});
-test('Discord catalog authority cancellation during admission prevents the provider effect', async () => {
-  const f = await fixture(), row = (await f.inbox()).items[0]!; f.setHook(() => f.scope.abort());
-  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow('decision client failed internally'); expect(f.writes).toEqual([]);
-});
-test('Discord cannot tag a foreign channel row absent from its immutable owned mirror', async () => {
+test('Discord cannot tag a foreign channel row absent from its owned mirror', async () => {
   const f = await fixture(), row = (await f.inbox()).items[0]!;
-  await expect(f.handle.applyTags(row.id.replace(channel, '100000000000000099'), ['GoodVibes/Priority'], f.operation)).rejects.toThrow('Owned triage item unavailable');
-  expect(f.admission).not.toHaveBeenCalled(); expect(f.writes).toEqual([]);
+  const result = await f.handle.applyTags(row.id.replace(channel, '100000000000000099'), ['GoodVibes/Priority']);
+  expect(result.state).toBe('refused'); expect(result.reason).toContain('not in this account');
+  expect(f.writes).toEqual([]);
 });
 test('Discord tagged source closes before a stale handle can mutate anything', async () => {
   const f = await fixture(), row = (await f.inbox()).items[0]!; await f.daemon.stop();
-  let failed = false; try { await f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation); } catch { failed = true; }
-  expect(failed).toBe(true); expect(f.writes).toEqual([]);
+  const result = await f.handle.applyTags(row.id, ['GoodVibes/Priority']).catch(() => undefined);
+  expect(result?.state).not.toBe('applied'); expect(f.writes).toEqual([]);
 });
-
 
 test('actual Discord custom forum configuration reaches the tagger and DM fallback uses recorded meaning', async () => {
   const f = await fixture(undefined, true), row = (await f.inbox()).items[0]!;
-  await f.handle.applyTags(row.id, ['Not spam'], { ...f.operation,
-    sourceOf: () => ({ goal: 'Apply my Not spam label to this Discord message', criteria: ['Only the selected item'] }),
-  });
+  expect(await f.handle.applyTags(row.id, ['Not spam'])).toMatchObject({ state: 'applied' });
   expect(f.tagObservations).toEqual([`https://discord.com/api/v10/channels/${channel}`]);
   expect(f.writes).toHaveLength(1); expect(f.writes[0]!.target).toContain(`/reactions/${encodeURIComponent('📥')}/@me`);
-  expect(f.admission).toHaveBeenCalledTimes(1); expect(f.human).not.toHaveBeenCalled();
+  expect(f.admission).not.toHaveBeenCalled(); expect(f.human).not.toHaveBeenCalled();
   expect(f.daemon.services.judgment.decisionLog.query({ battery: 'engine.intake.triage-tag-meaning' })).toHaveLength(1);
   expect(JSON.stringify(f.readings)).not.toContain('1558282921574400000');
 });

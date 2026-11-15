@@ -286,11 +286,15 @@ inventory.
 
 ## Inbox triage
 
-When a host enables account-owned inbox triage, saved labels apply only to the
-same account, provider, and unchanged message preview. Reading the inbox does
-not score messages or rewrite receipts. Switching accounts cannot inherit a
-saved label, even when message IDs and previews coincide.
+Each inbox account whose privacy screening is admitted also triages its mail:
+after a poll stores new messages, one model request per batch reads each one as
+spam, priority or normal, on the same model route and under the same retention
+promise as that account's screening. Turning decision models off (Classic) turns
+triage off too. The label is stored beside the message in the account's own
+inbox store and shows in `channels.inbox.list` (`triageLabel`, `triageScore`,
+`triageTags`) only while the message's content is the content that was scored;
+a changed message is scored again. Reading the inbox never asks a model.
+Spam wins over priority: a message that reads as both is labelled spam.
 
-Older receipts without an account binding remain stored but do not supply
-account-owned labels until explicit scoring produces a matching receipt. The
-account selector stays local and is omitted from the decision model's input.
+Labels are not written back to Slack, Discord or the mailbox unless the owner
+turns that on for the account.

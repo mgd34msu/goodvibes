@@ -1,16 +1,18 @@
 // ---------------------------------------------------------------------------
 // Triage tagger, IMAP provider.
 //
-// Applies a triage label as an IMAP keyword flag (STORE +FLAGS) over a minimal
-// IMAP4rev1-over-TLS client. Credentials are resolved per-apply from the daemon
-// credential store and are NEVER logged or returned. CRLF/control characters in
-// any interpolated command value are rejected (CRLF-injection guard). Transient
-// network failures are retried with bounded exponential backoff; protocol-level
-// NO/BAD rejections are deterministic and never retried.
+// A label is an IMAP keyword. It is written through the mail module's client
+// (`ImapClient.addKeywords`): one connection, sign in, EXAMINE, SELECT with the
+// UIDVALIDITY the message was listed under, every keyword in one `UID STORE`,
+// LOGOUT. Credentials are resolved by the caller per write and are never logged
+// or returned. A connection that could not be made or opened is retried with a
+// bounded backoff; a refusal from the server is not.
 // ---------------------------------------------------------------------------
 
-import { connect as tlsConnect } from 'node:tls';
-const summarizeError = (_error: unknown): string => 'IMAP transport failed';
+import type { Socket } from 'node:net';
+import { ImapClient, ImapOpenError, imapQuoteCredential } from '../../../email/imap-client.js';
+import { formatMailboxName } from '../../../email/imap-names.js';
+import { createImapTlsSocket } from '../../../email/node.js';
 
 export interface ImapStoreArgs {
   host: string;
@@ -20,6 +22,8 @@ export interface ImapStoreArgs {
   mailbox: string;
   uid: string;
   flag: string;
+  /** Every keyword for this message, set in one STORE on one connection; `flag` alone when absent. */
+  flags?: readonly string[];
   uidValidity: number;
   signal: AbortSignal;
   assertCurrent(): void;
@@ -38,39 +42,13 @@ export interface ImapRetryOptions {
 
 export type ImapStoreFlag = (args: ImapStoreArgs) => Promise<void>;
 
-/**
- * The minimal subset of a node:tls TLSSocket that imapStoreFlagOverTls drives.
- * Declaring it explicitly (rather than depending on the full TLSSocket surface)
- * gives the data-pump a precise injection seam: tests can supply an in-memory
- * duplex that exercises the protocol state machine without a real network
- * socket, while the production path passes the real tlsConnect result.
- */
-export interface ImapSocketLike {
-  setEncoding(encoding: string): void;
-  setTimeout(ms: number, callback: () => void): void;
-  write(data: string): void;
-  on(event: 'data', listener: (chunk: string) => void): void;
-  on(event: 'error', listener: (err: Error) => void): void;
-  on(event: 'close', listener: () => void): void;
-  destroy(): void;
-}
-
-/** Connector seam: opens an ImapSocketLike for the given host/port. */
-export type ImapConnect = (opts: {
-  host: string;
-  port: number;
-  servername: string;
-}) => ImapSocketLike;
-
-/** Production connector, a real IMAP4rev1-over-TLS socket via node:tls. */
-export const tlsImapConnect: ImapConnect = (opts) =>
-  tlsConnect(opts, () => {
-    /* greeting handled in the data pump */
-  }) as unknown as ImapSocketLike;
+/** Opens the connected socket the mail client runs on; production is direct TLS. */
+export type ImapSocketConnect = (host: string, port: number) => Promise<Socket>;
 
 /**
- * Error subclass carrying whether a failure is transient (worth retrying) or a
- * deterministic protocol rejection (NO/BAD) that must not be retried.
+ * A label write that did not happen, and whether trying again can help (the
+ * server could not be reached or opened) or not (the server refused, the
+ * target is invalid, or the mailbox changed).
  */
 export class ImapStoreError extends Error {
   readonly transient: boolean;
@@ -81,251 +59,47 @@ export class ImapStoreError extends Error {
   }
 }
 
-/**
- * Reject CR, LF, NUL and any other ASCII control character (0x00-0x1F, 0x7F)
- * in a value destined for an IMAP command line. CR/LF are the dangerous ones:
- * an unescaped CRLF would terminate the current command and let an attacker
- * inject a second IMAP command (CRLF injection). IMAP's quoted-string syntax
- * has no escape for these control chars, backslash only escapes `\` and `"`,
- * so the only safe handling is to refuse the value outright.
- */
-function assertImapSafe(value: string, field: string): void {
-  // eslint-disable-next-line no-control-regex -- intentional control-char guard
-  if (/[\x00-\x1F\x7F]/.test(value)) {
-    throw new ImapStoreError(
-      `IMAP ${field} contains illegal control characters (possible CRLF injection)`,
-      false,
-    );
-  }
-}
+const describe = (error: unknown, fallback: string): string =>
+  error instanceof Error && error.message.length > 0 ? error.message : fallback;
 
-/**
- * Wrap a value as an IMAP quoted string. Backslash and double-quote are escaped
- * per RFC 3501; control characters are NOT escapable in the quoted-string
- * grammar, so callers MUST validate with assertImapSafe first. quoteImap
- * re-asserts as defense-in-depth so no future caller can bypass the guard.
- */
-function quoteImap(value: string): string {
-  assertImapSafe(value, 'value');
-  return `"${value.replace(/([\\"])/g, '\\$1')}"`;
-}
-
-// A concrete UID sequence-set: one or more comma-separated single UIDs or
-// numeric ranges (`12`, `3:9`, `1,4,7:9`). RFC 3501 also permits `*` (the
-// largest UID in the mailbox) and ranges to `*`, but a wildcard would let a
-// single value like `1:*` apply the flag to the ENTIRE mailbox, never the
-// intent when tagging one triaged item, so `*` is rejected outright.
-const IMAP_UID_SET = /^[0-9]+(:[0-9]+)?(,[0-9]+(:[0-9]+)?)*$/;
-
-// An IMAP flag: an optional leading `\` (system flag, e.g. `\Seen`) followed by
-// atom characters only. The atom grammar excludes SP and the list/quoting
-// specials `(){%*"\` and `]`, so a flag cannot contain a space (which would
-// otherwise inject a second flag atom into the `+FLAGS (...)` list) or close
-// the parenthesised list early.
-// eslint-disable-next-line no-control-regex -- atom grammar excludes controls
-const IMAP_FLAG = /^\\?[^\s(){%*"\\\]\x00-\x1F\x7F]+$/;
-
-/**
- * Validate an IMAP UID value as a concrete sequence-set before it is
- * interpolated UNQUOTED into `UID STORE`. assertImapSafe only blocks control
- * chars; a control-char-free wildcard like `1:*` would still pass that guard
- * and mutate the whole mailbox. This is the boundary check that prevents it.
- */
-function assertImapUid(value: string): void {
-  if (!IMAP_UID_SET.test(value)) {
-    throw new ImapStoreError(
-      `IMAP uid is not a valid numeric sequence-set: ${JSON.stringify(value)}`,
-      false,
-    );
-  }
-}
-
-/**
- * Validate an IMAP flag against the flag/atom grammar before it is interpolated
- * UNQUOTED into the `+FLAGS (...)` list. assertImapSafe only blocks control
- * chars; a flag containing a space (e.g. `\Seen Junk`) would still pass that
- * guard and inject a second flag atom. This is the boundary check that
- * prevents it, independent of any upstream normalizer.
- */
-function assertImapFlag(value: string): void {
-  if (!IMAP_FLAG.test(value)) {
-    throw new ImapStoreError(
-      `IMAP flag is not a valid flag-keyword atom: ${JSON.stringify(value)}`,
-      false,
-    );
-  }
-}
-
-/**
- * Minimal IMAP4rev1 client: connect over TLS, LOGIN, SELECT, UID STORE +FLAGS,
- * LOGOUT. Uses only node:tls (Bun-compatible).
- *
- * Tagged-command sequencing uses an explicit completion flag rather than a line
- * heuristic: the LOGOUT step is tracked by reference, so its tagged OK (or an
- * untagged `* BYE`) cleanly completes the operation and tells the `close`
- * handler the disconnect was expected. Connection/timeout/socket failures are
- * surfaced as transient ImapStoreError; NO/BAD protocol responses as
- * non-transient.
- */
-export function imapStoreFlagOverTls(
-  args: ImapStoreArgs,
-  connect: ImapConnect = tlsImapConnect,
-): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
+/** Write every keyword for one message through the mail module's IMAP client. */
+export function imapStoreFlagWithMailClient(connect: ImapSocketConnect = createImapTlsSocket): ImapStoreFlag {
+  return async (args) => {
+    const flags = args.flags ?? [args.flag];
+    const uid = Number(args.uid);
+    // Everything the command lines carry is checked before a socket exists.
     try {
-      assertImapSafe(args.user, 'user');
-      assertImapSafe(args.password, 'password');
-      assertImapSafe(args.mailbox, 'mailbox');
-      assertImapSafe(args.uid, 'uid');
-      assertImapSafe(args.flag, 'flag');
-      // uid and flag are interpolated UNQUOTED below; the control-char guard
-      // alone is insufficient, so enforce the structural grammar here too.
-      assertImapUid(args.uid);
-      if (!/^[1-9][0-9]*$/.test(args.uid) || !Number.isSafeInteger(args.uidValidity) || args.uidValidity < 1) throw new ImapStoreError('IMAP target unavailable', false);
-      args.signal.throwIfAborted(); args.assertCurrent();
-      assertImapFlag(args.flag);
-    } catch (err) {
-      reject(
-        err instanceof ImapStoreError
-          ? err
-          : new ImapStoreError(summarizeError(err), false),
-      );
-      return;
+      if (!/^[1-9][0-9]*$/.test(args.uid) || !Number.isSafeInteger(uid)) throw new Error('The mail label target is not one message UID.');
+      if (!Number.isSafeInteger(args.uidValidity) || args.uidValidity < 1) throw new Error('The mail label target has no mailbox generation.');
+      imapQuoteCredential(args.user, 'username');
+      if (!args.password.startsWith('Bearer ')) imapQuoteCredential(args.password, 'password');
+      formatMailboxName(args.mailbox);
+    } catch (error) {
+      throw new ImapStoreError(describe(error, 'The mail label target is invalid.'), false);
     }
-    type Step = { tag: string; isLogout: boolean; isSelect: boolean; isStore: boolean; resolve: () => void; reject: (e: Error) => void };
-
-    let done = false;
-    let completed = false; // LOGOUT acknowledged (or BYE seen), so close is expected.
-    let buffer = '';
-    let pending: Step | null = null;
-    let counter = 0;
-    let greeted = false;
-    let validity: number | undefined;
-    let flagConfirmed = false;
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    const abort = () => finish(new ImapStoreError('IMAP operation revoked', false));
-
-    const finish = (err?: Error): void => {
-      if (done) return;
-      done = true;
-      clearTimeout(deadline); args.signal.removeEventListener('abort', abort);
-      const waiting = pending; pending = null;
-      if (waiting) waiting.reject(err ?? new ImapStoreError('IMAP operation retired', false));
-      try {
-        socket.destroy();
-      } catch {
-        /* ignore */
+    args.signal.throwIfAborted(); args.assertCurrent();
+    let socket: Socket;
+    try { socket = await connect(args.host, args.port); }
+    catch { throw new ImapStoreError(`The mail server ${args.host}:${args.port} could not be reached.`, true); }
+    const ignoreSocketError = (): void => {};
+    socket.on('error', ignoreSocketError);
+    const client = new ImapClient({ socket, username: args.user, password: args.password, mailbox: args.mailbox,
+      signal: args.signal, assertCurrent: args.assertCurrent });
+    try {
+      try { await client.open(); }
+      catch (error) {
+        throw new ImapStoreError(describe(error, 'The mailbox could not be opened.'), error instanceof ImapOpenError ? !error.terminal : true);
       }
-      if (err) reject(err);
-      else resolve();
-    };
-
-    const socket: ImapSocketLike = connect({
-      host: args.host,
-      port: args.port,
-      servername: args.host,
-    });
-    deadline = setTimeout(() => finish(new ImapStoreError('IMAP operation timed out', true)), 20_000);
-    args.signal.addEventListener('abort', abort, { once: true });
-    socket.setEncoding('utf-8');
-    socket.setTimeout(20_000, () =>
-      finish(new ImapStoreError('IMAP connection timed out', true)),
-    );
-
-    const send = (command: string, isLogout = false, isSelect = false, isStore = false): Promise<void> =>
-      new Promise<void>((res, rej) => {
-        if (done) { rej(new ImapStoreError('IMAP operation retired', false)); return; }
-        args.signal.throwIfAborted(); args.assertCurrent();
-        counter += 1;
-        const tag = `A${counter}`;
-        pending = { tag, isLogout, isSelect, isStore, resolve: res, reject: rej };
-        socket.write(`${tag} ${command}\r\n`);
-      });
-
-    const runSequence = async (): Promise<void> => {
-      await send(`LOGIN ${quoteImap(args.user)} ${quoteImap(args.password)}`);
-      validity = undefined;
-      await send(`SELECT ${quoteImap(args.mailbox)}`, false, true);
-      if (validity !== args.uidValidity) throw new ImapStoreError('IMAP UIDVALIDITY changed or unavailable', false);
-      await send(`UID STORE ${args.uid} +FLAGS (${args.flag})`, false, false, true);
-      await send('LOGOUT', true);
-    };
-
-    const handleLine = (line: string): void => {
-      if (done) return;
-      const observed = /^\* OK \[UIDVALIDITY ([0-9]+)\]/i.exec(line);
-      if (observed && pending?.isSelect) validity = Number(observed[1]);
-      if (!greeted) {
-        greeted = true;
-        if (!/^\* (OK|PREAUTH)/i.test(line)) {
-          finish(new ImapStoreError(`IMAP server rejected connection`, true));
-          return;
-        }
-        runSequence().catch((err) =>
-          finish(
-            err instanceof ImapStoreError
-              ? err
-              : new ImapStoreError(summarizeError(err), false),
-          ),
-        );
-        return;
-      }
-
-      // An untagged BYE during LOGOUT is the server announcing a clean close.
-      if (/^\* BYE/i.test(line) && pending?.isLogout) {
-        completed = true;
-        return;
-      }
-
-      if (!pending) return;
-      if (!line.startsWith(`${pending.tag} `)) {
-        // Untagged data. A STORE that found its message answers with that
-        // message's flags; a tagged OK alone also follows a UID that no longer
-        // exists (deleted or moved since it was listed), which is not success.
-        if (pending.isStore) {
-          const flags = /^\* \d+ FETCH .*?\bFLAGS \(([^)]*)\)/i.exec(line)?.[1];
-          if (flags !== undefined && flags.split(/\s+/).some((flag) => flag.toLowerCase() === args.flag.toLowerCase())) flagConfirmed = true;
-        }
-        return;
-      }
-      const status = line.slice(pending.tag.length + 1);
-      const current = pending;
-      pending = null;
-      if (/^OK(?: |$)/i.test(status)) {
-        if (current.isStore && !flagConfirmed) {
-          current.reject(new ImapStoreError('IMAP flag not applied: the message is no longer in the mailbox, or the server did not accept the keyword', false));
-          return;
-        }
-        current.resolve();
-        if (current.isLogout) {
-          completed = true;
-          finish();
-        }
-      } else {
-        // NO/BAD: deterministic protocol rejection, do not retry.
-        current.reject(new ImapStoreError(`IMAP command rejected`, false));
-      }
-    };
-
-    socket.on('error', (err) =>
-      finish(new ImapStoreError(summarizeError(err), true)),
-    );
-    socket.on('close', () => {
-      if (completed) finish();
-      else finish(new ImapStoreError('IMAP connection closed unexpectedly', true));
-    });
-    socket.on('data', (chunk: string) => {
-      buffer += chunk;
-      if (buffer.length > 65536) { finish(new ImapStoreError('IMAP response exceeds bound', false)); return; }
-      let newlineIdx = buffer.indexOf('\n');
-      while (newlineIdx !== -1) {
-        const line = buffer.slice(0, newlineIdx).replace(/\r$/, '');
-        buffer = buffer.slice(newlineIdx + 1);
-        handleLine(line);
-        newlineIdx = buffer.indexOf('\n');
-      }
-    });
-  });
+      try { await client.addKeywords(uid, args.uidValidity, flags); }
+      catch (error) { throw new ImapStoreError(describe(error, 'The label was not written.'), false); }
+      args.assertCurrent();
+      // The keywords are on the message; a LOGOUT the server drops changes nothing.
+      await client.logout().catch(() => {});
+    } finally {
+      client.close();
+      socket.off('error', ignoreSocketError);
+    }
+  };
 }
 
 /** True when an error is worth retrying (network/connection, not protocol). */
@@ -344,8 +118,8 @@ const defaultSleep = (ms: number): Promise<void> =>
 
 /**
  * Wrap an IMAP store function with bounded exponential-backoff retry on
- * transient failures only. Protocol-level (NO/BAD) errors are surfaced on the
- * first attempt without retry.
+ * transient failures only. Adding a keyword twice is harmless, so a retry
+ * after a dropped connection cannot double an effect.
  */
 export function makeRetryingImapStoreFlag(
   inner: ImapStoreFlag,

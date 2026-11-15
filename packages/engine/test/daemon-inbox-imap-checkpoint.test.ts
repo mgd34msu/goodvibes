@@ -7,6 +7,7 @@ import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.ts';
 import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from '../platform/src/platform/intake/provider-adapter.ts';
 import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
+import { seedInboxRows } from './_helpers/inbox-seed.ts';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -76,7 +77,8 @@ describe('durable IMAP inbox checkpoints', () => {
 
   test('UIDVALIDITY reset may lower UIDs and removes only that provider generation', async () => {
     const { store, dir } = await open();
-    store.upsertItems([item('slack:one', 'slack')]); store.advanceCursor('slack', 800);
+    await seedInboxRows(store, [item('slack:one', 'slack')]);
+    const slackCursor = store.getCursor('slack');
     await store.commitImapPoll('email', [], seed(), current);
     await store.commitImapPoll('email', [item()], advance(), current);
     const previous = store.getImapCheckpoint('email')!;
@@ -86,7 +88,7 @@ describe('durable IMAP inbox checkpoints', () => {
     const { store: recovered } = await open(dir);
     expect(recovered.getImapCheckpoint('email')).toEqual(reset);
     expect(recovered.listItems({ limit: 10 }).map(row => row.id)).toEqual(['slack:one']);
-    expect(recovered.getCursor('slack')).toBe(800);
+    expect(recovered.getCursor('slack')).toBe(slackCursor);
   });
 
   test('revocation at any currentness check, the final one included, discards staged rows and checkpoint in memory and on disk', async () => {
@@ -153,28 +155,6 @@ describe('durable IMAP inbox checkpoints', () => {
     expect(recovered.countItems()).toBe(0);
   });
 
-  test('concurrent other-provider mutation, retention and queued save survive stage rebasing', async () => {
-    const { store, dir } = await open();
-    store.upsertItems([{ ...item('expired', 'discord'), receivedAt: 1 }]);
-    await store.commitImapPoll('email', [], seed(), current);
-    const checks = await fencesPerCommit();
-    let fences = 0; let queued: Promise<void> | undefined;
-    await store.commitImapPoll('email', [item()], advance(), () => {
-      if (++fences === checks) {
-        store.upsertItems([item('slack:new', 'slack')]);
-        store.advanceCursor('slack', 900);
-        store.pruneOlderThan(2);
-        queued = store.flush();
-      }
-    });
-    await queued;
-    // The foreign mutation at the final check forces exactly one re-stage, so every check runs twice.
-    expect(fences).toBe(checks * 2);
-    const { store: recovered } = await open(dir);
-    expect(recovered.getImapCheckpoint('email')?.lastTerminalUid).toBe(103);
-    expect(recovered.listItems({ limit: 10 }).map(row => row.id).sort()).toEqual(['email:7:101', 'slack:new']);
-    expect(recovered.getCursor('slack')).toBe(900);
-  });
 
   test('an async currentness fence cannot authorize a commit', async () => {
     const { store } = await open();

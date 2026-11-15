@@ -2,18 +2,23 @@
 // Persistent cursor + item store for the inbound feed.
 //
 // Backed by HandlerSqliteStore (sql.js WASM) at
-//   {wd}/.goodvibes/tui/operator/inbox.sqlite
+//   {wd}/.goodvibes/tui/operator/<file>.sqlite
 //
-// Three tables:
+// Tables:
 //   items(id PK, provider, kind, fromDigest, subjectPreview, bodyPreview,
-//         routeId, receivedAt INT, unread INT)
-//   cursors(provider PK, nextSince INT)
+//         routeId, receivedAt INT, unread INT, triage_revision TEXT, seq INT)
+//   cursors(provider PK, nextSince INT)        one row per provider, or per
+//                                              conversation as `provider:conversation`
 //   imap_checkpoints(provider PK, checkpoint TEXT)
+//   triage_receipts(id PK, revision, status, label, score, tags, receipt)
+//                                              triage labels beside their rows
+//   inbox_source_revision_policy, inbox_retention_policy  format and policy versions
 //
-// Dedup is by items.id (upsert). nextSince advances monotonically per provider
-// = max(receivedAt) ever seen. Triage metadata is NOT persisted here: it is
-// applied downstream at the triage overlay layer (triage/integration.ts) over a
-// separate store, so this feed store carries only the raw inbound fields.
+// One write path: the poller commits rows and their progress together through
+// commitTimestampPoll (Slack, Discord) or commitImapPoll (mail). Dedup is by
+// items.id. `receivedAt` is the provider's own time for every provider; `seq` is
+// assigned by this store when a row is written or changes, so "new since" is
+// "committed after", the only order a store fed by several pollers can promise.
 //
 // RETENTION. The items table is bounded by BOTH an age TTL and a count cap, and
 // the sweep runs at init(), the recovery point, right after the database file
@@ -37,8 +42,8 @@
 
 import { HandlerSqliteStore, type HandlerSqliteTransaction } from '../state/daemon-handler-sqlite-store.js';
 import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from './provider-adapter.js';
-import { captureTriageReceiptScope, type CapturedTriageInput } from './triage/evidence.js';
-import type { TriageReceiptScope, TriageSourceBinding } from './triage/types.js';
+import { captureTriageReceiptScope } from './triage/evidence.js';
+import type { TriageLabel, TriageReceiptScope } from './triage/types.js';
 import { existsSync } from 'node:fs';
 import { retainActiveInboxStore } from './active-stores.js';
 import { captureImapAdvance, captureImapCheckpoint, captureImapItems, sameImapCheckpoint } from './imap-checkpoint.js';
@@ -126,7 +131,8 @@ const SCHEMA: string[] = [
      routeId TEXT,
      receivedAt INTEGER NOT NULL,
      unread INTEGER NOT NULL,
-     triage_revision TEXT
+     triage_revision TEXT,
+     seq INTEGER
    )`,
   `CREATE INDEX IF NOT EXISTS idx_items_provider_received
      ON items(provider, receivedAt)`,
@@ -135,6 +141,17 @@ const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS cursors (
      provider TEXT PRIMARY KEY,
      nextSince INTEGER NOT NULL
+   )`,
+  // One receipt per row: the label scored for the row's content revision, and
+  // the full receipt (model attribution, readings) for anyone who asks why.
+  `CREATE TABLE IF NOT EXISTS triage_receipts (
+     id TEXT PRIMARY KEY,
+     revision TEXT NOT NULL,
+     status TEXT NOT NULL,
+     label TEXT,
+     score REAL,
+     tags TEXT,
+     receipt TEXT NOT NULL
    )`,
 ];
 
@@ -148,6 +165,9 @@ interface ItemRow {
   routeId: string | null;
   receivedAt: number;
   unread: number;
+  triageLabel?: string | null;
+  triageScore?: number | null;
+  triageTags?: string | null;
 }
 
 /**
@@ -171,7 +191,21 @@ export interface InboxQuery {
   limit: number;
 }
 
-const nativeTriageStores = new WeakMap<object, { readonly store: HandlerSqliteStore; readonly scope: TriageReceiptScope | undefined; ready: boolean; closed: boolean }>();
+/** One receipt to store beside its row, scored against the row revision it names. */
+export interface InboxTriageReceiptRow {
+  readonly id: string;
+  /** The row's `triage_revision` when it was read for scoring. */
+  readonly revision: string;
+  readonly status: 'settled' | 'held' | 'unavailable';
+  readonly label?: TriageLabel;
+  readonly score?: number;
+  readonly tags?: readonly string[];
+  /** The full receipt (attribution and readings), stored as written. */
+  readonly receipt: string;
+}
+
+/** A row waiting for triage, with the revision its receipt must name. */
+export interface InboxTriageCandidate { readonly item: InboundChannelItem; readonly revision: string }
 
 export class InboxCursorStore {
   private readonly store: HandlerSqliteStore;
@@ -202,13 +236,15 @@ export class InboxCursorStore {
    */
   private closed = false;
   private readonly releaseStorage: () => void;
+  /** The account this mirror belongs to, stamped on the triage receipts it holds. */
+  readonly triageScope: TriageReceiptScope | undefined;
 
   constructor(
     workingDirectory: string,
     fileName: string = DEFAULT_STORE_FILE_NAME,
     options: InboxCursorStoreOptions = {},
   ) {
-    const triageScope = captureTriageReceiptScope(options.triageScope);
+    this.triageScope = captureTriageReceiptScope(options.triageScope);
     const policy = { itemTtlMs: options.itemTtlMs ?? INBOX_ITEM_TTL_MS, itemCap: options.itemCap ?? INBOX_ITEM_CAP };
     if (!isInboxRetentionPolicy(policy)) throw new Error('Inbox retention requires nonnegative safe-integer TTL and item cap');
     this.store = new HandlerSqliteStore({
@@ -226,7 +262,6 @@ export class InboxCursorStore {
     this.setIntervalImpl = options.setIntervalImpl ?? setInterval;
     this.clearIntervalImpl = options.clearIntervalImpl ?? clearInterval;
     this.releaseStorage = retainActiveInboxStore(this.store.dbPath);
-    nativeTriageStores.set(this, { store: this.store, scope: triageScope, ready: false, closed: false });
   }
 
   get dbPath(): string {
@@ -263,6 +298,13 @@ export class InboxCursorStore {
         this.store.run('INSERT INTO inbox_source_revision_policy (singleton, version) VALUES (1, 1)');
         if (existsSync(this.store.dbPath)) this.revision += 1;
       }
+      if (!columns.some(column => column.name === 'seq')) {
+        // Rows written before the store assigned sequences take their insertion order.
+        this.store.run('ALTER TABLE items ADD COLUMN seq INTEGER');
+        this.store.run('UPDATE items SET seq = rowid');
+        if (existsSync(this.store.dbPath)) this.revision += 1;
+      }
+      this.store.run('CREATE INDEX IF NOT EXISTS idx_items_seq ON items(seq)');
       const unversioned = this.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM items WHERE triage_revision IS NULL');
       if (unversioned && unversioned.count > 0) {
         this.store.run("UPDATE items SET triage_revision = 'ir-' || lower(hex(randomblob(16))) WHERE triage_revision IS NULL");
@@ -280,7 +322,6 @@ export class InboxCursorStore {
       await this.runSweep();
       if (this.closed) return;
       this.initialized = true;
-      nativeTriageStores.get(this)!.ready = true;
       this.startSweepTimer();
     })();
     this.initializing = pending;
@@ -306,6 +347,8 @@ export class InboxCursorStore {
     const at = this.now();
     const expired = this.pruneOlderThan(at - this.itemTtlMs);
     const capped = this.enforceItemCap();
+    // A triage label lives and dies with its row.
+    if (expired + capped > 0) this.store.run('DELETE FROM triage_receipts WHERE id NOT IN (SELECT id FROM items)');
     return { at, expired, capped, remaining: this.countItems() };
   }
 
@@ -363,31 +406,16 @@ export class InboxCursorStore {
   }
 
   /**
-   * Insert/refresh items, deduping by id. On conflict the mutable feed fields
-   * (unread, previews, routeId, receivedAt) are updated in place.
-   * Returns the number of NEW (previously unseen) items.
-   */
-  upsertItems(items: readonly InboundChannelItem[]): number {
-    this.assertOpen();
-    if (items.length === 0) return 0;
-    let inserted = 0;
-    this.store.transaction(() => {
-      // The same ownership rule the commit paths enforce: an id another provider owns is never overwritten.
-      for (const item of items) {
-        const existing = this.store.get<{ provider: string }>('SELECT provider FROM items WHERE id = ?', [item.id]);
-        if (existing && existing.provider !== item.provider) throw new Error('Inbox item id belongs to another provider');
-      }
-      inserted = upsertRows(this.store, items);
-    });
-    this.revision += 1;
-    return inserted;
-  }
-
-  /**
-   * Stage timestamp rows and their watermark together. Nothing becomes visible
+   * Stage timestamp rows and their progress together. Nothing becomes visible
    * until the post-write synchronous fence authorizes atomic publication.
+   *
+   * Without `conversations` the provider's one watermark moves to the newest
+   * row. With it, each named conversation's own cursor moves to the time given
+   * (what was read completely for it), and the provider-wide row is left as the
+   * floor for conversations that have no cursor of their own yet.
    */
-  commitTimestampPoll(provider: string, inputItems: readonly InboundChannelItem[], assertCurrent: () => void): Promise<number> {
+  commitTimestampPoll(provider: string, inputItems: readonly InboundChannelItem[], assertCurrent: () => void,
+    conversations?: Readonly<Record<string, number>>): Promise<number> {
     this.assertOpen();
     // The persistence queue may yield; do not retain mutable adapter results.
     const items = inputItems.map(item => ({ ...item }));
@@ -397,16 +425,21 @@ export class InboxCursorStore {
       if (!Number.isFinite(item.receivedAt)) throw new Error('Invalid timestamp inbox item');
       nextSince = Math.max(nextSince, Math.floor(item.receivedAt));
     }
-    const pending = this.store.persistTransaction(transaction => {
+    const advances = Object.entries(conversations ?? {}).map(([conversation, at]): [string, number] => {
+      if (!conversation || conversation.length > 200 || !Number.isSafeInteger(at) || at < 0) throw new Error('Invalid inbox conversation cursor');
+      return [`${provider}:${conversation}`, at];
+    });
+    const pending = trackSequences(held => this.store.persistTransaction(transaction => {
       for (const item of items) {
         const existing = transaction.get<{ provider: string }>('SELECT provider FROM items WHERE id = ?', [item.id]);
         if (existing && existing.provider !== provider) throw new Error('Timestamp inbox item id belongs to another provider');
       }
-      const inserted = upsertRows(transaction, items);
-      if (nextSince > 0) transaction.run(`INSERT INTO cursors (provider, nextSince) VALUES (?, ?)
-        ON CONFLICT(provider) DO UPDATE SET nextSince = MAX(cursors.nextSince, excluded.nextSince)`, [provider, nextSince]);
+      const inserted = upsertRows(transaction, items, held);
+      const cursorRows: readonly (readonly [string, number])[] = conversations ? advances : nextSince > 0 ? [[provider, nextSince]] : [];
+      for (const [key, at] of cursorRows) transaction.run(`INSERT INTO cursors (provider, nextSince) VALUES (?, ?)
+        ON CONFLICT(provider) DO UPDATE SET nextSince = MAX(cursors.nextSince, excluded.nextSince)`, [key, at]);
       return inserted;
-    }, () => { this.assertOpen(); const result = assertCurrent(); this.assertOpen(); return result; });
+    }, () => { this.assertOpen(); const result = assertCurrent(); this.assertOpen(); return result; }));
     // Closing must drain this transaction, without marking later ordinary
     // mutations clean or releasing the underlying lifetime lock early.
     const tracked = pending.then(() => {});
@@ -432,45 +465,29 @@ export class InboxCursorStore {
     this.assertOpen();
     const items = captureImapItems(provider, inputItems);
     const advance = captureImapAdvance(input, items);
-    const pending = this.store.persistTransaction((transaction) => {
+    const pending = trackSequences(held => this.store.persistTransaction((transaction) => {
       if (!sameImapCheckpoint(readImapCheckpoint(transaction, provider), advance.previous)) {
         throw new Error('IMAP inbox checkpoint changed before commit');
       }
-      if (advance.transition === 'reset') transaction.run('DELETE FROM items WHERE provider = ?', [provider]);
+      if (advance.transition === 'reset') {
+        transaction.run('DELETE FROM items WHERE provider = ?', [provider]);
+        transaction.run('DELETE FROM triage_receipts WHERE id NOT IN (SELECT id FROM items)');
+      }
       for (const item of items) {
         const existing = transaction.get<{ provider: string }>('SELECT provider FROM items WHERE id = ?', [item.id]);
         if (existing && existing.provider !== provider) throw new Error('IMAP inbox item id belongs to another provider');
       }
-      const inserted = upsertRows(transaction, items);
+      const inserted = upsertRows(transaction, items, held);
       transaction.run(`INSERT INTO imap_checkpoints (provider, checkpoint) VALUES (?, ?)
         ON CONFLICT(provider) DO UPDATE SET checkpoint = excluded.checkpoint`, [provider, JSON.stringify(advance.next)]);
       return inserted;
-    }, () => { this.assertOpen(); const result = assertCurrent(); this.assertOpen(); return result; });
+    }, () => { this.assertOpen(); const result = assertCurrent(); this.assertOpen(); return result; }));
     // Do not mark ordinary revisions clean: a separate flush still owns any
     // mutation accepted after this transaction's synchronous publication.
     const tracked = pending.then(() => {});
     this.flushing.add(tracked);
     void tracked.then(() => this.flushing.delete(tracked), () => this.flushing.delete(tracked));
     return pending;
-  }
-
-  /**
-   * Advance a provider's cursor monotonically. The stored value is always the
-   * max of the current value and the supplied candidate.
-   */
-  advanceCursor(provider: string, candidate: number): void {
-    this.assertOpen();
-    if (!Number.isFinite(candidate)) return;
-    const current = this.getCursor(provider);
-    const next = Math.max(current, Math.floor(candidate));
-    if (next === current && current !== 0) return;
-    this.store.run(
-      `INSERT INTO cursors (provider, nextSince) VALUES (?, ?)
-       ON CONFLICT(provider) DO UPDATE SET
-         nextSince = MAX(cursors.nextSince, excluded.nextSince)`,
-      [provider, next],
-    );
-    this.revision += 1;
   }
 
   /** Current cursor for a provider (0 when unset). */
@@ -483,9 +500,19 @@ export class InboxCursorStore {
     return row ? Number(row.nextSince) : 0;
   }
 
+  /** Every conversation cursor this provider has, keyed by conversation id. One query. */
+  getConversationCursors(provider: string): Map<string, number> {
+    this.assertOpen();
+    const prefix = `${provider}:`;
+    const rows = this.store.all<{ provider: string; nextSince: number }>(
+      'SELECT provider, nextSince FROM cursors WHERE substr(provider, 1, ?) = ?', [prefix.length, prefix]);
+    return new Map(rows.map(row => [row.provider.slice(prefix.length), Number(row.nextSince)]));
+  }
+
   /**
    * Read items for the feed, filtered by provider set + since, newest first,
-   * capped at limit. Maps SQLite rows back to the internal item shape.
+   * capped at limit. `since` is a store sequence (the `cursor` an earlier read
+   * returned): only rows committed or changed after it are returned.
    */
   listItems(query: InboxQuery): InboundChannelItem[] {
     this.assertOpen();
@@ -497,7 +524,7 @@ export class InboxCursorStore {
       params.push(...query.providers);
     }
     if (typeof query.since === 'number' && Number.isFinite(query.since)) {
-      clauses.push('receivedAt > ?');
+      clauses.push('seq > ?');
       params.push(Math.floor(query.since));
     }
     if (query.after && Number.isFinite(query.after.receivedAt)) {
@@ -505,33 +532,88 @@ export class InboxCursorStore {
       // older timestamp, or the same timestamp with a higher id. Both halves
       // are needed, several items can share a receivedAt, and comparing on
       // the timestamp alone would drop every one of its ties.
-      clauses.push('(receivedAt < ? OR (receivedAt = ? AND id > ?))');
+      clauses.push('(receivedAt < ? OR (receivedAt = ? AND items.id > ?))');
       const at = Math.floor(query.after.receivedAt);
       params.push(at, at, query.after.id);
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const limit = Math.max(0, Math.floor(query.limit));
     params.push(limit);
+    // A label shows only while the receipt names the row's current content revision.
     const rows = this.store.all<ItemRow>(
-      `SELECT id, provider, kind, fromDigest, subjectPreview, bodyPreview,
-              routeId, receivedAt, unread
-         FROM items ${where}
-         ORDER BY receivedAt DESC, id ASC
+      `SELECT items.id AS id, provider, kind, fromDigest, subjectPreview, bodyPreview,
+              routeId, receivedAt, unread, r.label AS triageLabel, r.score AS triageScore, r.tags AS triageTags
+         FROM items LEFT JOIN triage_receipts r
+           ON r.id = items.id AND r.revision = items.triage_revision AND r.status = 'settled'
+         ${where}
+         ORDER BY receivedAt DESC, items.id ASC
          LIMIT ?`,
       params,
     );
     return rows.map(rowToItem);
   }
 
-  /** Highest receivedAt across the (optionally provider-filtered) feed, or 0. */
-  maxReceivedAt(providers?: readonly string[]): number {
+  /** Each named row's current content revision, in one query. A row missing here is gone. */
+  triageRevisions(ids: readonly string[]): Map<string, string> {
+    this.assertOpen();
+    if (ids.length === 0) return new Map();
+    const rows = this.store.all<{ id: string; triage_revision: string }>(
+      `SELECT id, triage_revision FROM items WHERE id IN (${ids.map(() => '?').join(', ')})`, [...ids]);
+    return new Map(rows.map(row => [row.id, row.triage_revision]));
+  }
+
+  /** Rows of this provider whose content has no settled label yet, newest first. */
+  untriagedItems(provider: string, limit: number): InboxTriageCandidate[] {
+    this.assertOpen();
+    const rows = this.store.all<ItemRow & { revision: string }>(
+      `SELECT items.id AS id, provider, kind, fromDigest, subjectPreview, bodyPreview, routeId, receivedAt, unread,
+              items.triage_revision AS revision
+         FROM items LEFT JOIN triage_receipts r ON r.id = items.id AND r.revision = items.triage_revision
+        WHERE provider = ? AND items.triage_revision IS NOT NULL AND (r.id IS NULL OR r.status <> 'settled')
+        ORDER BY receivedAt DESC, items.id ASC LIMIT ?`, [provider, Math.max(0, Math.floor(limit))]);
+    return rows.map(row => ({ item: rowToItem(row), revision: row.revision }));
+  }
+
+  /**
+   * Store triage receipts beside their rows. Each row's revision is compared
+   * once, inside the transaction: a row whose content changed or went away since
+   * it was read is left for the next pass, the others are written. A failed
+   * attempt never replaces a settled label for the same content. Returns the ids written.
+   */
+  commitTriageReceipts(receipts: readonly InboxTriageReceiptRow[], assertCurrent: () => void = () => {}): Promise<readonly string[]> {
+    this.assertOpen();
+    const rows = receipts.map(row => ({ ...row, tags: row.tags ? JSON.stringify([...row.tags]) : null }));
+    if (rows.length === 0) return Promise.resolve([]);
+    const pending = this.store.persistTransaction(transaction => {
+      const written: string[] = [];
+      for (const row of rows) {
+        const current = transaction.get<{ triage_revision: string | null }>('SELECT triage_revision FROM items WHERE id = ?', [row.id]);
+        if (!current || current.triage_revision !== row.revision) continue;
+        if (row.status !== 'settled') {
+          const kept = transaction.get<{ status: string }>('SELECT status FROM triage_receipts WHERE id = ? AND revision = ?', [row.id, row.revision]);
+          if (kept?.status === 'settled') continue;
+        }
+        transaction.run(`INSERT OR REPLACE INTO triage_receipts (id, revision, status, label, score, tags, receipt)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`, [row.id, row.revision, row.status, row.label ?? null, row.score ?? null, row.tags, row.receipt]);
+        written.push(row.id);
+      }
+      return written;
+    }, () => { this.assertOpen(); const result = assertCurrent(); this.assertOpen(); return result; });
+    const tracked = pending.then(() => {});
+    this.flushing.add(tracked);
+    void tracked.then(() => this.flushing.delete(tracked), () => this.flushing.delete(tracked));
+    return pending;
+  }
+
+  /** Highest store sequence across the (optionally provider-filtered) feed, or 0: the "what is new" watermark. */
+  maxSequence(providers?: readonly string[]): number {
     this.assertOpen();
     const { where, params } = filterClause(providers);
-    const row = this.store.get<{ maxReceived: number | null }>(
-      `SELECT MAX(receivedAt) AS maxReceived FROM items ${where}`,
+    const row = this.store.get<{ maxSeq: number | null }>(
+      `SELECT MAX(seq) AS maxSeq FROM items ${where}`,
       params,
     );
-    return row && row.maxReceived != null ? Number(row.maxReceived) : 0;
+    return row && row.maxSeq != null ? Number(row.maxSeq) : 0;
   }
 
   /**
@@ -610,12 +692,6 @@ export class InboxCursorStore {
     return removed;
   }
 
-  /** Persist the current revision; a newer mutation cannot be marked saved by it. */
-  flush(): Promise<void> {
-    if (this.closed) return Promise.reject(new Error('InboxCursorStore is closed.'));
-    return this.flushSnapshot();
-  }
-
   private flushSnapshot(): Promise<void> {
     if (this.revision === this.persistedRevision) return Promise.resolve();
     const revision = this.revision;
@@ -634,7 +710,6 @@ export class InboxCursorStore {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
-    nativeTriageStores.get(this)!.closed = true;
     this.closing = Promise.resolve().then(async () => {
       let timerError: unknown;
       try { this.stopSweepTimer(); } catch (error) { timerError = error; }
@@ -650,6 +725,39 @@ export class InboxCursorStore {
   }
 }
 
+// One sequence for every inbox mirror in this process. The daemon keeps one
+// mirror per account and lists them together, so a watermark must compare
+// across them. A sequence is the commit time in ms, made unique and increasing,
+// so it also stays ahead of everything written before a restart.
+let lastSequence = 0;
+/** First sequence of every transaction staged but not yet published. */
+const unpublished = new Map<Set<number>, true>();
+
+function issueSequences(count: number, storeMax: number, held: Set<number>): number {
+  const first = Math.max(lastSequence + 1, storeMax + 1, Date.now());
+  lastSequence = first + Math.max(0, count - 1);
+  held.add(first);
+  return first;
+}
+
+function trackSequences<T>(run: (held: Set<number>) => Promise<T>): Promise<T> {
+  const held = new Set<number>();
+  unpublished.set(held, true);
+  return run(held).finally(() => { unpublished.delete(held); });
+}
+
+/**
+ * The highest sequence a reader may hand out as its watermark: below every
+ * transaction still being written, so a row published after the read can never
+ * carry a sequence the caller has already passed. Unbounded when nothing is
+ * being written (after a restart too), so the store's own maximum stands.
+ */
+export function publishedSequenceBound(): number {
+  let bound = Number.POSITIVE_INFINITY;
+  for (const held of unpublished.keys()) for (const first of held) bound = Math.min(bound, first - 1);
+  return bound;
+}
+
 /** Shared WHERE builder for the provider-set + since filter the reads share. */
 function filterClause(
   providers?: readonly string[],
@@ -662,7 +770,7 @@ function filterClause(
     params.push(...providers);
   }
   if (typeof since === 'number' && Number.isFinite(since)) {
-    clauses.push('receivedAt > ?');
+    clauses.push('seq > ?');
     params.push(Math.floor(since));
   }
   return { where: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '', params };
@@ -680,6 +788,14 @@ function rowToItem(row: ItemRow): InboundChannelItem {
     unread: Number(row.unread) !== 0,
   };
   if (row.routeId != null) item.routeId = row.routeId;
+  if (row.triageLabel === 'spam' || row.triageLabel === 'priority' || row.triageLabel === 'normal') {
+    item.triageLabel = row.triageLabel;
+    if (typeof row.triageScore === 'number') item.triageScore = row.triageScore;
+    try {
+      const tags: unknown = row.triageTags ? JSON.parse(row.triageTags) : [];
+      if (Array.isArray(tags)) item.triageTags = tags.filter((tag): tag is string => typeof tag === 'string');
+    } catch { /* A label without readable tags still shows. */ }
+  }
   return item;
 }
 
@@ -694,30 +810,36 @@ function readImapCheckpoint(store: HandlerSqliteTransaction, provider: string): 
   return row ? captureImapCheckpoint(JSON.parse(row.checkpoint) as ImapUidCheckpoint) : null;
 }
 
-function upsertRows(store: HandlerSqliteTransaction, items: readonly InboundChannelItem[]): number {
+function upsertRows(store: HandlerSqliteTransaction, items: readonly InboundChannelItem[], held: Set<number>): number {
   if (items.length === 0) return 0;
   const batchIds = [...new Set(items.map((item) => item.id))];
   const existing = new Set(store.all<{ id: string }>(
     `SELECT id FROM items WHERE id IN (${batchIds.map(() => '?').join(', ')})`, batchIds,
   ).map((row) => row.id));
   let inserted = 0;
-  for (const item of items) {
-    if (!existing.has(item.id)) { inserted += 1; existing.add(item.id); }
-    store.run(`INSERT INTO items
-      (id, provider, kind, fromDigest, subjectPreview, bodyPreview, routeId, receivedAt, unread)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-      triage_revision = CASE WHEN items.provider IS excluded.provider
+  // A row takes the next sequence when it is written new or its content changes,
+  // so a caller polling with `since` sees both; an identical re-read keeps its place.
+  let next = issueSequences(items.length, Number(store.get<{ maxSeq: number | null }>('SELECT MAX(seq) AS maxSeq FROM items')?.maxSeq ?? 0), held);
+  const unchanged = `items.provider IS excluded.provider
         AND (CASE items.kind WHEN 'dm' THEN 'direct' WHEN 'thread' THEN 'thread' ELSE 'service' END)
           IS (CASE excluded.kind WHEN 'dm' THEN 'direct' WHEN 'thread' THEN 'thread' ELSE 'service' END)
         AND items.subjectPreview IS excluded.subjectPreview AND items.bodyPreview IS excluded.bodyPreview
-        AND items.unread IS excluded.unread THEN items.triage_revision ELSE NULL END,
+        AND items.unread IS excluded.unread`;
+  for (const item of items) {
+    if (!existing.has(item.id)) { inserted += 1; existing.add(item.id); }
+    store.run(`INSERT INTO items
+      (id, provider, kind, fromDigest, subjectPreview, bodyPreview, routeId, receivedAt, unread, seq)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+      triage_revision = CASE WHEN ${unchanged} THEN items.triage_revision ELSE NULL END,
+      seq = CASE WHEN ${unchanged} THEN items.seq ELSE excluded.seq END,
       provider = excluded.provider, kind = excluded.kind,
       fromDigest = excluded.fromDigest, subjectPreview = excluded.subjectPreview,
       bodyPreview = excluded.bodyPreview, routeId = COALESCE(excluded.routeId, items.routeId),
       receivedAt = excluded.receivedAt, unread = excluded.unread`,
     [item.id, item.provider, item.kind, item.fromDigest, item.subjectPreview, item.bodyPreview,
-      item.routeId ?? null, item.receivedAt, item.unread ? 1 : 0]);
+      item.routeId ?? null, item.receivedAt, item.unread ? 1 : 0, next]);
+    next += 1;
     // SQLite issues only an actual new/changed message revision; identical
     // polling never mints then discards a new identifier.
     store.run("UPDATE items SET triage_revision = 'ir-' || lower(hex(randomblob(16))) WHERE id = ? AND triage_revision IS NULL", [item.id]);
@@ -725,39 +847,3 @@ function upsertRows(store: HandlerSqliteTransaction, items: readonly InboundChan
   return inserted;
 }
 
-
-export interface InboxTriageSourceObservation {
-  bindingFor(id: string): TriageSourceBinding | undefined;
-  assertCurrent(): void;
-}
-
-/** Only an original native mirror may supply a matching row revision. This is
- * cache provenance, never a substitute for the account owner's read lease or
- * permission to disclose a protected preview. No preview is copied/persisted. */
-export function captureInboxTriageSource(source: object, input: readonly CapturedTriageInput[], scope: TriageReceiptScope, requireAll = true): InboxTriageSourceObservation {
-  const owner = nativeTriageStores.get(source);
-  if (!owner || !owner.scope || owner.scope.providerId !== scope.providerId || owner.scope.accountScopeId !== scope.accountScopeId) throw new Error('Inbox triage requires its original native mirror account');
-  const originalCurrent = () => { if (!owner.ready || owner.closed) throw new Error('Inbox triage native source is unavailable'); };
-  originalCurrent();
-  const bindings = new Map<string, TriageSourceBinding>();
-  const currentRevision = (item: CapturedTriageInput): string | undefined => {
-    originalCurrent();
-    const row = owner.store.get<{ triage_revision: string }>(`SELECT triage_revision FROM items WHERE id = ? AND provider = ?
-      AND subjectPreview = ? AND bodyPreview = ? AND unread = ?
-      AND (CASE kind WHEN 'dm' THEN 'direct' WHEN 'thread' THEN 'thread' ELSE 'service' END) = ?`,
-    [item.id, item.surface, item.subject, item.snippet, item.unread ? 1 : 0, item.conversationKind]);
-    if (!row || typeof row.triage_revision !== 'string' || row.triage_revision.length !== 35 || !/^ir-[0-9a-f]{32}$/.test(row.triage_revision)) return undefined;
-    return row.triage_revision;
-  };
-  for (const item of input) {
-    const sourceRevision = currentRevision(item);
-    if (sourceRevision === undefined) { if (requireAll) throw new Error('Inbox triage native source changed'); continue; }
-    bindings.set(item.id, Object.freeze({ ...scope, sourceRevision }));
-  }
-  const assertCurrent = () => {
-    originalCurrent();
-    for (const item of input) if (bindings.has(item.id) && currentRevision(item) !== bindings.get(item.id)?.sourceRevision) throw new Error('Inbox triage native source changed');
-  };
-  assertCurrent();
-  return Object.freeze({ bindingFor: (id: string) => bindings.get(id), assertCurrent });
-}

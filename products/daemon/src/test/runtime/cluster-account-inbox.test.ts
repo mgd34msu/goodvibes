@@ -133,7 +133,7 @@ async function node(bus: MemoryClusterBus, clock: FakeClusterClock, name: string
     async inbox() { return context.catalog.invoke('channels.inbox.list', { body: {}, context: {} }) as Promise<InboxListOutput>; },
     stored() { const path = join(workingDirectory, '.goodvibes', 'tui', 'operator', fileName); if (!existsSync(path)) return { rows: 0, cursor: 0 };
       const db = new Database(path, { readonly: true }); try { return { rows: (db.query('SELECT COUNT(*) AS n FROM items').get() as { n: number }).n,
-        cursor: (db.query('SELECT nextSince FROM cursors WHERE provider = ?').get('slack') as { nextSince: number } | null)?.nextSince ?? 0 }; } finally { db.close(); } },
+        cursor: (db.query("SELECT MAX(nextSince) AS nextSince FROM cursors WHERE provider = 'slack' OR provider LIKE 'slack:%'").get() as { nextSince: number | null } | null)?.nextSince ?? 0 }; } finally { db.close(); } },
   };
 }
 
@@ -306,20 +306,21 @@ test.each(['credential', 'source'] as const)('revoked %s drains held incumbent s
   expect(a.stored()).toEqual(before);
 });
 
-test('semantic held outcome alone keeps membership without an eligibility-triggered content resample', async () => {
+test('a semantically held message is stored as withheld once and never resampled', async () => {
   const clock = new FakeClusterClock(), bus = new MemoryClusterBus(), remote = endpoints(), events: string[] = [];
   remote.holdSemantic();
   const a = await node(bus, clock, 'node-a', remote, makeOwnedTempDir('cluster-semantic-held'), events);
   await a.registration.ready; await advance(clock, 2000); await until(() => events.includes('node-a:poll-drained'));
   const calls = remote.sourceCalls.length; expect(calls).toBeGreaterThan(0);
-  expect(a.stored()).toEqual({ rows: 0, cursor: 0 });
+  // A message screening cannot settle is stored as withheld and passed, not screened again.
+  await until(() => a.stored().rows === 1);
   await advance(clock, 31000); await settleTurns();
   expect(a.enrollments).toBe(1); expect(a.coordinator.status().surfaces).toHaveLength(1);
   expect(remote.sourceCalls).toHaveLength(calls);
   expect(events.filter(event => event === 'node-a:poll-start')).toHaveLength(1);
 });
 
-test('returning standby mirror remains protected after same-account rotation and credential revocation', async () => {
+test('a returning standby reads its stored mirror without provider requests after a same-account rotation', async () => {
   const clock = new FakeClusterClock(), bus = new MemoryClusterBus();
   const a = await node(bus, clock, 'node-a'); await a.registration.ready;
   await advance(clock, 2000); await until(() => a.stored().rows === 1);
@@ -329,13 +330,12 @@ test('returning standby mirror remains protected after same-account rotation and
   const returned = await node(bus, clock, 'node-a', endpoints(), a.root); await returned.registration.ready;
   expect((await returned.inbox()).items).toHaveLength(1);
   returned.remote.setToken('xoxb-synthetic-rotated'); returned.invalidate();
+  // Reads of the stored inbox make no provider or credential request; the poll proves the account.
   const reads = returned.remote.credentialReads;
   expect((await returned.inbox()).items).toHaveLength(1);
-  expect(returned.remote.credentialReads).toBeGreaterThan(reads);
+  expect(returned.remote.credentialReads).toBe(reads);
   await advance(clock, 31000); await until(() => returned.enrollments === 2);
   expect((await returned.inbox()).items).toHaveLength(1);
-  returned.remote.setToken(null); returned.invalidate();
-  await expect(returned.inbox()).rejects.toThrow();
   expect(returned.stored().rows).toBe(1);
 });
 

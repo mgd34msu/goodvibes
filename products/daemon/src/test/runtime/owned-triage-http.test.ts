@@ -8,7 +8,7 @@ import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fix
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 
-test('explicit owned Jev API scoring reaches authenticated daemon inbox HTTP through real receipt SQLite', async () => {
+test('triage scores new rows after a poll and the label reaches authenticated daemon inbox HTTP', async () => {
   const root = makeOwnedTempDir('owned-triage-http');
   const directory = join(root, 'home', '.goodvibes', GOODVIBES_DAEMON_SURFACE_ROOT);
   mkdirSync(directory, { recursive: true });
@@ -41,16 +41,22 @@ test('explicit owned Jev API scoring reaches authenticated daemon inbox HTTP thr
       }); return owned;
     } });
     expect((await fixture.fetchAnonymous('/api/channels/inbox')).status).toBe(401);
-    expect(requests).toHaveLength(0);
-    expect(await (await fixture.fetch('/api/channels/inbox')).json()).toMatchObject({ total: 1, items: [{ id: 'fixture:one' }] });
-    expect(requests).toHaveLength(0);
-    expect(await owned.runInboxTriage()).toMatchObject({ receipts: [{ status: 'settled', label: 'priority' }], total: 1, hasMore: false });
-    const response = await fixture.fetch('/api/channels/inbox'); expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ total: 1, items: [{ id: 'fixture:one', triageLabel: 'priority', triageScore: .99,
+    // The poll stored a new row, so triage scored it: one request for the batch.
+    const deadline = Date.now() + 10_000;
+    let listed: { items: Array<Record<string, unknown>> } = { items: [] };
+    while (Date.now() < deadline) {
+      listed = await (await fixture.fetch('/api/channels/inbox')).json() as typeof listed;
+      if (listed.items[0]?.triageLabel !== undefined) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    expect(listed).toMatchObject({ total: 1, items: [{ id: 'fixture:one', triageLabel: 'priority', triageScore: .99,
       triageTags: ['GoodVibes/Priority'] }] });
     expect(requests).toHaveLength(1); expect(polls).toBe(1);
     expect(JSON.stringify(requests)).not.toContain('0123456789abcdef');
+    // An explicit pass over rows already labelled for their content asks nothing new.
+    expect(await owned.runInboxTriage({ limit: 10 }, { dryRun: true })).toMatchObject({ total: 1, hasMore: false });
     expect(fixture.services.gatewayMethods.hasHandler('inbox.triage.run')).toBe(false);
-    authority.abort(); expect((await fixture.fetch('/api/channels/inbox')).status).toBe(503);
+    // Revoking the triage grant stops scoring; the stored inbox stays readable.
+    authority.abort(); expect((await fixture.fetch('/api/channels/inbox')).status).toBe(200);
   } finally { await fixture?.stop(); server.stop(true); discovery.mockRestore(); }
 }, 30_000);

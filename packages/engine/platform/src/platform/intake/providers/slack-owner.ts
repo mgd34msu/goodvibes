@@ -7,6 +7,7 @@ import type { AdapterContext, InboundProviderAdapter, ProviderPollOptions, Provi
 import { POLL_CADENCE_MS } from '../provider-adapter.js';
 import type { OwnedInboxReadLease } from '../registration.js';
 import { createSlackInboxAdapter, type SlackInboxHttp } from './slack.js';
+import { describeInboxHttpFailure } from './inbox-http.js';
 import { createSlackInboxHttpOwner } from './slack-http.js';
 import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
 
@@ -71,9 +72,10 @@ function captureAccount(value: SlackInboxAccount): SlackInboxAccount {
   return Object.freeze({ workspaceId: fields[0]!, userId: fields[1]! });
 }
 
-function unavailable(configured?: boolean): ProviderPollResult {
-  return { items: [], state: 'unavailable', error: 'Slack inbox account or source is unavailable', ...(configured === undefined ? {} : { configured }) };
+function unavailable(configured?: boolean, error = 'The Slack inbox settings, credential or screening changed during the poll; the next poll uses the current ones'): ProviderPollResult {
+  return { items: [], state: 'unavailable', error, ...(configured === undefined ? {} : { configured }) };
 }
+const OTHER_ACCOUNT = 'The token in surfaces.slack.botToken belongs to a different Slack account or workspace than this inbox is set up for; replace the token or update surfaces.slack.workspaceId and surfaces.slack.inboxUserId';
 function usableToken(token: string | null): token is string {
   return typeof token === 'string' && (token.startsWith('xoxb-') || token.startsWith('xoxp-'));
 }
@@ -103,6 +105,10 @@ export async function createSlackInboxOwner(
   let identitySignal = AbortSignal.any([signal, identityLifetime.signal]);
   let commitEpoch: number | undefined;
   let pollSignal: AbortSignal | undefined;
+  // Set when the provider said this credential is not this account; stored
+  // rows stay unreadable until a poll proves the account again.
+  let identityRefused = false;
+  let refusalText = OTHER_ACCOUNT;
   const invalidateIdentity = (): void => {
     const retired = identityLifetime;
     verifiedCredential = undefined; identityEpoch += 1; commitEpoch = undefined;
@@ -172,20 +178,31 @@ export async function createSlackInboxOwner(
     const response = await httpOwner.http(url, request);
     current();
     if (url.pathname === '/api/auth.test') {
+      // An outage says nothing about the account. A denial or a different
+      // account does, and revokes what was proven.
+      if (!response.ok && response.reason !== 'denied') return response;
       if (!response.ok || !matchesAccount(response.body)) {
-        // Transport outages throw before this point. A decoded authentication
-        // denial, malformed identity or different account invalidates proof.
-        invalidateIdentity();
-        throw new Error('Slack inbox account verification unavailable');
+        invalidateIdentity(); identityRefused = true;
+        refusalText = response.ok ? OTHER_ACCOUNT : describeInboxHttpFailure('Slack', 'denied', { credentialKey: KEY });
+        return { ok: false, reason: 'denied' };
       }
       if (epoch !== identityEpoch) throw new Error('Slack inbox identity proof was revoked');
+      identityRefused = false;
       onVerified(epoch);
     }
     return response;
   };
 
+  // One reader for the owner's lifetime, so the account id, the conversation
+  // list and partly read windows carry over from tick to tick.
+  let pollToken: string | null = null;
+  let pollVerified: number | undefined;
+  const delegate = createSlackInboxAdapter({ logger: context.logger,
+    ...(resolveRouteId ? { resolveRouteId } : {}),
+    credentials: { resolveRef: async () => null, resolveConfigSecret: async (key) => key === KEY ? pollToken : null },
+  }, { http: async (url, request) => identityHttp(pollToken ?? '', (epoch) => { pollVerified = epoch; })(url, request), mapItem: mapper });
   const adapter: InboundProviderAdapter = {
-    id: 'slack', pollIntervalMs: POLL_CADENCE_MS.realtime,
+    id: 'slack', pollIntervalMs: POLL_CADENCE_MS.realtime, checkpointKind: 'conversation',
     assertCurrent() {
       current();
       if (commitEpoch === undefined || commitEpoch !== identityEpoch || !verifiedCredential || pollSignal?.aborted) {
@@ -198,24 +215,23 @@ export async function createSlackInboxOwner(
       try {
         return await own(async () => {
           const token = await readCredential();
-          if (!usableToken(token)) { configured = false; invalidateIdentity(); return unavailable(false); }
+          if (!usableToken(token)) { configured = false; invalidateIdentity(); delegate.forget(); return unavailable(false, 'surfaces.slack.botToken is not set to a Slack bot (xoxb-) or user (xoxp-) token'); }
           configured = true;
-          if (verifiedCredential && verifiedCredential !== token) invalidateIdentity();
-          let verified: number | undefined;
-          const delegate = createSlackInboxAdapter({ logger: context.logger,
-            ...(resolveRouteId ? { resolveRouteId } : {}),
-            credentials: { resolveRef: async () => null, resolveConfigSecret: async (key) => key === KEY ? token : null },
-          }, { http: identityHttp(token, (epoch) => { verified = epoch; }), mapItem: mapper });
+          if (verifiedCredential !== token) { if (verifiedCredential) invalidateIdentity(); delegate.forget(); }
+          pollToken = token; pollVerified = undefined;
           const result = await delegate.poll(options);
           current();
+          if (identityRefused) return unavailable(true, refusalText);
           // A token swapped during API/mapping work cannot commit an old poll.
-          if (await readCredential() !== token) { invalidateIdentity(); return unavailable(true); }
+          if (await readCredential() !== token) { invalidateIdentity(); delegate.forget(); return unavailable(true); }
           // A later auth denial must not be overwritten by an older mapper/read.
-          if (verified !== undefined && verified !== identityEpoch) return unavailable(true);
-          if (verified !== undefined) { verifiedCredential = token; commitEpoch = verified; }
+          if (pollVerified !== undefined && pollVerified !== identityEpoch) return unavailable(true);
+          if (pollVerified !== undefined) verifiedCredential = token;
+          // The account was proven by this poll or by an earlier one with this same credential.
+          commitEpoch = verifiedCredential === token ? identityEpoch : undefined;
           return result;
         });
-      } catch { return unavailable(configured); }
+      } catch { return unavailable(configured, identityRefused ? refusalText : undefined); }
     },
   };
 
@@ -239,24 +255,23 @@ export async function createSlackInboxOwner(
   });
   return {
     account, scopeId, triageStoreFileName, adapter,
-    invalidateCredential: invalidateIdentity,
-    async assertReadCurrent() { await verifyIdentity(false); },
+    invalidateCredential() { invalidateIdentity(); delegate.forget(); },
+    // Stored rows belong to this account's own mirror. A read needs no call to
+    // Slack: the poll owns "is this still the same account" and revokes reads
+    // (identityEpoch) the moment Slack says otherwise.
+    async assertReadCurrent() {
+      current();
+      if (identityRefused) throw new Error(refusalText);
+    },
     async acquireReadLease() {
-      const epoch = await verifyIdentity(false);
-      const observed = identityLifetime;
+      current();
+      if (identityRefused) throw new Error(refusalText);
+      const epoch = identityEpoch;
       const assertCurrent = (): void => {
         current();
-        if (observed.signal.aborted || epoch !== identityEpoch || !verifiedCredential) {
-          throw new Error('Slack inbox read identity was revoked');
-        }
+        if (epoch !== identityEpoch || identityRefused) throw new Error('Slack inbox read identity was revoked');
       };
-      assertCurrent();
-      return Object.freeze(Object.assign(async () => {
-        assertCurrent();
-        const latest = await verifyIdentity(false);
-        assertCurrent();
-        if (latest !== epoch) throw new Error('Slack inbox read identity was revoked');
-      }, { assertCurrent }));
+      return Object.freeze(Object.assign(async () => { assertCurrent(); }, { assertCurrent }));
     },
     async verifyEligibility() {
       const epoch = await verifyIdentity(true);

@@ -5,6 +5,7 @@ import { EmailCredentialUnavailableError } from '../../email/email-config.js';
 import type { EmailService } from '../../email/email-service.js';
 import type { EmailMailboxObservation } from '../../email/reply-subject-source.js';
 import { createProtectedSourceOwner } from '../../security/source-screening/owner.js';
+import { JudgmentInputError } from '../../gate/judgment-input.js';
 import type { ProtectedSourceOwnerOptions, ProtectedSource } from '../../security/source-screening/types.js';
 import type { OwnedInboxReadLease } from '../registration.js';
 import { digestSender, normalizeWhitespace, stripMarkup } from '../text-normalization.js';
@@ -25,17 +26,15 @@ export interface EmailInboxOwnerOptions {
   readonly service: EmailService;
   readonly screening: ProtectedSourceOwnerOptions;
   readonly assertCurrent: () => void;
-  /** Clock for the read-proof reuse window; defaults to `Date.now`. */
-  readonly now?: () => number;
   /** Read-only view of the actual durable inbox checkpoint, supplied by its registrar. */
   readonly getCheckpoint: () => ImapUidCheckpoint | null;
   /** Optional metadata-only routing capability captured by the owned poll. */
   readonly resolveRouteId?: RouteResolver;
   /**
    * Called once per message after it passed source screening, with the screened
-   * subject and body. It runs before the poll's checkpoint is committed, so a poll
-   * that is retried can offer the same message again; observers must tolerate that.
-   * It never delays or fails the poll.
+   * subject and body and the message's own date. It runs before the poll's
+   * checkpoint is committed, so a poll that is retried can offer the same message
+   * again; observers must tolerate that. It never delays or fails the poll.
    */
   readonly onMail?: (mail: OwnerMailObservation) => void;
   readonly signal?: AbortSignal;
@@ -92,6 +91,15 @@ function senderDomainOf(from: string): string | undefined {
   return address.includes('@') && domain.length <= 253
     && /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/.test(domain) ? domain : undefined;
 }
+/**
+ * The message's own time from its Date header, for display order, retention
+ * and "arrived after" questions. A missing, unreadable or far-future date
+ * falls back to when it was read here.
+ */
+function messageTime(date: string | undefined, readAt: number): number {
+  const parsed = date ? Date.parse(date) : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= readAt + 24 * 60 * 60 * 1000 ? parsed : readAt;
+}
 function sync(assert: () => void): void {
   const result: unknown = assert();
   if (result !== undefined) {
@@ -104,8 +112,6 @@ function unavailable(configured?: boolean): ProviderPollResult {
     ...(configured === undefined ? {} : { configured }) };
 }
 
-/** How long a completed read proof may start another read. */
-const READ_PROOF_REUSE_MS = 5_000;
 /**
  * Polls on which one message may fail to read or to be screened before it is
  * stepped over and published as a message that could not be read here. The
@@ -122,7 +128,7 @@ const UNREADABLE_REASON_TEXT: Readonly<Record<string, string>> = {
   'text-section-incomplete-or-unsupported': 'its text could not be decoded exactly',
   'complete-source-too-large': 'its text is larger than this reader takes',
   'repeated-read-failure': `the server did not return it readably on ${String(MAX_POLLS_PER_MESSAGE)} polls in a row`,
-  'screening-unsettled': `it could not be checked for unsafe content on ${String(MAX_POLLS_PER_MESSAGE)} polls in a row`,
+  'screening-unsettled': 'privacy screening could not settle what it holds, so it is withheld here',
 };
 
 /** No credentials or provider calls happen during construction. */
@@ -159,9 +165,11 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
     detachEligibility?.(); detachEligibility = undefined;
     retired?.abort();
   };
+  // Set when the server refused the account; cleared by the next poll that signs in.
+  let authorityRefused = false;
   const failedRead = (error: unknown): void => {
     if (error instanceof EmailCredentialUnavailableError || (error instanceof ImapOpenError
-      && (error.reason === 'authentication-rejected' || error.reason === 'mailbox-unavailable'))) revokeEligibility(true);
+      && (error.reason === 'authentication-rejected' || error.reason === 'mailbox-unavailable'))) { authorityRefused = true; revokeEligibility(true); }
   };
   let screeningObservation: EmailMailboxObservation | undefined;
   let commitObservation: EmailMailboxObservation | undefined;
@@ -177,15 +185,17 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
     return count;
   };
   /** The item that stands in for a message that could not be read here, so it is not lost. */
-  const unreadableItem = (uidValidity: number, uid: number, reason: string, senderDomain?: string): InboundChannelItem => ({
+  const unreadableItem = (uidValidity: number, uid: number, reason: string, senderDomain?: string, receivedAt = Date.now()): InboundChannelItem => ({
     id: `email:${scopeId}:${String(uidValidity).padStart(10, '0')}:${String(uid).padStart(10, '0')}`,
     provider: 'email', kind: 'dm' as const,
     fromDigest: digestSender(senderDomain ? `email-domain:${senderDomain}` : 'email:unknown sender'),
     subjectPreview: 'A message could not be read here',
     bodyPreview: prefix(`A message${senderDomain ? ` claiming to be from ${senderDomain}` : ''} in ${account.mailbox} `
       + `could not be read here: ${UNREADABLE_REASON_TEXT[reason] ?? 'it could not be read'}. Open it in your mail client.`, 500),
-    receivedAt: Date.now(), unread: true,
+    receivedAt, unread: true,
   });
+  // The mailbox generation the last poll saw, for reads of stored rows (no mail session per read).
+  let lastSeenValidity: number | undefined;
   const current = (): void => {
     try {
       if (closed || signal.aborted) throw new Error('Email inbox scope is unavailable');
@@ -236,6 +246,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
         const observation = service.getInboxMailboxObservation(result);
         if (!observation || observation.mailbox !== account.mailbox) return unavailable(true);
         observation.assertCurrent();
+        lastSeenValidity = observation.uidValidity; authorityRefused = false;
         if (result.outcome === 'checkpoint-required') {
           if (epoch !== identityEpoch) return unavailable(true);
           commitObservation = observation; commitEpoch = identityEpoch;
@@ -259,10 +270,19 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
           let release: Promise<void> | undefined;
           const retire = (): Promise<void> => release ??= captured ? screening.release(captured) : Promise.resolve();
           const abort = (): void => { void retire().catch(() => {}); };
+          const sentAt = messageTime(source.detail.date, Date.now());
           try {
-            captured = screening.capture([source.rawHeaders, source.rawBodyStructure,
-              source.textSections.map(section => section.text).join('\n'),
-              normalizeWhitespace(stripMarkup(source.detail.subject)), normalizeWhitespace(stripMarkup(body))]);
+            try {
+              captured = screening.capture([source.rawHeaders, source.rawBodyStructure,
+                source.textSections.map(section => section.text).join('\n'),
+                normalizeWhitespace(stripMarkup(source.detail.subject)), normalizeWhitespace(stripMarkup(body))]);
+            } catch (error) {
+              // Text the screening owner refuses to take is about this message: withhold it and move on.
+              if (!(error instanceof JudgmentInputError)) throw error;
+              const item = unreadableItem(observation.uidValidity, uid, 'screening-unsettled', senderDomainOf(source.detail.from), sentAt);
+              items.push(item); terminal.push({ uid, disposition: 'published', itemId: item.id });
+              continue;
+            }
             operationSignal.addEventListener('abort', abort, { once: true });
             observation.signal.addEventListener('abort', abort, { once: true });
             if (operationSignal.aborted || observation.signal.aborted) abort();
@@ -270,10 +290,17 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
             current(); observation.assertCurrent();
             if (operationSignal.aborted) return unavailable(true);
             if (judged.status !== 'settled') {
-              if (noteFailure(key) < MAX_POLLS_PER_MESSAGE) { stopAt = uid; break; }
-              const item = unreadableItem(observation.uidValidity, uid, 'screening-unsettled', senderDomainOf(source.detail.from));
-              items.push(item); terminal.push({ uid, disposition: 'published', itemId: item.id });
-              continue;
+              // A hold about the message itself is final for it: it is published
+              // as withheld and the checkpoint passes it. A hold about the route
+              // (down, busy, cancelled) keeps the messages screened before it and
+              // the next poll starts here; a route outage never steps a message over.
+              if (judged.reason === 'unsettled' || judged.reason === 'malformed' || judged.reason === 'protected-input') {
+                const item = unreadableItem(observation.uidValidity, uid, 'screening-unsettled', senderDomainOf(source.detail.from), sentAt);
+                items.push(item); terminal.push({ uid, disposition: 'published', itemId: item.id });
+                failures.delete(key);
+                continue;
+              }
+              stopAt = uid; break;
             }
             const projected = screening.project(judged.receipt);
             const fromDigest = digestSender(`email:${source.detail.from.trim().toLowerCase()}`);
@@ -291,11 +318,12 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
               provider: 'email', kind: 'dm' as const, fromDigest,
               ...(routeId === undefined ? {} : { routeId }),
               subjectPreview: prefix(projected[3]!, 200), bodyPreview: prefix(projected[4]!, 500),
-              receivedAt: Date.now(), unread: message.unread });
+              receivedAt: sentAt, unread: message.unread });
             terminal.push({ uid, disposition: 'published', itemId });
             failures.delete(key);
             if (onMail) {
-              try { onMail({ id: itemId, senderAddress: source.detail.from, subject: projected[3]!, body: projected[4]!, receivedAtMs: Date.now() }); }
+              // The message's own date: mail written before a purchase can never confirm it.
+              try { onMail({ id: itemId, senderAddress: source.detail.from, subject: projected[3]!, body: projected[4]!, receivedAtMs: sentAt }); }
               catch { /* An observer's failure cannot poison the poll or expose the source. */ }
             }
           } finally {
@@ -349,39 +377,17 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
       return observation;
     } catch (error) { failedRead(error); throw error; }
   });
-  const verifyReadOnce = async (): Promise<EmailMailboxObservation> => {
-    const observation = await verifyAccount();
+  /** The checkpoint's generation, when stored mail may be listed now. All in memory. */
+  const assertStoredGeneration = (): number => {
+    current();
+    if (authorityRefused) throw new Error('The mail server refused this account\'s sign-in or mailbox; stored mail stays hidden until a poll signs in again');
     const checkpoint = getCheckpoint();
-    if (!checkpoint || checkpoint.uidValidity !== observation.uidValidity) throw new Error('Email inbox generation has not been committed');
-    return observation;
-  };
-  // Each read proof is an IMAP login and select. Readers that arrive while one is in flight share it, so a
-  // refreshing client cannot multiply logins into provider lockout. Eligibility proofs never join it.
-  let reading: Promise<EmailMailboxObservation> | undefined;
-  const now = options.now ?? Date.now;
-  // A proof that finished moments ago also covers the next read that starts (a refresh right after a list), so
-  // back-to-back lists cost one login each instead of two. A lease's closing validation never reuses it.
-  let proven: { observation: EmailMailboxObservation; at: number; authority: number; identity: number } | undefined;
-  const verifyRead = (fresh = true): Promise<EmailMailboxObservation> => {
-    if (!fresh && proven && now() - proven.at >= 0 && now() - proven.at < READ_PROOF_REUSE_MS
-      && proven.authority === authorityEpoch && proven.identity === identityEpoch
-      // A mailbox reset commits a new generation; a proof of the old one must not refuse reads of the new one.
-      && getCheckpoint()?.uidValidity === proven.observation.uidValidity) {
-      const reused = proven.observation;
-      return (async () => {
-        current(); reused.assertCurrent();
-        const checkpoint = getCheckpoint();
-        if (!checkpoint || checkpoint.uidValidity !== reused.uidValidity) throw new Error('Email inbox generation has not been committed');
-        return reused;
-      })();
+    if (!checkpoint) throw new Error('Email inbox generation has not been committed; the first poll commits it');
+    // The observation itself is retired by the next mail read; only the generation it saw is kept.
+    if (lastSeenValidity !== undefined && checkpoint.uidValidity !== lastSeenValidity) {
+      throw new Error('The mailbox was reset on the server; the next poll replaces the stored mail');
     }
-    if (reading) return reading;
-    const authority = authorityEpoch, identity = identityEpoch;
-    const shared = verifyReadOnce();
-    reading = shared;
-    const clear = (): void => { if (reading === shared) reading = undefined; };
-    void shared.then(observation => { proven = { observation, at: now(), authority, identity }; clear(); }, clear);
-    return shared;
+    return checkpoint.uidValidity;
   };
   return {
     account, scopeId, triageStoreFileName, adapter,
@@ -390,6 +396,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
       const observation = await verifyAccount();
       current(); observation.assertCurrent();
       if (epoch !== authorityEpoch) throw new Error('Email inbox account verification was revoked');
+      authorityRefused = false;
       // Refresh metadata without needlessly changing the live eligibility signal.
       if (eligibility) {
         try { eligibility.assertCurrent(); } catch { revokeEligibility(); }
@@ -411,28 +418,18 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
       eligibility.assertCurrent();
       return eligibility;
     },
-    async assertReadCurrent() { await verifyRead(false); },
+    // Stored mail is read from this account's own mirror with no mail session:
+    // the configured account is checked in memory, and the poll (every minute)
+    // owns "is this still the same mailbox", committing a reset generation
+    // before stored rows of the old one could be listed again.
+    async assertReadCurrent() { assertStoredGeneration(); },
     async acquireReadLease() {
       const authorityAtAcquisition = authorityEpoch;
-      const original = await verifyRead(false);
-      const identityAtAcquisition = identityEpoch;
+      const generation = assertStoredGeneration();
       const assertCurrent = (): void => {
-        current(); original.assertCurrent();
-        const checkpoint = getCheckpoint();
-        if (authorityAtAcquisition !== authorityEpoch || identityAtAcquisition !== identityEpoch
-          || !checkpoint || checkpoint.uidValidity !== original.uidValidity) {
-          throw new Error('Email inbox read generation changed');
-        }
+        if (assertStoredGeneration() !== generation || authorityAtAcquisition !== authorityEpoch) throw new Error('Email inbox read generation changed');
       };
-      assertCurrent();
-      return Object.freeze(Object.assign(async () => {
-        assertCurrent();
-        const latest = await verifyRead();
-        assertCurrent();
-        if (latest.accountRevision !== original.accountRevision || latest.uidValidity !== original.uidValidity) {
-          throw new Error('Email inbox read generation changed');
-        }
-      }, { assertCurrent }));
+      return Object.freeze(Object.assign(async () => { assertCurrent(); }, { assertCurrent }));
     },
     close() {
       if (!closing) {

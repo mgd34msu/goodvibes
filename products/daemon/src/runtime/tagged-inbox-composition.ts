@@ -1,15 +1,14 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Root-held credential and permission owners for explicit provider tag handles. */
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { daemonSecretKeyFor } from '@goodvibes-jev/engine/platform/platform/config';
 import { createSurfaceEmailSecretReader } from '@goodvibes-jev/engine/platform/platform/email';
 import { createOwnedInboxTagging, createTriageTagger, type OwnedInboxTagging, type OwnedInboxSource, type TriageTaggerOptions } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { DaemonInboxControls } from './daemon-handler-composition.js';
 import type { InboxSurfaceRegistration } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { SecretsManager } from '../config/secrets.js';
+/** What a provider label write needs from the daemon: the decision port that reads a custom label name, and its lifetime. */
 export interface DaemonTriagePermissionHost {
-  readonly permissionManager: PermissionManager;
   readonly port: JudgmentPort;
   readonly signal: AbortSignal;
 }
@@ -18,6 +17,10 @@ export interface DaemonTriageTaggingRequest {
   readonly provider: 'slack' | 'discord' | 'email';
   readonly accountScopeId: string;
   readonly assertCurrent: () => void;
+  /** The owner's per-account switch; labels are written only while it is on. */
+  readonly enabled?: () => boolean;
+  /** The setting a refusal names. */
+  readonly settingKey?: string;
   readonly imap?: TriageTaggerOptions['imap'];
   readonly forumTagIds?: TriageTaggerOptions['forumTagIds'];
 }
@@ -69,7 +72,10 @@ export function createDaemonTriageTaggingFactory(input: {
         } };
       },
     });
-    const owner = createOwnedInboxTagging({ source: request.source, tagger, permissionManager: host.permissionManager, port: host.port, signal: host.signal, assertCurrent: current, onInvalidate });
+    // Built-in labels are fixed effects the owner switched on; only a custom
+    // name is read by the model (inside the tagger), never the write itself.
+    const owner = createOwnedInboxTagging({ source: request.source, tagger, signal: host.signal, assertCurrent: current, onInvalidate,
+      ...(request.enabled ? { enabled: request.enabled } : {}), ...(request.settingKey ? { settingKey: request.settingKey } : {}) });
     return { applyTags: owner.applyTags.bind(owner), async close() { await owner.close(); await tagger.close(); } };
   };
 }

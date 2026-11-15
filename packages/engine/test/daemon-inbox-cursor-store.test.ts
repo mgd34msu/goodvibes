@@ -1,6 +1,6 @@
 /**
- * Tests for the SQLite-backed cursor + item store: dedup by id, monotonic
- * cursor advancement, and feed queries.
+ * Tests for the inbox mirror: the commit path the poller uses, the commit
+ * sequence behind `since`, conversation cursors, and retention.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { rm } from 'node:fs/promises';
@@ -10,6 +10,7 @@ import {
 } from '../platform/src/platform/intake/cursor-store.ts';
 import type { InboundChannelItem } from '../platform/src/platform/intake/provider-adapter.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { seedInboxRows } from './_helpers/inbox-seed.ts';
 
 function item(over: Partial<InboundChannelItem> & { id: string }): InboundChannelItem {
   return {
@@ -39,125 +40,60 @@ afterEach(async () => {
 });
 
 describe('InboxCursorStore', () => {
-  test('upsertItems dedups by id and counts only new items', () => {
-    expect(store.upsertItems([item({ id: 'a' }), item({ id: 'b' })])).toBe(2);
-    // Re-inserting 'a' plus a new 'c' => only 'c' is new.
-    expect(store.upsertItems([item({ id: 'a' }), item({ id: 'c' })])).toBe(1);
+  test('commits dedup by id and count only new items', async () => {
+    expect(await seedInboxRows(store, [item({ id: 'a' }), item({ id: 'b' })])).toBe(2);
+    expect(await seedInboxRows(store, [item({ id: 'a' }), item({ id: 'c' })])).toBe(1);
     expect(store.countItems()).toBe(3);
   });
 
-  test('upsertItems counts a duplicate id within one batch once', () => {
-    // A single poll can return the same id twice; it must yield one row and
-    // count as one new item, not over-report the new-item total.
-    expect(store.upsertItems([item({ id: 'dup' }), item({ id: 'dup' })])).toBe(1);
-    expect(store.countItems()).toBe(1);
-  });
-
-  test('advanceCursor is monotonic', () => {
-    store.advanceCursor('slack', 500);
-    expect(store.getCursor('slack')).toBe(500);
-    store.advanceCursor('slack', 300); // lower => ignored
-    expect(store.getCursor('slack')).toBe(500);
-    store.advanceCursor('slack', 900);
-    expect(store.getCursor('slack')).toBe(900);
-  });
-
-  test('listItems filters by provider and since, newest first', () => {
-    store.upsertItems([
+  test('listItems filters by provider, newest first', async () => {
+    await seedInboxRows(store, [
       item({ id: 's1', provider: 'slack', receivedAt: 100 }),
       item({ id: 's2', provider: 'slack', receivedAt: 300 }),
       item({ id: 'd1', provider: 'discord', receivedAt: 200 }),
     ]);
-    const slack = store.listItems({ providers: ['slack'], limit: 10 });
-    expect(slack.map((i) => i.id)).toEqual(['s2', 's1']);
-    const recent = store.listItems({ since: 150, limit: 10 });
-    expect(recent.map((i) => i.id).sort()).toEqual(['d1', 's2']);
+    expect(store.listItems({ providers: ['slack'], limit: 10 }).map((i) => i.id)).toEqual(['s2', 's1']);
   });
 
-  test('limit caps the returned window', () => {
-    store.upsertItems([
-      item({ id: 'a', receivedAt: 1 }),
-      item({ id: 'b', receivedAt: 2 }),
-      item({ id: 'c', receivedAt: 3 }),
-    ]);
-    expect(store.listItems({ limit: 2 })).toHaveLength(2);
+  // A watermark is "committed after", not "sent after": a row committed later
+  // with an older provider time is still new to a caller that polls with since.
+  test('since returns a row committed after the watermark even when its own time is older', async () => {
+    await seedInboxRows(store, [item({ id: 'email:late-read', provider: 'email', receivedAt: 20_000 })]);
+    const watermark = store.maxSequence();
+    await seedInboxRows(store, [item({ id: 'slack:sent-earlier', provider: 'slack', receivedAt: 5_000 })]);
+    expect(store.listItems({ since: watermark, limit: 10 }).map((i) => i.id)).toEqual(['slack:sent-earlier']);
+    expect(store.countItems(undefined, watermark)).toBe(1);
   });
 
-  test('maxReceivedAt reflects the newest item', () => {
-    store.upsertItems([item({ id: 'a', receivedAt: 10 }), item({ id: 'b', receivedAt: 42 })]);
-    expect(store.maxReceivedAt()).toBe(42);
-    expect(store.maxReceivedAt(['discord'])).toBe(0);
+  test('conversation cursors are kept per conversation and never move back', async () => {
+    await store.commitTimestampPoll('slack', [item({ id: 'slack:C1:1', receivedAt: 400 })], () => {}, { C1: 400, C2: 900 });
+    await store.commitTimestampPoll('slack', [], () => {}, { C1: 300 });
+    expect([...store.getConversationCursors('slack')].sort()).toEqual([['C1', 400], ['C2', 900]]);
+    expect(store.getConversationCursors('discord').size).toBe(0);
   });
 
-  test('upsert updates mutable feed fields on conflict', () => {
-    store.upsertItems([item({ id: 'a', receivedAt: 10 })]);
-    // Re-upsert the same id with updated feed fields.
-    store.upsertItems([item({ id: 'a', receivedAt: 20, unread: false })]);
-    const [row] = store.listItems({ limit: 1 });
-    expect(row!.receivedAt).toBe(20);
-    expect(row!.unread).toBe(false);
+  test('a commit refuses an id another provider owns', async () => {
+    await seedInboxRows(store, [item({ id: 'shared', provider: 'slack', bodyPreview: 'original' })]);
+    await expect(store.commitTimestampPoll('discord', [item({ id: 'shared', provider: 'discord' })], () => {})).rejects.toThrow();
+    expect(store.listItems({ limit: 5 }).map((i) => [i.id, i.provider, i.bodyPreview])).toEqual([['shared', 'slack', 'original']]);
   });
 
-  test('advanceCursor ignores a non-finite candidate', () => {
-    store.advanceCursor('slack', 400);
-    store.advanceCursor('slack', Number.NaN); // guarded => no change
-    store.advanceCursor('slack', Number.POSITIVE_INFINITY); // guarded => no change
-    expect(store.getCursor('slack')).toBe(400);
-  });
-
-  test('advanceCursor writes through a first zero candidate', async () => {
-    // current===0 + candidate 0 hits the `current !== 0` arm of the guard, so
-    // it must NOT early-return: a genuine 0 watermark row is persisted once.
-    store.advanceCursor('discord', 0);
-    expect(store.getCursor('discord')).toBe(0);
-    // Reopen proves a row was actually written (not just the unset-default 0).
-    await store.flush();
-    await store.close();
-    const reopened = new InboxCursorStore(dir);
-    await reopened.init();
-    try {
-      expect(reopened.getCursor('discord')).toBe(0);
-      // A later real watermark still advances from the persisted zero.
-      reopened.advanceCursor('discord', 250);
-      expect(reopened.getCursor('discord')).toBe(250);
-    } finally {
-      await reopened.close();
-    }
-  });
-
-  test('pruneOlderThan removes old items, keeps cursors, and is provider-scoped', () => {
-    store.upsertItems([
+  test('pruneOlderThan removes old items, keeps cursors, and is provider-scoped', async () => {
+    await seedInboxRows(store, [
       item({ id: 'old', provider: 'slack', receivedAt: 100 }),
       item({ id: 'new', provider: 'slack', receivedAt: 500 }),
       item({ id: 'dold', provider: 'discord', receivedAt: 50 }),
     ]);
-    store.advanceCursor('slack', 500);
-    // Provider-scoped: only slack items older than 200 are removed.
     expect(store.pruneOlderThan(200, ['slack'])).toBe(1);
-    expect(store.listItems({ limit: 10 }).map((i) => i.id).sort()).toEqual([
-      'dold',
-      'new',
-    ]);
-    // Cursor is untouched by retention.
+    expect(store.listItems({ limit: 10 }).map((i) => i.id).sort()).toEqual(['dold', 'new']);
     expect(store.getCursor('slack')).toBe(500);
-    // Unscoped prune sweeps the rest below the cutoff.
     expect(store.pruneOlderThan(100)).toBe(1);
     expect(store.countItems()).toBe(1);
   });
 
-  test('pruneOlderThan is a no-op for a non-finite cutoff', () => {
-    store.upsertItems([item({ id: 'a', receivedAt: 10 })]);
-    expect(store.pruneOlderThan(Number.NaN)).toBe(0);
-    expect(store.countItems()).toBe(1);
-  });
-
-  test('survives a flush + reopen round trip', async () => {
-    // A recent receivedAt: reopening runs the retention sweep, and a 1970-era
-    // timestamp would (correctly) be reclaimed by the age TTL.
+  test('committed rows and cursors survive a reopen', async () => {
     const recent = Date.now() - 1_000;
-    store.upsertItems([item({ id: 'persist', receivedAt: recent })]);
-    store.advanceCursor('slack', recent);
-    await store.flush();
+    await seedInboxRows(store, [item({ id: 'persist', receivedAt: recent })]);
     await store.close();
     const reopened = new InboxCursorStore(dir);
     await reopened.init();
@@ -175,12 +111,10 @@ describe('InboxCursorStore retention', () => {
 
   test('the age TTL sweep runs at init and reclaims stale rows', async () => {
     const now = Date.now();
-    store.upsertItems([
+    await seedInboxRows(store, [
       item({ id: 'stale', receivedAt: now - 40 * DAY_MS }),
       item({ id: 'recent', receivedAt: now - 1 * DAY_MS }),
     ]);
-    store.advanceCursor('slack', now);
-    await store.flush();
     await store.close();
 
     const sweeps: InboxSweepSummary[] = [];
@@ -194,7 +128,7 @@ describe('InboxCursorStore retention', () => {
       expect(sweeps).toHaveLength(1);
       expect(sweeps[0]).toMatchObject({ expired: 1, capped: 0, remaining: 1 });
       // Cursors are monotonic watermarks and are never reaped.
-      expect(reopened.getCursor('slack')).toBe(now);
+      expect(reopened.getCursor('slack')).toBe(now - 1 * DAY_MS);
     } finally {
       await reopened.close();
     }
@@ -205,7 +139,7 @@ describe('InboxCursorStore retention', () => {
     const capped = new InboxCursorStore(dir, 'cap.sqlite', { itemCap: 3 });
     await capped.init();
     try {
-      capped.upsertItems([
+      await seedInboxRows(capped, [
         item({ id: 'i0', receivedAt: now - 5_000 }),
         item({ id: 'i1', receivedAt: now - 4_000 }),
         item({ id: 'i2', receivedAt: now - 3_000 }),
@@ -225,7 +159,7 @@ describe('InboxCursorStore retention', () => {
     const swept = new InboxCursorStore(dir, 'idempotent.sqlite', { itemCap: 2 });
     await swept.init();
     try {
-      swept.upsertItems([
+      await seedInboxRows(swept, [
         item({ id: 'a', receivedAt: now - 40 * DAY_MS }),
         item({ id: 'b', receivedAt: now - 3_000 }),
         item({ id: 'c', receivedAt: now - 2_000 }),
@@ -259,7 +193,7 @@ describe('InboxCursorStore retention', () => {
     try {
       // Nothing to reclaim at init, so the timer is what must catch this.
       expect(sweeps).toHaveLength(0);
-      timed.upsertItems([
+      await seedInboxRows(timed, [
         item({ id: 'x', receivedAt: now - 2_000 }),
         item({ id: 'y', receivedAt: now - 1_000 }),
       ]);

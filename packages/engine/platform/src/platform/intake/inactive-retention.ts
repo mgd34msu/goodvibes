@@ -63,7 +63,7 @@ function scalar(db: SqlDatabase, sql: string, params?: (string | number)[]): num
 function knownSchema(db: SqlDatabase): void {
   const tables = db.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")[0]?.values.map(row => row[0]);
   if (!tables || !['items', 'cursors', 'imap_checkpoints'].every(table => tables.includes(table))
-    || tables.some(table => !['items', 'cursors', 'imap_checkpoints', 'inbox_retention_policy', 'inbox_source_revision_policy'].includes(String(table)))
+    || tables.some(table => !['items', 'cursors', 'imap_checkpoints', 'inbox_retention_policy', 'inbox_source_revision_policy', 'triage_receipts'].includes(String(table)))
     || scalar(db, "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('trigger', 'view')") !== 0) throw unavailable();
   const itemColumns = db.exec('PRAGMA table_info(items)')[0]?.values;
   const columns = itemColumns?.map(row => row[1]);
@@ -74,7 +74,9 @@ function knownSchema(db: SqlDatabase): void {
     // Original nine-column mirrors predate mutation-issued source revisions.
     if (sourcePolicy) throw unavailable();
   } else {
-    if (columns.length !== expected.length + 1 || columns[expected.length] !== 'triage_revision' || !sourcePolicy) throw unavailable();
+    // Current mirrors add the store's commit sequence after the revision.
+    const sequenced = columns.length === expected.length + 2 && columns[expected.length + 1] === 'seq';
+    if ((columns.length !== expected.length + 1 && !sequenced) || columns[expected.length] !== 'triage_revision' || !sourcePolicy) throw unavailable();
     const revisionColumn = itemColumns?.[expected.length];
     if (revisionColumn?.[2] !== 'TEXT' || revisionColumn[3] !== 0 || revisionColumn[4] !== null || revisionColumn[5] !== 0) throw unavailable();
     const policyInfo = db.exec('PRAGMA table_info(inbox_source_revision_policy)')[0]?.values;
@@ -152,6 +154,10 @@ export function createInactiveInboxRetentionOwner(input: InactiveInboxRetentionO
           const expired = scalar(db, 'SELECT changes()');
           db.run('DELETE FROM items WHERE id NOT IN (SELECT id FROM items ORDER BY receivedAt DESC, id ASC LIMIT ?)', [policy.itemCap]);
           const capped = scalar(db, 'SELECT changes()');
+          // A triage label lives and dies with its row.
+          if ((expired || capped) && scalar(db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'triage_receipts'") !== 0) {
+            db.run('DELETE FROM triage_receipts WHERE id NOT IN (SELECT id FROM items)');
+          }
           if (expired || capped) {
             // Only expiration/cap deletion is authorized. No source interpretation,
             // cursor change, receipt fabrication, or reconstruction is performed.

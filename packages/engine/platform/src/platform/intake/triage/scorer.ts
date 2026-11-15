@@ -1,17 +1,19 @@
 import { fanOut, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { logger } from '../../utils/logger.js';
-import type { InboxTriageSourceObservation } from '../cursor-store.js';
 import { inboxTriage } from './battery.js';
 import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, triageConclusion, triageBinding, type CapturedTriageInput } from './evidence.js';
 import { captureTriageJudgment, triageConfiguredModel } from './model-result.js';
-import type { TriageInput, TriagePreview, TriageReceipt, TriageReceiptScope } from './types.js';
+import type { TriageInput, TriagePreview, TriageReceipt, TriageReceiptScope, TriageSourceBinding } from './types.js';
 
-export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, receiptScope?: TriageReceiptScope, preview?: false, source?: InboxTriageSourceObservation): Promise<readonly TriageReceipt[]>;
+/** Row revision each label names, by item id; absent for items that are not stored rows. */
+type SourceBindings = ReadonlyMap<string, TriageSourceBinding>;
+
+export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, receiptScope?: TriageReceiptScope, preview?: false, source?: SourceBindings): Promise<readonly TriageReceipt[]>;
 export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port: JudgmentPort | undefined, signal: AbortSignal | undefined,
-  receiptScope: TriageReceiptScope | undefined, preview: true, source?: InboxTriageSourceObservation): Promise<readonly TriagePreview[]>;
+  receiptScope: TriageReceiptScope | undefined, preview: true, source?: SourceBindings): Promise<readonly TriagePreview[]>;
 export async function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal,
-  receiptScope?: TriageReceiptScope, preview = false, source?: InboxTriageSourceObservation): Promise<readonly (TriageReceipt | TriagePreview)[]> {
+  receiptScope?: TriageReceiptScope, preview = false, source?: SourceBindings): Promise<readonly (TriageReceipt | TriagePreview)[]> {
   captureTriageReceiptScope(receiptScope);
   // Only settled evidence has a later exact-input matching consumer. A failed
   // attempt needs enough metadata to withdraw an old label, never a hash of the
@@ -44,14 +46,11 @@ export async function scoreCapturedTriage(items: readonly CapturedTriageInput[],
       // Internal fan-out grouping only: this marker is never sent to the port.
       model: 'configured',
       async ask(request) {
-        source?.assertCurrent();
         const questions = captureTriageData(request.questions) as typeof request.questions;
         const captureResult: NonNullable<typeof request.captureResult> = original => captureTriageJudgment(original, questions, configured).result;
         const capturedRequest = Object.freeze({ ...request, questions, captureResult,
-          context: Object.freeze({ ...request.context, batteryVersion: inboxTriage.version }),
-          ...(source ? { beforeAttempt: () => { source.assertCurrent(); assertSynchronousJudgmentGuard(request.beforeAttempt); source.assertCurrent(); } } : {}) });
+          context: Object.freeze({ ...request.context, batteryVersion: inboxTriage.version }) });
         const raw = await port.ask(capturedRequest);
-        source?.assertCurrent();
         if (signal?.aborted) throw new Error('Triage judgment cancelled.');
         const captured = captureTriageJudgment(raw, questions, configured);
         targetModel = captured.targetModel;
@@ -60,7 +59,6 @@ export async function scoreCapturedTriage(items: readonly CapturedTriageInput[],
     };
     const run = await fanOut(checkedPort, state, parts, { label: inboxTriage.name, site: 'intake.triage', ...(signal ? { signal } : {}) });
     if (signal?.aborted) return unavailable();
-    source?.assertCurrent();
     if (targetModel === undefined) throw new Error('Missing triage target attribution');
     const answeredTarget = targetModel;
     return Object.freeze(items.map((item, i) => {
@@ -73,7 +71,7 @@ export async function scoreCapturedTriage(items: readonly CapturedTriageInput[],
       }
       // Only an actual native mirror source can bind later enrichment. No
       // message body or content commitment is retained with the conclusion.
-      return Object.freeze({ ...triageBinding(item, source?.bindingFor(item.id)), ...attribution, ...conclusion });
+      return Object.freeze({ ...triageBinding(item, source?.get(item.id)), ...attribution, ...conclusion });
     }));
   } catch (error) {
     drainOwned(error);

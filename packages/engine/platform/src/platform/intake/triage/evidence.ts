@@ -1,8 +1,8 @@
-import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
-import { readYesNo, isPinnedJudgmentModel, matchesJudgmentModel, type YesNoReading } from '@goodvibes-jev/judgment';
+import { types as nodeTypes } from 'node:util';
+import type { YesNoReading } from '@goodvibes-jev/judgment';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { inboxTriage, TRIAGE_MODEL } from './battery.js';
-import type { TriageBinding, TriageFailureReceipt, TriageEvidence, TriageInput, TriageLabel, TriageReceipt, TriageReceiptScope, TriageSourceBinding } from './types.js';
+import { inboxTriage } from './battery.js';
+import type { TriageBinding, TriageEvidence, TriageInput, TriageLabel, TriageReceiptScope, TriageSourceBinding } from './types.js';
 
 /** Descriptor-only capture checks every property, including hidden data, without invoking user code. */
 export function captureTriageData(value: unknown): unknown {
@@ -86,88 +86,11 @@ export function labelToTag(label: TriageLabel): string {
 export function triageConclusion(spam: YesNoReading, urgency: YesNoReading):
   Omit<TriageEvidence, keyof TriageBinding> | { readonly status: 'held' } {
   if (spam.outcome !== 'act' || urgency.outcome !== 'act') return Object.freeze({ status: 'held' });
-  const label: TriageLabel = spam.verdict === 'yes' && spam.probability >= urgency.probability ? 'spam'
+  // Spam wins outright: a scam that demands action now reads yes on both, and is
+  // exactly the message that must never be put at the top as Priority.
+  const label: TriageLabel = spam.verdict === 'yes' ? 'spam'
     : urgency.verdict === 'yes' ? 'priority' : 'normal';
   const score = round(label === 'spam' ? spam.probability : label === 'priority' ? urgency.probability : 1 - Math.max(spam.probability, urgency.probability));
   return Object.freeze({ status: 'settled', spam: Object.freeze({...spam}), urgency: Object.freeze({...urgency}),
     label, score, tags: Object.freeze([labelToTag(label)]), signals: Object.freeze({ spam: round(spam.probability), urgency: round(urgency.probability) }) });
-}
-export function settleTriage(binding: TriageBinding, spam: YesNoReading, urgency: YesNoReading): TriageReceipt {
-  const conclusion = triageConclusion(spam, urgency);
-  if (conclusion.status === 'held') {
-    if (binding.receiptVersion === 4) {
-      const { source: _source, inputHash: _hash, receiptVersion: _version, ...attribution } = binding;
-      return Object.freeze({ ...attribution, receiptVersion: 3, status: 'held' });
-    }
-    return Object.freeze({ ...binding, status: 'held' });
-  }
-  return Object.freeze({ ...binding, ...conclusion });
-}
-/** Validate untrusted evidence as data, re-derive its conclusions, and return an immutable owned value. */
-export function checkTriageReceipt(value: unknown): TriageReceipt {
-  const safe = captureTriageData(value);
-  if (!safe || typeof safe !== 'object' || Array.isArray(safe)) return invalid();
-  const row = safe as Record<string, unknown>;
-  if (typeof row['id'] !== 'string' || !row['id'].trim() || row['id'].length > 500
-    || row['battery'] !== inboxTriage.name || row['batteryVersion'] !== inboxTriage.version) return invalid();
-  const failedV3 = row['receiptVersion'] === 3, sourceV4 = row['receiptVersion'] === 4;
-  if (failedV3 || sourceV4 ? Object.hasOwn(row, 'inputHash') || (failedV3 ? row['status'] !== 'held' && row['status'] !== 'unavailable' : row['status'] !== 'settled')
-    : typeof row['inputHash'] !== 'string' || !/^[a-f0-9]{64}$/.test(row['inputHash'])) return invalid();
-  const model = row['model'], actualModel = row['actualModel'], targetModel = row['targetModel'];
-  const identifier = (entry: unknown): entry is string => typeof entry === 'string' && /^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(entry);
-  const modern = row['receiptVersion'] === 2 || failedV3 || sourceV4;
-  if (row['receiptVersion'] !== undefined && !modern) return invalid();
-  if (modern) {
-    // Stored attribution describes the validated port response. It neither
-    // revalidates a provider alias nor authorizes an action from disk.
-    if (row['status'] === 'unavailable') {
-      if (model !== undefined || actualModel !== undefined || targetModel !== undefined) return invalid();
-    } else if (!identifier(model) || !identifier(actualModel) || !identifier(targetModel)) return invalid();
-  } else {
-    // Historical Jev-only receipts keep their original interpretation.
-    if (model !== TRIAGE_MODEL && (typeof model !== 'string' || !isPinnedJudgmentModel(model))) return invalid();
-    if (actualModel !== undefined && (typeof actualModel !== 'string' || !matchesJudgmentModel(model as string, actualModel))) return invalid();
-    if (model === TRIAGE_MODEL && row['status'] !== 'unavailable' && actualModel === undefined) return invalid();
-    if (targetModel !== undefined) return invalid();
-  }
-  if (failedV3) {
-    const expected: TriageFailureReceipt = Object.freeze({ id: row['id'], battery: inboxTriage.name, batteryVersion: inboxTriage.version,
-      receiptVersion: 3, status: row['status'] as 'held' | 'unavailable',
-      ...(model === undefined ? {} : { model: model as string }), ...(actualModel === undefined ? {} : { actualModel: actualModel as string }),
-      ...(targetModel === undefined ? {} : { targetModel: targetModel as string }) });
-    if (!isDeepStrictEqual(safe, expected)) return invalid();
-    return expected;
-  }
-  let source: TriageSourceBinding | undefined;
-  if (sourceV4 && row.source !== undefined) {
-    if (!row.source || typeof row.source !== 'object' || Array.isArray(row.source)) return invalid();
-    const value = row.source as Record<string, unknown>;
-    const scope = captureTriageReceiptScope({ providerId: value.providerId, accountScopeId: value.accountScopeId } as TriageReceiptScope);
-    if (!scope || typeof value.sourceRevision !== 'string' || value.sourceRevision.length !== 35 || !/^ir-[0-9a-f]{32}$/.test(value.sourceRevision)
-      || Object.keys(value).length !== 3) return invalid();
-    source = Object.freeze({ ...scope, sourceRevision: value.sourceRevision });
-  }
-  const attribution = { id: row['id'], battery: inboxTriage.name, batteryVersion: inboxTriage.version,
-    ...(model === undefined ? {} : { model: model as string }), ...(actualModel === undefined ? {} : { actualModel: actualModel as string }),
-    ...(targetModel === undefined ? {} : { targetModel: targetModel as string }) };
-  const binding: TriageBinding = sourceV4 ? { ...attribution, receiptVersion: 4, ...(source ? { source } : {}) }
-    : { ...attribution, inputHash: row['inputHash'] as string, ...(modern ? { receiptVersion: 2 as const } : {}) };
-  if (row['status'] === 'held' || row['status'] === 'unavailable') {
-    if (binding.receiptVersion === 4) return invalid();
-    const expected = Object.freeze({ ...binding, status: row['status'] });
-    if (!isDeepStrictEqual(safe, expected)) return invalid();
-    return expected;
-  }
-  if (row['status'] !== 'settled') return invalid();
-  const reading = (raw: unknown, key: 'spam' | 'urgency'): YesNoReading => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return invalid();
-    const p: unknown = (raw as Record<string, unknown>)['probability'];
-    if (typeof p !== 'number' || p < 0 || p > 1) return invalid();
-    const checked = readYesNo({ type: 'noul', noul: p }, inboxTriage.items[key].band);
-    if (!isDeepStrictEqual(raw, checked)) return invalid();
-    return checked;
-  };
-  const expected = settleTriage(binding, reading(row['spam'], 'spam'), reading(row['urgency'], 'urgency'));
-  if (expected.status !== 'settled' || !isDeepStrictEqual(safe, expected)) return invalid();
-  return expected as TriageEvidence;
 }

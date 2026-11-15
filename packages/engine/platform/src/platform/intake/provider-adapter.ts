@@ -1,15 +1,16 @@
 // ---------------------------------------------------------------------------
-// Inbound provider adapter contract + registry.
+// Inbound provider adapter contract.
 //
-// Each adapter owns ONE provider (slack, discord, email, ...). The poller calls
-// adapter.poll() on a cadence, dedups by item.id, and persists into the cursor
-// store. Adapters resolve credentials ONLY through the daemon credential store
-// and NEVER return raw sender ids or unredacted bodies, mapping/redaction is
-// the adapter's responsibility (see mapping helpers in `./mapping.ts`).
+// Each adapter owns ONE provider (slack, discord, email). The poller calls
+// adapter.poll() on the adapter's cadence and commits what it returns, rows and
+// progress together, through the cursor store. Every adapter is built by its
+// account owner (providers/*-owner.ts), which supplies credentials, the HTTP or
+// mail client and privacy screening; adapters never return raw sender ids or
+// unscreened text.
 //
-// CRITICAL: when a credential is missing/misconfigured an adapter returns
-// state 'unavailable' WITH an error string. It is NEVER silently omitted, the
-// caller must be able to distinguish "configured-but-empty" from "not wired".
+// When a credential is missing or unusable an adapter returns state
+// 'unavailable' with `configured: false`, so a caller can tell "not wired up"
+// from "wired up and failing".
 // ---------------------------------------------------------------------------
 
 import type { IntakeCredentialStore, IntakeLogger } from './context.js';
@@ -39,7 +40,8 @@ export interface InboundChannelItem {
   /** Unix ms. */
   receivedAt: number;
   unread: boolean;
-  /** Optional triage metadata written by the triage surface (read-only here). */
+  /** Triage label for the row's current content, read from the mirror; never written by an adapter. */
+  triageLabel?: 'spam' | 'priority' | 'normal';
   triageScore?: number;
   triageTags?: string[];
 }
@@ -106,6 +108,12 @@ export interface ProviderPollResult {
   checkpointAdvance?: ImapUidCheckpointAdvance;
   /** UIDs this poll passed without publishing because their content cannot be proven complete. */
   skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
+  /**
+   * Conversation adapters only: for each conversation read completely this
+   * poll, the newest time read. Committed with `items` even when `state` is
+   * 'unavailable', so what was read is kept and the next poll starts there.
+   */
+  conversationAdvance?: Readonly<Record<string, number>>;
 }
 
 export interface ProviderPollOptions {
@@ -115,6 +123,8 @@ export interface ProviderPollOptions {
   since?: number;
   /** IMAP-only checkpoint. Timestamp providers keep their existing since semantics. */
   checkpoint?: ImapUidCheckpoint;
+  /** Conversation adapters only: each conversation's own cursor (Unix ms), keyed by conversation id. */
+  conversations?: ReadonlyMap<string, number>;
   /** Max items to return this poll. */
   limit: number;
 }
@@ -145,8 +155,11 @@ export type RouteResolver = (input: {
 export interface InboundProviderAdapter {
   /** Provider id, e.g. 'slack'. Must be unique within the registry. */
   readonly id: string;
-  /** Explicit trusted adapter capability; never inferred from provider data. */
-  readonly checkpointKind?: 'imap-uid';
+  /**
+   * How progress is kept: 'imap-uid' for a mailbox checkpoint, 'conversation'
+   * for one cursor per conversation; absent for one provider-wide timestamp.
+   */
+  readonly checkpointKind?: 'imap-uid' | 'conversation';
   /** UID adapters must fence account/source currentness synchronously at commit. */
   readonly assertCurrent?: () => void;
   /**
@@ -162,9 +175,6 @@ export interface InboundProviderAdapter {
   poll(opts: ProviderPollOptions): Promise<ProviderPollResult>;
 }
 
-/** Factory signature: adapters are constructed lazily with shared context. */
-export type AdapterFactory = (ctx: AdapterContext) => InboundProviderAdapter;
-
 // ---------------------------------------------------------------------------
 // Cadence constants (single source of truth, referenced by adapters + tests).
 // ---------------------------------------------------------------------------
@@ -174,45 +184,3 @@ export const POLL_CADENCE_MS = {
   email: 60_000,
   default: 120_000,
 } as const;
-
-// ---------------------------------------------------------------------------
-// Registry
-// ---------------------------------------------------------------------------
-
-const FACTORIES = new Map<string, AdapterFactory>();
-
-/** Register a provider factory. Last registration for an id wins (idempotent). */
-export function registerAdapterFactory(id: string, factory: AdapterFactory): void {
-  FACTORIES.set(id, factory);
-}
-
-/** All registered provider ids, in insertion order. */
-export function registeredProviderIds(): string[] {
-  return [...FACTORIES.keys()];
-}
-
-/**
- * Construct adapters for the requested provider ids (or all registered ids when
- * `requested` is undefined/empty). Unknown ids are dropped: the returned map
- * only contains known providers.
- */
-export function buildAdapters(
-  ctx: AdapterContext,
-  requested?: readonly string[],
-): Map<string, InboundProviderAdapter> {
-  const ids = requested && requested.length > 0
-    ? requested.filter((id) => FACTORIES.has(id))
-    : registeredProviderIds();
-  const out = new Map<string, InboundProviderAdapter>();
-  for (const id of ids) {
-    const factory = FACTORIES.get(id);
-    if (!factory) continue;
-    out.set(id, factory(ctx));
-  }
-  return out;
-}
-
-/** Test/seam hook: clear the registry. */
-export function clearAdapterRegistry(): void {
-  FACTORIES.clear();
-}

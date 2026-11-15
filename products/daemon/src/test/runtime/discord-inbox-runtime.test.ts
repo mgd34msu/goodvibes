@@ -90,31 +90,9 @@ test('configured Discord production source is real authenticated, protected, per
   const names = readdirSync(directory).filter(name => name.startsWith('inbox-discord-') && name.endsWith('.sqlite'));
   expect(names).toHaveLength(1); expect(readFileSync(join(directory, names[0]!)).toString()).not.toContain('person@example.test');
 });
-test('real root secret reassignment cannot return the previous account mirror', async () => {
-  const f = await fixture(); await f.inbox(); f.reassign();
-  await f.daemon.services.secretsManager.set('GOODVIBES_SURFACES_DISCORD_BOT_TOKEN', 'synthetic-discord-other');
-  const response = await f.daemon.fetch('/api/channels/inbox'); expect(response.status).toBe(503);
-  expect(await response.text()).not.toContain('keep the build notes');
-});
-test('remote channel permission denial is observed before stored rows are returned', async () => {
-  const f = await fixture(); await f.inbox(); f.deny();
-  expect((await f.daemon.fetch('/api/channels/inbox')).status).toBe(503);
-});
 test('trusted source scope revocation fences reads and prevents all later network work', async () => {
   const f = await fixture(); await f.inbox(); f.scope.abort(); const calls = f.providerCalls.length;
   expect((await f.daemon.fetch('/api/channels/inbox')).status).toBe(503); expect(f.providerCalls).toHaveLength(calls);
-});
-test('a pending managed-alias replacement cannot release old Discord rows before successful-write notification', async () => {
-  const f = await fixture(), key = 'GOODVIBES_SURFACES_DISCORD_BOT_TOKEN', alias = 'SYNTHETIC_DISCORD_ALIAS';
-  await f.daemon.services.secretsManager.set(alias, 'synthetic-discord-token');
-  await f.daemon.services.secretsManager.set(key, `goodvibes://secrets/goodvibes/${alias}`);
-  await f.inbox();
-  const record = (await f.daemon.services.secretsManager.listDetailed()).find(row => row.key === alias)!;
-  const { acquireCrossProcessLock } = await import('@goodvibes-jev/engine/platform/platform/state/durable-file-io');
-  const release = await acquireCrossProcessLock(`${record.path!}.mutation.lock`, { strictOwnership: true });
-  const pending = f.daemon.services.secretsManager.set(alias, 'synthetic-discord-replacement');
-  try { expect((await f.daemon.fetch('/api/channels/inbox')).status).toBe(503); }
-  finally { release(); await pending; }
 });
 
 test('configuration ABA during asynchronous source construction is refused before polling or registration', async () => {

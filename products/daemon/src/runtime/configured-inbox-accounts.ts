@@ -1,6 +1,6 @@
 /** Native account selectors remain independent of permission to screen message text. */
 import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
-import type { EmailInboxAccount, SlackInboxAccount, OwnedInboxSource, OwnedInboxRead, ProviderStatus } from '@goodvibes-jev/engine/platform/platform/intake';
+import { triageAuthorityFromScreening, type EmailInboxAccount, type SlackInboxAccount, type OwnedInboxSource, type OwnedInboxRead, type ProviderStatus } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
@@ -125,10 +125,12 @@ export function createConfiguredHostedInboxSourceFactory(provider: 'slack' | 'em
         : provider === 'email' ? 'email-inbox' : 'discord-bot-dms', selection.operation);
       selection.operation.assertCurrent();
       const screening: ProtectedSourceOwnerOptions = acquisition.options;
+      // Triage asks on the same model route screening was admitted on, and stops with it.
+      const triageAuthority = triageAuthorityFromScreening(provider, undefined, screening);
       if (provider === 'slack' && 'workspaceId' in selection.account) {
-        source = await createSlackDaemonInboxSourceFactory({ account: selection.account, screening }, factories.slack)(context, routing, controls);
+        source = await createSlackDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority }, factories.slack)(context, routing, controls);
       } else if (provider === 'email' && 'host' in selection.account) {
-        source = await createEmailDaemonInboxSourceFactory({ account: selection.account, screening }, factories.email)(context, routing, controls);
+        source = await createEmailDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority }, factories.email)(context, routing, controls);
       } else if (provider === 'discord' && 'channelIds' in selection.account) {
         source = await createConfiguredDiscordDaemonInboxSourceFactory(screening, factories.discord)(context, routing, controls);
       } else throw new Error('Configured inbox account family changed');
@@ -179,7 +181,7 @@ function unavailableRead(provider: string, reason: InboxAdmissionReason | 'reacq
     async validate() { current(); },
     sources: {
       store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
-        maxReceivedAt: () => 0, getImapCheckpoint: () => null },
+        maxSequence: () => 0, getImapCheckpoint: () => null },
       poller: { snapshotStatuses: selected => !selected || selected.includes(provider) ? [{ ...status }] : [],
         isProviderRunning: () => false },
     },

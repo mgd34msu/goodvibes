@@ -29,7 +29,10 @@ export interface EmailInboxSteppedOver {
 }
 
 export interface EmailInboxPageSelection {
-  /** All UIDs in this connection's complete ALL search, including older history. */
+  /**
+   * UIDs this read searched: the whole mailbox when seeding or after a reset,
+   * otherwise only those above the checkpoint.
+   */
   readonly total: number;
   /** Eligible UIDs at this read, before the page limit; never a processed count. */
   readonly pending: number;
@@ -86,7 +89,11 @@ export async function readEmailInboxPage(deps: EmailServiceDeps, config: EmailCo
     if (validity === undefined || validity === null || !isUid(validity)) {
       return Object.freeze({ outcome: 'incomplete', reason: 'Mailbox identity is unavailable.' });
     }
-    const uids = await client.searchCompleteUids(false);
+    // Within a known mailbox generation only UIDs above the checkpoint are
+    // asked for; the whole mailbox is listed once, to seed or after a reset.
+    const known = checkpoint !== undefined && checkpoint.uidValidity === validity;
+    const fromUid = known ? Math.max(checkpoint.history.lowerBoundUid, (checkpoint.lastTerminalUid ?? 0) + 1) : undefined;
+    const uids = await client.searchCompleteUids(false, fromUid);
     current();
     if (!checkpoint || checkpoint.uidValidity !== validity) {
       const selectedUids = Object.freeze(uids.slice(-limit));
@@ -107,7 +114,7 @@ export async function readEmailInboxPage(deps: EmailServiceDeps, config: EmailCo
     // bytes cannot be shown here is stepped over (never screened, reported so
     // the owner is told it exists), and a read that failed ends the page at
     // that message, keeping everything read before it.
-    const unseen = pending.length === 0 ? new Set<number>() : new Set(await client.searchCompleteUids(true));
+    const unseen = pending.length === 0 ? new Set<number>() : new Set(await client.searchCompleteUids(true, fromUid));
     current();
     const stepOver = new Set(input.stepOver ?? []);
     const examined: number[] = [];

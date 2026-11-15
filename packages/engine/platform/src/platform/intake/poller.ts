@@ -3,11 +3,15 @@
 //
 // Runs one setInterval per provider at the provider's own cadence (Slack/
 // Discord 30s, email 60s, others 120s). Each tick:
-//   1. resolves the provider's persisted cursor (nextSince)
-//   2. calls adapter.poll({ since, limit })
-//   3. dedups + persists items into the cursor store (upsert)
-//   4. advances the cursor monotonically to max(receivedAt)
-//   5. records the last per-provider state for channels.inbox.list to report
+//   1. reads the provider's stored progress: the IMAP checkpoint, each
+//      conversation's cursor, or the one provider-wide timestamp
+//   2. calls adapter.poll() with it
+//   3. commits the returned rows and their progress in one transaction through
+//      the cursor store (commitImapPoll or commitTimestampPoll); a conversation
+//      adapter's rows and cursors are committed even when the tick also failed,
+//      so what was read is kept
+//   4. records the last per-provider state for channels.inbox.list to report
+//   5. tells `onCommitted` (triage) that new rows are stored
 //
 // One bad provider can never crash the loop: adapter.poll() resolves with
 // state:'unavailable' instead of rejecting, and any thrown error is caught and
@@ -54,6 +58,8 @@ export interface PollerOptions {
   logger: HandlerLogger;
   /** Max items fetched per provider per tick. */
   perProviderLimit?: number;
+  /** Called after a poll stored at least one new or changed row. Never awaited by the poll. */
+  onCommitted?: (providerId: string) => void;
   /** Inject a timer factory for tests (defaults to global setInterval). */
   setIntervalImpl?: typeof setInterval;
   clearIntervalImpl?: typeof clearInterval;
@@ -66,6 +72,7 @@ export class InboundPoller {
   private readonly store: InboxCursorStore;
   private readonly logger: HandlerLogger;
   private readonly perProviderLimit: number;
+  private readonly onCommitted: ((providerId: string) => void) | undefined;
   private readonly setIntervalImpl: typeof setInterval;
   private readonly clearIntervalImpl: typeof clearInterval;
   private readonly timers = new Map<string, ReturnType<typeof setInterval>>();
@@ -91,6 +98,7 @@ export class InboundPoller {
     this.store = options.store;
     this.logger = options.logger;
     this.perProviderLimit = options.perProviderLimit ?? DEFAULT_PER_PROVIDER_LIMIT;
+    this.onCommitted = options.onCommitted;
     this.setIntervalImpl = options.setIntervalImpl ?? setInterval;
     this.clearIntervalImpl = options.clearIntervalImpl ?? clearInterval;
     for (const id of this.adapters.keys()) {
@@ -230,12 +238,32 @@ export class InboundPoller {
         if (!current()) throw new Error('Inbound poll is no longer current');
         return result;
       };
+      const usesConversations = adapter.checkpointKind === 'conversation';
       const checkpoint = usesImapCheckpoint ? this.store.getImapCheckpoint(id) : null;
       const since = usesImapCheckpoint ? undefined : this.store.getCursor(id) || undefined;
+      const conversations = usesConversations ? this.store.getConversationCursors(id) : undefined;
       const result = await adapter.poll({ ...(since === undefined ? {} : { since }),
-        ...(checkpoint === null ? {} : { checkpoint }), limit: this.perProviderLimit, signal: controller.signal });
+        ...(checkpoint === null ? {} : { checkpoint }), ...(conversations ? { conversations } : {}),
+        limit: this.perProviderLimit, signal: controller.signal });
       if (!current()) return;
       configured = result.configured;
+      if (result.conversationAdvance && !usesConversations) throw new Error('Only a conversation adapter can propose conversation progress');
+      if (usesConversations && (result.items.length > 0 || Object.keys(result.conversationAdvance ?? {}).length > 0)) {
+        // Rows and cursors of the conversations read completely are kept even
+        // when a later conversation in the same tick failed.
+        const stored = await this.store.commitTimestampPoll(id, result.items, assertCommitCurrent, result.conversationAdvance ?? {});
+        if (!current()) return;
+        if (result.items.length > 0) this.notifyCommitted(id);
+        if (result.state === 'unavailable' || result.state === 'pending') {
+          this.setStatus(id, { id, state: result.state, itemCount: stored,
+            ...(result.state === 'unavailable' ? { error: result.error ?? 'provider unavailable' } : {}),
+            lastPolledAt: Date.now(), ...(result.configured === undefined ? {} : { configured: result.configured }), polled: true });
+          return;
+        }
+        this.setStatus(id, { id, state: result.items.length > 0 ? 'ready' : 'empty', itemCount: stored,
+          lastPolledAt: Date.now(), ...(result.configured === undefined ? {} : { configured: result.configured }), polled: true });
+        return;
+      }
       if (result.pendingMessages !== undefined && (!usesImapCheckpoint || !result.checkpointAdvance
         || !Number.isSafeInteger(result.pendingMessages) || result.pendingMessages < 0)) throw new Error('Invalid IMAP pending message count');
       const progress = result.pendingMessages === undefined ? {} : { mailboxProgress: {
@@ -268,9 +296,11 @@ export class InboundPoller {
           ? await this.store.commitImapPoll(id, result.items, result.checkpointAdvance, assertCommitCurrent)
           : 0;
       } else {
-        newCount = await this.store.commitTimestampPoll(id, result.items, assertCommitCurrent);
+        // A quiet tick writes nothing.
+        newCount = result.items.length > 0 ? await this.store.commitTimestampPoll(id, result.items, assertCommitCurrent) : 0;
       }
       if (!current()) return;
+      if (result.items.length > 0) this.notifyCommitted(id);
       this.setStatus(id, {
         id,
         state: result.items.length > 0 ? 'ready' : 'empty',
@@ -326,6 +356,10 @@ export class InboundPoller {
     for (const id of new Set([...this.adapters.keys(), ...this.pending.keys(), ...this.timers.keys()])) void this.stopProvider(id);
     this.started = false;
     return this.stopping;
+  }
+
+  private notifyCommitted(id: string): void {
+    try { this.onCommitted?.(id); } catch { this.warn('inbound commit observer failed', { provider: id }); }
   }
 
   private warn(message: string, meta: unknown): void {

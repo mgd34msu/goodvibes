@@ -38,8 +38,8 @@ export function composeInboxReads(input: readonly InboxReadSource[]): InboxAggre
         }
         return counts;
       },
-      maxReceivedAt(providers) {
-        return selected(providers).reduce((max, source) => Math.max(max, source.sources.store.maxReceivedAt(providers)), 0);
+      maxSequence(providers) {
+        return selected(providers).reduce((max, source) => Math.max(max, source.sources.store.maxSequence(providers)), 0);
       },
       getImapCheckpoint(provider) { return owners.get(provider)?.store.getImapCheckpoint(provider) ?? null; },
     },

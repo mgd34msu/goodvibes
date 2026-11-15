@@ -20,7 +20,7 @@ export class PageSocket extends SnapshotSocket {
     const tag = command.split(' ')[0];
     const done = `${tag} OK complete\r\n`;
     const uid = Number(/UID FETCH (\d+)/.exec(command)?.[1]);
-    if (this.page.malformedSearch && command.includes(` SEARCH ${this.page.malformedSearch}`)) {
+    if (this.page.malformedSearch && (this.page.malformedSearch === 'UNSEEN' ? command.includes(' SEARCH UNSEEN') : / SEARCH (ALL|UID )/.test(command))) {
       this.feed(`* SEARCH 42 invalid\r\n${done}`); return;
     }
     if (this.page.unseenUids && command.includes(' SEARCH UNSEEN')) {

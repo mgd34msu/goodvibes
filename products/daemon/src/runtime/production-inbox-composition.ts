@@ -93,7 +93,7 @@ function unconfiguredSource(provider: Provider): DaemonInboxSourceFactory {
             async validate() { current(); await validate(); current(); },
             sources: {
               store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
-                maxReceivedAt: () => 0, getImapCheckpoint: () => null },
+                maxSequence: () => 0, getImapCheckpoint: () => null },
               poller: { snapshotStatuses: selected => !selected || selected.includes(provider) ? [{ ...status }] : [],
                 isProviderRunning: () => false },
             },

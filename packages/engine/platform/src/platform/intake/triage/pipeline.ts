@@ -1,77 +1,58 @@
-import { isDeepStrictEqual } from 'node:util';
-import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, checkTriageReceipt } from './evidence.js';
-import { captureInboxTriageSource } from '../cursor-store.js';
+import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import type { InboxCursorStore, InboxTriageReceiptRow } from '../cursor-store.js';
+import { captureTriageInputs } from './evidence.js';
 import { scoreCapturedTriage } from './scorer.js';
-import { SqliteTriageStore } from './store.js';
-import type { RunInboxTriageOptions, TriageEvidence, TriageInput, TriagePreview, TriageReceipt, TriageStore, TriageStoredRecord, TriageReceiptScope } from './types.js';
+import type { TriageInput, TriagePreview, TriageReceipt } from './types.js';
 
-/** Scores first, then atomically publishes; dry-run does not open, read, close or write a receipt store. */
-export function runInboxTriage(items: readonly TriageInput[], options: RunInboxTriageOptions & { readonly dryRun: true }): Promise<readonly TriagePreview[]>;
-export function runInboxTriage(items: readonly TriageInput[], options?: RunInboxTriageOptions & { readonly dryRun?: false | undefined }): Promise<readonly TriageReceipt[]>;
-export function runInboxTriage(items: readonly TriageInput[], options: RunInboxTriageOptions): Promise<readonly (TriageReceipt | TriagePreview)[]>;
-export async function runInboxTriage(items: readonly TriageInput[], options: RunInboxTriageOptions = {}): Promise<readonly (TriageReceipt | TriagePreview)[]> {
-  const input = captureTriageInputs(items), scope = captureTriageReceiptScope(options.receiptScope);
-  if (options.dryRun) return scoreCapturedTriage(input, options.port, options.signal, scope, true);
-  const original = options.receiptSource;
-  if (original && !scope) throw new Error('Native triage receipt matching requires its original account scope');
-  const source = original && scope ? captureInboxTriageSource(original, input, scope) : undefined;
-  const receipts = await scoreCapturedTriage(input, options.port, options.signal, scope, false, source);
-  source?.assertCurrent();
-  if (!receipts.length || options.signal?.aborted) return receipts;
-  const injected = options.store;
-  if (!injected && !options.workingDirectory) throw new Error('Triage persistence requires a store or working directory.');
-  const store = injected ?? new SqliteTriageStore(options.workingDirectory!, undefined, options.beforeReceiptWrite);
-  try {
-    source?.assertCurrent();
-    if (source) await store.commit(receipts, options.signal, source.assertCurrent);
-    else await store.commit(receipts, options.signal);
-    source?.assertCurrent();
-  }
-  finally { if (!injected) await store.close(); }
-  return receipts;
+/** One stored row to score, with the content revision its label will name. */
+export interface TriageRow {
+  readonly id: string;
+  readonly provider: string;
+  readonly kind: string;
+  readonly subject: string;
+  readonly snippet: string;
+  readonly unread: boolean;
+  readonly revision: string;
 }
 
-/** One batched read; historical evidence is projected only when the latest receipt still agrees. */
-export async function readTriageMetadataBatch(items: readonly TriageInput[], store: TriageStore, receiptScope?: TriageReceiptScope, receiptSource?: object): Promise<ReadonlyMap<string, TriageEvidence>> {
-  const input = captureTriageInputs(items), scope = captureTriageReceiptScope(receiptScope);
-  const current = new Map(input.map(item => [item.id, item]));
-  if (!current.size) return new Map();
-  // Generic input is not native source provenance. Old digest rows remain
-  // historical; no compatibility hashing or retained protected snapshots.
-  if (!receiptSource || !scope) return new Map();
-  const source = captureInboxTriageSource(receiptSource, input, scope, false);
-  const records = await store.readBatch([...current.keys()]);
-  source.assertCurrent();
-  const out = new Map<string, TriageEvidence>();
-  // Native iteration rejects forged/proxy Maps and ignores overridden getters/iterators.
-  const entries = Map.prototype.entries.call(records) as IterableIterator<[string, TriageStoredRecord]>;
-  for (const [id, raw] of entries) {
-    const original = current.get(id);
-    if (!original) continue;
-    try {
-      const captured = captureTriageData(raw);
-      if (!captured || typeof captured !== 'object' || Array.isArray(captured)) continue;
-      const record = captured as unknown as TriageStoredRecord;
-      const latest = checkTriageReceipt(record.latest);
-      if (latest.status !== 'settled' || latest.id !== id || latest.receiptVersion !== 4) continue;
-      const settled = checkTriageReceipt(record.settled);
-      // Only the exact native mutation revision and account can lend a current label.
-      if (settled.status === 'settled' && isDeepStrictEqual(settled, latest)
-        && latest.source !== undefined && isDeepStrictEqual(latest.source, source.bindingFor(id))) out.set(id, settled);
-    } catch { /* Invalid stored evidence is never converted into a current label. */ }
-  }
-  source.assertCurrent();
-  return out;
+/** One representation for scoring: no sender, route or metadata. */
+function inputOf(row: Omit<TriageRow, 'revision'>): TriageInput {
+  return { id: row.id, surface: row.provider, subject: row.subject, snippet: row.snippet,
+    ...(row.kind === 'dm' ? { conversationKind: 'direct' as const } : row.kind === 'thread' ? { conversationKind: 'thread' as const } : {}),
+    unread: row.unread };
 }
 
-/** Removes stale incoming projections before adding checked evidence for this exact semantic input. */
-export async function enrichItemsWithTriage(items: readonly TriageInput[], store: TriageStore, receiptScope?: TriageReceiptScope, receiptSource?: object): Promise<readonly (TriageInput & { readonly triage?: TriageEvidence })[]> {
-  const captured = captureTriageData(items) as readonly TriageInput[];
-  const evidence = await readTriageMetadataBatch(captured, store, receiptScope, receiptSource);
-  return Object.freeze(captured.map(item => {
-    const clean = { ...item } as Record<string, unknown>;
-    for (const key of ['triage', 'triageScore', 'triageTags', 'triageLabel']) delete clean[key];
-    const triage = evidence.get(item.id);
-    return Object.freeze({ ...clean, ...(triage ? { triage } : {}) }) as TriageInput & { readonly triage?: TriageEvidence };
-  }));
+function receiptRow(receipt: TriageReceipt, revision: string): InboxTriageReceiptRow {
+  return receipt.status === 'settled'
+    ? { id: receipt.id, revision, status: 'settled', label: receipt.label, score: receipt.score, tags: receipt.tags, receipt: JSON.stringify(receipt) }
+    : { id: receipt.id, revision, status: receipt.status, receipt: JSON.stringify(receipt) };
+}
+
+/**
+ * Score rows of one account's mirror and store each label beside its row. The
+ * rows are read and privacy-checked once, the model is asked once for the
+ * batch, and each row's revision is compared once, inside the commit: a row
+ * whose content changed meanwhile keeps no stale label and is scored next time.
+ */
+export async function triageMirrorRows(store: InboxCursorStore, provider: string, port: JudgmentPort, options: {
+  readonly candidates: readonly TriageRow[]; readonly signal?: AbortSignal;
+}): Promise<{ readonly receipts: readonly TriageReceipt[]; readonly stored: number }> {
+  const rows = options.candidates.filter(row => row.provider === provider).slice(0, 100);
+  if (rows.length === 0) return { receipts: [], stored: 0 };
+  const input = captureTriageInputs(rows.map(inputOf));
+  const revisions = new Map(rows.map(row => [row.id, row.revision]));
+  const scope = store.triageScope;
+  const receipts = await scoreCapturedTriage(input, port, options.signal, scope, false,
+    scope ? new Map(rows.map(row => [row.id, { ...scope, sourceRevision: row.revision }])) : undefined);
+  if (options.signal?.aborted || receipts.length === 0) return { receipts, stored: 0 };
+  const written = await store.commitTriageReceipts(receipts.map(receipt => receiptRow(receipt, revisions.get(receipt.id)!)));
+  return { receipts, stored: written.length };
+}
+
+/** A reading of arbitrary items that is shown, never stored. */
+export async function previewInboxTriage(items: readonly { readonly id: string; readonly provider: string; readonly kind: string;
+  readonly subject?: string | undefined; readonly bodyPreview: string; readonly unread: boolean }[], port?: JudgmentPort, signal?: AbortSignal): Promise<readonly TriagePreview[]> {
+  const input = captureTriageInputs(items.map(item => inputOf({ id: item.id, provider: item.provider, kind: item.kind,
+    subject: item.subject ?? '', snippet: item.bodyPreview, unread: item.unread })));
+  return scoreCapturedTriage(input, port, signal, undefined, true);
 }

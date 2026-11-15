@@ -1,16 +1,12 @@
 import { afterEach, expect, test } from 'bun:test';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import type { OwnedInboxSource, OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
 import { attachDaemonInboxTagging, type DaemonTriagePermissionHost } from '../../runtime/tagged-inbox-composition.js';
 import { registerOwnedMailInbox } from '../../runtime/owned-inbox-mail.js';
 import { createHandlerContext } from '../helpers/handler-context.js';
 import type { RoutingRegistration } from '../../daemon/handlers/index.js';
 import type { DaemonInboxControls } from '../../runtime/daemon-handler-composition.js';
-import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 function source(ready = Promise.resolve()) {
@@ -21,7 +17,7 @@ function source(ready = Promise.resolve()) {
 function tagging() {
   let closed = false, closes = 0, applied = 0;
   let pending: Promise<void> | undefined;
-  const owner: OwnedInboxTagging = { async applyTags() { if (closed) throw new Error('retired'); applied++; }, close() { closed = true; closes++; return pending ?? Promise.resolve(); } };
+  const owner: OwnedInboxTagging = { async applyTags(itemId, tags) { if (closed) throw new Error('retired'); applied++; return { itemId, state: 'applied', applied: tags }; }, close() { closed = true; closes++; return pending ?? Promise.resolve(); } };
   return { owner, hold(promise: Promise<void>) { pending = promise; }, get closes() { return closes; }, get applied() { return applied; } };
 }
 const request = { provider: 'slack' as const, accountScopeId: 'real-owner-scope', assertCurrent() {} };
@@ -37,7 +33,7 @@ test('close fences new tag work immediately and drains tags before retiring sour
   let handle!: OwnedInboxTagging;
   const wrapped = await attachDaemonInboxTagging(f.owner, { onReady(owner) { handle = owner; } }, { createTriageTagging: () => tags.owner }, request);
   await wrapped.ready; const close = wrapped.close(); expect(wrapped.close()).toBe(close);
-  await expect(handle.applyTags('slack:C1:1.2', ['GoodVibes/Priority'], { sourceOf: () => ({ goal: 'Apply requested tag', criteria: [] }), assertCurrent() {} })).rejects.toThrow('retired');
+  await expect(handle.applyTags('slack:C1:1.2', ['GoodVibes/Priority'])).rejects.toThrow('retired');
   expect(f.closed).toBe(0); gate.resolve(); await close; expect(f.closed).toBe(1);
 });
 test('source or callback failure retires the tagging and source owners', async () => {
@@ -58,11 +54,9 @@ test('retirement before readiness cannot publish a stale handle', async () => {
   await wrapped.close(); gate.resolve(); await expect(wrapped.ready).rejects.toThrow('retired'); expect(delivered).toBe(0);
 });
 function rootFixture() {
-  const directory = makeOwnedTempDir('tagging-root-lifecycle');
-  const config = new ConfigManager({ workingDir: directory, homeDir: directory, surfaceRoot: 'daemon' });
   const log = new SqliteDecisionLog(':memory:'); cleanups.push(() => log[Symbol.dispose]());
   const fake = fakePort((_name, question) => choiceAnswer(question, 'act', 0.99));
-  const host: DaemonTriagePermissionHost = { permissionManager: new PermissionManager(undefined, createPermissionConfigReader(config), new PolicyRuntimeState()), port: withDecisionLog(fake.port, log), signal: new AbortController().signal };
+  const host: DaemonTriagePermissionHost = { port: withDecisionLog(fake.port, log), signal: new AbortController().signal };
   const configs = new Set<() => void>(), secrets = new Set<(key: string) => void>();
   let reads = 0;
   const input = { configManager: { get() { return undefined; }, onDidInvalidate(listener: () => void) { configs.add(listener); return () => { configs.delete(listener); }; } }, secretsManager: {

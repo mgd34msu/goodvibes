@@ -4,6 +4,7 @@ import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.t
 import { InboundPoller } from '../platform/src/platform/intake/poller.ts';
 import type { InboundChannelItem, InboundProviderAdapter, ProviderPollResult } from '../platform/src/platform/intake/provider-adapter.ts';
 import { aggregateInbox, decodePageCursor, encodePageCursor, normalizeInboxQuery, toWireItem, DEFAULT_LIMIT, MAX_LIMIT } from '../platform/src/platform/intake/aggregator.ts';
+import { seedInboxRows } from './_helpers/inbox-seed.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
@@ -66,7 +67,8 @@ describe('inbox mirror aggregation', () => {
   test('keeps freshness watermark distinct from paging position and filters totals consistently', async () => {
     const sources = await fixture({ a: healthy([item('a', 'a1', 100), item('a', 'a2', 200)]), b: healthy([item('b', 'b1', 300)]) });
     const first = aggregateInbox(sources, normalizeInboxQuery({}, { provider: 'a', limit: '1' }));
-    expect(first.cursor).toBe('200');
+    // The watermark is the store's commit sequence, not a message time.
+    expect(Number(first.cursor)).toBeGreaterThan(200);
     expect(first.nextCursor).not.toBe(first.cursor);
     expect(first.providers.map((status) => status.provider)).toEqual(['a']);
     const fresh = aggregateInbox(sources, normalizeInboxQuery({}, { provider: 'a', since: first.cursor! }));
@@ -115,7 +117,7 @@ describe('inbox mirror aggregation', () => {
   test('a standby reports pending and never starts provider polling to answer a read', async () => {
     let calls = 0;
     const sources = await fixture({ a: async () => { calls += 1; return { state: 'empty', configured: true, items: [] }; } }, false);
-    sources.store.upsertItems([item('a', 'existing', 100)]);
+    await seedInboxRows(sources.store, [item('a', 'existing', 100)]);
     const out = aggregateInbox(sources, normalizeInboxQuery({}));
     expect(out.items).toHaveLength(1);
     expect(out.providers[0]).toMatchObject({ state: 'pending', syncing: false, storedCount: 1 });
@@ -167,7 +169,7 @@ test('proven absent admission is unconfigured without inventing a poll, while un
   ];
   const out = aggregateInbox({
     store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
-      maxReceivedAt: () => 0, getImapCheckpoint: () => null },
+      maxSequence: () => 0, getImapCheckpoint: () => null },
     poller: { snapshotStatuses: () => statuses, isProviderRunning: () => false },
   }, normalizeInboxQuery({}));
   expect(out.providers.map(row => row.state)).toEqual(['unconfigured', 'pending', 'pending', 'error']);

@@ -79,7 +79,7 @@ test.each([{ workspaceId: 'T-OTHER', userId: 'U-OWNER' }, { workspaceId: 'T-ALPH
     const f = await fixture(); f.setAccount(account);
     expect(await f.owner.adapter.poll({ limit: 10 })).toMatchObject({ state: 'unavailable', configured: true, items: [] });
     expect(f.calls.map(call => call.path)).toEqual(['/api/auth.test']); expect(f.sourceCalls).toEqual([]);
-    await expect(f.owner.assertReadCurrent()).rejects.toThrow('scope is unavailable');
+    await expect(f.owner.assertReadCurrent()).rejects.toThrow('different Slack account');
   },
 );
 
@@ -95,8 +95,9 @@ test('same-account token rotation preserves the stable scope and authenticates t
 test('rotation to a different account cannot authorize previously stored rows', async () => {
   const f = await fixture(); await f.owner.adapter.poll({ limit: 10 });
   f.setToken('xoxb-synthetic-foreign'); f.setAccount({ workspaceId: 'T-ALPHA', userId: 'U-OTHER' });
-  await expect(f.owner.assertReadCurrent()).rejects.toThrow('scope is unavailable');
+  // The poll owns "is this still the same account"; once it has seen the other account, reads stop.
   expect((await f.owner.adapter.poll({ limit: 10 })).items).toEqual([]);
+  await expect(f.owner.assertReadCurrent()).rejects.toThrow('different Slack account');
 });
 
 test('an unchanged verified credential retains history eligibility during a provider outage', async () => {
@@ -133,10 +134,10 @@ test('close awaits a credential read that outlives cancellation and admits no la
   expect((await pending).items).toEqual([]); expect(f.calls).toEqual([]);
 });
 
-test('missing credentials stay unconfigured and cannot serve previous account data', async () => {
+test('missing credentials stay unconfigured and make no provider request', async () => {
   const f = await fixture(); f.setToken(null);
   expect(await f.owner.adapter.poll({ limit: 10 })).toMatchObject({ state: 'unavailable', configured: false, items: [] });
-  await expect(f.owner.assertReadCurrent()).rejects.toThrow('scope is unavailable'); expect(f.calls).toEqual([]);
+  expect(f.calls).toEqual([]);
 });
 
 test('account discriminators distinguish users and workspaces without exposing identifiers', async () => {
@@ -248,7 +249,8 @@ test('eligibility detaches the caller account and options before an awaited auth
 test('a read lease cannot change credential generations even when the replacement proves the same account', async () => {
   const f = await fixture();
   const lease = await f.owner.acquireReadLease();
-  f.setToken('xoxb-synthetic-rotated');
+  // The daemon tells the owner when the stored credential changes.
+  f.setToken('xoxb-synthetic-rotated'); f.owner.invalidateCredential();
   await expect(lease()).rejects.toThrow('revoked');
   expect(() => lease.assertCurrent!()).toThrow('revoked');
   const fresh = await f.owner.acquireReadLease();

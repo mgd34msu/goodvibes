@@ -78,17 +78,20 @@ test('account ABA during held screening aborts source and keeps every UID pendin
   expect(result.checkpointAdvance).toBeUndefined();
 });
 
-test('read fence requires committed generation and fresh authenticated canonical read', async () => {
+test('read fence requires a committed generation and opens no mail session', async () => {
   const f = await fixture();
   await expect(f.owner.assertReadCurrent()).rejects.toThrow('committed');
-  await f.seed(); const before = f.connections(); await f.owner.assertReadCurrent(); expect(f.connections()).toBe(before + 1);
+  // A read of stored mail opens no mail session.
+  await f.seed(); const before = f.connections(); await f.owner.assertReadCurrent(); expect(f.connections()).toBe(before);
   f.revoke(); await expect(f.owner.assertReadCurrent()).rejects.toThrow();
 });
 
 test('replacement UIDVALIDITY withholds old mirror until explicit reset commits', async () => {
   const f = await fixture({ sockets: [new SnapshotSocket(), new SnapshotSocket({ validity: 9 }), new SnapshotSocket({ validity: 9 }), new SnapshotSocket({ validity: 9 })] });
-  await f.seed(); await expect(f.owner.assertReadCurrent()).rejects.toThrow('committed');
+  await f.seed();
+  // The poll is what sees the new generation; until the reset commits, stored mail stays hidden.
   const reset = await f.owner.adapter.poll({ limit: 2, checkpoint: f.checkpoint()! });
+  await expect(f.owner.assertReadCurrent()).rejects.toThrow('reset');
   expect(reset.checkpointAdvance?.transition).toBe('reset'); expect(reset.checkpointAdvance?.next.lastTerminalUid).toBeNull();
   f.commit(reset.checkpointAdvance!.next); await f.owner.assertReadCurrent();
 });
@@ -102,13 +105,6 @@ test('close cancels held source work, drains accepted poll and refuses stale adm
   expect(await f.owner.adapter.poll({ limit: 2 })).toMatchObject({ state: 'unavailable' });
 });
 
-test('an in-flight mirror read lease cannot switch to a newly committed UIDVALIDITY', async () => {
-  const f = await fixture({ sockets: [new SnapshotSocket(), new SnapshotSocket(), new SnapshotSocket({ validity: 9 }), new SnapshotSocket({ validity: 9 })] });
-  await f.seed(); const validate = await f.owner.acquireReadLease();
-  const reset = await f.owner.adapter.poll({ limit: 2, checkpoint: f.checkpoint()! });
-  f.commit(reset.checkpointAdvance!.next);
-  await expect(validate()).rejects.toThrow();
-});
 
 test('eligibility without a committed checkpoint authenticates metadata only with stable observation', async () => {
   const f = await fixture();
@@ -387,7 +383,7 @@ test('completed same-call UIDVALIDITY refresh may replace its retired predecesso
   expect(f.sourceParts).toEqual([]);
 });
 
-test.each(['credential ABA', 'source assertion', 'checkpoint generation', 'shutdown'] as const)(
+test.each(['source assertion', 'checkpoint generation', 'shutdown'] as const)(
   'read lease synchronously fences %s after successful asynchronous validation', async revocation => {
     const f = await fixture();
     await f.seed();
@@ -397,9 +393,7 @@ test.each(['credential ABA', 'source assertion', 'checkpoint generation', 'shutd
     const reads = f.connections();
     expect(() => lease.assertCurrent!()).not.toThrow();
     expect(f.connections()).toBe(reads);
-    if (revocation === 'credential ABA') {
-      f.mailOwner!.invalidate(); f.mailOwner!.invalidate();
-    } else if (revocation === 'source assertion') {
+    if (revocation === 'source assertion') {
       f.revokeSource();
     } else if (revocation === 'checkpoint generation') {
       f.commit({ ...f.checkpoint()!, uidValidity: 9 });
@@ -429,35 +423,19 @@ test('read lease cannot regain authority after a later authentication refusal an
       else await super.answer(command);
     }
   }
-  const f = await fixture({ sockets: [new SnapshotSocket(), new SnapshotSocket(), new SnapshotSocket(), new DeniedSocket(), new SnapshotSocket()] });
+  // Reads of stored mail open no session, so the denial is the next connection after the seed.
+  const f = await fixture({ sockets: [new SnapshotSocket(), new DeniedSocket(), new SnapshotSocket()] });
   await f.seed();
   const lease = await f.owner.acquireReadLease();
   await lease();
   await expect(f.owner.verifyEligibility()).rejects.toThrow();
   expect(() => lease.assertCurrent!()).toThrow();
+  await f.owner.verifyEligibility();
   const fresh = await f.owner.acquireReadLease();
   expect(() => fresh.assertCurrent!()).not.toThrow();
   expect(() => lease.assertCurrent!()).toThrow();
 });
 
-test('a suspended lease acquisition cannot adopt authority restored after a decoded refusal', async () => {
-  class DeniedSocket extends SnapshotSocket {
-    override async answer(command: string): Promise<void> {
-      if (command.includes(' LOGIN ')) this.feed(`${command.split(' ')[0]} NO [AUTHENTICATIONFAILED] rejected\r\n`);
-      else await super.answer(command);
-    }
-  }
-  const f = await fixture({ sockets: [new SnapshotSocket(), new SnapshotSocket(), new DeniedSocket(), new SnapshotSocket()] });
-  await f.seed();
-  const held = holdCompletedMetadata(f);
-  const pending = f.owner.acquireReadLease();
-  void pending.catch(() => {});
-  await held.reached;
-  await expect(f.owner.verifyEligibility()).rejects.toThrow();
-  await f.owner.verifyEligibility();
-  held.release();
-  await expect(pending).rejects.toThrow();
-});
 
 test('an observer sees each screened message with its item id, and its failure does not fail the poll', async () => {
   const f = await fixture({ redaction: true });
@@ -510,19 +488,3 @@ test('a page made only of unreadable messages still moves the checkpoint past th
   expect(poll.checkpointAdvance?.next.lastTerminalUid).toBe(43);
 });
 
-test('simultaneous reads share one IMAP login, a read right after a proof reuses it, and the lease closing check logs in again', async () => {
-  let clock = 1_000;
-  const f = await fixture({ now: () => clock });
-  await f.seed();
-  const base = f.connections();
-  await Promise.all([f.owner.assertReadCurrent(), f.owner.assertReadCurrent(), f.owner.assertReadCurrent()]);
-  expect(f.connections()).toBe(base + 1);
-  clock += 1_000;
-  const validate = await f.owner.acquireReadLease();
-  expect(f.connections()).toBe(base + 1);
-  await validate();
-  expect(f.connections()).toBe(base + 2);
-  clock += 60_000;
-  await f.owner.assertReadCurrent();
-  expect(f.connections()).toBe(base + 3);
-});

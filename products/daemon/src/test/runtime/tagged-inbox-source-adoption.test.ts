@@ -30,7 +30,7 @@ function fixture() {
  const context: HandlerContext = { configManager: config, credentials: createDaemonCredentialStore(secrets), catalog: new GatewayMethodCatalog(), workingDirectory: root, homeDirectory: root, logger: { info() {}, warn() {}, error() {} } };
  let creates = 0, mutations = 0, tagCloses = 0; const requests: Parameters<NonNullable<DaemonInboxControls['createTriageTagging']>>[0][] = [];
  const controls: DaemonInboxControls = { gatePolling() {}, onAccountInvalidation() { return () => {}; }, createTriageTagging(request) {
-   creates++; requests.push(request); return { async applyTags() { mutations++; }, async close() { tagCloses++; } };
+   creates++; requests.push(request); return { async applyTags(itemId, tags) { mutations++; return { itemId, state: 'applied' as const, applied: tags }; }, async close() { tagCloses++; } };
  } };
  return { config, secrets, context, controls, requests, get creates() { return creates; }, get mutations() { return mutations; }, get tagCloses() { return tagCloses; } };
 }

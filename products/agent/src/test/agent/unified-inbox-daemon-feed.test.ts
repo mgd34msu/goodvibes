@@ -117,6 +117,7 @@ describe('fetching the inbound feed', () => {
       routeId: 'C1',
       threadId: 'T1',
       attachmentCount: 2,
+      triageLabel: null,
     });
   });
 

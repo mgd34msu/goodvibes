@@ -333,8 +333,9 @@ test('mapper screens the full original and normalized candidate before display c
     mapper = createProtectedInboxMapper(f.owner),
     text = '<p>' + 'ordinary '.repeat(80) + '</p>';
   const mapped = await mapper({ senderId: 'USENDER', channelId: 'DTEST', subject: 'Direct message', text });
-  expect(mapped?.bodyPreview).toHaveLength(500);
-  expect(mapped?.bodyPreview).not.toContain('<p>');
+  if (mapped.status !== 'mapped') throw new Error(`expected a mapped preview, got ${mapped.status}`);
+  expect(mapped.fields.bodyPreview).toHaveLength(500);
+  expect(mapped.fields.bodyPreview).not.toContain('<p>');
   expect(f.calls[1]!.body['state']).toMatchObject({ parts: ['Direct message', text, 'Direct message', 'ordinary '.repeat(80).trim()] });
 });
 
@@ -342,15 +343,15 @@ test('numeric provider identifiers stay local protocol data while identical raw 
   const identifier = '1556818270617600003'; // Synthetic 2026-10-06 Discord snowflake, sequence 3.
   const f = fixture(),
     mapper = createProtectedInboxMapper(f.owner);
-  expect(await mapper({ senderId: identifier, channelId: identifier, subject: 'Direct message', text: 'Ordinary build note.' })).toEqual({
+  expect(await mapper({ senderId: identifier, channelId: identifier, subject: 'Direct message', text: 'Ordinary build note.' })).toEqual({ status: 'mapped', fields: {
     fromDigest: digestSender(identifier),
     subjectPreview: 'Direct message',
     bodyPreview: 'Ordinary build note.',
-  });
+  } });
   expect(f.calls).toHaveLength(2);
   expect(JSON.stringify(f.calls)).not.toContain(identifier);
   const before = f.calls.length;
-  expect(await mapper({ senderId: 'USENDER', channelId: 'DTEST', subject: 'Direct message', text: identifier })).toBeNull();
+  expect(await mapper({ senderId: 'USENDER', channelId: 'DTEST', subject: 'Direct message', text: identifier })).toMatchObject({ status: 'withheld' });
   expect(f.calls).toHaveLength(before);
 });
 
@@ -358,10 +359,11 @@ test('releasing and recapturing an unchanged uncertain source cannot retry for a
   const f = fixture({ judge: (body, count) => reading(body, count === 1 ? 0.5 : 1, 1) }),
     mapper = createProtectedInboxMapper(f.owner);
   const original = { senderId: 'USENDER', channelId: 'DTEST', subject: 'Direct message', text: 'Ordinary unchanged source.' };
-  expect(await mapper(original)).toBeNull();
-  expect(await mapper({ ...original })).toBeNull();
+  // An unsettled message is published as withheld once; the inbox never offers it again.
+  expect(await mapper(original)).toMatchObject({ status: 'withheld' });
+  expect(await mapper({ ...original })).toMatchObject({ status: 'withheld' });
   expect(f.calls).toHaveLength(2);
-  expect(await mapper({ ...original, text: 'A genuinely changed source.' })).toMatchObject({ bodyPreview: 'A genuinely changed source.' });
+  expect(await mapper({ ...original, text: 'A genuinely changed source.' })).toMatchObject({ status: 'mapped', fields: { bodyPreview: 'A genuinely changed source.' } });
   expect(f.calls).toHaveLength(4);
 });
 

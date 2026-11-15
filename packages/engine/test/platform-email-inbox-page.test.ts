@@ -79,13 +79,14 @@ describe('oldest pending pages preserve durable UID progress', () => {
       const result = complete(await f.service.readInboxPage({ checkpoint: saved, limit: 2 }));
       expect(result.selectedUids).toEqual(expected); expect(result.coveredUids).toEqual(expected);
       expect(result.messages.map(message => message.source.detail.uid)).toEqual([...expected]);
-      expect(result.pending).toBe(pending); expect(result.total).toBe(5); expect(result.hasMore).toBe(hasMore);
+      // An ordinary poll searches only UIDs above the checkpoint.
+      expect(result.pending).toBe(pending); expect(result.total).toBe(pending); expect(result.hasMore).toBe(hasMore);
       expect(result.messages.map(message => message.unread)).toEqual(expected.map(uid => uid === 20 || uid === 50));
       saved = { ...saved, lastTerminalUid: expected.at(-1)! };
     }
     const empty = complete(await f.service.readInboxPage({ checkpoint: saved, limit: 2 }));
     expect(empty.messages).toEqual([]); expect(empty.coveredUids).toEqual([]); expect(empty.pending).toBe(0);
-    expect(empty.total).toBe(5); expect(empty.hasMore).toBe(false); expect(fetched(f.sockets[3]!)).toEqual([]);
+    expect(empty.total).toBe(0); expect(empty.hasMore).toBe(false); expect(fetched(f.sockets[3]!)).toEqual([]);
     expect(f.sockets.every(socket => socket.closed && socket.commands.every(command => !command.includes('SINCE')))).toBe(true);
   });
 

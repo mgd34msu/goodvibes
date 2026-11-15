@@ -4,6 +4,7 @@ import { Client, interceptors, type Dispatcher } from 'undici/index.js';
 import { responseStream } from '../../security/source-screening/direct-client.js';
 import { POLL_CADENCE_MS } from '../provider-adapter.js';
 import type { DiscordInboxHttp } from './discord.js';
+import type { InboxHttpFailure, InboxHttpResult } from './inbox-http.js';
 import { VERSION } from '../../version.js';
 
 const ORIGIN = 'https://discord.com';
@@ -20,26 +21,26 @@ const isAborted = (signal: AbortSignal): boolean => abortedGetter.call(signal) a
 const onAbort = (signal: AbortSignal, listener: () => void): void => addListener.call(signal, 'abort', listener, { once: true });
 const offAbort = (signal: AbortSignal, listener: () => void): void => removeListener.call(signal, 'abort', listener);
 
-const diagnostics = new WeakSet<object>();
-function diagnostic(message: string): Error {
-  const error = new Error(message);
-  diagnostics.add(error);
+// Fixed failures by private identity; an external rejection is never inspected.
+const failures = new WeakMap<object, { readonly reason: InboxHttpFailure; readonly retryAt?: number }>();
+function failure(reason: InboxHttpFailure, retryAt?: number): Error {
+  const error = new Error(`Discord HTTP ${reason}`);
+  failures.set(error, { reason, ...(retryAt === undefined ? {} : { retryAt }) });
   return error;
 }
-const invalid = () => diagnostic('Discord HTTP request is not allowed');
-const failed = () => diagnostic('Discord HTTP response is unavailable');
-const cancelled = () => diagnostic('Discord HTTP request was cancelled');
-const timedOut = () => diagnostic('Discord HTTP request timed out');
-const unauthorized = () => diagnostic('Discord HTTP authority is no longer current');
-const oversized = () => diagnostic('Discord HTTP response exceeds the byte limit');
-const rateLimited = () => diagnostic('Discord HTTP method is rate limited');
+const invalid = () => failure('not-allowed');
+const failed = () => failure('unavailable');
+const cancelled = () => failure('cancelled');
+const timedOut = () => failure('timed-out');
+const unauthorized = () => failure('not-current');
+const oversized = () => failure('too-large');
 
 /** Presence only: proxy URLs themselves can contain credentials. */
 function requireDirectRoute(): void {
   const names = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy',
     ...Object.getOwnPropertyNames(process.env).filter(name => ['http_proxy', 'https_proxy', 'all_proxy'].includes(name.toLowerCase()))]);
   if ([...names].some(name => process.env[name] !== undefined && process.env[name] !== '')) {
-    throw diagnostic('Discord HTTP direct route is unavailable');
+    throw failure('proxy');
   }
 }
 
@@ -63,7 +64,7 @@ function capture(input: URL, request: Parameters<DiscordInboxHttp>[1], channels:
       if (!allowed.includes(key) || query.has(key)) throw invalid();
       query.set(key, value);
     }
-    if (method === 'history' && (query.get('limit') !== '50' || !snowflake(query.get('before') ?? ''))) throw invalid();
+    if (method === 'history' && (query.get('limit') !== '100' || !snowflake(query.get('before') ?? ''))) throw invalid();
     exactKeys(request, ['method', 'headers', 'signal']);
     const { method: verb, headers, signal } = request;
     exactKeys(headers, ['Authorization', 'Accept']);
@@ -117,7 +118,8 @@ export function createDiscordInboxHttpOwner(options: DiscordInboxHttpOwnerOption
   const channels = new Set(options.channelIds);
   if (channels.size < 1 || channels.size > 200 || [...channels].some(id => !snowflake(id))) throw invalid();
   const lifetime = new AbortController();
-  const active = new Set<Promise<{ ok: boolean; body: unknown }>>();
+  const active = new Set<Promise<InboxHttpResult>>();
+  // Wall-clock end of the rate-limit wait Discord asked for.
   let cooldownUntil = 0;
   let client: Client | undefined;
   let dispatcher: Dispatcher | undefined;
@@ -143,7 +145,8 @@ export function createDiscordInboxHttpOwner(options: DiscordInboxHttpOwnerOption
   }
 
   const http: DiscordInboxHttp = async (url, request) => {
-    const captured = capture(url, request, channels);
+    let captured: ReturnType<typeof capture>;
+    try { captured = capture(url, request, channels); } catch { return { ok: false, reason: 'not-allowed' }; }
     const controller = new AbortController();
     const deadline = performance.now() + timeoutMs;
     const ensureCurrent = () => {
@@ -175,7 +178,7 @@ export function createDiscordInboxHttpOwner(options: DiscordInboxHttpOwnerOption
         try {
           await turn;
           ensureCurrent();
-          if (cooldownUntil > performance.now()) throw rateLimited();
+          if (cooldownUntil > Date.now()) throw failure('rate-limited', cooldownUntil);
           if (!client) {
             client = createClient(ORIGIN, { pipelining: 0, allowH2: false,
               connect: { rejectUnauthorized: true }, maxHeaderSize: 16 * 1024,
@@ -190,15 +193,17 @@ export function createDiscordInboxHttpOwner(options: DiscordInboxHttpOwnerOption
           reader = responseStream(response.body).getReader();
           // Capture a received rate limit even if cancellation wins next.
           if (response.statusCode === 429) {
-            cooldownUntil = performance.now() + cooldownMs(response.headers['retry-after']);
-            throw rateLimited();
+            cooldownUntil = Date.now() + cooldownMs(response.headers['retry-after']);
+            throw failure('rate-limited', cooldownUntil);
           }
-          // A received auth denial is a known fact even if cancellation wins
-          // next. Fence cached reads while this body's retirement is awaited.
-          if ((response.statusCode === 401 || response.statusCode === 403)) {
+          // A refused credential is a fact about the account only on the
+          // identity route; a 403 on one channel is about that channel.
+          if (response.statusCode === 401 || (response.statusCode === 403 && captured.method === 'self')) {
             onAuthenticationDenied?.();
-            throw failed();
+            throw failure('denied');
           }
+          if (response.statusCode === 403) throw failure('denied');
+          if (response.statusCode === 404) throw failure('not-found');
           ensureCurrent();
           // No redirect interceptor exists; all non-success bodies are retired
           // without decoding or exposing status text, headers or raw content.
@@ -227,11 +232,18 @@ export function createDiscordInboxHttpOwner(options: DiscordInboxHttpOwnerOption
         ensureCurrent();
         const body: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
         ensureCurrent();
-        return { ok: true, body };
+        return { ok: true, body } as const;
       } catch (error) {
-        if (controller.signal.aborted) throw controller.signal.reason;
-        if (error !== null && (typeof error === 'object' || typeof error === 'function') && diagnostics.has(error)) throw error;
-        throw failed();
+        // Every failure resolves with its fixed reason; nothing is thrown past this owner.
+        const known = error !== null && (typeof error === 'object' || typeof error === 'function') ? failures.get(error) : undefined;
+        if (known?.reason === 'rate-limited' || known?.reason === 'proxy' || known?.reason === 'denied' || known?.reason === 'not-found') {
+          return { ok: false, reason: known.reason, ...(known.retryAt === undefined ? {} : { retryAt: known.retryAt }) } as const;
+        }
+        if (controller.signal.aborted) {
+          const reason = controller.signal.reason !== null && typeof controller.signal.reason === 'object' ? failures.get(controller.signal.reason)?.reason : undefined;
+          return { ok: false, reason: reason ?? 'cancelled' } as const;
+        }
+        return { ok: false, reason: known?.reason ?? 'unavailable' } as const;
       } finally {
         clearTimeout(timer);
         controller.signal.removeEventListener('abort', cancelBody);

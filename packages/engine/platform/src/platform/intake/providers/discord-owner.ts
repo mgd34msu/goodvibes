@@ -7,7 +7,8 @@ import { createProtectedInboxMapper } from '../protected-preview.js';
 import type { AdapterContext, InboundProviderAdapter, ProviderPollOptions, ProviderPollResult } from '../provider-adapter.js';
 import { POLL_CADENCE_MS } from '../provider-adapter.js';
 import type { OwnedInboxReadLease } from '../registration.js';
-import { createDiscordInboxAdapter, type DiscordInboxHttp } from './discord.js';
+import { createDiscordInboxAdapter, type DiscordInboxCatalogSnapshot, type DiscordInboxHttp } from './discord.js';
+import { describeInboxHttpFailure } from './inbox-http.js';
 import { createDiscordInboxHttpOwner } from './discord-http.js';
 
 import { resolveDiscordInboxIdentity, type DiscordInboxIdentity } from './discord-identity.js';
@@ -40,8 +41,6 @@ export interface DiscordInboxOwnerOptions {
   readonly assertCurrent: () => void;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
-  /** Clock for the read-proof reuse window; defaults to `Date.now`. */
-  readonly now?: () => number;
 }
 
 /** A constructor seam for hosts/tests; never decoded from settings or messages. */
@@ -107,17 +106,15 @@ function captureChannels(value: DiscordInboxChannelScope): DiscordInboxChannelSc
     signal: fields.signal!.value, assertCurrent: fields.assertCurrent!.value });
 }
 
-function unavailable(configured?: boolean): ProviderPollResult {
-  return { items: [], state: 'unavailable', error: 'Discord inbox account or source is unavailable', ...(configured === undefined ? {} : { configured }) };
+function unavailable(configured?: boolean, error = 'The Discord inbox settings, credential or screening changed during the poll; the next poll uses the current ones'): ProviderPollResult {
+  return { items: [], state: 'unavailable', error, ...(configured === undefined ? {} : { configured }) };
 }
+const OTHER_ACCOUNT = 'The token in surfaces.discord.botToken belongs to a different bot than surfaces.discord.inboxBotUserId names; replace the token or update the setting';
 function usableToken(token: string | null): token is string {
   return typeof token === 'string' && /^[A-Za-z0-9._-]{1,4096}$/.test(token);
 }
 
 /** Explicit real provider owner; nothing polls, reads credentials or registers at construction. */
-/** How long a completed read proof may start another read. */
-const READ_PROOF_REUSE_MS = 5_000;
-
 export async function createDiscordInboxOwner(
   context: Pick<AdapterContext, 'credentials' | 'logger' | 'resolveRouteId'>,
   options: DiscordInboxOwnerOptions,
@@ -148,6 +145,10 @@ export async function createDiscordInboxOwner(
   let identitySignal = AbortSignal.any([signal, identityLifetime.signal]);
   let commitEpoch: number | undefined;
   let pollSignal: AbortSignal | undefined;
+  // Set when Discord said this credential is not this bot; stored rows stay
+  // unreadable until a poll proves the account again.
+  let identityRefused = false;
+  let refusalText = OTHER_ACCOUNT;
   const invalidateIdentity = (): void => {
     const retired = identityLifetime;
     verifiedCredential = undefined; credentialObservation = undefined; identityEpoch += 1; commitEpoch = undefined;
@@ -204,9 +205,11 @@ export async function createDiscordInboxOwner(
   const sameObservation = (a: IntakeCredentialSnapshot, b: IntakeCredentialSnapshot): boolean =>
     a.state !== 'unsupported' && b.state !== 'unsupported' && a.state === b.state && a.revision === b.revision
     && (a.state !== 'resolved' || (b.state === 'resolved' && a.value === b.value));
+  // Set when the local credential changed under a proven bot; reads wait for the next poll.
+  let credentialStale = false;
   const assertCredentialCurrent = (): void => {
     if (!credentialObservation || !sameObservation(credentialObservation, observeCredential(KEY))) {
-      invalidateIdentity(); throw new Error('Discord inbox credential incarnation was revoked');
+      invalidateIdentity(); credentialStale = true; throw new Error('Discord inbox credential incarnation was revoked');
     }
   };
   const readCredential = async (): Promise<string | null> => {
@@ -221,7 +224,7 @@ export async function createDiscordInboxOwner(
       || value !== (observation.state === 'resolved' ? observation.value : null)) {
       invalidateIdentity(); throw new Error('Discord inbox credential observation was revoked');
     }
-    credentialObservation = observation;
+    credentialObservation = observation; credentialStale = false;
     return value;
   };
   const matchesAccount = (body: unknown): boolean => {
@@ -236,51 +239,62 @@ export async function createDiscordInboxOwner(
     const response = await httpOwner.http(url, request);
     current();
     if (url.pathname === '/api/v10/users/@me') {
+      // An outage says nothing about the account. A denial or a different bot does.
+      if (!response.ok && response.reason !== 'denied') return response;
       if (!response.ok || !matchesAccount(response.body)) {
-        // Transport outages throw before this point. A decoded authentication
-        // denial, malformed identity or different account invalidates proof.
-        invalidateIdentity();
-        throw new Error('Discord inbox account verification unavailable');
+        invalidateIdentity(); identityRefused = true;
+        refusalText = response.ok ? OTHER_ACCOUNT : describeInboxHttpFailure('Discord', 'denied', { credentialKey: KEY });
+        return { ok: false, reason: 'denied' };
       }
       if (epoch !== identityEpoch) throw new Error('Discord inbox identity proof was revoked');
+      identityRefused = false;
       onVerified(epoch);
     }
     return response;
   };
 
-  const readCatalog = async (token: string, input: { selfId: string; beforeMs: number; signal?: AbortSignal }) => {
+  // Each configured channel is checked on its own: one that cannot be read is
+  // named and skipped, the others are still read.
+  const readCatalog = async (token: string, input: { selfId: string; signal?: AbortSignal }): Promise<DiscordInboxCatalogSnapshot> => {
     current();
     if (input.selfId !== account.userId || input.signal?.aborted) throw new Error('Discord inbox catalog is unavailable');
-    const epoch = identityEpoch;
     const found: { id: string; type: 1 }[] = [];
+    const unreadable: DiscordInboxCatalogSnapshot['unreadable'][number][] = [];
     for (const id of channels.channelIds) {
       const response = await httpOwner.http(new URL(`https://discord.com/api/v10/channels/${id}`), {
         method: 'GET', headers: { Authorization: `Bot ${token}`, Accept: 'application/json' },
         signal: input.signal ? AbortSignal.any([signal, input.signal]) : signal,
       });
       current();
-      const body = response.body;
-      if (!response.ok || !body || typeof body !== 'object' || types.isProxy(body) || Array.isArray(body)) {
-        invalidateIdentity(); throw new Error('Discord inbox channel is unavailable');
+      if (!response.ok) {
+        // Losing the whole route (rate limit, outage, proxy) ends the check; a refusal is this channel's own.
+        if (response.reason !== 'denied' && response.reason !== 'not-found') throw new Error(describeInboxHttpFailure('Discord', response.reason, { retryAt: response.retryAt, credentialKey: KEY }));
+        unreadable.push({ id, reason: response.reason });
+        continue;
       }
-      const fields = Object.getOwnPropertyDescriptors(body);
-      if (fields.id?.value !== id || fields.type?.value !== 1
-        || fields.guild_id?.value !== undefined) {
-        invalidateIdentity(); throw new Error('Discord inbox channel scope mismatch');
+      const body = response.body;
+      const fields = body && typeof body === 'object' && !types.isProxy(body) && !Array.isArray(body) ? Object.getOwnPropertyDescriptors(body) : undefined;
+      if (!fields || fields.id?.value !== id || fields.type?.value !== 1 || fields.guild_id?.value !== undefined) {
+        unreadable.push({ id, reason: 'not-a-dm' });
+        continue;
       }
       found.push({ id, type: 1 });
     }
     current();
-    if (epoch !== identityEpoch || input.signal?.aborted || await readCredential() !== token) {
-      invalidateIdentity(); throw new Error('Discord inbox catalog was revoked');
-    }
-    // Complete only for the explicit immutable intended-channel scope above.
-    // No bot REST endpoint is claimed to enumerate historical private channels.
-    return { complete: true, accountId: account.userId, channels: found };
+    return { accountId: account.userId, channels: found, unreadable };
   };
 
+  // One reader for the owner's lifetime, so the bot id, the channel check and
+  // partly read windows carry over from tick to tick.
+  let pollToken: string | null = null;
+  let pollVerified: number | undefined;
+  const delegate = createDiscordInboxAdapter({ logger: context.logger,
+    ...(resolveRouteId ? { resolveRouteId } : {}),
+    credentials: { resolveRef: async () => null, resolveConfigSecret: async (key) => key === KEY ? pollToken : null },
+  }, { http: async (url, request) => identityHttp(pollToken ?? '', (epoch) => { pollVerified = epoch; })(url, request),
+    listDmChannels: input => readCatalog(pollToken ?? '', input), mapItem: mapper });
   const adapter: InboundProviderAdapter = {
-    id: 'discord', pollIntervalMs: POLL_CADENCE_MS.realtime,
+    id: 'discord', pollIntervalMs: POLL_CADENCE_MS.realtime, checkpointKind: 'conversation',
     assertCurrent() {
       current(); assertCredentialCurrent();
       if (commitEpoch === undefined || commitEpoch !== identityEpoch || !verifiedCredential || pollSignal?.aborted) {
@@ -293,25 +307,23 @@ export async function createDiscordInboxOwner(
       try {
         return await own(async () => {
           const token = await readCredential();
-          if (!usableToken(token)) { configured = false; invalidateIdentity(); return unavailable(false); }
+          if (!usableToken(token)) { configured = false; invalidateIdentity(); delegate.forget(); return unavailable(false, 'surfaces.discord.botToken is not set to a Discord bot token'); }
           configured = true;
-          if (verifiedCredential && verifiedCredential !== token) invalidateIdentity();
-          let verified: number | undefined;
-          const delegate = createDiscordInboxAdapter({ logger: context.logger,
-            ...(resolveRouteId ? { resolveRouteId } : {}),
-            credentials: { resolveRef: async () => null, resolveConfigSecret: async (key) => key === KEY ? token : null },
-          }, { http: identityHttp(token, (epoch) => { verified = epoch; }),
-            listDmChannels: input => readCatalog(token, input), mapItem: mapper });
+          if (verifiedCredential !== token) { if (verifiedCredential) invalidateIdentity(); delegate.forget(); }
+          pollToken = token; pollVerified = undefined;
           const result = await delegate.poll(options);
           current();
+          if (identityRefused) return unavailable(true, refusalText);
           // A token swapped during API/mapping work cannot commit an old poll.
-          if (await readCredential() !== token) { invalidateIdentity(); return unavailable(true); }
+          if (await readCredential() !== token) { invalidateIdentity(); delegate.forget(); return unavailable(true); }
           // A later auth denial must not be overwritten by an older mapper/read.
-          if (verified !== undefined && verified !== identityEpoch) return unavailable(true);
-          if (verified !== undefined) { verifiedCredential = token; commitEpoch = verified; }
+          if (pollVerified !== undefined && pollVerified !== identityEpoch) return unavailable(true);
+          if (pollVerified !== undefined) verifiedCredential = token;
+          // The bot was proven by this poll or by an earlier one with this same credential.
+          commitEpoch = verifiedCredential === token ? identityEpoch : undefined;
           return result;
         });
-      } catch { return unavailable(configured); }
+      } catch { return unavailable(configured, identityRefused ? refusalText : undefined); }
     },
   };
 
@@ -329,52 +341,38 @@ export async function createDiscordInboxOwner(
         if (verified === undefined || verified !== identityEpoch) throw new Error();
         verifiedCredential = token;
       }
-      await readCatalog(token, { selfId: account.userId, beforeMs: Date.now(), signal });
+      const checked = await readCatalog(token, { selfId: account.userId, signal });
+      if (checked.unreadable.length > 0) throw new Error();
       current();
       return identityEpoch;
     } catch { throw new Error('Discord inbox account scope is unavailable'); }
   });
-  // Every read and lease validation proves the account again, which costs the identity call plus one call
-  // per configured channel. Readers that arrive while a proof is already in flight share it, so a
-  // refreshing client cannot multiply those calls into provider throttling. Eligibility proofs never join it.
-  let forcedVerification: Promise<number> | undefined;
-  const now = options.now ?? Date.now;
-  // A proof that finished moments ago also covers the next read that starts, so back-to-back lists cost one
-  // proof each instead of two. A lease's closing validation never reuses it.
-  let proven: { epoch: number; at: number } | undefined;
-  const verifyForced = (fresh = true): Promise<number> => {
-    if (!fresh && proven && now() - proven.at >= 0 && now() - proven.at < READ_PROOF_REUSE_MS
-      && proven.epoch === identityEpoch && verifiedCredential) {
-      const epoch = proven.epoch;
-      return (async () => { current(); assertCredentialCurrent(); return epoch; })();
-    }
-    if (forcedVerification) return forcedVerification;
-    const shared = verifyIdentity(true);
-    forcedVerification = shared;
-    const clear = (): void => { if (forcedVerification === shared) forcedVerification = undefined; };
-    void shared.then(epoch => { proven = { epoch, at: now() }; clear(); }, clear);
-    return shared;
-  };
   return {
     account, scopeId, triageStoreFileName, adapter,
-    invalidateCredential: invalidateIdentity,
-    async assertReadCurrent() { await verifyForced(false); },
+    invalidateCredential() { invalidateIdentity(); delegate.forget(); },
+    // Stored rows belong to this account's own mirror. A read needs no call to
+    // Discord: the poll owns "is this still the same bot" and revokes reads
+    // (identityEpoch) the moment Discord says otherwise.
+    // A changed local credential is seen at once from the in-memory secret
+    // record (no I/O) and fences reads until a poll proves the bot again.
+    async assertReadCurrent() {
+      current();
+      if (credentialStale) throw new Error('The Discord credential changed; the next poll checks it');
+      if (credentialObservation) assertCredentialCurrent();
+      if (identityRefused) throw new Error(refusalText);
+    },
     async acquireReadLease() {
-      const epoch = await verifyForced(false);
-      const observed = identityLifetime;
+      current();
+      if (credentialStale) throw new Error('The Discord credential changed; the next poll checks it');
+      if (credentialObservation) assertCredentialCurrent();
+      if (identityRefused) throw new Error(refusalText);
+      const epoch = identityEpoch;
       const assertCurrent = (): void => {
-        current(); assertCredentialCurrent();
-        if (observed.signal.aborted || epoch !== identityEpoch || !verifiedCredential) {
-          throw new Error('Discord inbox read identity was revoked');
-        }
+        current();
+        if (credentialObservation) assertCredentialCurrent();
+        if (epoch !== identityEpoch || identityRefused) throw new Error('Discord inbox read identity was revoked');
       };
-      assertCurrent();
-      return Object.freeze(Object.assign(async () => {
-        assertCurrent();
-        const latest = await verifyForced();
-        assertCurrent();
-        if (latest !== epoch) throw new Error('Discord inbox read identity was revoked');
-      }, { assertCurrent }));
+      return Object.freeze(Object.assign(async () => { assertCurrent(); }, { assertCurrent }));
     },
     async verifyEligibility() {
       const epoch = await verifyIdentity(true);

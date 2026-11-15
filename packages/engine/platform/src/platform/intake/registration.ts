@@ -11,7 +11,7 @@ import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
 import { HandlerError, registerCatalogHandler } from '../control-plane/host-handlers.js';
 import { InboxCursorStore } from './cursor-store.js';
 import { InboundPoller } from './poller.js';
-import { aggregateInbox, normalizeInboxQuery, type InboxListInput, type InboxListOutput, type ChannelInboxItem } from './aggregator.js';
+import { aggregateInbox, normalizeInboxQuery, type InboxListInput, type InboxListOutput } from './aggregator.js';
 import type { ImapUidCheckpoint, InboundProviderAdapter } from './provider-adapter.js';
 import type { TriageReceiptScope } from './triage/types.js';
 import type { IntakeLogger } from './context.js';
@@ -34,17 +34,11 @@ export interface InboxSurfaceContext {
   readonly logger: IntakeLogger;
 }
 
-export interface InboxTriageOverlay {
-  readonly triageScore: number;
-  readonly triageLabel: 'spam' | 'priority' | 'normal';
-  readonly triageTags: readonly string[];
-}
-
 export interface RegisterInboxSurfaceOptions {
   /** Required: the product supplies every configured or unavailable provider. */
   readonly adapters: ReadonlyMap<string, InboundProviderAdapter>;
-  /** Trusted host-only overlay; runs inside all held account leases. */
-  readonly enrichTriage?: (items: readonly Readonly<ChannelInboxItem>[], source?: object) => Promise<ReadonlyMap<string, InboxTriageOverlay>>;
+  /** Told after a poll stored new or changed rows for a provider (triage scores them). */
+  readonly onCommitted?: (providerId: string) => void;
   readonly storeFileName?: string;
   readonly beforeSourceRevisionWrite?: (() => void) | undefined;
   readonly triageScope?: TriageReceiptScope | undefined;
@@ -76,7 +70,6 @@ export interface OwnedInboxReadLease {
 }
 
 export interface OwnedInboxRead extends InboxReadSource {
-  readonly enrichTriage?: RegisterInboxSurfaceOptions['enrichTriage'];
   validate(): Promise<void>;
   assertCurrent(): void;
   release(): void;
@@ -85,6 +78,8 @@ export interface OwnedInboxRead extends InboxReadSource {
 /** One independent account store/poller lifetime; never owns a catalog binding. */
 export interface OwnedInboxSource extends InboxSurfaceRegistration {
   readonly providerIds: readonly string[];
+  /** This account's mirror, for the owner's own work on it (triage). Not a read path for callers. */
+  readonly mirror?: InboxCursorStore;
   acquireRead(requireFinalProof?: boolean): Promise<OwnedInboxRead>;
 }
 
@@ -119,7 +114,7 @@ export function createOwnedInboxSource(
     beforeSourceRevisionWrite: options.beforeSourceRevisionWrite,
     triageScope: options.triageScope,
   });
-  const poller = new InboundPoller({ adapters, store, logger: ctx.logger });
+  const poller = new InboundPoller({ adapters, store, logger: ctx.logger, ...(options.onCommitted ? { onCommitted: options.onCommitted } : {}) });
   let closed = false;
   let closing: Promise<void> | undefined;
   let setupFailed = false;
@@ -241,16 +236,11 @@ export function createOwnedInboxSource(
           if (types.isPromise(result)) void result.catch(() => {});
           if (result !== undefined) throw new Error('Read fence must be synchronous');
         } catch { throw scopeUnavailable(); }
-        if (requireFinalProof && store.hasInvalidItemNamespaces(providerIds)) {
-          throw new HandlerError('Inbox item IDs must belong to their provider namespace', 'INBOX_ITEM_NAMESPACE_INVALID', 503);
-        }
       };
       assertCurrent();
       return { providerIds, sources: { store, poller }, release: retire, assertCurrent,
-        ...(options.enrichTriage ? { enrichTriage: (items: readonly Readonly<ChannelInboxItem>[]) => options.enrichTriage!(items, store) } : {}),
         async validate() {
           if (closed || released) throw stopped();
-          await checkRead();
           try { await lease?.(); } catch { throw scopeUnavailable(); }
           assertCurrent();
         },
@@ -290,7 +280,7 @@ export function createOwnedInboxSource(
     void cleanup().then(resolve, reject);
     return result;
   };
-  return { ready, close, providerIds, acquireRead, getImapCheckpoint: (providerId) => store.getImapCheckpoint(providerId), unregister: () => { void close(); } };
+  return { ready, close, providerIds, mirror: store, acquireRead, getImapCheckpoint: (providerId) => store.getImapCheckpoint(providerId), unregister: () => { void close(); } };
 }
 
 /**
@@ -330,21 +320,7 @@ export function registerCompositeInboxSurface(
       try {
         for (const source of included) reads.push(await source.acquireRead(requireFinalProof));
         for (const read of reads) read.assertCurrent();
-        const result = await aggregateInbox(!requireFinalProof && reads.length === 1 ? reads[0]!.sources : composeInboxReads(reads), query);
-        // Only overlays cross the extension seam. Detached immutable rows, exact
-        // source membership and mechanical projection preserve identity/paging.
-        for (const read of reads) if (read.enrichTriage) {
-          const rows = result.items.filter(item => read.providerIds.includes(item.provider));
-          const overlays = await read.enrichTriage(Object.freeze(rows.map(item => Object.freeze({ ...item }))));
-          for (const item of rows) {
-            delete item.triageScore; delete item.triageLabel; delete item.triageTags;
-            const overlay = Map.prototype.get.call(overlays, item.id) as InboxTriageOverlay | undefined;
-            if (overlay) {
-              item.triageScore = overlay.triageScore; item.triageLabel = overlay.triageLabel;
-              item.triageTags = [...overlay.triageTags];
-            }
-          }
-        }
+        const result = aggregateInbox(!requireFinalProof && reads.length === 1 ? reads[0]!.sources : composeInboxReads(reads), query);
         const validations = await Promise.allSettled(reads.map(read => read.validate()));
         for (const validation of validations) if (validation.status === 'rejected') throw validation.reason;
         if (closed) throw stopped();

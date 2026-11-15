@@ -1,4 +1,4 @@
-import type { JudgmentPort, YesNoReading } from '@goodvibes-jev/judgment';
+import type { YesNoReading } from '@goodvibes-jev/judgment';
 
 /** Provider-neutral semantic input; the complete supplied object is inspected before projection. */
 export interface TriageInput {
@@ -55,33 +55,8 @@ export type TriagePreview = (Omit<TriageEvidence, 'inputHash' | 'receiptVersion'
   readonly inputHash?: never;
   readonly receiptVersion?: never;
 };
-export interface TriageStoredRecord {
-  readonly latest: TriageReceipt;
-  /** Last settled evidence is historical when latest is held/unavailable. */
-  readonly settled: TriageEvidence | null;
-}
-/** A single atomic write contains both settled evidence and latest-attempt receipts. */
-export interface TriageStore {
-  readBatch(ids: readonly string[]): Promise<ReadonlyMap<string, TriageStoredRecord>>;
-  /** Invoke the original publication restriction synchronously after all awaits and immediately before publishing. */
-  commit(receipts: readonly TriageReceipt[], signal?: AbortSignal, assertPublicationCurrent?: () => void): Promise<void>;
-  close(): Promise<void>;
-}
 /** Private receipt comparison domain, never model input or execution authority. */
 export interface TriageReceiptScope {
   readonly providerId: string;
   readonly accountScopeId: string;
-}
-export interface RunInboxTriageOptions {
-  readonly receiptScope?: TriageReceiptScope | undefined;
-  /** Genuine original InboxCursorStore, matched under the caller's read lease.
-   * Without it, scoring may be displayed/persisted as history but never lends
-   * a fresh enrichment label to later arbitrary input objects. */
-  readonly receiptSource?: object | undefined;
-  readonly port?: JudgmentPort;
-  readonly store?: TriageStore;
-  readonly workingDirectory?: string;
-  readonly dryRun?: boolean;
-  readonly signal?: AbortSignal;
-  readonly beforeReceiptWrite?: ((receiptVersion?: 3 | 4) => void) | undefined;
 }

@@ -11,6 +11,7 @@ import { acquireCrossProcessLock } from '../platform/src/platform/state/durable-
 import { acquireOwnedTriageIdentity } from '../platform/src/platform/intake/providers/account-identity.js';
 import { fileURLToPath } from 'node:url';
 import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { seedInboxRows } from './_helpers/inbox-seed.ts';
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 const clock = Date.parse('2026-11-08T12:00:00Z');
@@ -21,11 +22,11 @@ async function archivedDefault(root: string, historical = false) {
   const mirrorFileName = historical ? 'inbox-owned-23c3d67ce110d2b3dd64b99e555cbe3fb1fcd05f1877fe83612b3aaee99296d7.sqlite'
     : (await acquireOwnedTriageIdentity(owner, 'fixture', 'default-retention-account')).mirrorFileName;
   const store = new InboxCursorStore(root, mirrorFileName, { now: () => 0, sweepIntervalMs: 0 });
-  await store.init(); store.upsertItems([
+  await store.init(); await seedInboxRows(store, [
     { id: 'fixture:old', provider: 'fixture', kind: 'dm', fromDigest: 'cafebabedeadbeef', subjectPreview: '', bodyPreview: 'Archived default preview', receivedAt: clock - INBOX_ITEM_TTL_MS - 1, unread: true },
     { id: 'fixture:recent', provider: 'fixture', kind: 'dm', fromDigest: 'cafebabedeadbeef', subjectPreview: '', bodyPreview: 'Current default preview', receivedAt: clock - 1, unread: true },
   ]);
-  await store.flush(); await store.close();
+  await store.close();
   const selected = await acquireOwnedTriageIdentity(owner, 'fixture', 'default-retention-account');
   return { ...selected, path: store.dbPath, async count() {
     const read = new InboxCursorStore(root, selected.mirrorFileName, { now: () => 0, sweepIntervalMs: 0 });
@@ -65,11 +66,10 @@ async function archived(root: string, provider: 'discord' | 'slack' | 'email', t
   const name = `inbox-${provider}-${provider === 'discord' ? randomUUID() : (provider === 'slack' ? 'a' : 'b').repeat(64)}.sqlite`;
   const store = new InboxCursorStore(root, name, { now: () => 0, sweepIntervalMs: 0, itemTtlMs: ttl, itemCap: cap });
   await store.init(); cleanups.push(() => store.close());
-  store.upsertItems([
+  await seedInboxRows(store, [
     { id: `${provider}:old`, provider, kind: 'dm', fromDigest: 'cafebabedeadbeef', subjectPreview: '', bodyPreview: 'Archived protected preview', receivedAt: clock - INBOX_ITEM_TTL_MS - 1, unread: true },
     { id: `${provider}:recent`, provider, kind: 'dm', fromDigest: 'cafebabedeadbeef', subjectPreview: '', bodyPreview: 'Current protected preview', receivedAt: clock - 1, unread: true },
   ]);
-  await store.flush();
   return { store, name, path: store.dbPath, async count() {
     const reader = new InboxCursorStore(root, name, { now: () => 0, sweepIntervalMs: 0, itemTtlMs: ttl, itemCap: cap });
     await reader.init(); try { return reader.countItems(); } finally { await reader.close(); }
@@ -187,9 +187,9 @@ async function mirrorWitness(root: string, fileName: string) {
   } finally { database.close(); }
 }
 
-test('current ten-column mirror cleanup preserves surviving native revisions, protected fields, cursors and both policies', async () => {
+test('current mirror cleanup preserves surviving native revisions, protected fields, cursors and both policies', async () => {
   const root = makeProjectTempDir('inactive-inbox-current-schema'), row = await archived(root, 'email'); await row.store.close();
-  await editImage(root, row.name, "INSERT INTO cursors (provider, nextSince) VALUES ('email', 123)");
+  await editImage(root, row.name, "INSERT OR REPLACE INTO cursors (provider, nextSince) VALUES ('email', 123)");
   await editImage(root, row.name, "INSERT INTO imap_checkpoints (provider, checkpoint) VALUES ('email', 'original-checkpoint')");
   const before = await mirrorWitness(root, row.name);
   expect(before.sourcePolicy).toEqual([{ singleton: 1, version: 1 }]);
@@ -203,7 +203,10 @@ test('current ten-column mirror cleanup preserves surviving native revisions, pr
 
 test('the historical nine-column mirror remains supported without adopting new source policy or revisions', async () => {
   const root = makeProjectTempDir('inactive-inbox-old-nine'), row = await archived(root, 'slack'); await row.store.close();
+  await editImage(root, row.name, 'DROP INDEX idx_items_seq');
+  await editImage(root, row.name, 'ALTER TABLE items DROP COLUMN seq');
   await editImage(root, row.name, 'ALTER TABLE items DROP COLUMN triage_revision');
+  await editImage(root, row.name, 'DROP TABLE triage_receipts');
   await editImage(root, row.name, 'DROP TABLE inbox_source_revision_policy');
   let result: InactiveInboxSweep | undefined;
   const owner = janitor(root, value => { result = value; }); await owner.ready; await owner.close();

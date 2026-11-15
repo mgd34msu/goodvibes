@@ -8,8 +8,8 @@
 //
 //   * The mirror is already live. Each adapter polls its provider on that
 //     provider's own cadence (Slack/Discord 30s, email 60s) and writes what it
-//     pulls straight into the store. Explicit triage can score its admitted
-//     mirror selection; polling and listing never initiate scoring.
+//     pulls straight into the store. Triage scores new rows after a poll and
+//     stores the label beside the row; listing reads it and never scores.
 //   * A fetch-per-call would put a third-party rate limit behind a read verb
 //     any client may call at any rate, so one impatient UI could get every
 //     other consumer throttled by Slack.
@@ -18,8 +18,8 @@
 //     standby node fetch too, which is exactly the double-read the election
 //     exists to prevent, while the READ is deliberately ungated so a standby
 //     still answers.
-//   * Optional triage enrichment reads exact-input receipts under the owned
-//     account read lease. It never initiates a judgment or provider write.
+//   * A triage label is read from the same row it describes and shows only
+//     while the row's content is the content that was scored.
 //   * A provider outage would turn a read into a hang or a 500 instead of a
 //     partial answer with a named cause.
 //
@@ -37,7 +37,7 @@
 // no items, but that absence is not silently presented as a quiet mailbox.
 // ---------------------------------------------------------------------------
 
-import type { InboxCursorStore, InboxPosition } from './cursor-store.js';
+import { publishedSequenceBound, type InboxCursorStore, type InboxPosition } from './cursor-store.js';
 import type { InboundPoller, ProviderStatus } from './poller.js';
 import type { ImapUidCheckpoint, InboundChannelItem } from './provider-adapter.js';
 import { GatewayVerbError as HandlerError } from '../control-plane/routes/gateway-verb-error.js';
@@ -117,7 +117,7 @@ export interface InboxListQuery {
 
 /** Everything the aggregator reads from. Both are already-built collaborators. */
 export interface InboxAggregatorSources {
-  readonly store: Pick<InboxCursorStore, 'listItems' | 'countItems' | 'countItemsByProvider' | 'maxReceivedAt' | 'getImapCheckpoint'>;
+  readonly store: Pick<InboxCursorStore, 'listItems' | 'countItems' | 'countItemsByProvider' | 'maxSequence' | 'getImapCheckpoint'>;
   readonly poller: Pick<InboundPoller, 'snapshotStatuses' | 'isProviderRunning'>;
 }
 
@@ -128,8 +128,8 @@ export interface InboxAggregatorSources {
 /**
  * A page cursor is the position of the last item handed out, base64url-encoded
  * so it reads as opaque and callers do not build one by hand. It is NOT the
- * `cursor` field in the answer, that one is the freshness watermark a caller
- * feeds back as `since`. Two different questions ("what is new" vs "the next
+ * `cursor` field in the answer, that one is the freshness watermark (the
+ * store's commit sequence) a caller feeds back as `since`. Two different questions ("what is new" vs "the next
  * page down"), so two different values; collapsing them is how a paging client
  * ends up silently re-reading page one forever.
  */
@@ -245,6 +245,11 @@ export function toWireItem(item: InboundChannelItem): ChannelInboxItem {
   };
   if (item.subjectPreview.length > 0) wire.subject = item.subjectPreview;
   if (item.routeId != null) wire.routeId = item.routeId;
+  if (item.triageLabel !== undefined) {
+    wire.triageLabel = item.triageLabel;
+    if (item.triageScore !== undefined) wire.triageScore = item.triageScore;
+    wire.triageTags = [...(item.triageTags ?? [])];
+  }
   return wire;
 }
 
@@ -306,7 +311,10 @@ export function aggregateInbox(
       || (status.mailboxProgress?.pendingMessages ?? 0) > 0),
   };
 
-  const watermark = store.maxReceivedAt(providers);
+  // "What is new" is "committed after": the watermark is the newest commit
+  // sequence, held below any commit still being written so nothing published
+  // after this read can fall behind it.
+  const watermark = Math.min(store.maxSequence(providers), publishedSequenceBound());
   const nextSince = Math.max(query.since ?? 0, watermark);
   if (nextSince > 0) output.cursor = String(nextSince);
 

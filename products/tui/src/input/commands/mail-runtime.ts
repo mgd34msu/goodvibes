@@ -70,9 +70,12 @@ function truncate(value: string, width: number): string {
 
 /** The parts of the `email.inbox.list` output beyond the messages themselves. */
 type InboxListOutput = OperatorMethodOutput<'email.inbox.list'>;
+type TriageLabel = 'spam' | 'priority' | 'normal';
 interface InboxPageNotes {
   readonly total?: InboxListOutput['total'] | undefined;
   readonly unreadable?: InboxListOutput['unreadable'] | undefined;
+  /** Triage label by UID, from the daemon's inbox mirror. */
+  readonly labels?: ReadonlyMap<number, TriageLabel> | undefined;
 }
 
 export function renderInboxList(messages: readonly InboxMessage[], notes: InboxPageNotes = {}): string {
@@ -87,7 +90,9 @@ export function renderInboxList(messages: readonly InboxMessage[], notes: InboxP
   const lines = [`Inbox: ${messages.length} message${messages.length === 1 ? '' : 's'}${notes.total !== undefined && notes.total > messages.length ? ` of ${notes.total}` : ''}:`];
   for (const message of messages) {
     const mark = message.unread ? '●' : ' ';
-    lines.push(`  ${mark} ${String(message.uid).padStart(6)}  ${truncate(message.from, 28).padEnd(28)}  ${truncate(message.subject, 48)}`);
+    const label = notes.labels?.get(message.uid);
+    const tag = label === 'spam' ? '[spam] ' : label === 'priority' ? '[priority] ' : '';
+    lines.push(`  ${mark} ${String(message.uid).padStart(6)}  ${truncate(message.from, 28).padEnd(28)}  ${tag}${truncate(message.subject, 48)}`);
   }
   if (unreadableLine) lines.push(unreadableLine);
   lines.push('', '  /mail read <uid>: open one message');
@@ -201,6 +206,27 @@ async function withStatusOnFailure(
   }
 }
 
+/**
+ * Triage labels the daemon's inbox mirror holds for this mailbox, by UID. The
+ * mirror names a mail row `email:<account>:<uidvalidity>:<uid>`. Best effort:
+ * a mirror that cannot be read leaves the list unlabelled, never failed.
+ */
+async function triageLabels(gateway: Gateway, shown: number): Promise<ReadonlyMap<number, TriageLabel>> {
+  const labels = new Map<number, TriageLabel>();
+  if (shown === 0) return labels;
+  try {
+    const mirror = await gateway.invoke('channels.inbox.list', { ...READ_INVOCATION_CONTEXT, body: { provider: 'email', limit: 500 } }) as {
+      items?: readonly { id?: unknown; triageLabel?: unknown }[] };
+    for (const item of mirror.items ?? []) {
+      const uid = typeof item.id === 'string' ? Number(item.id.slice(item.id.lastIndexOf(':') + 1)) : Number.NaN;
+      if (Number.isSafeInteger(uid) && (item.triageLabel === 'spam' || item.triageLabel === 'priority' || item.triageLabel === 'normal')) {
+        labels.set(uid, item.triageLabel);
+      }
+    }
+  } catch { /* No mirror, no labels. */ }
+  return labels;
+}
+
 async function listInbox(ctx: CommandContext, gateway: Gateway, limit: number, withStatus: boolean): Promise<void> {
   await withStatusOnFailure(ctx, gateway, 'list', async () => {
     const result = await gateway.invoke('email.inbox.list', {
@@ -215,7 +241,8 @@ async function listInbox(ctx: CommandContext, gateway: Gateway, limit: number, w
         nextActions: [],
       }));
     }
-    ctx.print(renderInboxList(result.messages ?? [], { total: result.total, unreadable: result.unreadable }));
+    const labels = await triageLabels(gateway, (result.messages ?? []).length);
+    ctx.print(renderInboxList(result.messages ?? [], { total: result.total, unreadable: result.unreadable, labels }));
   });
 }
 

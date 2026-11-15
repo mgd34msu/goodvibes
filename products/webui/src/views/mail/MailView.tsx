@@ -31,7 +31,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Inbox, Mail, Pencil, RefreshCw, Reply } from 'lucide-react';
-import { client as platformClient } from '../../lib/goodvibes';
+import { client as platformClient, invokeMethod } from '../../lib/goodvibes';
 import type { EmailDraftCreateInput, EmailSendInput, EmailUnreadableMessage } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
@@ -40,6 +40,7 @@ import { useToast } from '../../lib/toast';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { DetailPane, EmptyState, ListDetail, SkeletonRows } from '../../components/data-view/DataView';
 import { Button, Checkbox, IconButton, Row, RowList, Select, StatusDot } from '../../components/ui';
+import { Chip } from '../../components/ui/Chip';
 import { DateField } from '../../components/ui/DateField';
 import { mailRefusalNote } from '../../lib/mail-refusal';
 import { sortInboxMessagesByUidDescending } from '../../lib/mail-order';
@@ -88,6 +89,19 @@ function UnreadableNote({ items }: { items: readonly EmailUnreadableMessage[] })
       </div>
     </div>
   );
+}
+
+/** Spam and priority labels by UID from a `channels.inbox.list` answer; normal mail carries no mark. */
+function mailTriageLabels(answer: unknown): ReadonlyMap<number, 'spam' | 'priority'> {
+  const labels = new Map<number, 'spam' | 'priority'>();
+  const items = answer && typeof answer === 'object' && Array.isArray((answer as { items?: unknown }).items)
+    ? (answer as { items: readonly { id?: unknown; triageLabel?: unknown }[] }).items : [];
+  for (const item of items) {
+    if (typeof item.id !== 'string' || (item.triageLabel !== 'spam' && item.triageLabel !== 'priority')) continue;
+    const uid = Number(item.id.slice(item.id.lastIndexOf(':') + 1));
+    if (Number.isSafeInteger(uid) && uid > 0) labels.set(uid, item.triageLabel);
+  }
+  return labels;
 }
 
 function normalizeRecipients(value: string): string {
@@ -167,6 +181,15 @@ export function MailView({ tabs }: MailViewProps = {}) {
         ...(since ? { since: new Date(`${since}T00:00:00.000Z`).toISOString() } : {}),
       }),
   });
+  // Triage labels live in the daemon's inbox store, one row per message named
+  // `email:<account>:<uidvalidity>:<uid>`. Best effort: a daemon without that
+  // store, or one that refuses, leaves the list unlabelled, never failed.
+  const triage = useQuery({
+    queryKey: ['email', 'triage-labels'] as const,
+    queryFn: () => invokeMethod('channels.inbox.list', { provider: 'email', limit: 500 }),
+    retry: false,
+  });
+  const labels = useMemo(() => mailTriageLabels(triage.data), [triage.data]);
   const detail = useMailMessage(selectedUid);
 
   const inboxNote = inbox.error ? mailRefusalNote(inbox.error) : null;
@@ -337,7 +360,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
       <DateField value={since} onChange={setSince} aria-label="Only messages on or after this date" />
       <Checkbox checked={unreadOnly} onChange={setUnreadOnly}>Unread only</Checkbox>
       <div className="dv-filters__end">
-        <IconButton label="Refresh inbox" icon={<RefreshCw />} onClick={() => void inbox.refetch()} />
+        <IconButton label="Refresh inbox" icon={<RefreshCw />} onClick={() => { void inbox.refetch(); void triage.refetch(); }} />
       </div>
     </>
   );
@@ -426,7 +449,11 @@ export function MailView({ tabs }: MailViewProps = {}) {
               meta={`${message.from} · ${message.bodyPreview}`}
               selected={message.uid === selectedUid}
               onSelect={() => selectMessage(message.uid)}
-              trailing={<span className="mail-row__date">{formatShort(message.date)}</span>}
+              trailing={<>
+                {labels.get(message.uid) === 'spam' ? <Chip size="sm" tone="warn">Spam</Chip> : null}
+                {labels.get(message.uid) === 'priority' ? <Chip size="sm" tone="info">Priority</Chip> : null}
+                <span className="mail-row__date">{formatShort(message.date)}</span>
+              </>}
             />
           ))}
         </RowList>

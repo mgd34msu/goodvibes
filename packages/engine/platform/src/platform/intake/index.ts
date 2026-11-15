@@ -16,17 +16,14 @@ export { sha256First, digestSender, stripMarkup, normalizeWhitespace } from './t
 export type {
   ImapUidCheckpoint, ImapUidCheckpointAdvance, ImapUidTerminalDisposition,
   InboundChannelItem, ProviderState, ProviderPollResult, ProviderPollOptions,
-  AdapterContext, RouteResolver, InboundProviderAdapter, AdapterFactory,
+  AdapterContext, RouteResolver, InboundProviderAdapter,
 } from './provider-adapter.js';
-export {
-  POLL_CADENCE_MS, registerAdapterFactory, registeredProviderIds, buildAdapters,
-  clearAdapterRegistry,
-} from './provider-adapter.js';
+export { POLL_CADENCE_MS } from './provider-adapter.js';
 export {
   InboxCursorStore, INBOX_ITEM_TTL_MS, INBOX_ITEM_CAP, INBOX_SWEEP_INTERVAL_MS,
 } from './cursor-store.js';
 export type {
-  InboxSweepSummary, InboxCursorStoreOptions, InboxPosition, InboxQuery,
+  InboxSweepSummary, InboxCursorStoreOptions, InboxPosition, InboxQuery, InboxTriageReceiptRow, InboxTriageCandidate,
 } from './cursor-store.js';
 
 export { InboundPoller } from './poller.js';
@@ -47,24 +44,15 @@ export type {
   OwnedInboxReadLease, OwnedInboxRead, OwnedInboxSource,
 } from './registration.js';
 
-export {
-  ImapClient as IntakeImapClient, imapDate as intakeImapDate,
-  parseFetchResponse as parseIntakeFetchResponse, decodeHeader as decodeIntakeImapHeader,
-} from './providers/imap-client.js';
-export type {
-  ImapConfig as IntakeImapConfig, ImapEnvelope as IntakeImapEnvelope,
-  ImapSocket as IntakeImapSocket, ImapConnector as IntakeImapConnector,
-} from './providers/imap-client.js';
-export { resolveRouteId as resolveIntakeRouteId } from './providers/route-util.js';
-
 export { inboxTriage, TRIAGE_MODEL } from './triage/battery.js';
 export { labelToTag } from './triage/evidence.js';
 export { scoreInboxTriage } from './triage/scorer.js';
-export { SqliteTriageStore } from './triage/store.js';
-export { runInboxTriage, readTriageMetadataBatch, enrichItemsWithTriage } from './triage/pipeline.js';
+export { triageMirrorRows, previewInboxTriage } from './triage/pipeline.js';
+export type { TriageRow } from './triage/pipeline.js';
+export { triageAuthorityFromScreening } from './triage/screening-route.js';
 export type {
   TriageInput, TriageLabel, TriageAttribution, TriageSourceBinding, TriageBinding, TriageEvidence, TriageFailureReceipt, TriagePreview, TriageReceipt,
-  TriageStoredRecord, TriageStore, RunInboxTriageOptions, TriageReceiptScope,
+  TriageReceiptScope,
 } from './triage/types.js';
 
 export { composeInboxReads } from './composite.js';
@@ -72,7 +60,6 @@ export type { InboxReadSource } from './composite.js';
 
 export { createOwnedTriagedInboxSource, registerTriagedInbox } from './triage/owned.js';
 export type { InboxTriageAuthority, OwnedTriagedInboxOptions, OwnedInboxTriageResult, OwnedTriagedInboxSource } from './triage/owned.js';
-export type { InboxTriageOverlay } from './registration.js';
 
 // Explicit host-owned provider mutation handles. No default registration or polling.
 export { createTriageTagger } from './triage/tagger/index.js';

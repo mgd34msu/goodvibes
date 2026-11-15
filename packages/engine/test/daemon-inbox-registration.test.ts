@@ -4,6 +4,7 @@ import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.j
 import { registerInboxSurface, INBOX_LIST_METHOD_ID, type InboxPollingControl, type InboxSurfaceContext } from '../platform/src/platform/intake/registration.js';
 import type { InboundProviderAdapter } from '../platform/src/platform/intake/provider-adapter.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { seedInboxRows } from './_helpers/inbox-seed.ts';
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { resolve, promise }; }
 function fixture() {
@@ -168,23 +169,6 @@ test('a product account guard withholds stored rows and sanitizes its rejection'
   } finally { await registration.close(); }
 });
 
-test('account scope is rechecked after the mirror snapshot before returning rows', async () => {
-  const { ctx } = fixture(); let permitted = true; let reads = 0;
-  const original = InboxCursorStore.prototype.listItems;
-  const query = spyOn(InboxCursorStore.prototype, 'listItems').mockImplementation(function (this: InboxCursorStore, ...args) {
-    const result = original.apply(this, args);
-    reads += 1;
-    queueMicrotask(() => { permitted = false; });
-    return result;
-  });
-  const registration = registerInboxSurface(ctx, { adapters: new Map(), assertReadCurrent() { if (!permitted) throw new Error('private'); } });
-  const reading = invoke(ctx); void reading.catch(() => {});
-  try {
-    await expect(reading).rejects.toMatchObject({ code: 'INBOX_SCOPE_UNAVAILABLE' });
-    expect(reads).toBe(1);
-  } finally { await Promise.allSettled([reading, registration.close()]); query.mockRestore(); }
-});
-
 test('default gated start waits for the admitted initial seed to complete', async () => {
   const { ctx } = fixture(); const entered = deferred(), release = deferred();
   let control!: InboxPollingControl, started = false;
@@ -263,7 +247,7 @@ test('legacy single-source reads preserve persisted unknown-provider filtering',
   const { ctx } = fixture();
   const store = new InboxCursorStore(ctx.workingDirectory);
   await store.init();
-  store.upsertItems([{ id: 'legacy-row', provider: 'removed-provider', receivedAt: Date.now(), kind: 'dm',
+  await seedInboxRows(store, [{ id: 'legacy-row', provider: 'removed-provider', receivedAt: Date.now(), kind: 'dm',
     fromDigest: '0123456789abcdef', subjectPreview: 'Legacy', bodyPreview: 'Legacy body', unread: true }]);
   await store.close();
   const registration = registerInboxSurface(ctx, { adapters: new Map() });

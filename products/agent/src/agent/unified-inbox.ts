@@ -105,6 +105,8 @@ export interface UnifiedInboxInboundMessageItem {
   readonly routeId: string | null;
   readonly threadId: string | null;
   readonly attachmentCount: number;
+  /** The inbox's triage label for this message's current content; null until it is scored. */
+  readonly triageLabel: 'spam' | 'priority' | 'normal' | null;
 }
 
 export type UnifiedInboxItem =
@@ -313,6 +315,7 @@ function toInboundMessageItem(raw: Record<string, unknown>): UnifiedInboxInbound
     routeId: readStringOrNull(raw, 'routeId'),
     threadId: readStringOrNull(raw, 'threadId'),
     attachmentCount: typeof raw.attachmentCount === 'number' ? raw.attachmentCount : 0,
+    triageLabel: raw.triageLabel === 'spam' || raw.triageLabel === 'priority' || raw.triageLabel === 'normal' ? raw.triageLabel : null,
   };
 }
 

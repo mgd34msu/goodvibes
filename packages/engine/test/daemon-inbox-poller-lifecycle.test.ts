@@ -159,7 +159,7 @@ describe('inbound poller owned generations', () => {
   });
 
   test('storage failure preserves explicit adapter-reported configuration', async () => {
-    const { poller, store } = await fixture(async () => empty);
+    const { poller, store } = await fixture(async () => ({ state: 'ready', configured: true, items: [item('unsaved')] }));
     const flush = spyOn(store, 'commitTimestampPoll').mockRejectedValueOnce(new Error('fixture persistence failed'));
     cleanups.push(() => flush.mockRestore());
     await poller.pollOnce();

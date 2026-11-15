@@ -4,7 +4,6 @@ import { createSystemOnePort, DECISION_MODEL_PROFILES, observeJudgmentModel, reu
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureTriageJudgment } from '../platform/src/platform/intake/triage/model-result.js';
 import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
-import { checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
 import { prepareJudgmentResult } from '../platform/src/platform/gate/judgment-result.js';
 import { readCustomTagMeaning } from '../platform/src/platform/intake/triage/tagger/meaning.js';
 
@@ -38,7 +37,6 @@ for (const profile of DECISION_MODEL_PROFILES) {
     if (!receipt) throw new Error('Actual triage fixture returned no receipt');
     expect(requests).toEqual([profile.model]);
     expect(receipt).toMatchObject({ receiptVersion: 4, status: 'settled', model: profile.model, actualModel: resolved, targetModel: profile.model });
-    expect(checkTriageReceipt(receipt)).toEqual(receipt);
   });
 }
 
@@ -84,15 +82,12 @@ test('native model proof cannot be obtained by copying valid results or forgeabl
   expect((await scoreInboxTriage([item], forged))[0]?.status).toBe('unavailable');
 });
 
-test('unavailable receipts do not invent a requested or answered model; historical receipts remain readable', async () => {
+test('unavailable receipts do not invent a requested or answered model', async () => {
   const [unavailable] = await scoreInboxTriage([item]);
   if (!unavailable) throw new Error('Missing unavailable receipt');
   expect(unavailable).toMatchObject({ receiptVersion: 3, status: 'unavailable' });
   expect(Object.hasOwn(unavailable, 'inputHash')).toBe(false);
   expect(unavailable?.model).toBeUndefined(); expect(unavailable?.actualModel).toBeUndefined();
-  expect(checkTriageReceipt(unavailable)).toEqual(unavailable);
-  const historical: Record<string, unknown> = { ...unavailable, inputHash: 'a'.repeat(64), status: 'unavailable', model: 'jev-latest' };
-  delete historical.receiptVersion; expect<unknown>(checkTriageReceipt(historical)).toEqual(historical);
 });
 
 test('a borrowed recorder getter is rejected without executing user code', async () => {

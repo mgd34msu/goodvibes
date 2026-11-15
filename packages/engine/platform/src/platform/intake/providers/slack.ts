@@ -1,34 +1,37 @@
 /**
- * Private Slack Web API intake prerequisite. Nothing registers this adapter.
- * The host must supply HTTP and a mapper that admits digest/previews under the
- * InboundChannelItem privacy contract. This module does not redact text, and
- * shape validation does not establish that the host's privacy work is correct.
- * Source/repairs: docs/contracts/daemon-inbox-and-triage.md#slack-complete-history-window.
+ * Slack Web API inbox reader, built by the Slack account owner (slack-owner.ts),
+ * which supplies HTTP and the screening mapper. This module does not redact
+ * text; the mapper decides what may be stored and shown.
+ *
+ * Progress is kept per direct-message conversation (conversation-scan.ts), so a
+ * rate limit or one unreadable conversation keeps what the tick already read.
+ * The account's own id and the conversation list are read when the reader
+ * starts, after a failure, and every ten minutes, not on every tick.
  */
 import type { AdapterContext, InboundChannelItem, InboundProviderAdapter, ProviderPollOptions, ProviderPollResult } from '../provider-adapter.js';
 import { POLL_CADENCE_MS } from '../provider-adapter.js';
+import type { ProtectedInboxPreview } from '../protected-preview.js';
+import { createConversationScanState, scanConversations, ScanFailure, type ScanCandidate, type ScanPage } from './conversation-scan.js';
+import { describeInboxHttpFailure, type InboxHttpResult } from './inbox-http.js';
 
 const PROVIDER = 'slack';
 const CREDENTIAL_KEY = 'surfaces.slack.botToken';
 const MAX_LIST_PAGES = 50;
-const MAX_HISTORY_PAGES = 20;
-const MAX_TOTAL_HISTORY_PAGES = 200;
+const HISTORY_PAGE_SIZE = 200;
+/** History requests one tick may make across all conversations. */
+const PAGES_PER_TICK = 40;
 const MAX_ITEMS = 1_000;
-/** A poll with no cursor starts this far back, so a long-lived account is not paged from its first message. */
+/** A conversation with no cursor starts this far back, so a long-lived account is not paged from its first message. */
 const SEED_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
-/** Window scans one poll may make while narrowing past a page budget or crossing empty windows. */
-const MAX_WINDOW_SCANS = 8;
-const MIN_WINDOW_MS = 2_000;
+/** How long a conversation list stays in use before it is read again (new conversations appear by then). */
+const CATALOG_REFRESH_MS = 10 * 60 * 1_000;
 
-/**
- * Resolves only after response decoding and resource cleanup. The host owns
- * transport timeouts/body-byte bounds and cancellation; the adapter awaits it.
- */
+/** Resolves (never rejects) after decoding and resource cleanup; the host owns deadlines and byte bounds. */
 export type SlackInboxHttp = (url: URL, request: {
   method: 'GET';
   headers: { Authorization: string; Accept: 'application/json' };
   signal?: AbortSignal;
-}) => Promise<{ ok: boolean; body: unknown }>;
+}) => Promise<InboxHttpResult>;
 
 /** Private, raw mapper input. It must never be logged or forwarded unchanged. */
 export interface SlackInboxMappingInput {
@@ -38,19 +41,8 @@ export interface SlackInboxMappingInput {
   readonly text: string;
 }
 
-/**
- * An explicit host admission decision. fromDigest is the first 16 hex
- * characters of SHA-256 of senderId; previews must satisfy
- * InboundChannelItem. No normalization helper alone implements this contract.
- * Returning null/undefined withholds the poll rather than silently skipping it.
- */
-export interface SlackInboxMappedFields {
-  readonly fromDigest: string;
-  readonly subjectPreview: string;
-  readonly bodyPreview: string;
-}
-export type SlackInboxMapper = (input: SlackInboxMappingInput, signal?: AbortSignal) =>
-  SlackInboxMappedFields | null | undefined | Promise<SlackInboxMappedFields | null | undefined>;
+/** The screening decision for one message (see protected-preview.ts). */
+export type SlackInboxMapper = (input: SlackInboxMappingInput, signal?: AbortSignal) => Promise<ProtectedInboxPreview>;
 
 export interface SlackInboxPorts {
   readonly http: SlackInboxHttp;
@@ -59,47 +51,25 @@ export interface SlackInboxPorts {
   readonly now?: () => number;
 }
 
-interface Candidate {
-  key: string;
-  channelId: string;
-  senderId: string;
-  text: string;
-  ts: string;
-  receivedAt: number;
-  kind: InboundChannelItem['kind'];
+/** A reader that remembers the account and its conversations between ticks. */
+export interface SlackInboxAdapter extends InboundProviderAdapter {
+  /** Drop what was learned about the account (a different credential is in use). */
+  forget(): void;
 }
 
-/** Only adapter-created, closed diagnostics may reach its result. */
-const diagnostics = new WeakMap<object, string>();
-function fail(message: string): never {
-  const error = new Error(message);
-  diagnostics.set(error, message);
-  throw error;
-}
-function diagnostic(error: unknown): string | undefined {
-  // WeakMap identity lookup never inspects an external rejection value. Even
-  // instanceof can execute a throwing Proxy getPrototypeOf trap.
-  return error !== null && (typeof error === 'object' || typeof error === 'function')
-    ? diagnostics.get(error) : undefined;
-}
-function checkActive(signal?: AbortSignal): void {
-  if (signal?.aborted) fail('Slack poll cancelled');
-}
-function unavailable(error: string, configured?: boolean): ProviderPollResult {
-  return { items: [], state: 'unavailable', error, ...(configured === undefined ? {} : { configured }) };
-}
+class Unreadable extends Error {}
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('Slack response shape invalid');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Unreadable();
   return value as Record<string, unknown>;
 }
 function optionalString(value: unknown, max: number): string | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== 'string' || value.length > max) fail('Slack response shape invalid');
+  if (typeof value !== 'string' || value.length > max) throw new Unreadable();
   return value;
 }
 function identifier(value: unknown): string {
   const result = optionalString(value, 200);
-  if (!result) fail('Slack response identifier missing');
+  if (!result) throw new Unreadable();
   return result;
 }
 function nextCursor(response: Record<string, unknown>): string | undefined {
@@ -108,251 +78,177 @@ function nextCursor(response: Record<string, unknown>): string | undefined {
   return cursor === null ? undefined : optionalString(cursor, 4_096) || undefined;
 }
 function rows(value: unknown, max: number): unknown[] {
-  if (!Array.isArray(value) || value.length > max) fail('Slack response page invalid');
+  if (!Array.isArray(value) || value.length > max) throw new Unreadable();
   return value;
 }
 function timestamp(value: unknown): { ts: string; receivedAt: number } {
   // Slack's timestamp grammar, not a reading of message meaning. Parse decimal
   // components rather than accepting parseFloat's trailing garbage/exponents.
-  if (typeof value !== 'string' || !/^\d{1,13}\.\d{6}$/.test(value)) fail('Slack message timestamp invalid');
+  if (typeof value !== 'string' || !/^\d{1,13}\.\d{6}$/.test(value)) throw new Unreadable();
   const [seconds, micros] = value.split('.');
   const receivedAt = Number(seconds) * 1_000 + Math.round(Number(micros) / 1_000);
-  if (!Number.isSafeInteger(receivedAt) || receivedAt <= 0) fail('Slack message timestamp invalid');
+  if (!Number.isSafeInteger(receivedAt) || receivedAt <= 0) throw new Unreadable();
   return { ts: value, receivedAt };
 }
-function classify(message: Record<string, unknown>, self: string, text: string, ts: string): Candidate['kind'] {
-  if (message.reactions !== undefined && !Array.isArray(message.reactions)) fail('Slack response shape invalid');
+function classify(message: Record<string, unknown>, self: string, text: string, ts: string): InboundChannelItem['kind'] {
   const thread = optionalString(message.thread_ts, 40);
-  if (message.user === self && Array.isArray(message.reactions) && message.reactions.length > 0) return 'reaction';
   if (text.includes(`<@${self}>`)) return 'mention';
   return thread && thread !== ts ? 'thread' : 'dm';
 }
-function compare(a: Candidate, b: Candidate): number {
-  return a.receivedAt - b.receivedAt || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+/** Slack's own error code (a fixed token such as `missing_scope`), never free text. */
+function slackErrorCode(body: Record<string, unknown>): string | undefined {
+  return typeof body.error === 'string' && /^[a-z_]{1,64}$/.test(body.error) ? body.error : undefined;
+}
+function refusal(method: string, code: string | undefined): string {
+  if (code === 'invalid_auth' || code === 'not_authed' || code === 'token_revoked' || code === 'account_inactive' || code === 'token_expired') {
+    return `Slack refused the token in ${CREDENTIAL_KEY} (${code}); replace it with a working token`;
+  }
+  if (code === 'missing_scope') return `The Slack token lacks a scope ${method} needs (missing_scope); add im:read and im:history to the Slack app and reinstall it`;
+  if (code === 'ratelimited') return 'Slack is rate limiting this inbox; the next poll tries again';
+  return `Slack refused ${method}${code ? ` (${code})` : ''}; the next poll tries again`;
 }
 
-/** Private factory: no global fetch, implicit mapper, registration or public barrel. */
-export function createSlackInboxAdapter(ctx: AdapterContext, ports: SlackInboxPorts): InboundProviderAdapter {
-  // Reject omission before any credential/HTTP work, including untyped callers.
+export function createSlackInboxAdapter(ctx: AdapterContext, ports: SlackInboxPorts): SlackInboxAdapter {
   if (typeof ports?.http !== 'function' || typeof ports?.mapItem !== 'function') {
     throw new Error('Slack inbox requires HTTP and an explicit item mapper');
   }
+  let self: string | undefined;
+  let catalog: { readonly channels: ReadonlyMap<string, string | undefined>; readonly at: number } | undefined;
+  const scan = createConversationScanState();
+  const forget = (): void => { self = undefined; catalog = undefined; scan.resume.clear(); scan.next = undefined; };
   return {
     id: PROVIDER,
+    checkpointKind: 'conversation',
     pollIntervalMs: POLL_CADENCE_MS.realtime,
+    forget,
     async poll(opts: ProviderPollOptions): Promise<ProviderPollResult> {
       let configured: boolean | undefined;
-      let stage = 'Slack poll failed';
-      let signal: AbortSignal | undefined;
+      const signal = opts.signal;
+      const cancelled = (): ProviderPollResult => ({ items: [], state: 'unavailable', error: describeInboxHttpFailure('Slack', 'cancelled', { credentialKey: CREDENTIAL_KEY }), ...(configured === undefined ? {} : { configured }) });
       try {
-        // Options can be supplied by hosts with accessors. Capture them once
-        // inside the boundary; never reread them while handling a failure.
-        signal = opts.signal;
-        const { limit, since } = opts;
-        checkActive(signal);
+        const { limit, since, conversations } = opts;
         const cutoff = Math.floor((ports.now ?? Date.now)());
-        if (!Number.isSafeInteger(cutoff) || cutoff <= 0 || !Number.isSafeInteger(limit)
-          || limit < 1 || limit > MAX_ITEMS || (since !== undefined
-            && (!Number.isSafeInteger(since) || since < 0))) fail('Slack poll bounds invalid');
-        stage = 'Slack credential lookup failed';
+        if (!Number.isSafeInteger(cutoff) || cutoff <= 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ITEMS
+          || (since !== undefined && (!Number.isSafeInteger(since) || since < 0))) {
+          return { items: [], state: 'unavailable', error: 'The Slack inbox was asked for an invalid range; this is a defect, report it' };
+        }
+        if (signal?.aborted) return cancelled();
         const token = await ctx.credentials.resolveConfigSecret(CREDENTIAL_KEY);
-        checkActive(signal);
-        if (!token || !token.trim()) return unavailable('missing surfaces.slack.botToken', false);
+        if (signal?.aborted) return cancelled();
+        if (!token || !token.trim()) return { items: [], state: 'unavailable', error: `${CREDENTIAL_KEY} is not set; add a Slack bot or user token to read this inbox`, configured: false };
         if (!token.startsWith('xoxb-') && !token.startsWith('xoxp-')) {
-          return unavailable('surfaces.slack.botToken is not a Slack bot/user token', false);
+          return { items: [], state: 'unavailable', error: `${CREDENTIAL_KEY} is not a Slack bot (xoxb-) or user (xoxp-) token`, configured: false };
         }
         configured = true;
-        const get = async (method: 'auth.test' | 'conversations.list' | 'conversations.history', params: Record<string, string>) => {
-          checkActive(signal);
-          stage = `Slack ${method} request failed`;
+        const get = async (method: 'auth.test' | 'conversations.list' | 'conversations.history', params: Record<string, string>, channel?: string) => {
           const url = new URL(`https://slack.com/api/${method}`);
           for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
           const response = await ports.http(url, {
             method: 'GET', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
             ...(signal === undefined ? {} : { signal }),
           });
-          checkActive(signal);
-          if (!response.ok) fail(`Slack ${method} HTTP failure`);
-          stage = `Slack ${method} response unreadable`;
-          const body = record(response.body);
-          if (body.ok !== true) fail(`Slack ${method} refused`);
+          if (!response.ok) {
+            const subject = channel ? `Slack conversation ${channel}` : undefined;
+            const scope = channel && (response.reason === 'not-found' || response.reason === 'denied') ? 'conversation' : 'tick';
+            throw new ScanFailure(describeInboxHttpFailure('Slack', response.reason, { retryAt: response.retryAt, subject, credentialKey: CREDENTIAL_KEY,
+              settingsHint: 'it is skipped until the conversation can be read again' }), scope, response.reason !== 'rate-limited');
+          }
+          let body: Record<string, unknown>;
+          try { body = record(response.body); } catch { throw new ScanFailure(`Slack answered ${method} in a shape the inbox does not read; the next poll tries again`, 'tick', true); }
+          if (body.ok !== true) {
+            const code = slackErrorCode(body);
+            const scope = channel && (code === 'channel_not_found' || code === 'not_in_channel') ? 'conversation' : 'tick';
+            throw new ScanFailure(refusal(method, code), scope, true);
+          }
           return body;
         };
-        // Unknown self identity would silently turn mentions/reactions into DMs.
-        const self = identifier((await get('auth.test', {})).user_id);
-        const channels = new Map<string, string | undefined>();
-        let cursor: string | undefined;
-        const listCursors = new Set<string>();
-        for (let page = 0; ; page += 1) {
-          if (page >= MAX_LIST_PAGES) fail('Slack conversation page budget exhausted');
-          const list = await get('conversations.list', { types: 'im', limit: '100', ...(cursor ? { cursor } : {}) });
-          for (const entry of rows(list.channels, 100)) {
-            const channel = record(entry);
-            channels.set(identifier(channel.id), optionalString(channel.user, 200));
-          }
-          cursor = nextCursor(list);
-          if (!cursor) break;
-          if (listCursors.has(cursor)) fail('Slack conversation cursor repeated');
-          listCursors.add(cursor);
-        }
-        // Keep only the oldest limit+1 distinct candidates. A window is scanned
-        // completely before the poller's single global timestamp may pass it.
-        // One request budget for the whole poll, however many windows it tries.
-        let totalHistoryPages = 0;
-        // A conversation read completely stays valid for any narrower window, so a rescan only re-reads the
-        // conversation that overflowed. A truncated read (more than limit+1 candidates) kept only the oldest ones, so
-        // it also serves a later floor only while the new upper bound stays at or below its newest kept candidate.
-        const complete = new Map<string, { floor: number; upper: number; truncated: boolean; items: Candidate[] }>();
-        // Where the overflowing conversation's newest pages ended: everything at or after it is already known to be
-        // dense, so the next window can end there instead of searching blindly.
-        let overflowReachedMs: number | undefined;
-        const scan = async (floor: number, upper: number): Promise<Candidate[] | undefined> => {
-          const found: Candidate[] = [];
-          for (const [channelId, channelUser] of channels) {
-            const cached = complete.get(channelId);
-            if (cached && cached.floor <= floor && upper <= cached.upper
-              && (!cached.truncated || cached.floor === floor || upper <= (cached.items[cached.items.length - 1]?.receivedAt ?? 0))) {
-              for (const candidate of cached.items) {
-                if (candidate.receivedAt >= upper || candidate.receivedAt <= floor || found.some(other => other.key === candidate.key)) continue;
-                found.push(candidate); found.sort(compare);
-                if (found.length > limit + 1) found.pop();
-              }
-              continue;
-            }
-            const own: Candidate[] = [];
-            let truncated = false;
-            let oldestSeenMs = Number.POSITIVE_INFINITY;
-            let historyCursor: string | undefined;
-            const historyCursors = new Set<string>();
+        // Unknown self identity would silently turn the owner's own messages and mentions into inbound DMs.
+        if (self === undefined || catalog === undefined || cutoff - catalog.at >= CATALOG_REFRESH_MS || cutoff < catalog.at) {
+          try {
+            self = identifier((await get('auth.test', {})).user_id);
+            const channels = new Map<string, string | undefined>();
+            let cursor: string | undefined;
+            const seen = new Set<string>();
             for (let page = 0; ; page += 1) {
-              if (totalHistoryPages >= MAX_TOTAL_HISTORY_PAGES) fail('Slack history page budget exhausted');
-              // A conversation too busy for this window is narrowed by the caller; a window is never committed partially.
-              if (page >= MAX_HISTORY_PAGES) {
-                overflowReachedMs = Number.isFinite(oldestSeenMs) ? oldestSeenMs : undefined;
-                return undefined;
+              if (page >= MAX_LIST_PAGES) throw new ScanFailure(`This Slack account has more direct-message conversations than the inbox lists (${String(MAX_LIST_PAGES * 100)})`, 'tick', true);
+              const list = await get('conversations.list', { types: 'im', limit: '100', ...(cursor ? { cursor } : {}) });
+              for (const entry of rows(list.channels, 100)) {
+                const channel = record(entry);
+                channels.set(identifier(channel.id), optionalString(channel.user, 200));
               }
-              totalHistoryPages += 1;
-              const history = await get('conversations.history', {
-                channel: channelId, limit: '50', latest: (upper / 1_000).toFixed(6),
-                oldest: (floor / 1_000).toFixed(6),
-                ...(historyCursor ? { cursor: historyCursor } : {}),
-              });
-              if (history.is_limited === true) fail('Slack history is limited');
-              if (history.is_limited !== undefined && typeof history.is_limited !== 'boolean') fail('Slack response shape invalid');
-              for (const entry of rows(history.messages, 50)) {
-                const message = record(entry);
-                const subtype = optionalString(message.subtype, 200);
-                const bot = optionalString(message.bot_id, 200);
-                if (subtype === 'bot_message' || bot) {
-                  // Skipped rows still count toward the pages read, so they still tell where the pages ended.
-                  try { oldestSeenMs = Math.min(oldestSeenMs, timestamp(message.ts).receivedAt); } catch { /* An unreadable skipped row only loses the hint. */ }
-                  continue;
-                }
-                const { ts, receivedAt } = timestamp(message.ts);
-                oldestSeenMs = Math.min(oldestSeenMs, receivedAt);
-                // Exclude the upper bound's entire rounded-ms bucket. A later poll
-                // will see it whole, including arrivals during this scan.
-                if (receivedAt <= floor || receivedAt >= upper) continue;
-                const text = optionalString(message.text, 40_000) ?? '';
-                const senderId = optionalString(message.user, 200) || channelUser || channelId;
-                const key = `${channelId}:${ts}`;
-                if (found.some(candidate => candidate.key === key)) continue;
-                const candidate = { key, channelId, senderId, text, ts, receivedAt, kind: classify(message, self, text, ts) };
-                found.push(candidate); found.sort(compare);
-                if (found.length > limit + 1) found.pop();
-                own.push(candidate); own.sort(compare);
-                if (own.length > limit + 1) { own.pop(); truncated = true; }
-              }
-              historyCursor = nextCursor(history);
-              if (history.has_more !== undefined && typeof history.has_more !== 'boolean') fail('Slack response shape invalid');
-              if (!historyCursor) {
-                if (history.has_more === true) fail('Slack history continuation missing');
-                break;
-              }
-              // A cursor remains authoritative even on an empty or short page.
-              if (historyCursors.has(historyCursor)) fail('Slack history cursor repeated');
-              historyCursors.add(historyCursor);
+              cursor = nextCursor(list);
+              if (!cursor || seen.has(cursor)) break;
+              seen.add(cursor);
             }
-            complete.set(channelId, { floor, upper, truncated, items: own });
+            catalog = { channels, at: cutoff };
+          } catch (error) {
+            catalog = undefined;
+            throw error;
           }
-          return found;
+        }
+        const me = self!;
+        const known = catalog!.channels;
+        const readPage = async (channel: string, window: { floor: number; upper: number; continueFrom?: string }): Promise<ScanPage> => {
+          if (signal?.aborted) throw new ScanFailure(describeInboxHttpFailure('Slack', 'cancelled', { credentialKey: CREDENTIAL_KEY }), 'tick', false);
+          const history = await get('conversations.history', {
+            channel, limit: String(HISTORY_PAGE_SIZE), latest: window.continueFrom ?? (window.upper / 1_000).toFixed(6),
+            oldest: (window.floor / 1_000).toFixed(6),
+          }, channel);
+          try {
+            const candidates: ScanCandidate[] = [];
+            let oldestTs: string | undefined;
+            let oldestMs = Number.POSITIVE_INFINITY;
+            for (const entry of rows(history.messages, HISTORY_PAGE_SIZE)) {
+              const message = record(entry);
+              const { ts, receivedAt } = timestamp(message.ts);
+              if (receivedAt < oldestMs) { oldestMs = receivedAt; oldestTs = ts; }
+              const subtype = optionalString(message.subtype, 200);
+              const author = optionalString(message.user, 200);
+              // Bot posts and the account's own messages are not inbound mail to the owner.
+              if (subtype === 'bot_message' || optionalString(message.bot_id, 200) || author === me) continue;
+              const text = optionalString(message.text, 40_000) ?? '';
+              candidates.push({ key: `${channel}:${ts}`, conversation: channel, senderId: author || known.get(channel) || channel,
+                text, receivedAt, kind: classify(message, me, text, ts) });
+            }
+            if (history.has_more !== undefined && typeof history.has_more !== 'boolean') throw new Unreadable();
+            const more = history.has_more === true && oldestTs !== undefined && oldestMs > window.floor;
+            return { candidates, ...(more ? { next: oldestTs! } : {}) };
+          } catch (error) {
+            if (error instanceof ScanFailure) throw error;
+            throw new ScanFailure(`Slack answered conversations.history for conversation ${channel} in a shape the inbox does not read; it is skipped this poll`, 'conversation', false);
+          }
         };
-        let floor = since ?? Math.max(0, cutoff - SEED_WINDOW_MS), upper = cutoff;
-        let candidates: Candidate[] = [];
-        let endedAtStop = false;
-        for (let scans = 1; ; scans += 1) {
-          const found = await scan(floor, upper);
-          if (found === undefined) {
-            // End the next window where the overflowing pages stopped; without that, halve toward the floor. The
-            // oldest complete prefix is what the cursor may pass.
-            if (scans >= MAX_WINDOW_SCANS || upper - floor < MIN_WINDOW_MS) fail('Slack history page budget exhausted');
-            // The upper bound excludes its whole millisecond, so end one past the stop to read that bucket whole.
-            const stopEnd = overflowReachedMs === undefined ? undefined : overflowReachedMs + 1;
-            endedAtStop = stopEnd !== undefined && stopEnd > floor + 1 && stopEnd < upper;
-            upper = endedAtStop && stopEnd !== undefined ? stopEnd : floor + Math.floor((upper - floor) / 2);
-            overflowReachedMs = undefined;
-            continue;
-          }
-          candidates = found;
-          // A complete but empty window moves the floor, so a quiet stretch cannot hold the cursor behind a busy one.
-          if (candidates.length > 0 || upper >= cutoff) break;
-          // Never report "empty" for a poll that stopped short of the cutoff.
-          if (scans >= MAX_WINDOW_SCANS) fail('Slack history page budget exhausted');
-          // The upper bound's own millisecond was excluded from this scan, so the next window starts one before it.
-          floor = upper - 1;
-          // A window that ended at an overflow stop would hit the same stop again from the cutoff, so halve instead.
-          upper = endedAtStop ? floor + Math.floor((cutoff - floor) / 2) : cutoff;
-          endedAtStop = false;
-        }
-        let selected = candidates.slice(0, limit);
-        const omitted = candidates[limit];
-        if (omitted) selected = selected.filter(candidate => candidate.receivedAt < omitted.receivedAt);
-        if (candidates.length > 0 && selected.length === 0) fail('Slack item budget cannot cover timestamp group');
-        const items: InboundChannelItem[] = [];
-        for (const candidate of selected) {
-          checkActive(signal);
-          stage = 'Slack item mapping failed';
-          const mapped = await ports.mapItem({ senderId: candidate.senderId, channelId: candidate.channelId,
-            subject: 'Direct message', text: candidate.text }, signal);
-          checkActive(signal);
-          if (!mapped) fail('Slack item mapping withheld or invalid');
-          // Snapshot host accessors exactly once. Validation and projection
-          // must use the same immutable primitive values, never later reads.
-          const { fromDigest, subjectPreview, bodyPreview } = mapped;
-          if (typeof fromDigest !== 'string' || !/^[a-f0-9]{16}$/.test(fromDigest)
-            || typeof subjectPreview !== 'string' || subjectPreview.length > 200
-            || typeof bodyPreview !== 'string' || bodyPreview.length > 500) fail('Slack item mapping withheld or invalid');
-          // Explicit projection prevents raw/extra mapper fields from escaping.
-          const item: InboundChannelItem = {
-            id: `slack:${candidate.channelId}:${candidate.ts}`, provider: PROVIDER, kind: candidate.kind,
-            fromDigest, subjectPreview, bodyPreview,
+        const tsOf = (candidate: ScanCandidate): string => candidate.key.slice(candidate.key.indexOf(':') + 1);
+        const outcome = await scanConversations({
+          conversations: [...known.keys()].sort(),
+          floorOf: channel => conversations?.get(channel) ?? since ?? Math.max(0, cutoff - SEED_WINDOW_MS),
+          cutoff, limit, pageBudget: PAGES_PER_TICK, state: scan, readPage,
+          map: candidate => ports.mapItem({ senderId: candidate.senderId, channelId: candidate.conversation, subject: 'Direct message', text: candidate.text }, signal),
+          toItem: (candidate, fields): InboundChannelItem => ({
+            id: `slack:${candidate.conversation}:${tsOf(candidate)}`, provider: PROVIDER, kind: candidate.kind,
+            fromDigest: fields.fromDigest, subjectPreview: fields.subjectPreview, bodyPreview: fields.bodyPreview,
             receivedAt: candidate.receivedAt, unread: true,
-          };
-          if (ctx.resolveRouteId) {
-            stage = 'Slack route resolution failed';
-            try {
-              const route = await ctx.resolveRouteId({ provider: PROVIDER, fromDigest: item.fromDigest, kind: item.kind });
-              checkActive(signal);
-              if (typeof route === 'string' && route.length > 0) item.routeId = route;
-            } catch {
-              checkActive(signal);
-              // Optional routing cannot poison the item. Never echo exceptions.
-              try { await ctx.logger.warn('Slack route resolution failed'); } catch { /* Reporting is optional. */ }
-              checkActive(signal);
-            }
+          }),
+          checkActive() { if (signal?.aborted) throw new ScanFailure(describeInboxHttpFailure('Slack', 'cancelled', { credentialKey: CREDENTIAL_KEY }), 'tick', false); },
+        });
+        if (ctx.resolveRouteId) for (const item of outcome.items) {
+          try {
+            const route = await ctx.resolveRouteId({ provider: PROVIDER, fromDigest: item.fromDigest, kind: item.kind });
+            if (typeof route === 'string' && route.length > 0) item.routeId = route;
+          } catch {
+            // Optional routing cannot poison the item. Never echo exceptions.
+            try { await ctx.logger.warn('Slack route resolution failed'); } catch { /* Reporting is optional. */ }
           }
-          items.push(item);
         }
-        checkActive(signal);
-        return { items, state: items.length ? 'ready' : 'empty', configured: true };
+        if (outcome.failure?.refreshCatalog) catalog = undefined;
+        const progress = Object.keys(outcome.advance).length > 0 ? { conversationAdvance: outcome.advance } : {};
+        if (outcome.failure) return { items: outcome.items, state: 'unavailable', error: outcome.failure.message, configured: true, ...progress };
+        return { items: outcome.items, state: outcome.items.length ? 'ready' : 'empty', configured: true, ...progress };
       } catch (error) {
-        // No external exception, Slack error field, raw response, identifier,
-        // credential, or message content is rendered in a result or log.
-        let cancelled = false;
-        // An untyped host may also supply a throwing aborted getter. Failure
-        // reporting must not invoke it outside a protected boundary.
-        try { cancelled = signal?.aborted === true; } catch { /* Keep the fixed stage diagnostic. */ }
-        return unavailable(cancelled ? 'Slack poll cancelled' : diagnostic(error) ?? stage, configured);
+        catalog = undefined;
+        if (signal?.aborted) return cancelled();
+        return { items: [], state: 'unavailable', ...(configured === undefined ? {} : { configured }),
+          error: error instanceof ScanFailure ? error.message : 'Slack answered in a shape the inbox does not read; the next poll tries again' };
       }
     },
   };

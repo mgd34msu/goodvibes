@@ -221,7 +221,8 @@ function stored(path: string) {
   try {
     return {
       items: database.query('SELECT id, bodyPreview, fromDigest FROM items ORDER BY receivedAt').all(),
-      cursor: database.query<{ nextSince: number }, []>('SELECT nextSince FROM cursors WHERE provider = \'slack\'').get()?.nextSince ?? 0,
+      // Slack keeps one cursor per conversation (`slack:<channel>`); the newest stands for the account.
+      cursor: database.query<{ nextSince: number | null }, []>('SELECT MAX(nextSince) AS nextSince FROM cursors WHERE provider = \'slack\' OR provider LIKE \'slack:%\'').get()?.nextSince ?? 0,
     };
   } finally { database.close(); }
 }
@@ -237,7 +238,8 @@ test('cold composition waits for the real gate; authenticated HTTP serves protec
   expect((await f.wire(false)).status).toBe(401);
   expect(f.remote.credentialReads).toBe(0);
   expect(await f.inbox()).toMatchObject({ items: [], total: 0, providers: [{ provider: 'slack', state: 'pending', syncing: false }] });
-  expect(f.remote.slackCalls.map(call => call.path)).toEqual(['/api/auth.test']);
+  // A read of the stored inbox makes no provider request.
+  expect(f.remote.slackCalls).toEqual([]);
   expect(f.remote.sourceCalls).toEqual([]);
   await f.control.start();
   const inbox = await f.inbox();
@@ -258,8 +260,9 @@ test('same-account token rotation and restart preserve the cursor and deduplicat
   await first.host.start(); const before = stored(first.storePath);
   remote.setToken('xoxb-synthetic-rotated');
   expect((await first.inbox()).total).toBe(1);
-  expect(remote.slackCalls.at(-1)).toMatchObject({ path: '/api/auth.test', authorization: 'Bearer xoxb-synthetic-rotated' });
   await first.poll();
+  // The new token is proven by the poll, before anything it reads is stored.
+  expect(remote.slackCalls.find(call => call.authorization === 'Bearer xoxb-synthetic-rotated')?.path).toBe('/api/auth.test');
   expect(stored(first.storePath)).toEqual(before);
   expect(remote.slackCalls.at(-1)!.oldest).toBe((before.cursor / 1_000).toFixed(6));
   await first.host.close();
@@ -278,9 +281,10 @@ test.each([{ workspaceId: 'T-SYNTHETIC-OTHER', userId: account.userId }, { works
     f.remote.setToken('xoxb-synthetic-foreign'); f.remote.setAccount(foreign);
     f.remote.messages.push({ ...f.remote.messages[0]!, ts: `${Math.floor((Date.now() - 2_000) / 1_000)}.000000` });
     const previousCalls = f.remote.slackCalls.length; const previousSourceCalls = f.remote.sourceCalls.length;
-    const refused = await f.wire(); expect(refused.status).toBe(503); expect(refused.text).not.toContain(redacted);
+    // The poll owns "is this still the same account": it sees the other account and stops there.
     await f.poll();
-    expect(f.remote.slackCalls.slice(previousCalls).map(call => call.path)).toEqual(['/api/auth.test', '/api/auth.test']);
+    expect(f.remote.slackCalls.slice(previousCalls).map(call => call.path)).toEqual(['/api/auth.test']);
+    const refused = await f.wire(); expect(refused.status).toBe(503); expect(refused.text).not.toContain(redacted);
     expect(f.remote.sourceCalls).toHaveLength(previousSourceCalls);
     expect(stored(f.storePath)).toEqual(before);
     expect((await f.wire()).status).toBe(503);

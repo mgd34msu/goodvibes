@@ -16,6 +16,7 @@ export const inboxTriage = defineBattery({
     { name: 'synthetic scam', state: { subject: 'Prize notice', snippet: 'You won a fictional lottery you never entered; pay a fee to collect it.' }, expect: { spam: 'yes', urgency: 'no' } },
     { name: 'synthetic teammate request', state: { subject: 'Release review', snippet: 'Please review our release checklist before the rehearsal this afternoon.', conversationKind: 'direct' }, expect: { spam: 'no', urgency: 'yes' } },
     { name: 'synthetic routine note', state: { subject: 'Meeting notes', snippet: 'Here is the summary. No reply or action needed.' }, expect: { spam: 'no', urgency: 'no' } },
+    { name: 'synthetic urgent scam', state: { subject: 'Account closes today', snippet: 'Your mailbox will be deleted today unless you pay the fictional renewal fee at this link right now.' }, expect: { spam: 'yes', urgency: 'yes' } },
     { name: 'synthetic quoted urgency', state: { subject: 'Copy edit', snippet: 'Our sample spam says ACT NOW. This is an archived example, no action requested.' }, expect: { spam: 'no', urgency: 'no' } },
   ],
 });

@@ -1,47 +1,52 @@
-/** Explicit account-owned scoring and lease-held enrichment; never a polling hook. */
+/**
+ * One account's inbox with triage: its mirror, its poller and, when the account
+ * has a triage grant, a scoring pass that runs after each poll that stored new
+ * rows. Labels are stored beside their rows in the mirror and shown by every
+ * inbox read; a label shows only while the row's content is what was scored.
+ */
 import { join } from 'node:path';
-import { types } from 'node:util';
-import { assertSynchronousJudgmentGuard, type JudgmentPort } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { HandlerError } from '../../control-plane/host-handlers.js';
 import { acquireCrossProcessLock } from '../../state/durable-file-io.js';
-import { aggregateInbox, normalizeInboxQuery, type ChannelInboxItem, type InboxListInput } from '../aggregator.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
+import { aggregateInbox, normalizeInboxQuery, type InboxListInput } from '../aggregator.js';
 import { createOwnedInboxSource, registerCompositeInboxSurface, type InboxSurfaceContext,
-  type OwnedInboxSource, type RegisterInboxSurfaceOptions, type InboxTriageOverlay } from '../registration.js';
-import { captureInboxTriageSource } from '../cursor-store.js';
-import { captureTriageInputs } from './evidence.js';
-import { readTriageMetadataBatch, runInboxTriage } from './pipeline.js';
-import { SqliteTriageStore } from './store.js';
-import type { TriageInput, TriagePreview, TriageReceipt } from './types.js';
+  type OwnedInboxSource, type RegisterInboxSurfaceOptions } from '../registration.js';
+import { previewInboxTriage, triageMirrorRows } from './pipeline.js';
+import type { TriagePreview, TriageReceipt } from './types.js';
 import { acquireOwnedTriageIdentity } from '../providers/account-identity.js';
 
 /**
- * Constructor-only host grant, never decoded from message/configuration data.
- * The trusted host attests that this exact port is bound to the named destination
- * and authorized to read this account's protected previews with no retention.
- * A destination string alone establishes no permission. No production grant is
- * established by this module. Both revocation and a live synchronous proof are required.
+ * The account's grant to send its screened previews to a model for triage. The
+ * daemon builds it from the account's privacy-screening route
+ * (screening-route.ts), so triage goes where screening already goes, under the
+ * same retention promise, and stops when screening is revoked.
  */
 export interface InboxTriageAuthority {
-  readonly accountScopeId: string;
+  /** Absent when the grant is built for whichever account it is handed to (one grant per account). */
+  readonly accountScopeId?: string;
   readonly providerId: string;
   readonly destinationId: string;
-  readonly retention: 'ephemeral-no-log';
+  readonly retention: 'ephemeral-no-log' | 'provider-managed-zero-retention-unverified';
   readonly port: JudgmentPort;
   readonly signal: AbortSignal;
   assertCurrent(): void;
 }
-export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptions, 'storeFileName' | 'enrichTriage' | 'acquireReadLease'> {
+export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptions, 'storeFileName' | 'onCommitted' | 'acquireReadLease'> {
   /** Preserve a native account mirror already protected by its host owner lock. */
   readonly storeFileName?: string;
-  /** Preserve a native provider's already-owned opaque or historical triage selector. */
+  /** Earlier installs kept triage receipts in a file of their own; that file is no longer read. */
   readonly triageStoreFileName?: string;
   /** Native installation declaration before publishing default opaque selectors. */
   readonly beforeIdentityWrite?: (() => void) | undefined;
+  /** Native data declaration before the first triage receipt is stored in the mirror. */
   readonly beforeReceiptWrite?: ((receiptVersion?: 3 | 4) => void) | undefined;
   readonly providerId: string;
   readonly accountScopeId: string;
   readonly acquireReadLease: NonNullable<RegisterInboxSurfaceOptions['acquireReadLease']>;
   readonly authority?: InboxTriageAuthority;
+  /** Rows scored per model request (one request per batch). */
+  readonly batchSize?: number;
 }
 export interface OwnedInboxTriageResult {
   readonly receipts: readonly (TriageReceipt | TriagePreview)[];
@@ -50,25 +55,19 @@ export interface OwnedInboxTriageResult {
   readonly nextCursor?: string;
 }
 export interface OwnedTriagedInboxSource extends OwnedInboxSource {
-  /** Explicit bounded mirror selection, maximum 100 rows per call; never automatic. */
+  /** Score a selected page now, at most 100 rows; `dryRun` returns the reading without storing it. */
   runInboxTriage(query?: InboxListInput, operation?: { readonly signal?: AbortSignal; readonly dryRun?: boolean }): Promise<OwnedInboxTriageResult>;
 }
 function unavailable(): HandlerError {
-  return new HandlerError('Inbox triage authority is unavailable', 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
-}
-function synchronous(proof: () => void): void {
-  const result: unknown = proof();
-  if (types.isPromise(result)) void result.catch(() => {});
-  if (result !== undefined) throw unavailable();
-}
-/** One representation for scoring and receipt matching. No sender or metadata. */
-function inputs(rows: readonly Readonly<ChannelInboxItem>[]): readonly TriageInput[] {
-  return rows.map(row => ({ id: row.id, surface: row.provider, subject: row.subject ?? '', snippet: row.bodyPreview,
-    ...(row.kind === 'dm' ? { conversationKind: 'direct' as const }
-      : row.kind === 'thread' ? { conversationKind: 'thread' as const } : {}), unread: row.unread }));
+  return new HandlerError('Inbox triage is not enabled for this account: it has no privacy-screening model route to ask, or that route was revoked',
+    'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
 }
 
-/** Own one independent account, its mirror, semantic work, receipts and storage lock. */
+const DEFAULT_BATCH = 50;
+/** Batches one trigger may score before it waits for the next poll. */
+const MAX_BATCHES_PER_PASS = 4;
+
+/** Own one independent account, its mirror, triage and storage lock. */
 export function createOwnedTriagedInboxSource(
   ctx: Omit<InboxSurfaceContext, 'catalog'>, options: OwnedTriagedInboxOptions,
 ): Promise<OwnedTriagedInboxSource> { return createTriagedSource(ctx, options); }
@@ -77,76 +76,92 @@ async function createTriagedSource(
   ctx: Omit<InboxSurfaceContext, 'catalog'>, options: OwnedTriagedInboxOptions,
   enclosingClosing?: () => Promise<void> | undefined,
 ): Promise<OwnedTriagedInboxSource> {
-  // Construction option properties and provider membership are captured before
-  // the first await. Trusted collaborator objects remain borrowed. In particular,
-  // validating a caller-owned lease/map and then rereading it after lock
-  // acquisition would let mutation silently replace the validated account.
   ctx = Object.freeze({ ...ctx });
   options = Object.freeze({ ...options, adapters: new Map(options.adapters) });
   const { providerId, accountScopeId } = options;
   const receiptScope = Object.freeze({ providerId, accountScopeId });
-  for (const selectedFile of [options.storeFileName, options.triageStoreFileName]) if (selectedFile !== undefined && (typeof selectedFile !== 'string'
-    || selectedFile.length > 200 || selectedFile.includes('/') || selectedFile.includes('\\')
-    || selectedFile.startsWith('.') || !selectedFile.endsWith('.sqlite'))) {
+  if (options.storeFileName !== undefined && (typeof options.storeFileName !== 'string' || options.storeFileName.length > 200
+    || options.storeFileName.includes('/') || options.storeFileName.includes('\\') || options.storeFileName.startsWith('.')
+    || !options.storeFileName.endsWith('.sqlite'))) {
     throw new TypeError('Triaged inbox mirror requires a local SQLite filename');
   }
   if (!providerId || providerId.includes(':') || !accountScopeId || accountScopeId.length > 500
     || options.adapters.size !== 1 || !options.adapters.has(providerId) || typeof options.acquireReadLease !== 'function') {
     throw new TypeError('Triaged inbox requires one explicitly scoped account and read lease');
   }
-  // Capture membership and authority at construction; later option mutation grants nothing.
   const authority = options.authority;
-  const port = authority?.port, authoritySignal = authority?.signal;
+  const bound = authority !== undefined && (authority.accountScopeId === undefined || authority.accountScopeId === accountScopeId)
+    && authority.providerId === providerId && authority.destinationId.length > 0;
+  const batchSize = Math.max(1, Math.min(100, Math.floor(options.batchSize ?? DEFAULT_BATCH)));
   const gatePolling = options.gatePolling;
-  const proof = authority ? authority.assertCurrent.bind(authority) : undefined;
-  const authorizedBinding = authority?.accountScopeId === accountScopeId && authority.providerId === providerId
-    && typeof authority.destinationId === 'string' && authority.destinationId.length > 0
-    && authority.retention === 'ephemeral-no-log' && !!authoritySignal && typeof proof === 'function';
   const owner = new AbortController();
-  let closed = false, closing: Promise<void> | undefined, store: SqliteTriageStore | undefined;
+  let closed = false, closing: Promise<void> | undefined;
   const active = new Set<Promise<unknown>>();
-  let scoreTail: Promise<unknown> = Promise.resolve();
-  // Native providers already own both selectors. Other hosts resolve defaults
-  // once from their actual private account registry, preserving saved hashes.
-  const defaults = options.storeFileName && options.triageStoreFileName ? undefined
+  const defaults = options.storeFileName ? undefined
     : await acquireOwnedTriageIdentity({ workingDirectory: ctx.workingDirectory, assertCurrent: () => {
       if (closed || owner.signal.aborted) throw unavailable();
     }, beforeWrite: options.beforeIdentityWrite }, providerId, accountScopeId);
-  const fileName = options.triageStoreFileName ?? defaults!.triageFileName;
   const mirrorFileName = options.storeFileName ?? defaults!.mirrorFileName;
-  // Native roots already own explicit mirror locks. Defaults must acquire the
-  // actual mirror lifetime too, including when they reuse a known native pair.
-  // Preserve the published owned64 triage mutex so old sources/janitors remain
-  // excluded even when this registry selected a separate receipt filename.
-  const legacyOwned = /^inbox-owned-([0-9a-f]{64})\.sqlite$/.exec(mirrorFileName);
-  const lockNames = new Set([
-    ...(options.storeFileName === undefined ? [`${mirrorFileName}.owner.lock`] : []),
-    ...(legacyOwned ? [`inbox-triage-${legacyOwned[1]!}.sqlite.owner.lock`] : []),
-    `${fileName}.owner.lock`,
-  ]);
+  // Native roots already own their mirror lock; a default mirror takes its own.
   const releases: Array<() => void> = [];
   const releaseLock = () => {
     const failures: unknown[] = [];
     for (const release of releases.splice(0).reverse()) try { release(); } catch (error) { failures.push(error); }
     if (failures.length) throw new Error('Triaged inbox storage ownership did not retire', { cause: failures[0] });
   };
+  // Mirrors named by the earlier owned-inbox scheme are also guarded by the
+  // mutex the offline retention janitor looks for (inactive-retention.ts).
+  const legacyOwned = /^inbox-owned-([0-9a-f]{64})\.sqlite$/.exec(mirrorFileName);
+  const lockNames = [...(options.storeFileName === undefined ? [`${mirrorFileName}.owner.lock`] : []),
+    ...(legacyOwned ? [`inbox-triage-${legacyOwned[1]!}.sqlite.owner.lock`] : [])];
   try {
     for (const name of lockNames) releases.push(await acquireCrossProcessLock(join(ctx.workingDirectory, '.goodvibes', 'tui', 'operator', name),
       { strictOwnership: true, totalTimeoutMs: 100 }));
   } catch (error) { releaseLock(); throw error; }
-  const assertAuthority = (): void => {
-    if (closed || owner.signal.aborted || !authorizedBinding || !port || authoritySignal?.aborted || !proof) throw unavailable();
-    try { synchronous(proof); } catch { throw unavailable(); }
+  /** Usable grant right now, or undefined: triage is skipped, never an error for a read. */
+  const grant = (): InboxTriageAuthority | undefined => {
+    // Decision models off (Classic) means no model request, triage included.
+    if (closed || owner.signal.aborted || !bound || authority.signal.aborted || isClassicOperation()) return undefined;
+    try { authority.assertCurrent(); return authority; } catch { return undefined; }
   };
-  const optionalAuthority = (): boolean => {
-    if (closed) throw unavailable();
-    if (!authority) return false;
-    assertAuthority(); return true;
+  const report = (message: string): void => { try { ctx.logger.warn(message); } catch { /* fixed diagnostic only */ } };
+  let declared = false;
+  const declare = (): void => { if (!declared) { options.beforeReceiptWrite?.(4); declared = true; } };
+  // One scoring pass at a time; a poll that lands during a pass asks for one more.
+  let passing: Promise<void> | undefined;
+  let again = false;
+  let source!: OwnedInboxSource;
+  const pass = async (): Promise<void> => {
+    for (let batch = 0; batch < MAX_BATCHES_PER_PASS; batch += 1) {
+      const live = grant();
+      const mirror = source.mirror;
+      if (!live || !mirror) return;
+      const candidates = mirror.untriagedItems(providerId, batchSize).map(({ item, revision }) => ({ id: item.id, provider: item.provider,
+        kind: item.kind, subject: item.subjectPreview, snippet: item.bodyPreview, unread: item.unread, revision }));
+      if (candidates.length === 0) return;
+      declare();
+      const signal = AbortSignal.any([owner.signal, live.signal]);
+      const { receipts, stored } = await triageMirrorRows(mirror, providerId, live.port, { candidates, signal });
+      // Unanswered (model down, held readings): stop here and wait for the next poll.
+      if (stored === 0 || receipts.every(receipt => receipt.status !== 'settled')) return;
+    }
   };
-  const getStore = (): SqliteTriageStore => store ??= new SqliteTriageStore(ctx.workingDirectory, fileName, options.beforeReceiptWrite);
-  let source: OwnedInboxSource;
+  const schedule = (): void => {
+    if (!grant()) return;
+    if (passing) { again = true; return; }
+    const run = (async () => {
+      do {
+        again = false;
+        try { await pass(); } catch { report('Inbox triage pass failed; the next poll tries again'); }
+      } while (again && !closed);
+    })();
+    passing = run;
+    active.add(run);
+    void run.finally(() => { active.delete(run); if (passing === run) passing = undefined; });
+  };
   try {
     source = createOwnedInboxSource(ctx, { ...options, adapters: new Map(options.adapters), storeFileName: mirrorFileName, triageScope: receiptScope,
+      onCommitted: () => schedule(),
       ...(gatePolling ? { gatePolling: (provider: string, control: Parameters<NonNullable<RegisterInboxSurfaceOptions['gatePolling']>>[1]) => {
         const retire = gatePolling(provider, control);
         if (typeof retire !== 'function') return;
@@ -158,74 +173,34 @@ async function createTriagedSource(
           return result;
         };
       } } : {}),
-      async enrichTriage(rows, mirror) {
-        const out = new Map<string, InboxTriageOverlay>();
-        if (!optionalAuthority() || !rows.length) return out;
-        for (let offset = 0; offset < rows.length; offset += 100) {
-          assertAuthority();
-          const batch = inputs(rows.slice(offset, offset + 100));
-          // Input/privacy rejection is not an optional database failure.
-          captureTriageInputs(batch);
-          try {
-            const evidence = await readTriageMetadataBatch(batch, getStore(), receiptScope, mirror);
-            for (const [id, row] of evidence) out.set(id, { triageScore: row.score, triageLabel: row.label, triageTags: row.tags });
-          } catch {
-            assertAuthority();
-            try { ctx.logger.warn('Inbox triage metadata unavailable'); } catch { /* fixed diagnostic only */ }
-            // A corrupt optional image cannot leave a partially enriched page.
-            out.clear(); return out;
-          }
-          assertAuthority();
-        }
-        return out;
-      },
     });
   } catch (error) { releaseLock(); throw error; }
-  const score: OwnedTriagedInboxSource['runInboxTriage'] = (query = {}, operation = {}) => {
-    if (closed) return Promise.reject(unavailable());
-    // Normalize and capture before admission; no later caller mutation is observed.
-    let selected: ReturnType<typeof normalizeInboxQuery>;
+  // Rows stored before triage was granted, or before a restart, are scored once the mirror is open.
+  void source.ready.then(() => schedule(), () => {});
+  const score: OwnedTriagedInboxSource['runInboxTriage'] = async (query = {}, operation = {}) => {
+    if (closed) throw unavailable();
+    const selected = normalizeInboxQuery(query);
+    if (selected.limit > 100) throw new HandlerError('Inbox triage scores at most 100 rows at a time; pass limit 100 or less', 'INVALID_ARGUMENT', 400);
+    if (selected.providers?.some(provider => provider !== providerId)) throw unavailable();
+    const live = grant();
+    if (!live) throw unavailable();
+    const signal = AbortSignal.any([owner.signal, live.signal, ...(operation.signal ? [operation.signal] : [])]);
+    const read = await source.acquireRead(true);
     try {
-      selected = normalizeInboxQuery(query);
-      if (selected.limit > 100) throw new TypeError('Explicit inbox triage is limited to 100 selected rows');
-      if (selected.providers?.some(provider => provider !== providerId)) throw unavailable();
-      selected = { ...selected, providers: [providerId] };
-    } catch (error) { return Promise.reject(error); }
-    const dryRun = operation.dryRun === true;
-    const signals = [owner.signal, ...(authoritySignal ? [authoritySignal] : []), ...(operation.signal ? [operation.signal] : [])];
-    const signal = AbortSignal.any(signals);
-    const work = scoreTail.then(async (): Promise<OwnedInboxTriageResult> => {
-      assertAuthority(); signal.throwIfAborted();
-      const read = await source.acquireRead(true);
-      try {
-        assertAuthority(); signal.throwIfAborted();
-        const page = aggregateInbox(read.sources, selected);
-        const batch = inputs(page.items);
-        const captured = captureTriageInputs(batch);
-        const expected = JSON.stringify(captured);
-        const originalSource = captureInboxTriageSource(read.sources.store, captured, receiptScope);
-        const assertCurrent = (): void => {
-          signal.throwIfAborted(); assertAuthority(); read.assertCurrent(); originalSource.assertCurrent();
-          const current = inputs(aggregateInbox(read.sources, selected).items);
-          if (JSON.stringify(captureTriageInputs(current)) !== expected) {
-            throw new HandlerError('Inbox triage selection changed', 'INBOX_TRIAGE_SELECTION_CHANGED', 409);
-          }
-        };
-        assertCurrent();
-        // Recheck at the actual outbound call, rather than only before fan-out.
-        const guardedPort: JudgmentPort = { get model() { return port!.model; }, async ask(request) { assertCurrent(); return port!.ask({ ...request, beforeAttempt: () => { assertCurrent(); assertSynchronousJudgmentGuard(request.beforeAttempt); assertCurrent(); } }); } };
-        const receipts = await runInboxTriage(batch, { port: guardedPort, signal, dryRun, receiptScope, receiptSource: read.sources.store,
-          // This seam is not caller-injectable. The canonical store enforces the
-          // exact proof immediately before rename, with no intervening await.
-          store: { readBatch: ids => getStore().readBatch(ids), close: async () => {},
-            commit: (rows, abort, assertSource) => getStore().commit(rows, abort, () => { assertCurrent(); assertSource?.(); assertCurrent(); }) },
-        });
-        await read.validate(); assertCurrent();
-        return { receipts, total: page.total, hasMore: page.hasMore, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
-      } finally { read.release(); }
-    });
-    scoreTail = work.catch(() => {});
-    active.add(work); void work.then(() => active.delete(work), () => active.delete(work)); return work;
+      const page = aggregateInbox(read.sources, { ...selected, providers: [providerId] });
+      const mirror = source.mirror!;
+      let receipts: readonly (TriageReceipt | TriagePreview)[];
+      if (operation.dryRun) {
+        receipts = await previewInboxTriage(page.items, live.port, signal);
+      } else {
+        const revisions = mirror.triageRevisions(page.items.map(item => item.id));
+        declare();
+        receipts = (await triageMirrorRows(mirror, providerId, live.port, { signal,
+          candidates: page.items.filter(item => revisions.has(item.id)).map(item => ({ id: item.id, provider: item.provider, kind: item.kind,
+            subject: item.subject ?? '', snippet: item.bodyPreview, unread: item.unread, revision: revisions.get(item.id)! })) })).receipts;
+      }
+      return { receipts, total: page.total, hasMore: page.hasMore, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+    } finally { read.release(); }
   };
   const close = (): Promise<void> => {
     if (closing) return closing;
@@ -237,28 +212,16 @@ async function createTriagedSource(
     const retiring = source.close();
     void (async () => {
       const outcomes = await Promise.allSettled([retiring, ...active]);
-      // Scoring refusals are operation outcomes, not failed retirement.
-      let storeFailure: unknown;
-      try { await store?.close(); } catch (error) { storeFailure = error; }
-      // A source that did not retire may still hold its mirror open, so its locks stay held.
+      // A source that did not retire may still hold its mirror open, so its lock stays held.
       if (outcomes[0]?.status === 'rejected') throw new Error('Triaged inbox source did not retire');
-      // The source is closed: a failed receipt-store close is reported but must not strand the account's locks.
       releaseLock();
-      if (storeFailure !== undefined) throw new Error('Triaged inbox receipt store did not close', { cause: storeFailure });
     })().then(resolve, reject);
     return closing;
   };
-  return { ...source, runInboxTriage: score, close, unregister() { void close(); },
-    async acquireRead(_requireFinalProof = true) {
-      const read = await source.acquireRead(true);
-      const assertCurrent = (): void => { read.assertCurrent(); optionalAuthority(); };
-      try { assertCurrent(); } catch (error) { read.release(); throw error; }
-      return { ...read, assertCurrent, async validate() { await read.validate(); assertCurrent(); } };
-    },
-  };
+  return { ...source, runInboxTriage: score, close, unregister() { void close(); } };
 }
 
-/** Compatibility-shaped registrar; adds no catalog methods, tagger or activation. */
+/** Owned source plus the canonical `channels.inbox.list` binding over it. */
 export async function registerTriagedInbox(ctx: InboxSurfaceContext, options: OwnedTriagedInboxOptions): Promise<OwnedTriagedInboxSource> {
   ctx = Object.freeze({ ...ctx });
   let closing: Promise<void> | undefined;

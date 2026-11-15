@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test';
-import { EventEmitter } from 'node:events';
+import type { Socket } from 'node:net';
+import { connectSocket, makeFakeImapServer, serverWrite } from './_helpers/fake-imap-server.ts';
 import { createTriageTagger } from '../platform/src/platform/intake/triage/tagger/index.ts';
 import { captureTags } from '../platform/src/platform/intake/triage/tagger/shared.ts';
 import { applySlackTags } from '../platform/src/platform/intake/triage/tagger/slack.ts';
 import { applyDiscordTags } from '../platform/src/platform/intake/triage/tagger/discord.ts';
-import { imapStoreFlagOverTls, makeRetryingImapStoreFlag, ImapStoreError, type ImapStoreArgs, type ImapSocketLike } from '../platform/src/platform/intake/triage/tagger/imap.ts';
+import { imapStoreFlagWithMailClient, makeRetryingImapStoreFlag, ImapStoreError, type ImapStoreArgs } from '../platform/src/platform/intake/triage/tagger/imap.ts';
 const guard = () => ({ signal: new AbortController().signal, assertCurrent() {} });
 function http(responses: Array<Response | (() => Response)>) {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -48,50 +49,83 @@ test('Discord revocation after GET prevents PATCH', async () => {
   await expect(applyDiscordTags({ channel: '123', message: '234' }, ['GoodVibes/Spam'], 'synthetic', { signal: abort.signal, assertCurrent() {} }, { 'GoodVibes/Spam': '890' }, f.fetcher)).rejects.toThrow();
   expect(f.calls).toHaveLength(2);
 });
-function imap(validity = 7, rejected = false) {
-  const events = new EventEmitter(); const writes: string[] = [];
-  const socket = { setEncoding() {}, setTimeout() {}, on: events.on.bind(events), destroy() {}, write(line: string) {
-    writes.push(line); const tag = line.split(' ')[0];
-    queueMicrotask(() => { if (line.includes('SELECT')) events.emit('data', `* OK [UIDVALIDITY ${validity}] current\r\n`); if (line.includes('UID STORE')) events.emit('data', '* 1 FETCH (FLAGS (GoodVibes_Spam))\r\n'); events.emit('data', `${tag} ${rejected ? 'NO' : 'OK'} done\r\n`); });
-  } } as ImapSocketLike;
-  const connect = () => { queueMicrotask(() => events.emit('data', '* OK ready\r\n')); return socket; };
-  return { writes, connect };
+/** A mail server that answers the label write: EXAMINE and SELECT report `validity`, STORE reports `storeReply`. */
+async function imapServer(options: { validity?: number; selectValidity?: number; storeReply?: readonly string[]; storeStatus?: 'OK' | 'NO' } = {}) {
+  const commands: string[] = [];
+  const server = await makeFakeImapServer((socket) => {
+    serverWrite(socket, '* OK ready');
+    let buffer = '';
+    socket.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      let end = buffer.indexOf('\r\n');
+      while (end !== -1) {
+        const line = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+        commands.push(line);
+        const [tag = '', verb = '', sub = ''] = line.split(' ');
+        if (verb === 'EXAMINE') { serverWrite(socket, '* 3 EXISTS'); serverWrite(socket, `* OK [UIDVALIDITY ${options.validity ?? 7}] ok`); serverWrite(socket, `${tag} OK [READ-ONLY] done`); }
+        else if (verb === 'SELECT') { serverWrite(socket, `* OK [UIDVALIDITY ${options.selectValidity ?? options.validity ?? 7}] ok`); serverWrite(socket, `${tag} OK [READ-WRITE] done`); }
+        else if (verb === 'UID' && sub === 'STORE') { for (const reply of options.storeReply ?? ['* 3 FETCH (UID 42 FLAGS (\\Seen GoodVibes_Spam))']) serverWrite(socket, reply); serverWrite(socket, `${tag} ${options.storeStatus ?? 'OK'} done`); }
+        else if (verb === 'LOGOUT') { serverWrite(socket, '* BYE'); serverWrite(socket, `${tag} OK done`); }
+        else serverWrite(socket, `${tag} OK done`);
+        end = buffer.indexOf('\r\n');
+      }
+    });
+  });
+  let connects = 0;
+  const connect = (): Promise<Socket> => { connects += 1; return connectSocket(server.address.port); };
+  return { commands, connect, connects: () => connects, close: () => server.close() };
 }
-const args = (): ImapStoreArgs => ({ host: 'imap.invalid', port: 993, user: 'a"b', password: 'c\\d', mailbox: 'Inbox', uid: '42', flag: 'GoodVibes_Spam', uidValidity: 7, ...guard() });
-test('IMAP quoted login, SELECT UIDVALIDITY then UID STORE and tagged logout', async () => {
-  const f = imap(); await imapStoreFlagOverTls(args(), f.connect);
-  expect(f.writes).toEqual(['A1 LOGIN "a\\"b" "c\\\\d"\r\n', 'A2 SELECT "Inbox"\r\n', 'A3 UID STORE 42 +FLAGS (GoodVibes_Spam)\r\n', 'A4 LOGOUT\r\n']);
+const args = (): ImapStoreArgs => ({ host: '127.0.0.1', port: 993, user: 'a"b', password: 'c\\d', mailbox: 'Inbox', uid: '42', flag: 'GoodVibes_Spam', uidValidity: 7, ...guard() });
+const sent = (commands: readonly string[]) => commands.map(line => line.replace(/^\S+ /, ''));
+
+test('IMAP label: one connection, quoted login, EXAMINE, SELECT, every keyword in one UID STORE, LOGOUT', async () => {
+  const f = await imapServer({ storeReply: ['* 3 FETCH (UID 42 FLAGS (GoodVibes_Spam GoodVibes_Priority))'] });
+  try {
+    await imapStoreFlagWithMailClient(f.connect)({ ...args(), flags: ['GoodVibes_Spam', 'GoodVibes_Priority'] });
+    expect(f.connects()).toBe(1);
+    expect(sent(f.commands)).toEqual(['LOGIN "a\\"b" "c\\\\d"', 'EXAMINE Inbox', 'SELECT Inbox', 'UID STORE 42 +FLAGS (GoodVibes_Spam GoodVibes_Priority)', 'LOGOUT']);
+  } finally { f.close(); }
 });
-test('IMAP mailbox generation mismatch prevents STORE', async () => {
-  const f = imap(8); await expect(imapStoreFlagOverTls(args(), f.connect)).rejects.toThrow('UIDVALIDITY');
-  expect(f.writes.some(line => line.includes('STORE'))).toBe(false);
+test('IMAP label: a mailbox reset between listing and writing prevents STORE', async () => {
+  for (const options of [{ validity: 8 }, { selectValidity: 8 }]) {
+    const f = await imapServer(options);
+    try {
+      await expect(imapStoreFlagWithMailClient(f.connect)(args())).rejects.toMatchObject({ name: 'ImapStoreError', transient: false });
+      expect(f.commands.some(line => line.includes('STORE'))).toBe(false);
+    } finally { f.close(); }
+  }
 });
-test.each(['\r', '\n', '\x00', '\x7f'])('IMAP controls refuse before connection', async byte => {
-  let calls = 0; await expect(imapStoreFlagOverTls({ ...args(), password: `x${byte}` }, () => { calls++; throw new Error(); })).rejects.toThrow(); expect(calls).toBe(0);
+test('IMAP label: a STORE the message did not answer (gone, or keyword refused) is not counted as written', async () => {
+  for (const storeReply of [[], ['* 3 FETCH (UID 42 FLAGS (\\Seen))']]) {
+    const f = await imapServer({ storeReply });
+    try { await expect(imapStoreFlagWithMailClient(f.connect)(args())).rejects.toMatchObject({ name: 'ImapStoreError', transient: false }); }
+    finally { f.close(); }
+  }
+  const refused = await imapServer({ storeStatus: 'NO' });
+  try { await expect(imapStoreFlagWithMailClient(refused.connect)(args())).rejects.toMatchObject({ transient: false }); }
+  finally { refused.close(); }
 });
-test('IMAP NO/BAD never retries; transient retry bounded and revoked retry refused', async () => {
+// The UID and the keywords go on the command line unquoted: a wildcard would tag
+// the whole mailbox, a system flag would mark mail read or deleted, a space or
+// paren would inject another flag. Credentials carry no control characters (a
+// mailbox name is modified UTF-7, so a line break in it never reaches the wire).
+test.each([
+  { uid: '1:*' }, { uid: '*' }, { uid: '1,2' }, { uid: '1)\r\nA9 DELETE x' }, { uid: '0' },
+  { flags: ['\\Seen'] }, { flags: ['\\Deleted'] }, { flags: ['Spam Junk'] }, { flags: ['Spam)'] }, { flags: [''] }, { flags: [] },
+  { password: 'x\r' }, { password: 'x\n' }, { password: 'x\x00' }, { user: 'bad\x7fuser' },
+] as Partial<ImapStoreArgs>[])('IMAP label refuses %p and writes nothing', async (bad) => {
+  const f = await imapServer();
+  try {
+    await expect(imapStoreFlagWithMailClient(f.connect)({ ...args(), ...bad })).rejects.toMatchObject({ name: 'ImapStoreError', transient: false });
+    expect(f.commands.some(line => line.includes('STORE'))).toBe(false);
+  } finally { f.close(); }
+});
+test('IMAP label: a refusal never retries; an unreachable server retries a bounded number of times', async () => {
   let calls = 0;
   await expect(makeRetryingImapStoreFlag(async () => { calls++; throw new ImapStoreError('NO', false); }, { sleep: async () => {} })(args())).rejects.toThrow(); expect(calls).toBe(1);
-  calls = 0; await expect(makeRetryingImapStoreFlag(async () => { calls++; throw new ImapStoreError('network', true); }, { sleep: async () => {} })(args())).rejects.toThrow(); expect(calls).toBe(3);
-});
-
-// A prior command's response code is not evidence for this SELECT mailbox.
-test('IMAP greeting or LOGIN UIDVALIDITY cannot authorize a SELECT with no generation', async () => {
-  for (const phase of ['greeting', 'login']) {
-    const events = new EventEmitter(); const writes: string[] = [];
-    const socket = { setEncoding() {}, setTimeout() {}, on: events.on.bind(events), destroy() {}, write(line: string) {
-      writes.push(line); const tag = line.split(' ')[0];
-      queueMicrotask(() => {
-        if (phase === 'login' && line.includes('LOGIN')) events.emit('data', '* OK [UIDVALIDITY 7] prior command\r\n');
-        events.emit('data', `${tag} OK completed\r\n`);
-      });
-    } } as ImapSocketLike;
-    await expect(imapStoreFlagOverTls(args(), () => {
-      queueMicrotask(() => events.emit('data', phase === 'greeting' ? '* OK [UIDVALIDITY 7] greeting\r\n' : '* OK ready\r\n'));
-      return socket;
-    })).rejects.toThrow('UIDVALIDITY');
-    expect(writes.some(line => line.includes('STORE'))).toBe(false);
-  }
+  calls = 0;
+  const unreachable = imapStoreFlagWithMailClient(async () => { calls++; throw Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }); });
+  await expect(makeRetryingImapStoreFlag(unreachable, { sleep: async () => {} })(args())).rejects.toMatchObject({ transient: true }); expect(calls).toBe(3);
 });
 
 test('unsupported provider never falls through to an email writer or resolves credentials', () => {

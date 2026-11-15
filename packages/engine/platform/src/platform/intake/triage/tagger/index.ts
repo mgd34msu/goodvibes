@@ -3,7 +3,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { IntakeCredentialStore } from '../../context.js';
 import { applySlackReactions } from './slack.js';
 import { applyDiscordTagEffects, observeDiscordForumTags } from './discord.js';
-import { makeRetryingImapStoreFlag, imapStoreFlagOverTls, type ImapStoreFlag } from './imap.js';
+import { makeRetryingImapStoreFlag, imapStoreFlagWithMailClient, type ImapStoreFlag } from './imap.js';
 import { TAGS, current, type TaggerGuard, type TaggerHttp, type TriageProviderTag } from './shared.js';
 import { captureTriageData } from '../evidence.js';
 import { captureTagNames, readCustomTagMeaning, TriageTagMeaningHeld } from './meaning.js';
@@ -61,14 +61,16 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
   const heldMeanings = new Set<string>();
   const pendingMeanings = new Set<string>();
   let closing: Promise<void> | undefined;
-  const store = makeRetryingImapStoreFlag(options.imapStoreFlag ?? imapStoreFlagOverTls);
+  const store = makeRetryingImapStoreFlag(options.imapStoreFlag ?? imapStoreFlagWithMailClient());
   const owner: TriageTagger = {
     provider: options.provider, accountScopeId: options.accountScopeId,
     async applyTags(itemId, rawTags, operation) { const prepared = await owner.prepareTags(itemId, rawTags, operation); return prepared.applyTags(operation); },
     prepareTags(itemId, rawTags, operation) {
       const tags = captureTagNames(rawTags);
       const proof = operation.assertCurrent.bind(operation);
-      const signal = AbortSignal.any([lifetime.signal, options.signal, operation.signal, AbortSignal.timeout(20_000)]);
+      // No deadline here: preparation may read a custom name's meaning. The
+      // provider write gets its own 20 seconds, starting when it starts.
+      const signal = AbortSignal.any([lifetime.signal, options.signal, operation.signal]);
       const guard = { signal, assertCurrent() { current({ signal, assertCurrent: options.assertCurrent }); proof(); } };
       const preparation = Promise.resolve().then(async (): Promise<PreparedTriageTags> => {
         current(guard);
@@ -129,7 +131,7 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
           if (used) return Promise.reject(new Error('Triage preparation already consumed'));
           used = true;
           const admissionCurrent = admission.assertCurrent.bind(admission);
-          const finalGuard = { signal: AbortSignal.any([signal, admission.signal]), assertCurrent() { current(guarded); admissionCurrent(); } };
+          const finalGuard = { signal: AbortSignal.any([signal, admission.signal, AbortSignal.timeout(20_000)]), assertCurrent() { current(guarded); admissionCurrent(); } };
           const work = Promise.resolve().then(async () => {
         current(finalGuard);
         if (options.provider === 'slack') {
@@ -145,7 +147,9 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
           if (parts.length !== 4 || parts[0] !== 'email' || parts[1] !== options.accountScopeId || !/^\d+$/.test(parts[2]!) || !/^\d+$/.test(parts[3]!) || !options.imap) throw new Error('Email triage target unavailable');
           const uidValidity = Number(parts[2]), uid = Number(parts[3]);
           if (!Number.isSafeInteger(uid) || uid < 1) throw new Error('Email triage UID unavailable');
-          for (const effect of effects) await store({ ...options.imap, password: token, uid: String(uid), uidValidity, flag: effect.keyword!, ...finalGuard });
+          // Every keyword in one STORE on one connection.
+          const flags = effects.map(effect => effect.keyword!);
+          await store({ ...options.imap, password: token, uid: String(uid), uidValidity, flag: flags[0]!, flags, ...finalGuard });
         }
         current(finalGuard);
       });

@@ -1,8 +1,7 @@
 import { screeningAnswers } from './_helpers/screening-answers.js';
 import { afterEach, expect, test } from 'bun:test';
 import { createProtectedSourceOwner } from '../platform/src/platform/security/source-screening/owner.ts';
-import { createProtectedInboxMapper } from '../platform/src/platform/intake/protected-preview.ts';
-import { parseIntakeFetchResponse } from '../platform/src/platform/intake/providers/imap-response.ts';
+import { createProtectedInboxMapper, WITHHELD_PREVIEW_TEXT, type ProtectedInboxPreview } from '../platform/src/platform/intake/protected-preview.ts';
 import { digestSender } from '../platform/src/platform/intake/text-normalization.ts';
 const cleanups: Array<() => Promise<void>> = [];
 const missingPrivateText: string[] = [];
@@ -34,8 +33,11 @@ function fixture(selections: readonly { text: string; privateText: string }[] = 
     judgment: { endpoint: `http://127.0.0.1:${server.port}`, model: 'jev-1.13.0' },
   });
   cleanups.push(async () => { await owner.close(); await server.stop(true); });
-  return { mapper: createProtectedInboxMapper(owner), calls };
+  const mapper = createProtectedInboxMapper(owner);
+  return { mapper: async (...args: Parameters<typeof mapper>) => mapped(await mapper(...args)), screen: mapper, calls };
 }
+/** The screened previews, or null when nothing screened was released. */
+function mapped(result: ProtectedInboxPreview) { return result.status === 'mapped' ? result.fields : null; }
 const input = (text: string, subject = '') => ({ senderId: 'U-some-workspace-user', channelId: 'D-synthetic', subject, text });
 for (const row of [
   { text: 'reach me at jane.doe@example.com please', privateText: 'jane.doe@example.com', expected: 'reach me at [redacted] please' },
@@ -70,25 +72,27 @@ test('original body maximum is 500, single-line, plain text and redacted after s
 for (const text of ['card 4111111111111111 expires', 'token is xoxb-EXAMPLE-faketoken-donotuse here',
   'Authorization: Bearer abcdefgh-EXAMPLE-faketoken', 'api_key = wordstyle-EXAMPLE-fakevalue-token']) {
   test(`original protected literal is withheld before any model transmission: ${text.split(' ')[0]}`, async () => {
-    const f = fixture(); expect(await f.mapper(input(text))).toBeNull(); expect(f.calls).toEqual([]);
+    // Withheld as a message, so it can be listed without its text and the inbox moves past it.
+    const f = fixture(); const result = await f.screen(input(text));
+    expect(result.status).toBe('withheld');
+    if (result.status === 'withheld') expect(result.fields.bodyPreview).toBe(WITHHELD_PREVIEW_TEXT);
+    expect(f.calls).toEqual([]);
   });
 }
 test('a recorded semantic rejection releases no original email preview and cannot fall back to regex redaction', async () => {
   const text = 'reach me at jane.doe@example.com please';
   const f = fixture([{ text, privateText: 'jane.doe@example.com' }], false);
-  expect(await f.mapper(input(text))).toBeNull(); expect(f.calls).toHaveLength(2);
+  const result = await f.screen(input(text));
+  expect(result.status).toBe('withheld');
+  if (result.status === 'withheld') expect(result.fields.bodyPreview).not.toContain('jane');
+  expect(f.calls).toHaveLength(2);
 });
 
 
-test('original absent-subject preview is empty after the real protocol boundary normalizes a missing header', async () => {
-  const headers = 'From: Synthetic Sender\r\nDate: Thu, 01 Oct 2026 00:00:00 +0000\r\n';
+test('an absent subject stays an empty preview after screening', async () => {
   const body = 'ordinary note';
-  const raw = `* 1 FETCH (UID 7 FLAGS () BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {${Buffer.byteLength(headers)}}\r\n${headers} BODY[TEXT] {${Buffer.byteLength(body)}}\r\n${body})\r\n`;
-  const envelopes = parseIntakeFetchResponse(raw);
-  expect(envelopes).toHaveLength(1);
-  expect(envelopes[0]!.subject).toBe('');
   const f = fixture();
-  const result = await f.mapper(input(envelopes[0]!.bodyPreview, envelopes[0]!.subject));
+  const result = await f.mapper(input(body, ''));
   expect(result?.subjectPreview).toBe('');
   expect(result?.bodyPreview).toBe(body);
   expect(f.calls[0]!.source!.parts).toEqual(['', body, '', body]);

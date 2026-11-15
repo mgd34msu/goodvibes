@@ -3,8 +3,9 @@
  *
  * One coordinator over the platform's existing history stores. `plan()` is a
  * dry-run preview of exactly what a rewind to a turn anchor would change, plus
- * a single-use confirm token; `apply()` is confirm-gated and performs the
- * restore(s), recording an undo point so the rewind is itself reversible
+ * a single-use confirm token; `apply()` runs only with that token, so what runs
+ * is what was previewed, and performs the restore(s), recording an undo point
+ * so the rewind is itself reversible
  * (restore-the-restore). The workspace side reuses the checkpoint manager's
  * own pre-restore safety checkpoint as that undo point; the conversation side
  * reuses its store's captured pre-rewind snapshot. Every apply emits a receipt
@@ -12,7 +13,7 @@
  */
 import type { WorkspaceEvent } from '../../events/workspace.js';
 import { RewindTokenStore, rewindFingerprint } from './tokens.js';
-import { discardTurnAnchorsAfter, restoreDiscardedTurnAnchors, type TurnAnchor } from './turn-anchors.js';
+import { discardTurnAnchorsAfter, dropAnchorsAgainFor, restoreAnchorsDroppedBy } from './turn-anchors.js';
 import type { SessionSurface } from '../runtime/session-surface.js';
 import type {
   RewindAnchor,
@@ -38,8 +39,8 @@ export class RewindTokenError extends Error {
   }
 }
 
-/** The two ways to authorize an apply: a confirm token from plan, or `confirm: true`. */
-export const REWIND_CONFIRM_OPTIONS = ['confirm', 'confirmToken'] as const;
+/** What authorizes an apply: the confirm token the matching plan returned. */
+export const REWIND_CONFIRM_OPTIONS = ['confirmToken'] as const;
 
 export interface UnifiedRewindServiceDeps {
   /** The workspace-checkpoint store port. Absent → files rewind is honestly unavailable. */
@@ -60,12 +61,14 @@ export interface UnifiedRewindServiceDeps {
 }
 
 export interface RewindApplyOptions {
+  /**
+   * Not an authorization: an apply runs only with `confirmToken`. A call that
+   * sends `confirm: true` alone is refused with the plan method named.
+   */
   readonly confirm?: boolean | undefined;
+  /** The single-use token `plan()` returned for this same anchor and scope. */
   readonly confirmToken?: string | undefined;
 }
-
-/** How many rewinds keep their dropped anchors for an undo. */
-const MAX_REMEMBERED_REWINDS = 32;
 
 function wants(scope: RewindScope, part: 'files' | 'conversation'): boolean {
   return scope === 'both' || scope === part;
@@ -94,8 +97,6 @@ export class UnifiedRewindService {
   private readonly anchorSurface: SessionSurface | null;
   /** Sessions with an apply running; a second apply for one of them is refused. */
   private readonly applying = new Set<string>();
-  /** The anchors a conversation rewind dropped, by its undo snapshot, so undoing it gives them back. */
-  private readonly droppedAnchors = new Map<string, { sessionId: string; turnId: string; anchors: readonly TurnAnchor[] }>();
 
   constructor(deps: UnifiedRewindServiceDeps = {}) {
     this.workspace = deps.workspace ?? null;
@@ -108,18 +109,16 @@ export class UnifiedRewindService {
 
   /**
    * The conversation of a rewind was put back (undo): its turn anchors come
-   * back with it, in memory and in the sidecar.
+   * back with it, in memory and in the sidecar (which also holds them across
+   * a restart).
    */
   anchorsRestored(undoSnapshotId: string): void {
-    const kept = this.droppedAnchors.get(undoSnapshotId);
-    if (kept) restoreDiscardedTurnAnchors(kept.sessionId, kept.anchors, this.anchorSurface ?? undefined);
+    restoreAnchorsDroppedBy(undoSnapshotId, this.anchorSurface ?? undefined);
   }
 
   /** The conversation of an undone rewind was cut again (redo): its anchors go again. */
   anchorsDropped(undoSnapshotId: string): void {
-    const kept = this.droppedAnchors.get(undoSnapshotId);
-    if (!kept) return;
-    discardTurnAnchorsAfter(kept.sessionId, kept.turnId, this.anchorSurface ?? undefined);
+    dropAnchorsAgainFor(undoSnapshotId, this.anchorSurface ?? undefined);
   }
 
   /** Dry-run preview of a rewind + a single-use confirm token authorizing it. */
@@ -137,7 +136,7 @@ export class UnifiedRewindService {
     return { sessionId: anchor.sessionId, turnId, scope, token, expiresAt, files, conversation, warnings };
   }
 
-  /** Confirm-gated apply. Unconfirmed → a non-error refusal; bad token → RewindTokenError. */
+  /** Apply a planned rewind. No token → a non-error refusal naming the plan; bad token → RewindTokenError. */
   async apply(anchor: RewindAnchor, scope: RewindScope, opts: RewindApplyOptions = {}): Promise<RewindApplyResult> {
     // Two applies for one session (a double click, two surfaces) would restore
     // and truncate over each other and interleave their undo points. The
@@ -147,8 +146,8 @@ export class UnifiedRewindService {
         receipt: null,
         refused: true,
         refusal: {
-          reason: 'Another rewind of this session is still running. Wait for its receipt, then plan again if you still want this rewind.',
-          confirmField: 'confirm',
+          reason: 'Another rewind of this session is still running, so this one was not started and nothing changed. Wait for its receipt, then plan again if you still want this rewind.',
+          confirmField: 'confirmToken',
           planMethod: 'rewind.plan',
           options: [],
         },
@@ -166,23 +165,25 @@ export class UnifiedRewindService {
     const turnId = anchor.turnId ?? null;
     const resolved = wants(scope, 'files') ? await this.resolveFiles(anchor) : null;
     const fingerprint = rewindFingerprint(anchor.sessionId, turnId, scope, resolved?.checkpoint?.id ?? null);
-    if (opts.confirmToken !== undefined) {
-      if (!this.tokens.consume(opts.confirmToken, fingerprint)) {
-        throw new RewindTokenError(
-          'confirmToken is invalid, already used, expired, or was issued for a different rewind (including a plan that previewed a different workspace checkpoint than this anchor resolves to now). Re-run rewind.plan.',
-        );
-      }
-    } else if (opts.confirm !== true) {
+    // The token is the one authority: it binds this apply to the plan that
+    // previewed it (including which workspace checkpoint gets restored), and
+    // the plan is where the whole-workspace warning is shown.
+    if (opts.confirmToken === undefined) {
       return {
         receipt: null,
         refused: true,
         refusal: {
-          reason: 'rewind.apply restores files and/or conversation and requires confirmation before it will run.',
-          confirmField: 'confirm',
+          reason: 'Nothing was changed: rewind.apply runs only with the confirmToken that rewind.plan returns, so the rewind that runs is the one that was previewed. Call rewind.plan with the same sessionId, turnId and scope, read its warnings, then call rewind.apply with its token.',
+          confirmField: 'confirmToken',
           planMethod: 'rewind.plan',
           options: [...REWIND_CONFIRM_OPTIONS],
         },
       };
+    }
+    if (!this.tokens.consume(opts.confirmToken, fingerprint)) {
+      throw new RewindTokenError(
+        'confirmToken is invalid, already used, expired, or was issued for a different rewind (including a plan that previewed a different workspace checkpoint than this anchor resolves to now). Re-run rewind.plan.',
+      );
     }
 
     if (scope === 'both' && resolved?.unmatchedTurn) {
@@ -240,15 +241,7 @@ export class UnifiedRewindService {
     // Turns after the anchor are gone from the conversation; their anchors
     // would otherwise cut the new branch at an unrelated message.
     if (conversation?.rewound && anchor.turnId !== undefined) {
-      const dropped = discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, this.anchorSurface ?? undefined);
-      if (conversation.undoSnapshotId) {
-        this.droppedAnchors.set(conversation.undoSnapshotId, { sessionId: anchor.sessionId, turnId: anchor.turnId, anchors: dropped });
-        while (this.droppedAnchors.size > MAX_REMEMBERED_REWINDS) {
-          const oldest = this.droppedAnchors.keys().next().value;
-          if (oldest === undefined) break;
-          this.droppedAnchors.delete(oldest);
-        }
-      }
+      discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, this.anchorSurface ?? undefined, conversation.undoSnapshotId ?? undefined);
     }
 
     const receipt = {

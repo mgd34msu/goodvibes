@@ -7,9 +7,12 @@
 // is "a daemon-hosted mutable conversation store": preview() reports how many
 // messages would truncate to a recorded turn boundary, and rewind() performs the
 // truncation and captures the pre-/post-truncation snapshots so the reversal can
-// be undone and re-applied. The truncation boundary is the message count recorded
-// for the anchor's turnId at TURN_COMPLETED (rewind-turn-anchors.ts), the same
-// join key files rewind uses against the workspace checkpoint.
+// be undone and re-applied. The truncation boundary is the anchor recorded for
+// the turnId at TURN_COMPLETED (platform/rewind turn-anchors), resolved by the
+// key of the turn's last message so a compacted history is never cut at an
+// unrelated message; the turnId is the same join key files rewind uses
+// against the workspace checkpoint. With an `undoDir` the snapshots are also
+// written to disk, so an undo still works after the process restarted.
 //
 // This module is the single implementation of that port for the TUI, and it has
 // two consumers again, but the second one reaches it differently now.
@@ -35,9 +38,12 @@ import type {
   RewindConversationPort,
   RewindConversationPreview,
 } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { readdirSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ConversationManager as CoreConversation } from '@goodvibes-jev/engine/platform/platform/core';
 export interface RewindConversation extends Pick<CoreConversation, 'getMessageCount' | 'toJSON' | 'fromJSON' | 'removeMessagesAfter'> { rebuildHistory(): void }
-import { resolveTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { resolveTurnAnchor, resolveTurnBoundary, type BoundaryMessage } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { logger, readDocument, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type ConversationJson = Parameters<CoreConversation['fromJSON']>[0];
 
@@ -70,6 +76,37 @@ interface SnapshotPair {
   readonly afterSerialized: string;
 }
 
+/** A snapshot pair as written to `<undoDir>/<undoSnapshotId>.json`. */
+interface StoredSnapshot {
+  readonly sessionId: string;
+  readonly before: ConversationJson;
+  readonly after: ConversationJson;
+  readonly afterCount: number;
+}
+
+export interface ConversationRewindPortOptions {
+  /**
+   * Directory for the undo snapshots, one file per rewind, the newest
+   * {@link MAX_UNDOABLE_REWINDS} kept. Absent: snapshots live in memory only
+   * and an undo after a restart finds nothing.
+   */
+  readonly undoDir?: string | undefined;
+}
+
+const UNDO_SNAPSHOT_ID = /^rwc_[a-z0-9]+_[a-z0-9]+$/;
+
+function messagesOf(json: unknown): readonly BoundaryMessage[] | null {
+  const messages = (json as { messages?: unknown } | null)?.messages;
+  return Array.isArray(messages) ? messages as BoundaryMessage[] : null;
+}
+
+function isStoredSnapshot(value: unknown): value is StoredSnapshot {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.sessionId === 'string' && typeof v.afterCount === 'number'
+    && messagesOf(v.before) !== null && messagesOf(v.after) !== null;
+}
+
 /**
  * Build a conversation rewind port. `resolveConversation` maps an anchor's
  * sessionId to the live ConversationManager, for the single-session /rewind
@@ -79,30 +116,68 @@ interface SnapshotPair {
  */
 export function createConversationRewindPort(
   resolveConversation: (sessionId: string) => RewindConversation | null,
+  options: ConversationRewindPortOptions = {},
 ): ConversationRewindPort {
   const snapshots = new Map<string, SnapshotPair>();
+  const undoDir = options.undoDir;
 
   /** Each snapshot holds a whole conversation, so only the newest reversals stay undoable. */
-  function remember(id: string, pair: SnapshotPair): void {
+  function remember(id: string, sessionId: string, pair: SnapshotPair): void {
     snapshots.set(id, pair);
     while (snapshots.size > MAX_UNDOABLE_REWINDS) {
       const oldest = snapshots.keys().next().value;
       if (oldest === undefined) break;
       snapshots.delete(oldest);
     }
+    if (undoDir) store(id, { sessionId, before: pair.before, after: pair.after, afterCount: pair.afterCount });
   }
 
-  /** `keep` is null when the anchor names a turn this process has no recorded boundary for. */
-  function keepFor(anchor: RewindAnchor): { conv: RewindConversation | null; keep: number | null; total: number } {
-    const conv = resolveConversation(anchor.sessionId);
-    if (!conv) return { conv: null, keep: 0, total: 0 };
-    const total = conv.getMessageCount();
-    if (!anchor.turnId) return { conv, keep: total, total };
-    const rec = resolveTurnAnchor(anchor.sessionId, anchor.turnId);
-    return { conv, keep: rec ? Math.min(rec.messageCount, total) : null, total };
+  /** One write of the pair per rewind, then the oldest files past the bound go (ids sort by creation time). */
+  function store(id: string, stored: StoredSnapshot): void {
+    if (!undoDir) return;
+    try {
+      writeDocument(join(undoDir, `${id}.json`), stored, { indent: null });
+      const files = readdirSync(undoDir).filter((name) => name.startsWith('rwc_') && name.endsWith('.json')).sort();
+      for (const name of files.slice(0, Math.max(0, files.length - MAX_UNDOABLE_REWINDS))) {
+        try { unlinkSync(join(undoDir, name)); } catch { /* another process pruned it first */ }
+      }
+    } catch (error) {
+      // The rewind itself succeeded; only its undo after a restart is lost.
+      logger.warn('conversation rewind undo snapshot could not be written', { undoSnapshotId: id, error: summarizeError(error) });
+    }
   }
-  const unresolvedTurn = (turnId: string | undefined): string =>
-    `this conversation has no recorded boundary for turn ${turnId ?? ''}, so there is no point to rewind it to`;
+
+  /** The pair for an undo id: from memory, or from its file when this process restarted since the rewind. */
+  function snapshotFor(id: string): SnapshotPair | undefined {
+    const held = snapshots.get(id);
+    if (held || !undoDir || !UNDO_SNAPSHOT_ID.test(id)) return held;
+    const stored = readDocument(join(undoDir, `${id}.json`), {
+      label: 'rewind/undo-snapshot',
+      recovery: 'That rewind can no longer be undone; the conversation itself is unchanged.',
+      validate: (parsed) => {
+        if (!isStoredSnapshot(parsed)) throw new Error('not a conversation rewind undo snapshot');
+        return parsed;
+      },
+    });
+    const conv = stored ? resolveConversation(stored.sessionId) : null;
+    if (!stored || !conv) return undefined;
+    const pair: SnapshotPair = { conv, before: stored.before, after: stored.after, afterCount: stored.afterCount, afterSerialized: JSON.stringify(stored.after) };
+    snapshots.set(id, pair);
+    return pair;
+  }
+
+  /**
+   * Where a rewind to `anchor` cuts `conv`. `messages` is the conversation as
+   * it is now; it is read only when the anchor carries a boundary key.
+   */
+  function keepFor(anchor: RewindAnchor, conv: RewindConversation, messages: () => readonly BoundaryMessage[] | null): { keep: number; total: number } | { reason: string; total: number } {
+    const total = conv.getMessageCount();
+    if (!anchor.turnId) return { keep: total, total };
+    const rec = resolveTurnAnchor(anchor.sessionId, anchor.turnId);
+    if (!rec) return { reason: `this conversation has no recorded boundary for turn ${anchor.turnId}, so there is no point to rewind it to`, total };
+    const resolved = resolveTurnBoundary(rec, total, messages);
+    return resolved.reason === undefined ? { keep: resolved.keep, total } : { reason: resolved.reason, total };
+  }
 
   function restore(snapshot: SnapshotPair | undefined, which: 'before' | 'after'): boolean {
     if (!snapshot) return false;
@@ -113,37 +188,38 @@ export function createConversationRewindPort(
 
   return {
     async preview(anchor: RewindAnchor): Promise<RewindConversationPreview> {
-      const { keep, total } = keepFor(anchor);
-      if (keep === null) {
-        return { available: false, unavailableReason: unresolvedTurn(anchor.turnId), messagesToDrop: 0, messagesRemaining: total };
-      }
-      return { messagesToDrop: Math.max(0, total - keep), messagesRemaining: keep };
+      const conv = resolveConversation(anchor.sessionId);
+      if (!conv) return { messagesToDrop: 0, messagesRemaining: 0 };
+      const cut = keepFor(anchor, conv, () => messagesOf(conv.toJSON()));
+      if ('reason' in cut) return { available: false, unavailableReason: cut.reason, messagesToDrop: 0, messagesRemaining: cut.total };
+      return { messagesToDrop: Math.max(0, cut.total - cut.keep), messagesRemaining: cut.keep };
     },
 
     async rewind(anchor: RewindAnchor): Promise<RewindConversationOutcome> {
-      const { conv, keep, total } = keepFor(anchor);
+      const conv = resolveConversation(anchor.sessionId);
       const undoSnapshotId = `rwc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
       if (!conv) return { droppedMessages: 0, undoSnapshotId };
-      // Reporting success for a rewind that dropped nothing would leave files and conversation at different points.
-      if (keep === null) return { available: false, unavailableReason: unresolvedTurn(anchor.turnId), droppedMessages: 0, undoSnapshotId };
       const before = conv.toJSON() as ConversationJson;
-      conv.removeMessagesAfter(keep);
+      const cut = keepFor(anchor, conv, () => messagesOf(before));
+      // Reporting success for a rewind that dropped nothing would leave files and conversation at different points.
+      if ('reason' in cut) return { available: false, unavailableReason: cut.reason, droppedMessages: 0, undoSnapshotId };
+      conv.removeMessagesAfter(cut.keep);
       conv.rebuildHistory();
       const after = conv.toJSON() as ConversationJson;
-      remember(undoSnapshotId, { conv, before, after, afterCount: conv.getMessageCount(), afterSerialized: JSON.stringify(after) });
-      return { droppedMessages: Math.max(0, total - keep), undoSnapshotId };
+      remember(undoSnapshotId, anchor.sessionId, { conv, before, after, afterCount: conv.getMessageCount(), afterSerialized: JSON.stringify(after) });
+      return { droppedMessages: Math.max(0, cut.total - cut.keep), undoSnapshotId };
     },
 
     restoreBefore(undoSnapshotId: string): boolean {
-      return restore(snapshots.get(undoSnapshotId), 'before');
+      return restore(snapshotFor(undoSnapshotId), 'before');
     },
 
     restoreAfter(undoSnapshotId: string): boolean {
-      return restore(snapshots.get(undoSnapshotId), 'after');
+      return restore(snapshotFor(undoSnapshotId), 'after');
     },
 
     messagesSinceRewind(undoSnapshotId: string): number | null {
-      const snapshot = snapshots.get(undoSnapshotId);
+      const snapshot = snapshotFor(undoSnapshotId);
       if (!snapshot) return null;
       const delta = snapshot.conv.getMessageCount() - snapshot.afterCount;
       if (delta !== 0) return delta;
@@ -195,8 +271,8 @@ function hasSessionConversation(sessionId: string): boolean {
  * names. Used by the local /rewind command and, through the host loop, by the
  * daemon when a rewind driven from anywhere touches a session running here.
  */
-function createSessionConversationRewindPort(): ConversationRewindPort {
-  return createConversationRewindPort((sessionId) => liveConversations.get(sessionId) ?? null);
+function createSessionConversationRewindPort(options: ConversationRewindPortOptions = {}): ConversationRewindPort {
+  return createConversationRewindPort((sessionId) => liveConversations.get(sessionId) ?? null, options);
 }
 
 function findSessionConversation(sessionId: string): Conversation | null {

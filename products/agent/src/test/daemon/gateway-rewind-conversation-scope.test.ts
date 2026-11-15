@@ -115,7 +115,7 @@ describe('rewind.plan/apply conversation scope (live conversationRewindPort, pla
 
       const applied = await buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }).invoke('rewind.apply', {
         methodId: 'rewind.apply',
-        body: { sessionId, turnId: 'turn-1', scope: 'conversation', confirm: true, token: plan.token },
+        body: { sessionId, turnId: 'turn-1', scope: 'conversation', confirmToken: plan.token },
       } as never) as RewindApplyResult;
 
       expect(applied.refused).toBe(false);

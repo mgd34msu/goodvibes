@@ -227,9 +227,9 @@ export const PROFILE_FIELDS: readonly ProfileFieldDef[] = [
 
 const FIELD_BY_ID = new Map(PROFILE_FIELDS.map((field) => [field.id, field]));
 
-/** `<canonical section> <normalized label>` → field. */
+/** `<canonical section>\u0000<normalized label>` → field. */
 const FIELD_BY_SECTION_LABEL = new Map(
-  PROFILE_FIELDS.map((field) => [`${field.section} ${normalizeProfileKey(field.label)}`, field]),
+  PROFILE_FIELDS.map((field) => [`${field.section}\u0000${normalizeProfileKey(field.label)}`, field]),
 );
 
 export function profileFieldById(fieldId: string): ProfileFieldDef | undefined {
@@ -254,7 +254,7 @@ export function profileFieldForLabel(
   section: ProfileSectionName,
   label: string,
 ): ProfileFieldDef | undefined {
-  return FIELD_BY_SECTION_LABEL.get(`${section} ${normalizeProfileKey(label)}`);
+  return FIELD_BY_SECTION_LABEL.get(`${section}\u0000${normalizeProfileKey(label)}`);
 }
 
 export function profileFieldsForSection(section: ProfileSectionName): readonly ProfileFieldDef[] {

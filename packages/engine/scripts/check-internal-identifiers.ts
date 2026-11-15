@@ -2,13 +2,16 @@
 //
 // Pre-release gate: internal planning labels (wave / work-order / debt-register /
 // UX-workstream ids) and unfinished-work comment markers must not appear in
-// tracked text. Pure regex over the source tree, no stored state.
+// tracked text, and no tracked source file in the repository may hold a raw NUL
+// byte (search, diff and edit tools treat such a file as binary and skip it).
+// Pure regex over the source tree, no stored state.
 // docs/decisions/** is the sanctioned home for planning shorthand.
 //
 //   bun run internal-id:check
 //
 // Test override: INTERNAL_ID_ROOT replaces the engine package root.
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -65,8 +68,28 @@ export function scanTree(root = INTERNAL_ID_ROOT): { files: number; violations: 
   return { files, violations };
 }
 
+/** Tracked source files anywhere in the repository that hold a raw NUL byte. */
+export function findNulSources(repoRoot = resolve(INTERNAL_ID_ROOT, '../..')): string[] {
+  let listed: string;
+  try {
+    listed = execFileSync('git', ['-C', repoRoot, 'ls-files', '-z', '--', '*.ts', '*.tsx', '*.js', '*.mjs', '*.cjs'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return [];
+  }
+  return listed.split('\u0000').filter((rel) => {
+    if (!rel) return false;
+    try {
+      return readFileSync(join(repoRoot, rel)).includes(0);
+    } catch {
+      return false;
+    }
+  }).map((rel) => `${rel}: raw NUL byte; write it as the escape \\u0000 so the file stays text`);
+}
+
 if (import.meta.main) {
-  const { files, violations } = scanTree();
+  const scanned = scanTree();
+  const files = scanned.files;
+  const violations = [...scanned.violations, ...findNulSources()];
   if (violations.length > 0) {
     console.error(`internal-identifier-check FAILED: ${violations.length} finding(s).\n`);
     for (const violation of violations.slice(0, 100)) console.error(`- ${violation}`);

@@ -56,7 +56,8 @@ describe('product-composed conversation rewind', () => {
     const conv = conversation(5);
     registerSessionConversation(SESSION, conv);
     recordTurnAnchor(SESSION, { turnId: 't-apply', label: 'apply', messageCount: 2, at: Date.now() });
-    const applied = await invoke('rewind.apply', { sessionId: SESSION, turnId: 't-apply', scope: 'conversation', confirm: true }) as Applied;
+    const plan = await invoke('rewind.plan', { sessionId: SESSION, turnId: 't-apply', scope: 'conversation' }) as Plan;
+    const applied = await invoke('rewind.apply', { sessionId: SESSION, turnId: 't-apply', scope: 'conversation', confirmToken: plan.token }) as Applied;
     expect(applied.refused).toBe(false);
     expect(applied.receipt?.conversation?.rewound).toBe(true);
     expect(applied.receipt?.conversation?.droppedMessages).toBe(3);
@@ -69,7 +70,8 @@ describe('product-composed conversation rewind', () => {
     expect(plan.warnings.join(' ')).toContain('holds no live conversation for that session');
   });
   test('unhosted apply gives a skipped receipt', async () => {
-    const applied = await invoke('rewind.apply', { sessionId: 's-unhosted', scope: 'conversation', confirm: true }) as Applied;
+    const plan = await invoke('rewind.plan', { sessionId: 's-unhosted', scope: 'conversation' }) as Plan;
+    const applied = await invoke('rewind.apply', { sessionId: 's-unhosted', scope: 'conversation', confirmToken: plan.token }) as Applied;
     expect(applied.refused).toBe(false);
     expect(applied.receipt?.conversation?.rewound).toBe(false);
     expect(applied.receipt?.warnings.join(' ')).toContain('conversation rewind skipped');

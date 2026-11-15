@@ -10,6 +10,7 @@ import {
   UnifiedRewindService,
   type RewindAnchor,
   type RewindConversationPort,
+  type RewindScope,
   type RewindWorkspacePort,
 } from '../platform/src/platform/rewind/index.ts';
 import {
@@ -31,6 +32,11 @@ import { makeTestSurface } from './_helpers/session-surface.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const anchor: RewindAnchor = { sessionId: 'guard-s1', turnId: 'turn-1' };
+
+/** What authorizes an apply: the token of a plan for the same anchor and scope. */
+async function planned(service: UnifiedRewindService, at: RewindAnchor, scope: RewindScope): Promise<{ confirmToken: string }> {
+  return { confirmToken: (await service.plan(at, scope)).token };
+}
 
 function workspace(restoreCalls: string[]): RewindWorkspacePort {
   return {
@@ -55,7 +61,7 @@ describe('rewinding files and conversation together', () => {
       workspace: workspace(restores),
       conversation: { ...okConversation, preview: async () => ({ messagesToDrop: 0, messagesRemaining: 0, available: false, unavailableReason: 'the host lapsed' }) },
     });
-    const result = await service.apply(anchor, 'both', { confirm: true });
+    const result = await service.apply(anchor, 'both', await planned(service, anchor, 'both'));
     expect(result.refused).toBe(true);
     expect(result.refusal?.reason).toContain('the host lapsed');
     expect(result.refusal?.reason).toContain('Nothing was changed');
@@ -68,7 +74,7 @@ describe('rewinding files and conversation together', () => {
       workspace: workspace(restores),
       conversation: { ...okConversation, rewind: async () => { throw new Error('host connection dropped'); } },
     });
-    const result = await service.apply(anchor, 'both', { confirm: true });
+    const result = await service.apply(anchor, 'both', await planned(service, anchor, 'both'));
     expect(result.refused).toBe(false);
     expect(result.receipt?.undo.files).toEqual({ restoreCheckpointId: 'wcp_safety' });
     expect(result.receipt?.conversation?.rewound).toBe(false);
@@ -80,7 +86,7 @@ describe('rewinding files and conversation together', () => {
     const service = new UnifiedRewindService({
       conversation: { ...okConversation, rewind: async () => { throw new Error('host connection dropped'); } },
     });
-    await expect(service.apply({ sessionId: 'guard-s1' }, 'conversation', { confirm: true })).rejects.toThrow('host connection dropped');
+    await expect(service.apply({ sessionId: 'guard-s1' }, 'conversation', await planned(service, { sessionId: 'guard-s1' }, 'conversation'))).rejects.toThrow('host connection dropped');
   });
 });
 
@@ -101,16 +107,16 @@ describe('two applies for one session', () => {
       },
     };
     const service = new UnifiedRewindService({ workspace: slow });
-    const first = service.apply(anchor, 'files', { confirm: true });
+    const first = service.apply(anchor, 'files', await planned(service, anchor, 'files'));
     await inside;
-    const second = await service.apply(anchor, 'files', { confirm: true });
+    const second = await service.apply(anchor, 'files', await planned(service, anchor, 'files'));
     expect(second.refused).toBe(true);
     expect(second.refusal?.reason).toContain('still running');
     release();
     expect((await first).refused).toBe(false);
     expect(restores).toEqual(['wcp_a']);
     // Once the first has finished, the session can be rewound again.
-    expect((await service.apply(anchor, 'files', { confirm: true })).refused).toBe(false);
+    expect((await service.apply(anchor, 'files', await planned(service, anchor, 'files'))).refused).toBe(false);
   });
 });
 
@@ -153,7 +159,7 @@ describe('turn anchors after a rewind', () => {
     for (const [id, count] of [['t1', 2], ['t2', 4]] as const) recordTurnAnchor('anchors-b', turn(id, count));
     const sessionAnchor: RewindAnchor = { sessionId: 'anchors-b', turnId: 't1' };
     const service = new UnifiedRewindService({ conversation: okConversation, anchorSurface: surface });
-    await service.apply(sessionAnchor, 'conversation', { confirm: true });
+    await service.apply(sessionAnchor, 'conversation', await planned(service, sessionAnchor, 'conversation'));
     clearTurnAnchors('anchors-b');
     expect(restoreTurnAnchors('anchors-b', surface)).toBe(1);
   });
@@ -165,7 +171,7 @@ describe('turn anchors after a rewind', () => {
     for (const [id, count] of [['t1', 2], ['t2', 4]] as const) recordTurnAnchor('anchors-b', turn(id, count));
     persistTurnAnchors('anchors-b', surface);
     const service = new UnifiedRewindService({ conversation: okConversation, anchorSurface: surface });
-    await service.apply({ sessionId: 'anchors-b', turnId: 't1' }, 'conversation', { confirm: true });
+    await service.apply({ sessionId: 'anchors-b', turnId: 't1' }, 'conversation', await planned(service, { sessionId: 'anchors-b', turnId: 't1' }, 'conversation'));
     service.anchorsRestored('conv_undo');
     clearTurnAnchors('anchors-b');
     expect(restoreTurnAnchors('anchors-b', surface)).toBe(2);

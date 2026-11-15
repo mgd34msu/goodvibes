@@ -39,10 +39,11 @@ test('recorded boundaries drive real truncation with reversible before/after sna
   expect(port.restoreBefore('unknown')).toBe(false); expect(port.restoreAfter('unknown')).toBe(false);
 });
 
-test('a boundary beyond the live count is clamped and absent boundaries preserve messages', async () => {
+test('a boundary beyond the live count is unavailable, never clamped, and absent boundaries preserve messages', async () => {
   const fixture = conversation(2); const port = createConversationRewindPort(() => fixture.port);
   recordTurnAnchor(SESSION, { turnId: 'future', label: 'fixture', messageCount: 20, at: 1 });
-  expect(await port.preview({ sessionId: SESSION, turnId: 'future' })).toEqual({ messagesToDrop: 0, messagesRemaining: 2 });
+  expect(await port.preview({ sessionId: SESSION, turnId: 'future' })).toMatchObject({ available: false, messagesToDrop: 0, messagesRemaining: 2 });
+  expect((await port.rewind({ sessionId: SESSION, turnId: 'future' })).available).toBe(false);
   expect((await port.rewind({ sessionId: SESSION, turnId: 'missing' })).droppedMessages).toBe(0);
   expect(fixture.messages).toHaveLength(2);
 });

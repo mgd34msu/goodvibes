@@ -14,8 +14,10 @@ import {
   clearTurnAnchors,
   getTurnAnchors,
   recordTurnAnchor,
+  type RewindAnchor,
   type RewindCheckpointView,
   type RewindConversationPort,
+  type RewindScope,
   type RewindWorkspacePort,
 } from '../platform/src/platform/rewind/index.js';
 import {
@@ -30,6 +32,11 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+/** What authorizes an apply: the token of a plan for the same anchor and scope. */
+async function planned(service: UnifiedRewindService, at: RewindAnchor, scope: RewindScope): Promise<{ confirmToken: string }> {
+  return { confirmToken: (await service.plan(at, scope)).token };
+}
+
 function workspace(): string {
   const dir = mkdtempSync(join(tmpdir(), 'rewind-undo-'));
   dirs.push(dir);
@@ -141,14 +148,14 @@ describe('rewind service', () => {
 
     const plan = await service.plan({ sessionId: 's1', turnId: 't2' }, 'both');
     expect(plan.warnings.join('\n')).toContain('Turn t2 has no workspace checkpoint of its own');
-    const result = await service.apply({ sessionId: 's1', turnId: 't2' }, 'both', { confirm: true });
+    const result = await service.apply({ sessionId: 's1', turnId: 't2' }, 'both', await planned(service, { sessionId: 's1', turnId: 't2' }, 'both'));
 
     expect(result.refused).toBe(true);
     expect(result.refusal?.reason).toContain('scope "conversation"');
     expect(restored).toEqual([]);
     expect(rewound).toEqual([]);
     // Conversation-only stays available for the same turn.
-    expect((await service.apply({ sessionId: 's1', turnId: 't2' }, 'conversation', { confirm: true })).refused).toBe(false);
+    expect((await service.apply({ sessionId: 's1', turnId: 't2' }, 'conversation', await planned(service, { sessionId: 's1', turnId: 't2' }, 'conversation'))).refused).toBe(false);
   });
 
   test('a conversation rewind drops the anchors of the turns it removed', async () => {
@@ -158,7 +165,7 @@ describe('rewind service', () => {
       recordTurnAnchor(session, { turnId, label: turnId, messageCount, at: messageCount });
     }
     const service = new UnifiedRewindService({ conversation: trackingConversation([]) });
-    await service.apply({ sessionId: session, turnId: 't1' }, 'conversation', { confirm: true });
+    await service.apply({ sessionId: session, turnId: 't1' }, 'conversation', await planned(service, { sessionId: session, turnId: 't1' }, 'conversation'));
     expect(getTurnAnchors(session).map((a) => a.turnId)).toEqual(['t1']);
     clearTurnAnchors(session);
   });

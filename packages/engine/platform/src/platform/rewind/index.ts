@@ -53,9 +53,14 @@ export type {
 export {
   ANCHOR_SIDECAR_SETTLE_MS,
   ANCHOR_TMP_MAX_AGE_MS,
+  captureTurnAnchor,
   clearTurnAnchors,
   discardTurnAnchorsAfter,
+  dropAnchorsAgainFor,
+  restoreAnchorsDroppedBy,
   restoreDiscardedTurnAnchors,
+  resolveTurnBoundary,
+  turnBoundaryKey,
   getTurnAnchors,
   persistTurnAnchors,
   reapOrphanedAnchorSidecars,
@@ -67,5 +72,8 @@ export {
 export type {
   AnchorSidecarReapOptions,
   AnchorSidecarReapResult,
+  BoundaryMessage,
   TurnAnchor,
+  TurnAnchorSource,
+  TurnBoundaryResolution,
 } from './turn-anchors.js';

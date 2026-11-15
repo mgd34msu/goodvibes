@@ -178,7 +178,7 @@ function coalescingKey(record: SharedApprovalRecord): string | null {
   const sessionId = typeof record.sessionId === 'string' ? record.sessionId : '';
   const callId = typeof record.callId === 'string' ? record.callId : '';
   if (callId.length === 0) return null;
-  return `${sessionId} ${callId}`;
+  return `${sessionId}\u0000${callId}`;
 }
 
 /**

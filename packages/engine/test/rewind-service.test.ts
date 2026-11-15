@@ -13,6 +13,7 @@ import {
   type RewindCheckpointView,
   type RewindConversationPort,
   type RewindRestoreResult,
+  type RewindScope,
   type RewindWorkspacePort,
 } from '../platform/src/platform/rewind/index.js';
 import { ConversationRewindHostBroker } from '../platform/src/platform/rewind/conversation-host-broker.js';
@@ -61,6 +62,11 @@ const fakeConversation: RewindConversationPort = {
 
 const anchor: RewindAnchor = { sessionId: 's1', turnId: 'turn-1' };
 
+/** What authorizes an apply: the token of a plan for the same anchor and scope. */
+async function planned(service: UnifiedRewindService, at: RewindAnchor, scope: RewindScope): Promise<{ confirmToken: string }> {
+  return { confirmToken: (await service.plan(at, scope)).token };
+}
+
 describe('rewind.plan: dry-run preview + confirm token', () => {
   test('files plan resolves the anchor checkpoint and its affected file count', async () => {
     const service = new UnifiedRewindService({ workspace: fakeWorkspace() });
@@ -75,7 +81,7 @@ describe('rewind.plan: dry-run preview + confirm token', () => {
 
   test('applying a files rewind warns that other writers\' edits are reverted too', async () => {
     const service = new UnifiedRewindService({ workspace: fakeWorkspace() });
-    const receipt = (await service.apply(anchor, 'files', { confirm: true })).receipt!;
+    const receipt = (await service.apply(anchor, 'files', await planned(service, anchor, 'files'))).receipt!;
     expect(receipt.warnings.join(' ')).toContain('other sessions, agents or you');
   });
 
@@ -109,13 +115,17 @@ describe('rewind.plan: dry-run preview + confirm token', () => {
 });
 
 describe('rewind.apply: confirm gate', () => {
-  test('an unconfirmed apply returns a non-error refusal naming rewind.plan', async () => {
-    const service = new UnifiedRewindService({ workspace: fakeWorkspace() });
-    const result = await service.apply(anchor, 'files', {});
-    expect(result.refused).toBe(true);
-    expect(result.receipt).toBeNull();
-    expect(result.refusal?.planMethod).toBe('rewind.plan');
-    expect(result.refusal?.options).toEqual(['confirm', 'confirmToken']);
+  test('an apply without a plan token returns a non-error refusal naming rewind.plan', async () => {
+    const restoreCalls: Array<{ id: string; safety: boolean | undefined }> = [];
+    const service = new UnifiedRewindService({ workspace: fakeWorkspace({ restoreCalls }) });
+    for (const opts of [{}, { confirm: true }]) {
+      const result = await service.apply(anchor, 'files', opts);
+      expect(result.refused).toBe(true);
+      expect(result.receipt).toBeNull();
+      expect(result.refusal?.planMethod).toBe('rewind.plan');
+      expect(result.refusal?.confirmField).toBe('confirmToken');
+    }
+    expect(restoreCalls).toEqual([]);
   });
 
   test('a valid confirm token authorizes the apply and is single-use', async () => {
@@ -133,20 +143,13 @@ describe('rewind.apply: confirm gate', () => {
     const plan = await service.plan(anchor, 'files');
     await expect(service.apply(anchor, 'both', { confirmToken: plan.token })).rejects.toBeInstanceOf(RewindTokenError);
   });
-
-  test('confirm:true bypasses the token', async () => {
-    const service = new UnifiedRewindService({ workspace: fakeWorkspace() });
-    const result = await service.apply(anchor, 'files', { confirm: true });
-    expect(result.refused).toBe(false);
-    expect(result.receipt?.files?.restored).toBe(true);
-  });
 });
 
 describe('rewind.apply: symmetric undo point (restore-the-restore)', () => {
   test('applying files records the pre-restore safety checkpoint as the undo point', async () => {
     const restoreCalls: Array<{ id: string; safety: boolean | undefined }> = [];
     const service = new UnifiedRewindService({ workspace: fakeWorkspace({ restoreCalls }) });
-    const receipt = (await service.apply(anchor, 'files', { confirm: true })).receipt!;
+    const receipt = (await service.apply(anchor, 'files', await planned(service, anchor, 'files'))).receipt!;
     // The workspace restore was asked to take a safety checkpoint.
     expect(restoreCalls).toEqual([{ id: 'wcp_a', safety: true }]);
     expect(receipt.files?.safetyCheckpointId).toBe('wcp_safety');
@@ -162,7 +165,7 @@ describe('rewind.apply: symmetric undo point (restore-the-restore)', () => {
         restore: { checkpointId: 'wcp_a', safetyCheckpointId: 'wcp_safety', restoredFiles: ['src/a.ts'], removedFiles: [], failedPaths: [{ path: 'src/b.ts', reason: 'permission denied' }] },
       }),
     });
-    const receipt = (await service.apply(anchor, 'files', { confirm: true })).receipt!;
+    const receipt = (await service.apply(anchor, 'files', await planned(service, anchor, 'files'))).receipt!;
     expect(receipt.files?.restored).toBe(false);
     expect(receipt.undo.files).toEqual({ restoreCheckpointId: 'wcp_safety' });
     expect(receipt.warnings.join(' ')).toContain('src/b.ts: permission denied');
@@ -171,7 +174,7 @@ describe('rewind.apply: symmetric undo point (restore-the-restore)', () => {
 
   test('both scope records undo points for files and conversation', async () => {
     const service = new UnifiedRewindService({ workspace: fakeWorkspace(), conversation: fakeConversation });
-    const receipt = (await service.apply(anchor, 'both', { confirm: true })).receipt!;
+    const receipt = (await service.apply(anchor, 'both', await planned(service, anchor, 'both'))).receipt!;
     expect(receipt.undo.files).toEqual({ restoreCheckpointId: 'wcp_safety' });
     expect(receipt.undo.conversation).toEqual({ undoSnapshotId: 'conv_undo_1' });
     expect(receipt.conversation?.droppedMessages).toBe(4);
@@ -181,7 +184,7 @@ describe('rewind.apply: symmetric undo point (restore-the-restore)', () => {
     const service = new UnifiedRewindService({
       workspace: fakeWorkspace({ restore: { checkpointId: 'wcp_a', safetyCheckpointId: null, restoredFiles: [], removedFiles: [] } }),
     });
-    const receipt = (await service.apply(anchor, 'files', { confirm: true })).receipt!;
+    const receipt = (await service.apply(anchor, 'files', await planned(service, anchor, 'files'))).receipt!;
     expect(receipt.undo.files).toBeNull();
   });
 });
@@ -316,7 +319,10 @@ describe('conversation rewind hosts', () => {
   test('an apply reaches the hosting surface and its receipt carries that surface\'s undo handle', async () => {
     const h = hostHarness();
     const hostId = await registerHost(h, 'sess-1');
-    const applied = h.rewind.apply({ sessionId: 'sess-1', turnId: 'turn-4' }, 'conversation', { confirm: true });
+    const planning = h.rewind.plan({ sessionId: 'sess-1', turnId: 'turn-4' }, 'conversation');
+    await serveOne(h, hostId, { messagesToDrop: 6, messagesRemaining: 11 });
+    const { token } = await planning;
+    const applied = h.rewind.apply({ sessionId: 'sess-1', turnId: 'turn-4' }, 'conversation', { confirmToken: token });
     const served = await serveOne(h, hostId, { droppedMessages: 6, undoSnapshotId: 'rwc_from_the_surface' });
     expect(served.kind).toBe('rewind');
     const result = await applied;
@@ -345,7 +351,7 @@ describe('conversation rewind hosts', () => {
     expect(plan.conversation?.available).toBe(false);
     expect(plan.warnings.join(' ')).toContain('did not answer within');
 
-    const applied = await h.rewind.apply({ sessionId: 'sess-1' }, 'conversation', { confirm: true });
+    const applied = await h.rewind.apply({ sessionId: 'sess-1' }, 'conversation', { confirmToken: plan.token });
     expect(applied.receipt?.conversation?.rewound).toBe(false);
     // The one thing a timed-out rewind must not say is that the messages
     // survived: nobody here knows whether the surface truncated.

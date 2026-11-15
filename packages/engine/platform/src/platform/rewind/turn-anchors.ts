@@ -5,13 +5,15 @@
  * The unified rewind service next door (service.ts) anchors a rewind to a
  * `{ sessionId, turnId }`. Files-scope resolves that turnId against the
  * workspace checkpoints the turn engine already stamps with the same turnId.
- * Conversation-scope, however, needs to know HOW MANY conversation messages
- * existed at that turn boundary, a mapping the platform's checkpoint store does not
- * carry (turn checkpoints are not stamped with a conversation-message count).
- * This registry supplies exactly that mapping: at every TURN_COMPLETED a host
- * records the turnId together with the live `conversation.getMessageCount()`,
- * so a later rewind to that turnId can truncate the conversation to precisely
- * the boundary the files checkpoint captured.
+ * Conversation-scope, however, needs to know WHERE in the conversation that
+ * turn ended, a mapping the platform's checkpoint store does not carry. This
+ * registry supplies it: at every TURN_COMPLETED a host records the turnId with
+ * the live `conversation.getMessageCount()` and a key of the turn's last
+ * message ({@link captureTurnAnchor}). A position alone is not an identity:
+ * compaction rewrites the history and renumbers it, so a rewind resolves the
+ * boundary by the key ({@link resolveTurnBoundary}) and says the turn was
+ * compacted away when its last message is gone, instead of cutting at
+ * whatever message now sits at the old position.
  *
  * Two layers, and a host chooses how far up it goes:
  *
@@ -26,9 +28,11 @@
  *      reloads it, so message-anchored rewind behaves identically before and
  *      after a resume. Both take the `SessionSurface` that owns the sessions
  *      directory, so the sidecar and its session can never land in different
- *      places. The `messageCount` boundaries stay valid across a resume because
- *      a resume rehydrates the same message history the anchors were recorded
- *      against.
+ *      places. The boundaries stay valid across a resume because a resume
+ *      rehydrates the same message history the anchors were recorded against.
+ *      The sidecar also keeps the anchors a conversation rewind dropped, by the
+ *      rewind's undo snapshot id, so undoing that rewind after a restart gives
+ *      them back.
  *
  * Layer 2 is opt-in per call, not per module: a host that never calls
  * `persistTurnAnchors` performs no I/O here at all.
@@ -46,8 +50,14 @@ export interface TurnAnchor {
   readonly turnId: string;
   /** A short human label (the truncated user prompt) for the recent-turns picker. */
   readonly label: string;
-  /** `conversation.getMessageCount()` captured at this turn's completion, the conversation truncation boundary. */
+  /** `conversation.getMessageCount()` captured at this turn's completion, where the boundary was then. */
   readonly messageCount: number;
+  /**
+   * {@link turnBoundaryKey} of the turn's last message, the boundary's
+   * identity. Absent on anchors recorded without it; those resolve by position
+   * and are refused only when the conversation is now shorter than they are.
+   */
+  readonly boundary?: string | undefined;
   /** Wall-clock ms at capture, for ordering + age display. */
   readonly at: number;
 }
@@ -65,6 +75,104 @@ const MAX_TRACKED_SESSIONS = 256;
 
 const registry = new Map<string, TurnAnchor[]>();
 
+/** The anchors one conversation rewind dropped, kept so undoing that rewind gives them back. */
+interface DiscardedAnchors {
+  readonly undoSnapshotId: string;
+  readonly turnId: string;
+  readonly anchors: readonly TurnAnchor[];
+}
+
+/** How many rewinds per session keep their dropped anchors for an undo. */
+const MAX_DISCARDED_PER_SESSION = 16;
+
+/** Dropped anchors by session, oldest first; mirrored into the session's sidecar. */
+const discardedBySession = new Map<string, DiscardedAnchors[]>();
+
+/** The parts of a conversation message its boundary key is made from. */
+export interface BoundaryMessage {
+  readonly role: string;
+  readonly content?: unknown;
+  readonly callId?: string | undefined;
+  readonly toolCalls?: readonly { readonly id?: string | undefined }[] | undefined;
+}
+
+/**
+ * A short key for one message: its role, the ids that tie it to tool calls,
+ * and a 32-bit FNV-1a hash of its content. Cost: one pass over that message's
+ * text, nothing else.
+ */
+export function turnBoundaryKey(message: BoundaryMessage): string {
+  const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? null) ?? '';
+  const ids = message.callId ?? (message.toolCalls?.map((call) => call.id ?? '').join(',') ?? '');
+  const text = `${message.role}|${ids}|${content}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${message.role}:${text.length.toString(36)}:${hash.toString(36)}`;
+}
+
+/** The conversation facts an anchor is captured from at TURN_COMPLETED. */
+export interface TurnAnchorSource {
+  getMessageCount(): number;
+  getLastUserMessage(): string | null | undefined;
+  /** The message at `index`, read in place (no copy of the history). */
+  getMessageAt(index: number): BoundaryMessage | undefined;
+}
+
+/** Build a completed turn's anchor, boundary key included, from the live conversation. */
+export function captureTurnAnchor(turnId: string, conversation: TurnAnchorSource, at: number = Date.now()): TurnAnchor {
+  const messageCount = conversation.getMessageCount();
+  const last = messageCount > 0 ? conversation.getMessageAt(messageCount - 1) : undefined;
+  return {
+    turnId,
+    label: summarizeTurnLabel(conversation.getLastUserMessage()),
+    messageCount,
+    ...(last ? { boundary: turnBoundaryKey(last) } : {}),
+    at,
+  };
+}
+
+/** Where a conversation rewind to an anchor cuts, or why it cannot. */
+export type TurnBoundaryResolution =
+  | { readonly keep: number; readonly reason?: undefined }
+  | { readonly keep?: undefined; readonly reason: string };
+
+const COMPACTED_AWAY = 'that turn was compacted away (its last message is no longer in the conversation), so there is no point to cut the conversation at. Rewind the files only, or pick a later turn';
+const SHORTER_NOW = 'the conversation is shorter now than when that turn ended (it was compacted or cut back since), so that turn\'s end cannot be found. Rewind the files only, or pick a later turn';
+
+/**
+ * Resolve an anchor to the number of messages to keep in a conversation of
+ * `total` messages. The recorded position is used when the message there still
+ * has the anchor's key; otherwise the message with that key nearest the
+ * recorded position; when none has it, the turn is gone and the reason says
+ * so. `readMessages` (the conversation as it is now) is called only for an
+ * anchor with a key; an anchor without one, or a conversation whose messages
+ * cannot be read, is trusted by position only while the conversation is at
+ * least that long.
+ */
+export function resolveTurnBoundary(
+  anchor: TurnAnchor,
+  total: number,
+  readMessages: () => readonly BoundaryMessage[] | null,
+): TurnBoundaryResolution {
+  const messages = anchor.boundary === undefined || anchor.messageCount === 0 ? null : readMessages();
+  if (messages === null) {
+    return anchor.messageCount > total ? { reason: SHORTER_NOW } : { keep: anchor.messageCount };
+  }
+  const count = messages.length;
+  const at = anchor.messageCount - 1;
+  const here = messages[at];
+  if (here && turnBoundaryKey(here) === anchor.boundary) return { keep: anchor.messageCount };
+  let best = -1;
+  for (let i = 0; i < count; i++) {
+    const message = messages[i];
+    if (message && turnBoundaryKey(message) === anchor.boundary && (best < 0 || Math.abs(i - at) < Math.abs(best - at))) best = i;
+  }
+  return best >= 0 ? { keep: best + 1 } : { reason: COMPACTED_AWAY };
+}
+
 /** Trim a user prompt to a single compact line for the picker. */
 export function summarizeTurnLabel(text: string | null | undefined, max = 72): string {
   const oneLine = (text ?? '').replace(/\s+/g, ' ').trim();
@@ -80,8 +188,9 @@ export function summarizeTurnLabel(text: string | null | undefined, max = 72): s
  * In one linear history no turn ends with fewer messages than the turn
  * before it. A new turn that ends below an earlier anchor's count means the
  * history was cut back (a rewind, an undo, a compaction) since that
- * anchor was recorded, so those earlier anchors no longer name a boundary in
- * this conversation and are dropped.
+ * anchor was recorded, so those earlier anchors are dropped from the list the
+ * turn picker shows. Whether a kept anchor still names a boundary is decided
+ * at rewind time by its key ({@link resolveTurnBoundary}).
  */
 export function recordTurnAnchor(sessionId: string, anchor: TurnAnchor): void {
   if (!sessionId || !anchor.turnId) return;
@@ -103,6 +212,7 @@ export function recordTurnAnchor(sessionId: string, anchor: TurnAnchor): void {
     const oldest = registry.keys().next().value;
     if (oldest === undefined) break;
     registry.delete(oldest);
+    discardedBySession.delete(oldest);
   }
 }
 
@@ -124,13 +234,55 @@ export function resolveTurnAnchor(sessionId: string, turnId: string): TurnAnchor
  * once, so a resume before the next turn completes does not bring the dropped
  * anchors back.
  */
-export function discardTurnAnchorsAfter(sessionId: string, turnId: string, surface?: SessionSurface): readonly TurnAnchor[] {
+export function discardTurnAnchorsAfter(
+  sessionId: string,
+  turnId: string,
+  surface?: SessionSurface,
+  undoSnapshotId?: string,
+): readonly TurnAnchor[] {
   const list = registry.get(sessionId);
   const index = list?.findIndex((a) => a.turnId === turnId) ?? -1;
   if (!list || index < 0) return [];
   const discarded = list.splice(index + 1);
+  if (undoSnapshotId && discarded.length > 0) rememberDiscarded(sessionId, { undoSnapshotId, turnId, anchors: discarded });
   if (surface && discarded.length > 0) persistTurnAnchors(sessionId, surface);
   return discarded;
+}
+
+function rememberDiscarded(sessionId: string, entry: DiscardedAnchors): void {
+  const kept = (discardedBySession.get(sessionId) ?? []).filter((d) => d.undoSnapshotId !== entry.undoSnapshotId);
+  kept.push(entry);
+  if (kept.length > MAX_DISCARDED_PER_SESSION) kept.splice(0, kept.length - MAX_DISCARDED_PER_SESSION);
+  discardedBySession.set(sessionId, kept);
+}
+
+function findDiscarded(undoSnapshotId: string): { sessionId: string; entry: DiscardedAnchors } | null {
+  for (const [sessionId, list] of discardedBySession) {
+    const entry = list.find((d) => d.undoSnapshotId === undoSnapshotId);
+    if (entry) return { sessionId, entry };
+  }
+  return null;
+}
+
+/**
+ * The conversation rewind with this undo snapshot was undone: the anchors it
+ * dropped come back, in memory and in the sidecar. Works after a restart once
+ * the session's sidecar was restored. Returns false when nothing is known for
+ * that snapshot.
+ */
+export function restoreAnchorsDroppedBy(undoSnapshotId: string, surface?: SessionSurface): boolean {
+  const found = findDiscarded(undoSnapshotId);
+  if (!found) return false;
+  restoreDiscardedTurnAnchors(found.sessionId, found.entry.anchors, surface);
+  return true;
+}
+
+/** The undone rewind with this undo snapshot was applied again (redo): its anchors go again. */
+export function dropAnchorsAgainFor(undoSnapshotId: string, surface?: SessionSurface): boolean {
+  const found = findDiscarded(undoSnapshotId);
+  if (!found) return false;
+  discardTurnAnchorsAfter(found.sessionId, found.entry.turnId, surface);
+  return true;
 }
 
 /**
@@ -148,6 +300,7 @@ export function restoreDiscardedTurnAnchors(sessionId: string, anchors: readonly
 /** Drop a session's anchors. Exposed for tests and session reset. */
 export function clearTurnAnchors(sessionId: string): void {
   registry.delete(sessionId);
+  discardedBySession.delete(sessionId);
 }
 
 // --- Cross-resume persistence -------------------------------------------------
@@ -176,8 +329,16 @@ function isTurnAnchor(value: unknown): value is TurnAnchor {
     typeof a.turnId === 'string' && a.turnId.length > 0 &&
     typeof a.label === 'string' &&
     typeof a.messageCount === 'number' && Number.isFinite(a.messageCount) &&
-    typeof a.at === 'number' && Number.isFinite(a.at)
+    typeof a.at === 'number' && Number.isFinite(a.at) &&
+    (a.boundary === undefined || typeof a.boundary === 'string')
   );
+}
+
+function isDiscardedAnchors(value: unknown): value is DiscardedAnchors {
+  if (typeof value !== 'object' || value === null) return false;
+  const d = value as Record<string, unknown>;
+  return typeof d.undoSnapshotId === 'string' && d.undoSnapshotId.length > 0
+    && typeof d.turnId === 'string' && Array.isArray(d.anchors) && d.anchors.every(isTurnAnchor);
 }
 
 /**
@@ -191,10 +352,11 @@ export function persistTurnAnchors(sessionId: string, surface: SessionSurface): 
   const path = anchorSidecarPath(sessionId, surface);
   if (!path) return true;
   const list = registry.get(sessionId) ?? [];
-  if (list.length === 0) return true; // nothing to mirror yet
+  const discarded = discardedBySession.get(sessionId) ?? [];
+  if (list.length === 0 && discarded.length === 0) return true; // nothing to mirror yet
   try {
     mkdirSync(surface.sessionsDir, { recursive: true });
-    const payload = JSON.stringify({ version: ANCHOR_SIDECAR_VERSION, sessionId, anchors: list });
+    const payload = JSON.stringify({ version: ANCHOR_SIDECAR_VERSION, sessionId, anchors: list, ...(discarded.length > 0 ? { discarded } : {}) });
     const tmp = `${path}${ANCHOR_SIDECAR_TMP_MARKER}${process.pid}`;
     writeFileSync(tmp, payload);
     renameSync(tmp, path);
@@ -216,7 +378,7 @@ export function restoreTurnAnchors(sessionId: string, surface: SessionSurface): 
   const path = anchorSidecarPath(sessionId, surface);
   if (!path || !existsSync(path)) return 0;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { anchors?: unknown };
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { anchors?: unknown; discarded?: unknown };
     if (!parsed || !Array.isArray(parsed.anchors)) return 0;
     let restored = 0;
     for (const candidate of parsed.anchors) {
@@ -224,6 +386,9 @@ export function restoreTurnAnchors(sessionId: string, surface: SessionSurface): 
         recordTurnAnchor(sessionId, candidate);
         restored++;
       }
+    }
+    if (Array.isArray(parsed.discarded)) {
+      for (const candidate of parsed.discarded) if (isDiscardedAnchors(candidate)) rememberDiscarded(sessionId, candidate);
     }
     return restored;
   } catch {

@@ -223,7 +223,7 @@ describe('nothing is deleted in silence', () => {
   });
 
   test('recording onto an unreadable ledger says that it is replacing it', () => {
-    seedLedger('    ');
+    seedLedger('\u0000\u0000\u0000\u0000');
     const { warns } = withCapturedLogs(() => recordRecoveryRemoval(surface, 'sess-after-corruption', Date.now()));
     expect(warns.some((entry) => entry.message.includes('ledger unreadable'))).toBe(true);
     expect(readRecoveryRemovals(surface).map((r) => r.sessionId)).toEqual(['sess-after-corruption']);

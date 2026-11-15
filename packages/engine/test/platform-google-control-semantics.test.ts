@@ -61,25 +61,28 @@ describe('Google setup semantic control contract', () => {
     else await expect(reading).rejects.toThrow(mode === 'malformed' ? 'answer "pick" has no probabilities object' : 'Google setup page reading');
     expect(rig.clicked).toEqual([]);
   });
-  for (const mode of ['snapshot', 'page', 'port', 'cancel', 'request'] as const) test(`held ${mode} invalidation prevents a late action`, async () => {
+  for (const mode of ['port', 'cancel', 'request'] as const) test(`held ${mode} invalidation prevents a late action`, async () => {
     const delayed = held(selection().port); installJudgmentPort(delayed.port);
     const rig = browserRig(), abort = new AbortController(); let active = true;
     const pending = findElement(rig.elements(), { purpose: 'Create client' }, { browser: rig.browser, signal: abort.signal, assertCurrent: () => { if (!active) throw new Error('retired'); } });
     const rejected = pending.then(() => null, error => error);
     await delayed.started;
-    if (mode === 'snapshot') rig.change([element('new', 'Create')]);
-    if (mode === 'page') rig.replacePage();
     if (mode === 'port') { installJudgmentPort(selection().port); installJudgmentPort(delayed.port); }
     if (mode === 'cancel') abort.abort();
     if (mode === 'request') active = false;
     delayed.release(); expect(await rejected).toBeInstanceOf(Error);
     expect(rig.clicked).toEqual([]); expect(rig.typed).toEqual([]);
   });
-  for (const mode of ['snapshot', 'page', 'port', 'foreign', 'cancel'] as const) test(`settled ${mode} invalidation rejects consumption`, async () => {
+  test('a control that loads late beside the chosen one does not fail the step', async () => {
+    installJudgmentPort(selection().port); const rig = browserRig();
+    const chosen = await findElement(rig.elements(), { purpose: 'Create client' }, { browser: rig.browser });
+    rig.change([...rig.elements(), element('extra', 'Créer aussi')]);
+    await consumeGoogleElement(rig.browser, chosen!);
+    expect(rig.clicked).toEqual(['submit']);
+  });
+  for (const mode of ['port', 'foreign', 'cancel'] as const) test(`settled ${mode} invalidation rejects consumption`, async () => {
     const fake = selection(); installJudgmentPort(fake.port); const rig = browserRig(), abort = new AbortController();
     const chosen = await findElement(rig.elements(), { purpose: 'Create client' }, { browser: rig.browser, signal: abort.signal });
-    if (mode === 'snapshot') rig.change([...rig.elements(), element('extra', 'Créer aussi')]);
-    if (mode === 'page') rig.replacePage();
     if (mode === 'port') { installJudgmentPort(selection().port); installJudgmentPort(fake.port); }
     if (mode === 'cancel') abort.abort();
     await expect(consumeGoogleElement(mode === 'foreign' ? browserRig().browser : rig.browser, chosen!)).rejects.toThrow();
@@ -116,14 +119,6 @@ describe('Google setup semantic control contract', () => {
     delayed.release(); expect(await rejected).toBeInstanceOf(Error); await Promise.resolve();
     expect(rig.clicked).toEqual([]); expect(rig.typed).toEqual([]);
   });
-});
-
-test('consumed browser restriction still rejects replacement of original browser methods', () => {
-  installJudgmentPort(selection().port); const rig = browserRig();
-  const effect = ownGoogleBrowser(rig.browser).consumeObservation();
-  expect(() => effect.assertCurrent()).not.toThrow();
-  rig.browser.click = async () => {};
-  expect(() => effect.assertCurrent()).toThrow();
 });
 
 test('ordinary four-letter-word sign-in prose reaches the typed page reader', async () => {

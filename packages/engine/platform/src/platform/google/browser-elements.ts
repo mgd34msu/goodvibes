@@ -1,11 +1,19 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-/** Purpose-grounded Google setup controls. Readings are observations, not action authorization. */
+/**
+ * Purpose-grounded Google setup controls. Readings are observations, not action
+ * authorization.
+ *
+ * Each step observes the page once, asks against that capture, and acts with
+ * the capture's snapshot id as the precondition: the browser engine refuses a
+ * click or keystroke whose snapshot is no longer the page's current one, which
+ * is the one check that sits at the effect. A refused action re-observes and
+ * acts once more on the same control when it is still there.
+ */
 
 import type { GoogleBrowserElement, GoogleBrowserPort } from './types.js';
 import { preserveGoogleDecisionFailure } from './decision-work.js';
-import { googleSetupControl, googleSignInPage, googleTwoStepPage, googleAppPasswordPage, googleControlSnapshot, admitGoogleControlMetadata, googleReadingOwner, GoogleReadingError, type GoogleReadingOptions } from './browser-readings.js';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { googleSetupControl, googleSignInPage, googleTwoStepPage, googleAppPasswordPage, googleControlSnapshot, admitGoogleControlMetadata, googleReadingOwner, GoogleReadingError, latestGoogleSnapshot, type GoogleReadingOptions } from './browser-readings.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { StaleElementError } from '../browser/index.js';
 
 export interface GoogleElementQuery {
   /** The action or observation this control must serve, not a substring filter. */
@@ -16,34 +24,14 @@ export interface GoogleElementQuery {
   readonly tag?: string;
 }
 
+/** What a chosen control may be acted on with: the browser and capture it was read from, and the reading's lifetime. */
 interface SelectionLease {
   readonly browser: GoogleBrowserPort | undefined;
-  readonly snapshot: string;
-  readonly url: string | undefined;
-  readonly assertCurrent: () => void;
-  readonly assertOwner: () => void;
+  readonly source: readonly GoogleBrowserElement[];
   readonly signal: AbortSignal | undefined;
+  readonly assertOwner: () => void;
 }
 const selected = new WeakMap<GoogleBrowserElement, SelectionLease>();
-
-/** Fence attempts and reading/action attachments to the same offered page. */
-function fencedPort(base: JudgmentPort, current: () => void, currentPage: () => Promise<void>): JudgmentPort {
-  return { ...base,
-    ...(base.recorder ? { recorder: {
-      recordReadings(id, readings) { current(); base.recorder!.recordReadings(id, readings); current(); },
-      recordAction(id, action) { current(); base.recorder!.recordAction(id, action); current(); },
-    } satisfies NonNullable<JudgmentPort['recorder']> } : {}),
-    async ask(request) {
-      await currentPage(); current();
-      const result = await base.ask({ ...request,
-        beforeAttempt: () => { current(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); current(); },
-        beforeAsyncAttempt: async () => { await currentPage(); const checked = await request.beforeAsyncAttempt?.(); current(); return checked; },
-        assertLogCurrent: () => { current(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); current(); },
-      });
-      await currentPage(); current(); return result;
-    },
-  };
-}
 
 /** All structurally eligible candidates participate; no first-match fallback. */
 export async function findElement(
@@ -52,73 +40,65 @@ export async function findElement(
   options: GoogleReadingOptions = {},
 ): Promise<GoogleBrowserElement | null> {
   try {
-    const browser = options.browser;
     const snapshot = googleControlSnapshot(elements);
-    const describe = () => {
-      const descriptors = Object.getOwnPropertyDescriptors(query);
-      if (Object.values(descriptors).some(d => !('value' in d))) throw new GoogleReadingError();
-      return snapshotJudgmentInput({ purpose: query.purpose, nameIncludes: query.nameIncludes,
-        role: query.role, tag: query.tag, pattern: query.namePattern?.source, flags: query.namePattern?.flags });
-    };
-    const request = describe();
-    const requestKey = JSON.stringify(request);
+    const request = snapshotJudgmentInput({ purpose: query.purpose, nameIncludes: query.nameIncludes,
+      role: query.role, tag: query.tag, pattern: query.namePattern?.source, flags: query.namePattern?.flags });
     const context = snapshotJudgmentInput({ ...request as object,
       purpose: query.purpose ?? query.nameIncludes ?? 'Select the control matching the supplied structural constraints' });
+    const pattern = query.namePattern ? new RegExp(query.namePattern.source, query.namePattern.flags.replace(/[gy]/g, '')) : undefined;
     const candidates = snapshot.filter(element => element.disabled !== true && (!query.role || element.role.toLowerCase() === query.role.toLowerCase())
       && (!query.tag || element.tag.toLowerCase() === query.tag.toLowerCase())
-      && (!query.namePattern || new RegExp(query.namePattern.source, query.namePattern.flags.replace(/[gy]/g, '')).test(element.name)));
+      && (!pattern || pattern.test(element.name)));
     const owner = googleReadingOwner('google.setup.control', options);
-    const pageOwner = browser?.captureAuthority?.();
-    const url = browser ? await browser.currentUrl() : undefined;
-    owner.assertCurrent();
-    pageOwner?.assertCurrent();
-    snapshotJudgmentInput({ url });
-    const before = JSON.stringify(snapshot);
-    const current = () => { owner.assertCurrent(); pageOwner?.assertCurrent(); if (JSON.stringify(describe()) !== requestKey || JSON.stringify(googleControlSnapshot(elements)) !== before) throw new GoogleReadingError(); };
-    current();
-    const currentPage = async () => {
-      current();
-      if (browser) {
-        const freshUrl = await browser.currentUrl(); current();
-        const fresh = await (browser.verifySnapshot?.() ?? browser.snapshot()); current();
-        if (url !== freshUrl || JSON.stringify(googleControlSnapshot(fresh)) !== before) throw new GoogleReadingError();
-      }
-      current();
-    };
-    if (!candidates.length) { await currentPage(); return null; }
-    const port = fencedPort(owner.port, current, currentPage);
-    const reading = await googleSetupControl.select(port, context as never,
+    if (!candidates.length) return null;
+    const reading = await googleSetupControl.select(owner.port, context as never,
       candidates.map((element, index) => ({ id: `control_${index}`, content: { role: element.role, name: element.name, tag: element.tag } })),
       { site: 'google.setup.control', signal: owner.signal });
-    current();
-    await currentPage();
     if (reading.outcome !== 'act') throw new GoogleReadingError();
     if (reading.chosen === undefined) { reading.recordAction('no suitable Google setup control'); return null; }
     const index = candidates.findIndex((_, index) => `control_${index}` === reading.chosen);
     if (index < 0) throw new GoogleReadingError();
     const element = Object.freeze({ ...candidates[index]! });
     reading.recordAction('selected an offered Google setup control');
-    current();
-    selected.set(element, { browser, snapshot: before, url, assertCurrent: current, assertOwner: owner.assertCurrent, signal: owner.signal });
+    selected.set(element, { browser: options.browser, source: elements, signal: owner.signal, assertOwner: owner.assertCurrent });
     return element;
   } catch (error) { preserveGoogleDecisionFailure(error, options); throw new GoogleReadingError(); }
 }
 
-/** Revalidate the full snapshot and original owner at the actual effect boundary. */
+/**
+ * The ref of the control with the chosen control's role and name in a later
+ * capture, when exactly one such control is there.
+ */
+function sameControl(element: GoogleBrowserElement, elements: readonly GoogleBrowserElement[]): string {
+  const same = googleControlSnapshot(elements).filter((control) => control.disabled !== true && control.role === element.role && control.name === element.name);
+  if (same.length !== 1) {
+    throw new GoogleReadingError(`The Google setup page changed after the ${element.role} "${element.name}" was chosen, and it is no longer on the page once. Re-run this step.`);
+  }
+  return same[0]!.ref;
+}
+
+/**
+ * Act on a chosen control. A ref belongs to the capture it was read from, so a
+ * control chosen from an earlier capture is found again, by role and name, in
+ * the latest one. The engine refuses the action when the page changed since
+ * that capture; then the page is observed once more and the action repeated
+ * once on the same control.
+ */
 export async function consumeGoogleElement(browser: GoogleBrowserPort, element: GoogleBrowserElement, text?: string): Promise<void> {
   const lease = selected.get(element);
   if (!lease || lease.browser !== browser) throw new GoogleReadingError();
-  lease.assertCurrent();
-  const url = await browser.currentUrl();
-  lease.assertCurrent();
-  if (url !== lease.url) throw new GoogleReadingError();
-  const snapshot = await (browser.verifySnapshot?.() ?? browser.snapshot());
-  lease.assertCurrent();
-  if (JSON.stringify(googleControlSnapshot(snapshot)) !== lease.snapshot) throw new GoogleReadingError();
-  lease.assertCurrent();
   selected.delete(element);
-  if (text === undefined) await browser.click(element.ref, { signal: lease.signal, assertCurrent: lease.assertCurrent });
-  else await browser.type(element.ref, text, { signal: lease.signal, assertCurrent: lease.assertCurrent });
+  lease.assertOwner();
+  const act = (ref: string): Promise<void> => text === undefined
+    ? browser.click(ref, { signal: lease.signal, assertCurrent: lease.assertOwner })
+    : browser.type(ref, text, { signal: lease.signal, assertCurrent: lease.assertOwner });
+  const latest = latestGoogleSnapshot(browser);
+  try {
+    await act(latest === undefined || latest === lease.source ? element.ref : sameControl(element, latest));
+  } catch (error) {
+    if (!(error instanceof StaleElementError)) throw error;
+    await act(sameControl(element, await browser.snapshot()));
+  }
   lease.assertOwner();
 }
 
@@ -185,85 +165,95 @@ export async function requireElement(
 /** A settled typed page reading. Unknown/unavailable is never "signed in". */
 export async function looksLikeGoogleSignIn(url: string, elements: readonly GoogleBrowserElement[], options: GoogleReadingOptions = {}): Promise<boolean> {
   try {
-    const browser = options.browser;
-    const snapshot = googleControlSnapshot(elements);
-    const state = snapshotJudgmentInput({ url, elements: snapshot });
+    const state = snapshotJudgmentInput({ url, elements: googleControlSnapshot(elements) });
     const owner = googleReadingOwner('google.setup.sign-in-page', options);
-    const pageOwner = browser?.captureAuthority?.();
-    const before = JSON.stringify(snapshot);
-    const current = () => {
-      owner.assertCurrent(); pageOwner?.assertCurrent();
-      if (JSON.stringify(googleControlSnapshot(elements)) !== before) throw new GoogleReadingError();
-    };
-    const currentPage = async () => {
-      current();
-      if (browser) {
-        const currentUrl = await browser.currentUrl(); current();
-        const currentElements = await (browser.verifySnapshot?.() ?? browser.snapshot()); current();
-        if (currentUrl !== url || JSON.stringify(googleControlSnapshot(currentElements)) !== before) throw new GoogleReadingError();
-      }
-      current();
-    };
-    const run = await googleSignInPage.run(fencedPort(owner.port, current, currentPage), state as never, { site: 'google.setup.sign-in-page', signal: owner.signal });
-    await currentPage();
+    const run = await googleSignInPage.run(owner.port, state as never, { site: 'google.setup.sign-in-page', signal: owner.signal });
     const reading = run.readings.signIn;
     if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new GoogleReadingError();
     run.recordAction('returned settled Google sign-in page state');
-    current();
     return reading.verdict === 'yes';
   } catch (error) { preserveGoogleDecisionFailure(error, options); throw new GoogleReadingError(); }
 }
 
-/** Capture and fence the complete setup page before interpreting its state. */
-async function observeGooglePage(browser: GoogleBrowserPort, site: string, options: GoogleReadingOptions) {
-  const owner = googleReadingOwner(site, options);
-  const pageOwner = browser.captureAuthority?.();
-  const current = () => { owner.assertCurrent(); pageOwner?.assertCurrent(); };
-  current();
-  const url = await browser.currentUrl(); current();
-  const elements = googleControlSnapshot(await browser.snapshot()); current();
-  const text = await browser.readText(); current();
-  admitGoogleControlMetadata({ url, text });
-  const state = snapshotJudgmentInput({ url, elements, text });
-  if (text.length > 160_000) throw new GoogleReadingError();
-  const before = JSON.stringify(elements);
-  const currentPage = async () => {
-    current();
-    const freshUrl = await browser.currentUrl(); current();
-    const fresh = googleControlSnapshot(await (browser.verifySnapshot?.() ?? browser.snapshot())); current();
-    const freshText = await browser.readText(); current();
-    if (freshUrl !== url || JSON.stringify(fresh) !== before || freshText !== text) throw new GoogleReadingError();
-  };
-  return { state, current, currentPage, port: fencedPort(owner.port, current, currentPage), signal: owner.signal };
+/** One observation of a setup page: its address, its controls and its text, read once. */
+export interface GooglePageCapture {
+  readonly url: string;
+  readonly elements: readonly GoogleBrowserElement[];
+  readonly text: string;
+}
+
+/** Read the page once. The snapshot taken here is the one any later action on its controls is checked against. */
+export async function captureGooglePage(browser: GoogleBrowserPort): Promise<GooglePageCapture> {
+  const url = await browser.currentUrl();
+  const elements = await browser.snapshot();
+  const text = await browser.readText();
+  return { url, elements, text };
+}
+
+function pageState(page: GooglePageCapture): unknown {
+  admitGoogleControlMetadata({ url: page.url, text: page.text });
+  if (page.text.length > 160_000) throw new GoogleReadingError();
+  return snapshotJudgmentInput({ url: page.url, elements: googleControlSnapshot(page.elements), text: page.text });
 }
 
 /** Read the observed setting without changing it. */
-export async function readGoogleTwoStepState(browser: GoogleBrowserPort, options: GoogleReadingOptions = {}): Promise<'on' | 'off' | 'unknown'> {
+export async function readGoogleTwoStepState(browser: GoogleBrowserPort, options: GoogleReadingOptions & { readonly page?: GooglePageCapture } = {}): Promise<'on' | 'off' | 'unknown'> {
   try {
-    const page = await observeGooglePage(browser, googleTwoStepPage.name, options);
-    const run = await googleTwoStepPage.run(page.port, page.state as never, { site: googleTwoStepPage.name, signal: page.signal });
-    await page.currentPage();
+    const owner = googleReadingOwner(googleTwoStepPage.name, options);
+    const state = pageState(options.page ?? await captureGooglePage(browser));
+    const run = await googleTwoStepPage.run(owner.port, state as never, { site: googleTwoStepPage.name, signal: owner.signal });
     const { enabled, disabled } = run.readings;
     const on = enabled.verdict === 'yes' && enabled.outcome === 'act';
     const off = disabled.verdict === 'yes' && disabled.outcome === 'act';
     const setting = on === off ? 'unknown' : on ? 'on' : 'off';
     run.recordAction('Report the observed 2-Step Verification setting; no account setting was changed.');
-    page.current();
     return setting;
   } catch (error) { preserveGoogleDecisionFailure(error, options); return 'unknown'; }
 }
 
-export async function readGoogleAppPasswordState(browser: GoogleBrowserPort, label: string, options: GoogleReadingOptions = {}) {
+export async function readGoogleAppPasswordState(browser: GoogleBrowserPort, label: string, options: GoogleReadingOptions & { readonly page?: GooglePageCapture } = {}) {
   const labelState = snapshotJudgmentInput({ label });
-  const page = await observeGooglePage(browser, googleAppPasswordPage.name, options);
-  const run = await googleAppPasswordPage.run(page.port, { ...(page.state as object), ...(labelState as object) },
-    { site: googleAppPasswordPage.name, signal: page.signal });
-  await page.currentPage();
+  const owner = googleReadingOwner(googleAppPasswordPage.name, options);
+  const state = pageState(options.page ?? await captureGooglePage(browser));
+  const run = await googleAppPasswordPage.run(owner.port, { ...(state as object), ...(labelState as object) },
+    { site: googleAppPasswordPage.name, signal: owner.signal });
   const { twoStepRequired, labelExists } = run.readings;
   if ([twoStepRequired, labelExists].some(reading => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new GoogleReadingError();
   run.recordAction('Observe app-password prerequisites and label presence; browser writes require separate control selection.');
-  page.current();
   return { twoStepRequired: twoStepRequired.verdict === 'yes', labelExists: labelExists.verdict === 'yes' };
+}
+
+/**
+ * Read the page text until `found` recognises what an action produced, a few
+ * times with a short pause between reads. A result dialog appears after the
+ * network round trip its click starts, so the read straight after the click
+ * often comes too early. Returns null when it never appears.
+ */
+export async function readTextUntil<T>(
+  browser: GoogleBrowserPort,
+  found: (text: string) => T | null,
+  options: { readonly attempts?: number; readonly delayMs?: number; readonly signal?: AbortSignal | undefined } = {},
+): Promise<T | null> {
+  const attempts = options.attempts ?? RESULT_READ_ATTEMPTS;
+  const delayMs = options.delayMs ?? RESULT_READ_DELAY_MS;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) await pause(delayMs, options.signal);
+    const result = found(await browser.readText());
+    if (result !== null) return result;
+  }
+  return null;
+}
+
+const RESULT_READ_ATTEMPTS = 5;
+const RESULT_READ_DELAY_MS = 250;
+
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return; }
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    const onAbort = (): void => { clearTimeout(timer); reject(signal?.reason); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /** Best-effort DOM tag guessed from an accessible role. */

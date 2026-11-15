@@ -25,7 +25,7 @@
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { withProcessLockSync } from '../utils/process-lock.js';
 import { normalizeDomain, normalizeEmailAddress } from './signup-address.js';
 
 // ──────────────────────────────────────────────────────────────────
@@ -431,33 +431,33 @@ export class AgentAccountRegistry {
   }
 
   /**
-   * One read-modify-write under a cross-process lock. The lock is a single attempt: another
-   * process mid-update makes this call fail with a retryable message rather than wait,
-   * and nothing is written. An unreadable file is never replaced.
+   * One read-modify-write under the store's kernel-released writer lock. A
+   * writer in another process is waited for up to a second; past that the call
+   * fails with a retryable `ProcessLockBusyError` and nothing is written. A
+   * holder that dies releases the lock with its process. An unreadable file is
+   * never replaced.
    */
   private mutate<T>(
     change: (parsed: ParsedStore) => { readonly value: T; readonly accounts: readonly AgentAccountRecord[] },
     guard?: AgentAccountWriteGuard,
   ): T {
-    const release = tryAcquireCrossProcessLock(`${this.storePath}.lock`);
-    if (release === null) {
-      throw new Error('Another process is updating the account registry. Nothing was changed; retry in a moment.');
-    }
-    try {
+    mkdirSync(dirname(this.storePath), { recursive: true });
+    return withProcessLockSync(`${this.storePath}.writer.sqlite`, () => {
       // The lock file and its staging files touch the store's directory; the guard
       // is told so that its fence follows this owner's own change and nothing else.
       guard?.didWrite?.('lock', '');
-      const parsed = this.readStore();
-      if (parsed.unreadable !== undefined) {
-        throw new Error(`The account registry at ${this.storePath} was not changed because ${parsed.unreadable}. Repair or move the file, then retry.`);
+      try {
+        const parsed = this.readStore();
+        if (parsed.unreadable !== undefined) {
+          throw new Error(`The account registry at ${this.storePath} was not changed because ${parsed.unreadable}. Repair or move the file, then retry.`);
+        }
+        const { value, accounts } = change(parsed);
+        this.writeStore({ ...parsed.store, accounts }, guard, parsed.dropped > 0);
+        return value;
+      } finally {
+        guard?.didWrite?.('unlock', '');
       }
-      const { value, accounts } = change(parsed);
-      this.writeStore({ ...parsed.store, accounts }, guard, parsed.dropped > 0);
-      return value;
-    } finally {
-      release();
-      guard?.didWrite?.('unlock', '');
-    }
+    }, { waitMs: 1_000 });
   }
 
   private writeStore(store: AccountStoreFile, guard?: AgentAccountWriteGuard, keepPreviousCopy = false): void {

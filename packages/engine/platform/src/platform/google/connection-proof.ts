@@ -91,10 +91,11 @@ export async function proveGoogleConnection(client: GoogleApiClient): Promise<Go
   const calendar: GoogleProofResult = events.ok
     ? {
       ok: true,
+      // An unbounded list starts now, so the first item is the next event.
       detail:
-        events.value.length === 0
+        events.value.items.length === 0
           ? 'Read the primary calendar, it has no upcoming events.'
-          : `Read the primary calendar (next event: ${events.value[0]?.summary ?? 'untitled'}).`,
+          : `Read the primary calendar (next event: ${events.value.items[0]?.summary ?? 'untitled'}).`,
     }
     : classify('calendar', events);
 

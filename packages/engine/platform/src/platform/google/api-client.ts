@@ -7,7 +7,11 @@
  *          (q, maxResults, pageToken, labelIds, includeSpamTrash)
  *   - POST https://gmail.googleapis.com/gmail/v1/users/{userId}/messages/send
  *   - GET  https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events
- *          (timeMin, timeMax, singleEvents, orderBy, maxResults)
+ *          (timeMin, timeMax, singleEvents, orderBy, maxResults, pageToken)
+ *
+ * A list answers with one page and a `nextPageToken` when more exist; every
+ * list here returns `more` from that token so a page is never reported as the
+ * whole answer.
  *
  * Two properties this module is responsible for:
  *
@@ -22,9 +26,8 @@
  *      surface-authority layer enforces what may then be done with it.
  */
 
-import { readApiFailure } from './failure-readings.js';
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { redactSecretsFromMessage } from './oauth-loopback.js';
+import { redactDiagnosticText } from '../utils/redaction.js';
 import type { GoogleTokenManager } from './token-manager.js';
 import {
   collectHistoryDelta,
@@ -63,12 +66,14 @@ export interface GoogleApiFetchPort {
 
 /** A failure the caller can act on, with no secret material in it. */
 export interface GoogleApiFailure {
-  readonly provenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
   readonly ok: false;
   readonly status: number | null;
-  /** Structured diagnosis, preserved so downstream reports do not reinterpret prose. */
-  readonly reason?: 'grant-invalid' | 'missing-scopes' | 'api-disabled' | 'unclassified' | undefined;
+  /**
+   * Structured diagnosis from Google's own status and reason fields, preserved
+   * so downstream reports do not reinterpret prose. `rate-limited` is a usage
+   * or quota limit that clears by itself; it is never a refused credential.
+   */
+  readonly reason?: 'grant-invalid' | 'missing-scopes' | 'api-disabled' | 'rate-limited' | 'unclassified' | undefined;
   readonly problem: string;
   readonly fix: string;
   /**
@@ -81,6 +86,67 @@ export interface GoogleApiFailure {
 }
 
 export type GoogleApiResult<T> = { readonly ok: true; readonly value: T } | GoogleApiFailure;
+
+/** One answer from a list call. `more` is true when Google said further items exist past these. */
+export interface GoogleListPage<T> {
+  readonly items: readonly T[];
+  readonly more: boolean;
+}
+
+/** Message summaries read side by side for one mail list; the list stays in Google's order. */
+const MESSAGE_SUMMARY_CONCURRENCY = 4;
+
+/**
+ * Google's own names for a usage limit, from `error.errors[].reason` (the
+ * Gmail and Calendar v1/v3 error format) and `ErrorInfo.reason` (the AIP-193
+ * format). Either way the call can be repeated once the limit clears.
+ */
+const RATE_LIMIT_REASONS: ReadonlySet<string> = new Set([
+  'rateLimitExceeded', 'userRateLimitExceeded', 'dailyLimitExceeded', 'quotaExceeded', 'limitExceeded',
+  'RATE_LIMIT_EXCEEDED', 'RESOURCE_EXHAUSTED',
+]);
+const MISSING_SCOPE_REASONS: ReadonlySet<string> = new Set(['insufficientPermissions', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT']);
+const API_DISABLED_REASONS: ReadonlySet<string> = new Set(['accessNotConfigured', 'SERVICE_DISABLED']);
+
+type GoogleFailureCause = 'missing-scopes' | 'api-disabled' | 'rate-limited';
+
+/**
+ * The cause Google stated for a failed call, read from the structured fields
+ * of its error body: `error.status`, `error.errors[].reason` and
+ * `error.details[]` entries of type `ErrorInfo`. Undefined when the body
+ * names none of the known causes, or names two that disagree.
+ */
+function statedFailureCause(parsed: unknown): GoogleFailureCause | undefined {
+  const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : null;
+  if (error === null) return undefined;
+  const reasons: string[] = [];
+  if (Array.isArray(error.errors)) {
+    for (const entry of error.errors) if (isRecord(entry) && typeof entry.reason === 'string') reasons.push(entry.reason);
+  }
+  if (Array.isArray(error.details)) {
+    for (const detail of error.details) {
+      // ErrorReason values: cloud.google.com/java/docs/reference/proto-google-common-protos/latest/com.google.api.ErrorReason
+      if (isRecord(detail) && detail['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo' && typeof detail.reason === 'string') {
+        reasons.push(detail.reason);
+      }
+    }
+  }
+  if (typeof error.status === 'string') reasons.push(error.status);
+  const causes = new Set<GoogleFailureCause>();
+  for (const reason of reasons) {
+    if (RATE_LIMIT_REASONS.has(reason)) causes.add('rate-limited');
+    else if (MISSING_SCOPE_REASONS.has(reason)) causes.add('missing-scopes');
+    else if (API_DISABLED_REASONS.has(reason)) causes.add('api-disabled');
+  }
+  return causes.size === 1 ? [...causes][0] : undefined;
+}
+
+/** Google's own message from an error body, on one line, with anything credential-shaped masked. */
+function statedFailureMessage(parsed: unknown): string {
+  const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : null;
+  const message = error === null ? '' : readString(error.message).replace(/\s+/g, ' ').trim();
+  return redactDiagnosticText(message.length > 300 ? `${message.slice(0, 300)}...` : message);
+}
 
 /**
  * Provenance marker carried by every piece of mail-derived content.
@@ -360,6 +426,8 @@ export class GoogleApiClient {
   constructor(
     private readonly tokens: GoogleTokenManager,
     private readonly fetchPort: GoogleApiFetchPort,
+    /** Wall clock for the default lower bound of a calendar list. */
+    private readonly now: () => number = Date.now,
   ) {}
 
   /**
@@ -424,60 +492,24 @@ export class GoogleApiClient {
     }
 
     if (!response.ok) {
-      return { ok: false, status: response.status, ...await this.describeHttpFailure(response.status, parsed) };
+      return { ok: false, status: response.status, ...describeHttpFailure(response.status, parsed) };
     }
 
     return { ok: true, value: parsed };
-  }
-
-  private async describeHttpFailure(status: number, parsed: unknown): Promise<Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason' | 'provenance' | 'semanticAssessment'>> {
-    return withConfiguredDecisionModelPolicy(async (): Promise<Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason' | 'provenance' | 'semanticAssessment'>> => {
-      const result = await this.describeNativeHttpFailure(status, parsed);
-      if (!isClassicOperation()) return result;
-      return { ...result, provenance: 'classic', ...(result.reason === 'unclassified'
-        ? { semanticAssessment: 'not-evaluated' as const, problem: result.problem + ' Classic operation did not interpret the error explanation.' } : {}) };
-    });
-  }
-
-  private async describeNativeHttpFailure(status: number, parsed: unknown): Promise<Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason'>> {
-    if (status === 429) return { problem: 'Google is rate-limiting this account.', fix: 'Wait a minute and try again.' };
-    let cause: 'missing-scopes' | 'api-disabled' | 'unknown' = 'unknown';
-    if (status === 403) {
-      const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : null;
-      const reasons = error && Array.isArray(error.details) ? error.details
-        .filter((detail: unknown) => isRecord(detail) && detail['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo' && detail.domain === 'googleapis.com')
-        .map((detail: unknown) => isRecord(detail) ? detail.reason : undefined) : [];
-      // ErrorReason protocol values: cloud.google.com/java/docs/reference/proto-google-common-protos/latest/com.google.api.ErrorReason
-      const scopes = reasons.includes('ACCESS_TOKEN_SCOPE_INSUFFICIENT');
-      const disabled = reasons.includes('SERVICE_DISABLED');
-      if (scopes !== disabled) cause = scopes ? 'missing-scopes' : 'api-disabled';
-      else if (!reasons.length && error !== null && readString(error.message).trim()) {
-        try { cause = await readApiFailure(parsed); } catch { /* Keep an unestablished cause unknown. */ }
-      }
-    }
-    if (cause === 'missing-scopes') return {
-      reason: cause,
-      problem: 'Google refused the request because the credential lacks the required OAuth permissions.',
-      fix: 'Say the word and I will re-authorize with every scope this product needs, in one consent.',
-    };
-    if (cause === 'api-disabled') return {
-      reason: cause,
-      problem: 'The required Google API is not enabled for this project.',
-      fix: 'Say the word and I will enable it and retry.',
-    };
-    return {
-      reason: 'unclassified',
-      problem: `Google returned HTTP ${status}; the cause could not be established.`,
-      fix: 'Check the account and project access settings before retrying.',
-    };
   }
 
   // -------------------------------------------------------------------------
   // Gmail
   // -------------------------------------------------------------------------
 
-  /** List message summaries. `query` uses Gmail search syntax (e.g. "is:unread"). */
-  async listMessages(options: { query?: string; maxResults?: number } = {}): Promise<GoogleApiResult<readonly GmailMessageSummary[]>> {
+  /**
+   * List message summaries. `query` uses Gmail search syntax (e.g. "is:unread").
+   *
+   * The summaries are read a few at a time, each asking only for the headers a
+   * summary shows, and come back in Google's order. `more` says Google has
+   * further matches past this page.
+   */
+  async listMessages(options: { query?: string; maxResults?: number } = {}): Promise<GoogleApiResult<GoogleListPage<GmailMessageSummary>>> {
     const params = new URLSearchParams();
     if (options.query !== undefined && options.query.trim().length > 0) params.set('q', options.query.trim());
     params.set('maxResults', String(Math.max(1, Math.min(100, options.maxResults ?? 20))));
@@ -485,25 +517,38 @@ export class GoogleApiClient {
     const listed = await this.request(`${GMAIL_BASE}/messages?${params.toString()}`);
     if (!listed.ok) return listed;
 
-    const ids = isRecord(listed.value) && Array.isArray(listed.value.messages) ? listed.value.messages : [];
-    const summaries: GmailMessageSummary[] = [];
-    for (const entry of ids) {
-      if (!isRecord(entry)) continue;
-      const id = readString(entry.id);
-      if (id.length === 0) continue;
-      const detail = await this.fetchMessage(id, 'metadata');
-      if (detail.ok) summaries.push(detail.value);
-      // A message deleted between the list and the read is genuinely gone. Any
-      // other failure means this list is incomplete, and a shorter list
-      // reported as the whole inbox is worse than an error.
-      else if (detail.status !== 404) {
-        return {
-          ...detail,
-          problem: `Read ${summaries.length} of ${ids.length} listed messages before one could not be read. ${detail.problem}`,
-        };
+    const page = isRecord(listed.value) ? listed.value : {};
+    const entries = Array.isArray(page.messages) ? page.messages : [];
+    const ids = entries
+      .map((entry) => (isRecord(entry) ? readString(entry.id) : ''))
+      .filter((id) => id.length > 0);
+    const more = readString(page.nextPageToken).length > 0;
+
+    const read: Array<GmailMessageSummary | null> = new Array<GmailMessageSummary | null>(ids.length).fill(null);
+    const outcome: { failure: GoogleApiFailure | null } = { failure: null };
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (outcome.failure === null && next < ids.length) {
+        const index = next;
+        next += 1;
+        const detail = await this.fetchMessage(ids[index]!, 'metadata');
+        if (detail.ok) read[index] = detail.value;
+        // A message deleted between the list and the read is genuinely gone. Any
+        // other failure means this list is incomplete, and a shorter list
+        // reported as the whole inbox is worse than an error.
+        else if (detail.status !== 404) outcome.failure ??= detail;
       }
+    };
+    await Promise.all(Array.from({ length: Math.min(MESSAGE_SUMMARY_CONCURRENCY, ids.length) }, worker));
+    const summaries = read.filter((summary): summary is GmailMessageSummary => summary !== null);
+    const failed = outcome.failure;
+    if (failed !== null) {
+      return {
+        ...failed,
+        problem: `Read ${summaries.length} of ${ids.length} listed messages before one could not be read. ${failed.problem}`,
+      };
     }
-    return { ok: true, value: summaries };
+    return { ok: true, value: { items: summaries, more } };
   }
 
   /** Read one message including its plain-text body. */
@@ -568,7 +613,11 @@ export class GoogleApiClient {
   private async fetchMessage(id: string, format: 'metadata'): Promise<GoogleApiResult<GmailMessageSummary>>;
   private async fetchMessage(id: string, format: 'full'): Promise<GoogleApiResult<GmailMessageBody>>;
   private async fetchMessage(id: string, format: 'metadata' | 'full'): Promise<GoogleApiResult<GmailMessageBody>> {
-    const result = await this.request(`${GMAIL_BASE}/messages/${encodeURIComponent(id)}?format=${format}`);
+    const params = new URLSearchParams({ format });
+    // A summary shows a handful of headers; asking for only those keeps every
+    // other header a sender wrote out of memory and off the wire.
+    if (format === 'metadata') for (const header of METADATA_HEADERS) params.append('metadataHeaders', header);
+    const result = await this.request(`${GMAIL_BASE}/messages/${encodeURIComponent(id)}?${params.toString()}`);
     if (!result.ok) return result;
     const record = isRecord(result.value) ? result.value : {};
     const payload = isRecord(record.payload) ? record.payload : {};
@@ -718,25 +767,57 @@ export class GoogleApiClient {
   // Calendar
   // -------------------------------------------------------------------------
 
+  /**
+   * List events in start-time order.
+   *
+   * With no bound at all the list starts now: Google orders an unbounded list
+   * from the calendar's first event ever, so without it "what is on my
+   * calendar" would answer with the oldest events the account has. A lookup by
+   * `sourceUid` and a read of `all` events keep no default bound.
+   *
+   * `all` follows every page (an export); otherwise one page of `maxResults`
+   * (default 25, at most 250) is read and `more` says whether Google has
+   * further events in the range.
+   */
   async listEvents(
-    options: { calendarId?: string; timeMin?: string; timeMax?: string; maxResults?: number; sourceUid?: string } = {},
-  ): Promise<GoogleApiResult<readonly CalendarEventRecord[]>> {
+    options: { calendarId?: string; timeMin?: string; timeMax?: string; maxResults?: number; sourceUid?: string; all?: boolean } = {},
+  ): Promise<GoogleApiResult<GoogleListPage<CalendarEventRecord>>> {
     const calendarId = options.calendarId ?? 'primary';
+    const all = options.all === true;
     const params = new URLSearchParams({
       singleEvents: 'true',
       orderBy: 'startTime',
-      maxResults: String(Math.max(1, Math.min(250, options.maxResults ?? 25))),
+      maxResults: String(all ? 250 : Math.max(1, Math.min(250, options.maxResults ?? 25))),
     });
-    if (options.timeMin !== undefined) params.set('timeMin', options.timeMin);
+    const unbounded = options.timeMin === undefined && options.timeMax === undefined;
+    const timeMin = options.timeMin ?? (unbounded && options.sourceUid === undefined && !all
+      ? new Date(this.now()).toISOString()
+      : undefined);
+    if (timeMin !== undefined) params.set('timeMin', timeMin);
     if (options.timeMax !== undefined) params.set('timeMax', options.timeMax);
     if (options.sourceUid !== undefined) params.set('privateExtendedProperty', `${GOOGLE_EVENT_SOURCE_UID_PROPERTY}=${options.sourceUid}`);
 
-    const result = await this.request(
-      `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
-    );
-    if (!result.ok) return result;
-    const items = isRecord(result.value) && Array.isArray(result.value.items) ? result.value.items : [];
-    return { ok: true, value: items.map(toCalendarEvent).filter((event): event is CalendarEventRecord => event !== null) };
+    const events: CalendarEventRecord[] = [];
+    for (;;) {
+      const result = await this.request(
+        `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+      );
+      if (!result.ok) {
+        return events.length === 0
+          ? result
+          : { ...result, problem: `Read ${events.length} events before a page could not be read. ${result.problem}` };
+      }
+      const page = isRecord(result.value) ? result.value : {};
+      const items = Array.isArray(page.items) ? page.items : [];
+      for (const item of items) {
+        const event = toCalendarEvent(item);
+        if (event !== null) events.push(event);
+      }
+      const pageToken = readString(page.nextPageToken);
+      if (pageToken.length === 0) return { ok: true, value: { items: events, more: false } };
+      if (!all) return { ok: true, value: { items: events, more: true } };
+      params.set('pageToken', pageToken);
+    }
   }
 
   async getEvent(id: string, calendarId = 'primary'): Promise<GoogleApiResult<CalendarEventRecord>> {
@@ -783,6 +864,36 @@ export class GoogleApiClient {
       ? { ok: false, status: null, problem: 'Google accepted the event but returned no usable record.', fix: 'Check the calendar directly.' }
       : { ok: true, value: event };
   }
+}
+
+/**
+ * A failed call as a reason, a problem and a fix, from the status and Google's
+ * structured error fields alone. An unrecognised 403 stays `unclassified` and
+ * carries Google's own message.
+ */
+function describeHttpFailure(status: number, parsed: unknown): Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason'> {
+  const cause = status === 429 ? 'rate-limited' : status === 403 ? statedFailureCause(parsed) : undefined;
+  if (cause === 'rate-limited') return {
+    reason: cause,
+    problem: `Google is limiting requests from this account${status === 403 ? ' (a usage limit, not a refused credential)' : ''}.`,
+    fix: 'Wait a minute and try again; a daily limit clears when Google resets it.',
+  };
+  if (cause === 'missing-scopes') return {
+    reason: cause,
+    problem: 'Google refused the request because the credential lacks the required OAuth permissions.',
+    fix: 'Say the word and I will re-authorize with every scope this product needs, in one consent.',
+  };
+  if (cause === 'api-disabled') return {
+    reason: cause,
+    problem: 'The required Google API is not enabled for this project.',
+    fix: 'Say the word and I will enable it and retry.',
+  };
+  const stated = statedFailureMessage(parsed);
+  return {
+    reason: 'unclassified',
+    problem: `Google returned HTTP ${status}${stated.length > 0 ? `: ${stated}` : '; the cause could not be established.'}`,
+    fix: 'Check the account and project access settings before retrying.',
+  };
 }
 
 function toCalendarEvent(value: unknown): CalendarEventRecord | null {

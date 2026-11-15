@@ -77,7 +77,10 @@ export interface CalendarGatewayCreated {
 
 export interface CalendarGatewayIcsExport {
   readonly icsContent: string;
+  /** The number of events in `icsContent`. */
   readonly eventCount: number;
+  /** True when the export stopped at a `limit` and the calendar holds further events in the window. */
+  readonly more?: boolean;
 }
 
 /** One calendar collection a backend can reach, for a setup flow to offer. */
@@ -86,10 +89,21 @@ export interface CalendarGatewayCalendarSummary {
   readonly displayName: string;
 }
 
+/** Guests an imported event named that were not added to it. */
+export interface CalendarGatewayIcsAttendeesLeftOff {
+  readonly eventId: string;
+  readonly title: string;
+  readonly attendees: readonly string[];
+  /** How to invite them. */
+  readonly next: string;
+}
+
 export interface CalendarGatewayIcsImport {
   readonly imported: number;
   readonly eventIds: readonly string[];
   readonly errors: readonly string[];
+  /** Present when an imported event named attendees; an import never adds guests itself. */
+  readonly attendeesLeftOff?: readonly CalendarGatewayIcsAttendeesLeftOff[];
 }
 
 /**

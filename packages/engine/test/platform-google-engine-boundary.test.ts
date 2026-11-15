@@ -94,17 +94,20 @@ for (const mode of ['getter', 'proxy']) test(`raw ${mode} snapshots are rejected
   expect(touched).toBe(0); expect(fake.requests).toHaveLength(0);
 });
 
-test('same-label snapshot ABA during a held judgment retires the original page observation', async () => {
+test('a page read again during a held judgment is refused at the click, observed once more and acted on once', async () => {
   const base = readings().port, held = gate();
   installJudgmentPort({ model: base.model, ask: async request => { await held.hold(); return base.ask(request); } });
   const rig = fixture(); await rig.browser.navigate('https://console.cloud.google.com/auth/clients');
   const elements = await rig.browser.snapshot();
   const pending = findElement(elements, { purpose: 'Create client' }, { browser: rig.browser });
-  const refused = pending.then(() => null, error => error);
   await held.started;
   rig.rows([{ ...rig.row, name: 'Unrelated action' }]); await rig.engine.snapshot({ sessionId: 's', pageId: 'p' });
   rig.rows([rig.row]); await rig.engine.snapshot({ sessionId: 's', pageId: 'p' });
-  held.release(); expect(await refused).toBeInstanceOf(Error); expect(rig.effects).toEqual([]);
+  held.release();
+  const chosen = await pending;
+  expect(rig.effects).toEqual([]);
+  await consumeGoogleElement(rig.browser, chosen!);
+  expect(rig.effects).toEqual(['click']);
 });
 
 test('a safe accessible name cannot hide secret-bearing metadata from an upstream card-field reading', async () => {

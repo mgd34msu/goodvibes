@@ -31,6 +31,8 @@
  */
 
 import { isCalendarResourceType, parseCalendarDataEvents, parseMultistatus, type CalDavEventRecord } from './caldav-parse.js';
+import { isIP } from 'node:net';
+import { registrableDomain } from '../security/public-suffix.js';
 
 // ---------------------------------------------------------------------------
 // Transport port
@@ -210,12 +212,43 @@ function isLoopbackHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
 
+/**
+ * Where the credentials may go: the scheme and port of the first address, and
+ * its registrable domain. A provider that shards accounts across hosts of its
+ * own domain (iCloud answers discovery on `caldav.icloud.com` and names a home
+ * on `p42-caldav.icloud.com`) is followed; a host on any other domain is not.
+ * An address with no registrable domain (an IP, `localhost`) is pinned to its
+ * exact host.
+ */
+interface CredentialPin {
+  readonly protocol: string;
+  readonly port: string;
+  readonly domain: string | null;
+  readonly host: string;
+}
+
+/** The registrable domain of a host name; null for an IP literal, which has none. */
+function domainOf(hostname: string): string | null {
+  if (hostname.startsWith('[') || isIP(hostname) !== 0) return null;
+  return registrableDomain(hostname);
+}
+
+function credentialPin(target: URL): CredentialPin {
+  return { protocol: target.protocol, port: target.port, domain: domainOf(target.hostname), host: target.hostname };
+}
+
+function withinPin(pin: CredentialPin, target: URL): boolean {
+  if (target.protocol !== pin.protocol || target.port !== pin.port) return false;
+  if (pin.domain === null) return target.hostname === pin.host;
+  return domainOf(target.hostname) === pin.domain;
+}
+
 export class CalDavClient {
   private readonly http: CalDavHttpPort;
   private readonly auth: CalDavAuth;
   private readonly signal: AbortSignal | undefined;
-  /** The server this client talks to: set by the first request, the only origin the credentials may reach. */
-  private pinnedOrigin: string | null = null;
+  /** Set by the first request: the scheme, port and domain the credentials may reach. */
+  private pin: CredentialPin | null = null;
 
   constructor(options: CalDavClientOptions) {
     this.http = options.http;
@@ -344,7 +377,7 @@ export class CalDavClient {
     } catch {
       return { ok: false, problem: 'the calendar server address is not a valid URL', fix: 'check the server address' };
     }
-    if (this.pinnedOrigin === null) {
+    if (this.pin === null) {
       // Credentials go only to a server the person chose, over TLS (a
       // loopback server is exempt, for local testing).
       if (target.protocol !== 'https:' && !(target.protocol === 'http:' && isLoopbackHost(target.hostname))) {
@@ -354,14 +387,14 @@ export class CalDavClient {
           fix: 'use the https address of the calendar server',
         };
       }
-      this.pinnedOrigin = target.origin;
-    } else if (target.origin !== this.pinnedOrigin) {
-      // Hrefs come from the server's own answers: one naming another host
-      // must not receive the Authorization header.
+      this.pin = credentialPin(target);
+    } else if (!withinPin(this.pin, target)) {
+      // Hrefs come from the server's own answers: one naming a host outside
+      // the domain the person chose must not receive the Authorization header.
       return {
         ok: false,
-        problem: `the calendar server pointed to a different address (${target.origin}), and the account credentials were not sent there`,
-        fix: 'use the calendar server address that your provider documents for this account',
+        problem: `the calendar server pointed to an address outside the domain it was given (${target.origin}), and the account credentials were not sent there`,
+        fix: 'this server hands calendars to another provider; connect to that provider\'s own calendar address instead',
       };
     }
     const headers: Record<string, string> = {

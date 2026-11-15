@@ -7,7 +7,7 @@ import {
   ACCOUNT_REGISTRY_PATH_SEGMENTS,
   MAX_ACCOUNT_RECORDS,
 } from '../platform/src/platform/google/account-registry.ts';
-import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
+import { holdProcessLock, ProcessLockBusyError } from '../platform/src/platform/utils/process-lock.ts';
 import { mintAddressFor } from '../platform/src/platform/google/signup-address.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,17 +150,17 @@ describe('AgentAccountRegistry', () => {
     expect(readFileSync(join(dirname(storePath), copies[0]!), 'utf-8')).toBe(before);
   });
 
-  test('refuses a change while another process holds the store lock, then succeeds once it is released', () => {
+  test('writes nothing while another holder has the store lock, then succeeds once it is released', () => {
     const { registry, storePath } = tempRegistry();
     registry.record(validInput());
-    const release = tryAcquireCrossProcessLock(`${storePath}.lock`);
-    expect(release).not.toBeNull();
+    const held = holdProcessLock(`${storePath}.writer.sqlite`);
+    expect(held).not.toBeNull();
     const before = readFileSync(storePath, 'utf-8');
     try {
-      expect(() => registry.record(validInput({ serviceDomain: 'other.com', serviceUrl: 'https://other.com/signup', aliasAddress: 'mike+gv-other-com-bbbbbbbb@example.com', credentialSecretKey: 'signup/other.com/b' }))).toThrow('Another process');
+      expect(() => registry.record(validInput({ serviceDomain: 'other.com', serviceUrl: 'https://other.com/signup', aliasAddress: 'mike+gv-other-com-bbbbbbbb@example.com', credentialSecretKey: 'signup/other.com/b' }))).toThrow(ProcessLockBusyError);
       expect(readFileSync(storePath, 'utf-8')).toBe(before);
     } finally {
-      release?.();
+      held?.release();
     }
     expect(registry.record(validInput({ serviceDomain: 'other.com', serviceUrl: 'https://other.com/signup', aliasAddress: 'mike+gv-other-com-bbbbbbbb@example.com', credentialSecretKey: 'signup/other.com/b' })).id).toBe('other-com');
   });

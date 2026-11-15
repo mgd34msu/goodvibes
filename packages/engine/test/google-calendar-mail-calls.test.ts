@@ -35,7 +35,7 @@ describe('listing mail', () => {
     });
     const result = await api.listMessages();
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.problem).toContain('Read 1 of 3');
+    if (!result.ok) expect(result.problem).toContain('of 3 listed messages');
   });
 
   test('a message deleted between the list and the read is simply left out', async () => {
@@ -45,7 +45,7 @@ describe('listing mail', () => {
       return json({ id: 'm1', threadId: 't', payload: { headers: [] }, labelIds: [] });
     });
     const result = await api.listMessages();
-    expect(result.ok && result.value.map((message) => message.id)).toEqual(['m1']);
+    expect(result.ok && result.value.items.map((message) => message.id)).toEqual(['m1']);
   });
 });
 
@@ -232,7 +232,7 @@ describe('the Google calendar gateway', () => {
     expect(JSON.stringify(posts()[0]?.body)).toContain('FREQ=MONTHLY;BYMONTHDAY=15');
   });
 
-  test('an override of one occurrence is reported as such, and attendees are sent', async () => {
+  test('an override of one occurrence is reported as such, and attendees are left off and listed', async () => {
     const { service, posts } = gateway();
     const result = await service.importIcs(ics(
       vevent(['UID:o-1', 'SUMMARY:Moved', 'DTSTART:20260808T120000Z', 'DTEND:20260808T130000Z', 'RECURRENCE-ID:20260808T100000Z'])
@@ -240,6 +240,34 @@ describe('the Google calendar gateway', () => {
     ));
     expect(result.imported).toBe(1);
     expect(result.errors.join(' ')).toContain('RECURRENCE-ID');
-    expect((posts()[0]?.body as { attendees?: unknown }).attendees).toEqual([{ email: 'bob@example.com' }]);
+    expect((posts()[0]?.body as { attendees?: unknown }).attendees).toBeUndefined();
+    expect(result.attendeesLeftOff?.map((entry) => entry.attendees)).toEqual([['bob@example.com']]);
+  });
+
+  test('an export reads every page and counts every event', async () => {
+    const pages = [
+      { items: [{ id: 'e1', summary: 'one', start: { dateTime: '2020-01-01T10:00:00Z' }, end: { dateTime: '2020-01-01T11:00:00Z' } }], nextPageToken: 'p2' },
+      { items: [{ id: 'e2', summary: 'two', start: { dateTime: '2024-01-01T10:00:00Z' }, end: { dateTime: '2024-01-01T11:00:00Z' } }], nextPageToken: 'p3' },
+      { items: [{ id: 'e3', summary: 'three', start: { dateTime: '2027-01-01T10:00:00Z' }, end: { dateTime: '2027-01-01T11:00:00Z' } }] },
+    ];
+    const requested: string[] = [];
+    const service = createGoogleCalendarGatewayService({
+      sources: sources(),
+      fetch: {
+        fetch: async (url: string): Promise<Response> => {
+          if (url.includes('oauth2.googleapis.com/token')) {
+            return json({ access_token: 'live', expires_in: 3600, scope: 'https://www.googleapis.com/auth/calendar.events', token_type: 'Bearer' });
+          }
+          requested.push(url);
+          const token = new URL(url).searchParams.get('pageToken');
+          return json(pages[token === null ? 0 : Number(token.slice(1)) - 1]);
+        },
+      },
+    });
+    const exported = await service.exportIcs({});
+    expect(exported.eventCount).toBe(3);
+    expect(exported.more).toBeUndefined();
+    expect(requested).toHaveLength(3);
+    expect(requested.every((url) => !url.includes('timeMin'))).toBe(true);
   });
 });

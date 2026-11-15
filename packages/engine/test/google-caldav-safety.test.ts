@@ -48,6 +48,21 @@ describe('CalDAV credentials stay with the server the person chose', () => {
     expect(requests.every((request) => request.url.startsWith('https://caldav.example.com/'))).toBe(true);
   });
 
+  test('a principal on a sibling host of the same domain is followed over https, and nowhere else', async () => {
+    const { port, requests } = recordingPort(() => ({ status: 207, headers: {}, body: principalNaming('https://p42-caldav.example.com/123/principal/') }));
+    const client = new CalDavClient({ http: port, auth: AUTH });
+    const principal = await client.discoverPrincipal('https://caldav.example.com/');
+    expect(principal.ok).toBe(true);
+    if (!principal.ok) return;
+    await client.discoverCalendarHome(principal.principalUrl);
+    expect(requests.map((request) => new URL(request.url).host)).toEqual(['caldav.example.com', 'p42-caldav.example.com']);
+    const downgraded = await client.discoverCalendarHome('http://p42-caldav.example.com/123/principal/');
+    expect(downgraded.ok).toBe(false);
+    const foreign = await client.discoverCalendarHome('https://caldav.example.net/123/principal/');
+    expect(foreign.ok).toBe(false);
+    expect(requests).toHaveLength(2);
+  });
+
   test('a first address that is plain http on a non-loopback host sends nothing', async () => {
     const { port, requests } = recordingPort(() => ({ status: 207, headers: {}, body: '' }));
     const client = new CalDavClient({ http: port, auth: AUTH });

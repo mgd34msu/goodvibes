@@ -24,10 +24,11 @@ import { captureOwnedJson } from '../gate/judgment-input.js';
  * optional extra filter and never load-bearing.
  */
 
-import type {
-  BrowserEngine,
-  BrowserLaunchOptions,
-  BrowserTarget,
+import {
+  StaleElementError,
+  type BrowserEngine,
+  type BrowserLaunchOptions,
+  type BrowserTarget,
 } from '../browser/index.js';
 import { admitGoogleControlMetadata, googleControlSnapshot } from './browser-readings.js';
 import { deriveTagFromRole } from './browser-elements.js';
@@ -109,12 +110,6 @@ export function createGoogleBrowserPort(
   }
 
   return {
-    captureAuthority() {
-      const captured = generation, capturedSnapshot = snapshotId, capturedSession = sessionId, capturedPage = pageId;
-      return { assertCurrent: () => {
-        if (capturedSnapshot !== undefined) engine.assertSnapshotCurrent(capturedSession, capturedPage, capturedSnapshot);
-        if (captured !== generation) throw new Error('The Google browser page changed.'); } };
-    },
     async navigate(url) {
       generation += 1;
       const result = await engine.navigate(target(), {
@@ -141,21 +136,11 @@ export function createGoogleBrowserPort(
       return toGoogleElements(result.elements);
     },
 
-    async verifySnapshot() {
-      if (snapshotId === undefined) throw new Error('There is no Google control snapshot to verify.');
-      const expected = snapshotId;
-      const result = captureOwnedJson(await engine.snapshot(target(), {}, {
-        admit: elements => { admitGoogleControlMetadata(elements); googleControlSnapshot(elements); }, verifySnapshotId: expected,
-      }), nodeTypes.isProxy) as Record<string, unknown>;
-      if (snapshotId !== expected || result.snapshotId !== expected || result.truncated === true) throw new Error('The Google control snapshot was replaced.');
-      return toGoogleElements(result.elements);
-    },
-
     async click(ref, ownership) {
       const at = generation, expectedSnapshot = snapshotId, assertCurrent = ownership?.assertCurrent, signal = ownership?.signal;
       const result = await engine.click(target(), { ref }, { snapshotId: expectedSnapshot, signal, assertCurrent: () => {
         assertCurrent?.();
-        if (at !== generation || expectedSnapshot !== snapshotId) throw new Error('The Google browser action is no longer current.');
+        if (at !== generation || expectedSnapshot !== snapshotId) throw new StaleElementError('The Google page was read again after this control was chosen.', 'Read the page again.');
       } });
       generation += 1;
       adopt(result);
@@ -169,7 +154,7 @@ export function createGoogleBrowserPort(
         ...(typeOptions?.submit === undefined ? {} : { submit: typeOptions.submit }),
       }, { snapshotId: expectedSnapshot, signal, assertCurrent: () => {
         assertCurrent?.();
-        if (at !== generation || expectedSnapshot !== snapshotId) throw new Error('The Google browser action is no longer current.');
+        if (at !== generation || expectedSnapshot !== snapshotId) throw new StaleElementError('The Google page was read again after this control was chosen.', 'Read the page again.');
       } });
       generation += 1;
       adopt(result);

@@ -23,7 +23,7 @@ import { withGoogleDecisionWork } from './decision-work.js';
  */
 
 import { APP_PASSWORD_LABEL, APP_PASSWORD_URL, TWO_STEP_URL } from './setup-plan.js';
-import { describeElements, findElement, looksLikeGoogleSignIn, readGoogleAppPasswordState, requireElement } from './browser-elements.js';
+import { captureGooglePage, describeElements, findElement, looksLikeGoogleSignIn, readGoogleAppPasswordState, readTextUntil, requireElement } from './browser-elements.js';
 import { consumeGoogleElement } from './browser-elements.js';
 import { ownGoogleBrowser } from './browser-readings.js';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -130,15 +130,6 @@ function wordsOnPage(text: string): ReadonlySet<string> {
   return new Set((text.toLowerCase().match(/[a-z]+/g) ?? []));
 }
 
-const WAIT_ATTEMPTS = 5;
-const WAIT_DELAY_MS = 250;
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 /**
  * Creates a Google app password under `label` (default: `APP_PASSWORD_LABEL`).
  * Never throws for any of the three known non-ready states; each is reported
@@ -154,14 +145,15 @@ export async function createAppPassword(
     const pageUrl = options.pageUrl ?? APP_PASSWORD_URL;
 
     await browser.navigate(pageUrl);
-    const url = await browser.currentUrl();
-    let elements = await browser.snapshot();
+    // One observation for every reading of this page and the first action on it.
+    const observed = await captureGooglePage(browser);
+    let elements = observed.elements;
 
-    if (await looksLikeGoogleSignIn(url, elements, { browser })) {
-      return signInNeeded(url);
+    if (await looksLikeGoogleSignIn(observed.url, elements, { browser })) {
+      return signInNeeded(observed.url);
     }
 
-    const page = await readGoogleAppPasswordState(browser, label);
+    const page = await readGoogleAppPasswordState(browser, label, { page: observed });
     if (page.twoStepRequired) return twoStepNeeded();
     if (page.labelExists) return alreadyExists(label, pageUrl);
 
@@ -182,12 +174,7 @@ export async function createAppPassword(
     const textBeforeCreate = wordsOnPage(await browser.readText());
     await consumeGoogleElement(browser, createButtonLookup.element);
 
-    let passwordText: string | null = null;
-    for (let attempt = 0; attempt < WAIT_ATTEMPTS && !passwordText; attempt += 1) {
-      if (attempt > 0) await delay(WAIT_DELAY_MS);
-      const text = await browser.readText();
-      passwordText = extractPassword(text, textBeforeCreate);
-    }
+    const passwordText = await readTextUntil(browser, (text) => extractPassword(text, textBeforeCreate), { signal: options.signal });
 
     if (!passwordText) {
       elements = await browser.snapshot();

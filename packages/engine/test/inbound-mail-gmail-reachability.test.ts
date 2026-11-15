@@ -49,7 +49,6 @@
 
 import { afterEach, expect, setSystemTime, test, describe } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -128,6 +127,7 @@ function googleFetch(options: {
   readonly historyIdOnProfile?: string;
   readonly profileStatus?: number;
   readonly profileMessage?: string;
+  readonly profileReason?: string;
   readonly historyRecords?: unknown[];
 }): { fetch: (url: string, init: RequestInit) => Promise<Response> } {
   const scope = options.scope;
@@ -142,7 +142,10 @@ function googleFetch(options: {
       }
       if (url.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/profile')) {
         if (options.profileStatus !== undefined && options.profileStatus !== 200) {
-          return json({ error: { message: options.profileMessage ?? 'Request had insufficient authentication scopes.' } }, options.profileStatus);
+          return json({ error: {
+            message: options.profileMessage ?? 'Request had insufficient authentication scopes.',
+            errors: [{ reason: options.profileReason ?? 'insufficientPermissions' }],
+          } }, options.profileStatus);
         }
         return json({
           emailAddress: WATCHED_ADDRESS,
@@ -214,6 +217,7 @@ function composeOrNull(input: {
   readonly home?: string;
   readonly profileStatus?: number;
   readonly profileMessage?: string;
+  readonly profileReason?: string;
   readonly historyRecords?: unknown[];
   /** Empties the encrypted store, which is what an unconnected machine looks like. */
   readonly noStoredCredential?: boolean;
@@ -305,6 +309,7 @@ function composeOrNull(input: {
         log,
         ...(input.profileStatus === undefined ? {} : { profileStatus: input.profileStatus }),
         ...(input.profileMessage === undefined ? {} : { profileMessage: input.profileMessage }),
+        ...(input.profileReason === undefined ? {} : { profileReason: input.profileReason }),
         ...(input.historyRecords === undefined ? {} : { historyRecords: input.historyRecords }),
       }),
     }),
@@ -514,47 +519,34 @@ describe('the Gmail inbound path is reachable from the daemon composition', () =
     await rig.supervisor.stop();
   });
 
-  /**
-   * A judgment port that reads the error text it is shown, so the verdict follows
-   * the wording and a fixed answer cannot stand in for the classification.
-   */
-  async function startUnderPermissionReading(profileMessage: string): Promise<{
-    status: Awaited<ReturnType<InboundMailSupervisor['start']>>;
-    requests: ReadonlyArray<{ readonly state: unknown }>;
-  }> {
+  /** A 403 whose cause Google states in its own reason field; no decision model is installed. */
+  async function startUnderForbidden(profileMessage: string, profileReason: string): Promise<Awaited<ReturnType<InboundMailSupervisor['start']>>> {
     const prior = installJudgmentPort(undefined);
-    const failure = fakePort((name, _question, state) => {
-      const message = (state as { error?: { message?: string } }).error?.message ?? '';
-      return noulAnswer(name === 'missingScopes' && message.includes('insufficient authentication scopes') ? .99 : .01);
-    });
-    installJudgmentPort({ ...failure.port, ask(request) {
-      if (request.context?.battery === 'google.api-failure') return failure.port.ask(request);
-      return prior ? prior.ask(request) : Promise.reject(new Error('No judgment fixture for this request'));
-    } });
+    let asks = 0;
+    installJudgmentPort({ model: 'fixture', async ask() { asks += 1; throw new Error('a Google error is classified without a model'); } });
     let supervisor: InboundMailSupervisor | undefined;
     try {
-      const rig = compose({ profileStatus: 403, profileMessage });
+      const rig = compose({ profileStatus: 403, profileMessage, profileReason });
       supervisor = rig.supervisor;
       const status = await rig.supervisor.start();
-      return { status, requests: failure.requests };
+      expect(asks).toBe(0);
+      return status;
     } finally {
       await supervisor?.stop();
       installJudgmentPort(prior);
     }
   }
 
-  test('a qualified Google permission refusal is reported instead of a quiet IMAP fallback', async () => {
-    const { status, requests } = await startUnderPermissionReading('Request had insufficient authentication scopes.');
+  test('a Google permission refusal is reported instead of a quiet IMAP fallback', async () => {
+    const status = await startUnderForbidden('Request had insufficient authentication scopes.', 'insufficientPermissions');
     expect(status.mode).toBe('inactive');
     expect(status.reason).toContain('credential lacks the required OAuth permissions');
-    expect(requests).toHaveLength(1);
-    expect(requests[0]!.state).toEqual({ error: { message: 'Request had insufficient authentication scopes.' } });
     // No IMAP connection is configured; keep the actual Google cause.
     expect(status.reason).not.toContain('surfaces.email.imap.host');
   });
 
-  test('a 403 whose wording is not a scope refusal is not reported as missing permissions', async () => {
-    const { status } = await startUnderPermissionReading('Rate limit exceeded for this project.');
+  test('a 403 that Google names a usage limit is not reported as missing permissions', async () => {
+    const status = await startUnderForbidden('Rate Limit Exceeded', 'rateLimitExceeded');
     expect(status.mode).toBe('inactive');
     expect(status.reason).not.toContain('credential lacks the required OAuth permissions');
   });

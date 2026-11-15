@@ -168,6 +168,11 @@ function describeFailure(result: GoogleApiFailure): ToolOutput {
   return failure(`${result.problem} ${result.fix}`);
 }
 
+/** The closing line of a list that is one page of a longer answer. */
+function moreExist(shown: number, how: string): string {
+  return `Showing ${String(shown)}; more exist. To see them, ${how}.`;
+}
+
 function isFailure<T>(result: GoogleApiResult<T>): result is GoogleApiFailure {
   return !result.ok;
 }
@@ -355,7 +360,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
           end: { type: 'string', description: 'RFC3339 end time for calendar.create.' },
           location: { type: 'string', description: 'Optional event location for calendar.create.' },
           description: { type: 'string', description: 'Optional event description for calendar.create.' },
-          timeMin: { type: 'string', description: 'RFC3339 lower bound for calendar.list.' },
+          timeMin: { type: 'string', description: 'RFC3339 lower bound for calendar.list. Defaults to now when neither bound is given.' },
           timeMax: { type: 'string', description: 'RFC3339 upper bound for calendar.list.' },
           maxResults: { type: 'number', description: 'How many items to return. Defaults to 10.' },
           clientId: { type: 'string', description: 'OAuth client id the user pasted, for connect.client.' },
@@ -497,7 +502,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         // recorded that a READ HAPPENED rather than that any text arrived, and
         // it refused subsequent sends on the strength of an empty result set,
         // exposure invented out of an empty inbox.
-        if (result.value.length === 0) return ok('No messages matched.');
+        const messages = result.value.items;
+        if (messages.length === 0) return ok('No messages matched.');
         // Subject lines and sender names are attacker-controlled text, so they
         // are recorded WITH the text. Recording the origin alone left the guard
         // unable to tell a send that repeats a subject line from one that does
@@ -506,9 +512,13 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
           surface: 'email',
           origin: 'gmail',
           at: new Date().toISOString(),
-          content: result.value.map((message) => `${message.from} ${message.subject}`).join('\n'),
+          content: messages.map((message) => `${message.from} ${message.subject}`).join('\n'),
         });
-        return ok([UNTRUSTED_MAIL_NOTICE, ...result.value.map((message) => `${message.id}  ${message.from}, ${message.subject}`)].join('\n'));
+        return ok([
+          UNTRUSTED_MAIL_NOTICE,
+          ...messages.map((message) => `${message.id}  ${message.from}, ${message.subject}`),
+          ...(result.value.more ? [moreExist(messages.length, 'narrow the query or raise maxResults')] : []),
+        ].join('\n'));
       }
 
       if (action === 'mail.read') {
@@ -662,8 +672,12 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         });
         assertCurrent();
         if (isFailure(result)) return describeFailure(result);
-        if (result.value.length === 0) return ok('No events in that range.');
-        return ok(result.value.map((event) => `${event.start}  ${event.summary}${event.location ? ` (${event.location})` : ''}`).join('\n'));
+        const events = result.value.items;
+        if (events.length === 0) return ok('No events in that range.');
+        return ok([
+          ...events.map((event) => `${event.start}  ${event.summary}${event.location ? ` (${event.location})` : ''}`),
+          ...(result.value.more ? [moreExist(events.length, 'narrow timeMin/timeMax or raise maxResults')] : []),
+        ].join('\n'));
       }
 
       const summaryText = readString(args.summary);

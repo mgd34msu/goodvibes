@@ -68,7 +68,7 @@ export const googleAppPasswordPage = defineBattery({
   ],
 });
 export class GoogleReadingError extends Error {
-  constructor() { super('The Google setup page reading could not be established or is no longer current.'); this.name = 'GoogleReadingError'; }
+  constructor(message = 'The Google setup page reading could not be established or is no longer current.') { super(message); this.name = 'GoogleReadingError'; }
 }
 export function assertGoogleReadingCurrent(options: JudgmentReadingOptions): void {
   try {
@@ -105,9 +105,7 @@ export function googleReadingOwner(site: string, options: GoogleReadingOptions) 
   requireDecisionFeature('automatic Google page interpretation; complete the step manually in Google settings');
   const owner = captureJudgmentPort(site, { signal: options.signal, assertCurrent: options.assertCurrent });
   const port: JudgmentPort = { ...owner.port, async ask(request) {
-    owner.assertCurrent();
     const result = await owner.port.ask(request);
-    owner.assertCurrent();
     checkAnswers(request.questions, result.answers);
     return result;
   } };
@@ -126,25 +124,37 @@ export function ownGoogleManualBrowser(browser: GoogleBrowserPort, options: Judg
   return wrapGoogleBrowser(browser, { signal: options.signal, assertCurrent: current, consumeObservation: () => { current(); return { assertCurrent: current }; } });
 }
 
+/** The controls of the last snapshot each flow browser returned, so an action can tell which capture its control came from. */
+const latestSnapshots = new WeakMap<GoogleBrowserPort, readonly GoogleBrowserElement[]>();
+
+/** The last snapshot a flow browser returned; undefined for a browser no flow owns. */
+export function latestGoogleSnapshot(browser: GoogleBrowserPort): readonly GoogleBrowserElement[] | undefined {
+  return latestSnapshots.get(browser);
+}
+
+/**
+ * The flow's browser, bound to the reading's lifetime: a cancelled or retired
+ * reading stops before the next browser call, and its signal reaches every
+ * click and keystroke.
+ */
 function wrapGoogleBrowser(browser: GoogleBrowserPort, owner: { readonly signal: AbortSignal | undefined; readonly assertCurrent: () => void; readonly consumeObservation: () => { readonly assertCurrent: () => void } }): ReturnType<typeof ownGoogleBrowser> {
-  const methods = { navigate: browser.navigate, currentUrl: browser.currentUrl, snapshot: browser.snapshot, verifySnapshot: browser.verifySnapshot, click: browser.click, type: browser.type, readText: browser.readText, captureAuthority: browser.captureAuthority };
-  const methodsCurrent = () => {
-    for (const key of Object.keys(methods) as (keyof typeof methods)[]) if (browser[key] !== methods[key]) throw new GoogleReadingError();
-  };
-  const current = () => { owner.assertCurrent(); methodsCurrent(); };
+  const current = owner.assertCurrent;
   async function call<T>(work: () => Promise<T>): Promise<T> {
-    current(); const result = await work(); current(); return result;
+    current(); return work();
   }
   const actionSignal = (signal: AbortSignal | undefined): AbortSignal | undefined =>
     owner.signal && signal && owner.signal !== signal ? AbortSignal.any([owner.signal, signal]) : owner.signal ?? signal;
-  return { assertCurrent: current, consumeObservation: () => { current(); const restriction = owner.consumeObservation(); return { assertCurrent: () => { restriction.assertCurrent(); methodsCurrent(); } }; }, browser: {
-    ...(methods.captureAuthority ? { captureAuthority: () => { current(); return methods.captureAuthority!.call(browser); } } : {}),
-    navigate: url => call(() => methods.navigate.call(browser, url)),
-    currentUrl: () => call(() => methods.currentUrl.call(browser)),
-    snapshot: () => call(() => methods.snapshot.call(browser)),
-    ...(methods.verifySnapshot ? { verifySnapshot: () => call(() => methods.verifySnapshot!.call(browser)) } : {}),
-    click: (ref, ownership) => { const signal = actionSignal(ownership?.signal); return call(() => methods.click.call(browser, ref, { signal, assertCurrent: () => { current(); ownership?.assertCurrent(); current(); } })); },
-    type: (ref, text, options) => { const signal = actionSignal(options?.signal); return call(() => methods.type.call(browser, ref, text, { ...options, signal, assertCurrent: () => { current(); options?.assertCurrent?.(); current(); } })); },
-    readText: options => call(() => methods.readText.call(browser, options)),
-  } };
+  const wrapped: GoogleBrowserPort = {
+    navigate: url => call(() => browser.navigate(url)),
+    currentUrl: () => call(() => browser.currentUrl()),
+    snapshot: async () => {
+      const elements = await call(() => browser.snapshot());
+      latestSnapshots.set(wrapped, elements);
+      return elements;
+    },
+    click: (ref, ownership) => call(() => browser.click(ref, { signal: actionSignal(ownership?.signal), assertCurrent: () => { current(); ownership?.assertCurrent(); } })),
+    type: (ref, text, options) => call(() => browser.type(ref, text, { ...options, signal: actionSignal(options?.signal), assertCurrent: () => { current(); options?.assertCurrent?.(); } })),
+    readText: options => call(() => browser.readText(options)),
+  };
+  return { assertCurrent: current, consumeObservation: () => { current(); return owner.consumeObservation(); }, browser: wrapped };
 }

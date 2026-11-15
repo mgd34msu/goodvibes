@@ -118,6 +118,13 @@
  *      is unreachable, and nothing anywhere reports a fault. So the delta
  *      carries `unreadable`, on the same contract and for the same reason, and
  *      a caller cannot persist the new position without stepping over it.
+ *
+ *   5. **The position can move up to the first message not done.** Every
+ *      `History` record carries its own `id`, and a later call with that id as
+ *      `startHistoryId` returns exactly the records after it. The delta keeps
+ *      each message's record id (`named`), so a caller advances to the last
+ *      record whose messages were all read and handed on (`reachedHistoryId`)
+ *      instead of holding the whole delta behind one message.
  */
 
 import type {
@@ -235,6 +242,13 @@ export interface GmailFetchProblem {
   readonly fix: string;
 }
 
+/** One message id a delta named, with the id of the history record that added it. */
+export interface GmailNamedMessage {
+  readonly id: string;
+  /** The `History.id` of the record; `''` when Google sent none, which never becomes a position. */
+  readonly recordId: string;
+}
+
 /** Everything both delta arms carry, regardless of whether bodies came back. */
 interface GmailHistoryDeltaCommon {
   /**
@@ -243,6 +257,7 @@ interface GmailHistoryDeltaCommon {
    * Persist this as the next call's `startHistoryId` **only when `unreadable`
    * is empty**, see the field below, which exists to make that condition
    * something a caller has to look at rather than something it can forget.
+   * Otherwise persist `reachedHistoryId(...)`.
    */
   readonly historyId: string;
   /**
@@ -256,13 +271,13 @@ interface GmailHistoryDeltaCommon {
    * returned again, so a caller that advanced past an unread message would
    * not merely delay it, it would make it permanently unreachable.
    *
-   * There is no partial advance available here. Unlike a UID, a `historyId` is
-   * one position for the WHOLE delta, so there is no "just below the one that
-   * failed" to move to. The whole delta is therefore unresolved: the caller
-   * keeps its old position and asks again, and dedup absorbs the re-delivery
-   * of whatever did come back this time.
+   * A partial advance is available: `reachedHistoryId` names the last record
+   * before the first message that was not read, and every record up to it is
+   * done. Only what follows that record is asked for again.
    */
   readonly unreadable: readonly GmailFetchProblem[];
+  /** Every message id the history records named, in record order, each with its record's id. */
+  readonly named: readonly GmailNamedMessage[];
 }
 
 /**
@@ -370,9 +385,9 @@ function buildHistoryPageParams(options: HistoryDeltaOptions, pageToken: string 
 async function collectAddedMessageIds(
   deps: HistoryDeltaDeps,
   options: HistoryDeltaOptions,
-): Promise<{ readonly ok: true; readonly historyId: string; readonly ids: readonly string[] } | HistoryDeltaUnavailable | GoogleApiFailure> {
+): Promise<{ readonly ok: true; readonly historyId: string; readonly named: readonly GmailNamedMessage[] } | HistoryDeltaUnavailable | GoogleApiFailure> {
   const seen = new Set<string>();
-  const ids: string[] = [];
+  const named: GmailNamedMessage[] = [];
   let latestHistoryId = options.startHistoryId;
   let pageToken: string | undefined;
 
@@ -404,6 +419,8 @@ async function collectAddedMessageIds(
     const records = Array.isArray(value.history) ? value.history : [];
     for (const record of records) {
       if (!isRecord(record)) continue;
+      // A string in uint64 decimal; never parsed to a number, it does not fit one.
+      const recordId = readString(record.id);
       const added = Array.isArray(record.messagesAdded) ? record.messagesAdded : [];
       for (const entry of added) {
         if (!isRecord(entry)) continue;
@@ -411,14 +428,14 @@ async function collectAddedMessageIds(
         const id = readString(message.id);
         if (id.length === 0 || seen.has(id)) continue;
         seen.add(id);
-        ids.push(id);
+        named.push({ id, recordId });
       }
     }
 
     pageToken = typeof value.nextPageToken === 'string' && value.nextPageToken.length > 0 ? value.nextPageToken : undefined;
   } while (pageToken !== undefined);
 
-  return { ok: true, historyId: latestHistoryId, ids };
+  return { ok: true, historyId: latestHistoryId, named };
 }
 
 /**
@@ -432,7 +449,8 @@ async function collectAddedMessageIds(
  * `startHistoryId` only when `ok` is `true` AND `value.unreadable` is empty.
  * Both conditions, not just the first: an `ok` delta whose `unreadable` is
  * non-empty is a delta that has not been fully read, and its `historyId` names
- * a position nothing has reached.
+ * a position nothing has reached. Short of that, `reachedHistoryId` names the
+ * position the messages that were done have reached.
  */
 export async function collectHistoryDelta(
   deps: HistoryDeltaDeps,
@@ -490,7 +508,7 @@ export async function collectHistoryDelta(
     fetch: (id: string) => Promise<GoogleApiResult<T>>,
   ): Promise<T[]> => {
     const collectedMessages: T[] = [];
-    for (const id of collected.ids) {
+    for (const { id } of collected.named) {
       const fetched = await fetch(id);
       if (fetched.ok) {
         collectedMessages.push(fetched.value);
@@ -520,6 +538,7 @@ export async function collectHistoryDelta(
         historyId: collected.historyId,
         messages,
         unreadable,
+        named: collected.named,
       },
     };
   }
@@ -527,8 +546,34 @@ export async function collectHistoryDelta(
   const messages = await drain((id) => deps.getMessage(id));
   return {
     ok: true,
-    value: { bodies: 'available', historyId: collected.historyId, messages, unreadable },
+    value: { bodies: 'available', historyId: collected.historyId, messages, unreadable, named: collected.named },
   };
+}
+
+/**
+ * The furthest position a caller may persist after handling a delta: the id
+ * of the last history record before the first named message that is not
+ * `done`, or the delta's own `historyId` when every message is done, or
+ * `startHistoryId` when the very first record is not.
+ *
+ * Records come back in ascending order, so every record up to the returned
+ * one has all its messages done, and a later `startHistoryId` of that id
+ * returns exactly the records after it. A message that was deleted before it
+ * could be fetched counts as done; the caller decides the rest.
+ */
+export function reachedHistoryId(
+  delta: Pick<GmailHistoryDeltaCommon, 'historyId' | 'named'>,
+  startHistoryId: string,
+  done: (id: string) => boolean,
+): string {
+  const first = delta.named.findIndex((entry) => !done(entry.id));
+  if (first < 0) return delta.historyId;
+  const blocked = delta.named[first]!.recordId;
+  for (let index = first - 1; index >= 0; index -= 1) {
+    const candidate = delta.named[index]!.recordId;
+    if (candidate.length > 0 && candidate !== blocked) return candidate;
+  }
+  return startHistoryId;
 }
 
 /**

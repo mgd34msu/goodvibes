@@ -15,6 +15,7 @@
 import { describe, expect, test } from 'bun:test';
 import { GoogleApiClient, type GoogleApiFetchPort } from '../platform/src/platform/google/api-client.ts';
 import { GoogleTokenManager } from '../platform/src/platform/google/token-manager.ts';
+import { reachedHistoryId } from '../platform/src/platform/google/history-delta.ts';
 import type { GoogleOAuthCredentials } from '../platform/src/platform/google/credential-adoption.ts';
 
 // ---------------------------------------------------------------------------
@@ -365,6 +366,31 @@ describe('historyListDelta: with a granted Gmail scope', () => {
     expect(problem.fix.length).toBeGreaterThan(0);
     // An id that could not be read must never appear as a message.
     expect(result.value.messages.map((m) => m.id)).not.toContain('msg-limited');
+  });
+
+  test('the position reaches the last record before the first message that was not read', async () => {
+    // Three records, one message each; the third answers 429. Records 11 and
+    // 12 are done, so the next poll starts after 12 and asks only for 13.
+    const page = {
+      historyId: '13',
+      history: ['11', '12', '13'].map((id) => ({ id, messagesAdded: [{ message: { id: `m${id}`, threadId: `t${id}` } }] })),
+    };
+    const body = (id: string): Response => jsonResponse(200, gmailMessagePayload({
+      id, threadId: 't', to: 'owner@example.com', deliveredTo: [], from: 'sender@example.com', subject: 's', bodyText: 'b',
+    }));
+    const { port } = fakeFetchPort({
+      history: [jsonResponse(200, page)],
+      messages: { m11: body('m11'), m12: body('m12'), m13: jsonResponse(429, { error: { message: 'Rate Limit Exceeded' } }) },
+    });
+    const client = new GoogleApiClient(tokenManagerWithScopes(['https://mail.google.com/']), port);
+
+    const result = await client.historyListDelta({ startHistoryId: '10' });
+    if (!result.ok) throw new Error('expected a delta');
+    const unread = new Set(result.value.unreadable.map((problem) => problem.id));
+    expect(reachedHistoryId(result.value, '10', (id) => !unread.has(id))).toBe('12');
+    // The first record not done keeps the start position; every record done reaches the delta's own mark.
+    expect(reachedHistoryId(result.value, '10', (id) => id !== 'm11')).toBe('10');
+    expect(reachedHistoryId(result.value, '10', () => true)).toBe('13');
   });
 
   test('a server fault and a refused token are unreadable too, carrying their own status', async () => {

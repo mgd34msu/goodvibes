@@ -28,6 +28,7 @@ import type {
   CalendarGatewayCreated,
   CalendarGatewayEventDetail,
   CalendarGatewayEventSummary,
+  CalendarGatewayIcsAttendeesLeftOff,
   CalendarGatewayIcsExport,
   CalendarGatewayIcsImport,
   CalendarGatewayListInput,
@@ -81,6 +82,8 @@ function statusFor(failure: GoogleApiFailure): number {
   // token refresh, not the calendar call), so the status is stated here: 401,
   // the same status the CalDAV service reports CALENDAR_AUTH_FAILED under.
   if (failure.reason === 'grant-invalid') return 401;
+  // A usage limit Google reports as a 403 is still a limit: wait and retry.
+  if (failure.reason === 'rate-limited') return 429;
   if (failure.status === 401) return 401;
   if (failure.status === 403) return 403;
   if (failure.status === 404) return 404;
@@ -96,6 +99,7 @@ function codeFor(failure: GoogleApiFailure): string {
   // must act on, and the webui renders CALENDAR_AUTH_FAILED as a re-authorize
   // prompt. Mapped by the structured verdict, never by sniffing problem text.
   if (failure.reason === 'grant-invalid') return 'CALENDAR_AUTH_FAILED';
+  if (failure.reason === 'rate-limited') return 'RATE_LIMITED';
   if (failure.status === 403) return 'PERMISSION_DENIED';
   if (failure.status === 404) return 'NOT_FOUND';
   if (failure.status === 429) return 'RATE_LIMITED';
@@ -240,18 +244,27 @@ export function createGoogleCalendarGatewayService(
     });
   }
 
-  async function readEvents(input: CalendarGatewayListInput): Promise<readonly CalendarEventRecord[]> {
+  /**
+   * One read of the calendar. `all` follows every page (export); otherwise one
+   * page of `limit` is read and `more` says whether Google holds further events
+   * in the window.
+   */
+  async function readEvents(
+    input: CalendarGatewayListInput,
+    all: boolean,
+  ): Promise<{ readonly events: readonly CalendarEventRecord[]; readonly more: boolean }> {
     const { client } = await connect();
-    const events = unwrap(
+    const page = unwrap(
       await client.listEvents({
         ...(input.calendarId === undefined ? {} : { calendarId: input.calendarId }),
         ...(input.from === undefined ? {} : { timeMin: input.from }),
         ...(input.to === undefined ? {} : { timeMax: input.to }),
-        ...(input.limit === undefined ? {} : { maxResults: input.limit }),
+        ...(all || input.limit === undefined ? {} : { maxResults: input.limit }),
+        ...(all ? { all: true } : {}),
       }),
     );
-    recordEventsRead(input.calendarId, events);
-    return events;
+    recordEventsRead(input.calendarId, page.items);
+    return { events: page.items, more: page.more };
   }
 
   /**
@@ -275,13 +288,12 @@ export function createGoogleCalendarGatewayService(
 
   return {
     async listEvents(input) {
-      // With no window the answer is what is coming up: Google orders by start
-      // time, so an unbounded list returns the oldest events first. Export
-      // shares `readEvents` and keeps reading everything.
+      // With no window the answer is what is coming up, from a day ago so a
+      // meeting that just started still shows. Export reads every page instead.
       const windowed = input.from === undefined && input.to === undefined
         ? { ...input, from: new Date(now() - DEFAULT_LOOKBACK_MS).toISOString() }
         : input;
-      return (await readEvents(windowed)).map(toSummary);
+      return (await readEvents(windowed, false)).events.map(toSummary);
     },
 
     async getEvent(eventId, calendarId) {
@@ -318,15 +330,26 @@ export function createGoogleCalendarGatewayService(
       return { eventId: created.id, uid: created.id, createdAt: new Date(now()).toISOString() };
     },
 
+    /**
+     * Every event in the window, every page of it, so the file and its
+     * `eventCount` are the whole calendar for that window. With a `limit` the
+     * export stops at one page of that size and `more` says when it is partial.
+     */
     async exportIcs(input): Promise<CalendarGatewayIcsExport> {
-      const events = await readEvents(input);
-      return { icsContent: renderIcs(events, now()), eventCount: events.length };
+      const { events, more } = await readEvents(input, input.limit === undefined);
+      return { icsContent: renderIcs(events, now()), eventCount: events.length, ...(more ? { more: true } : {}) };
     },
 
     /**
      * Import is per-event and reports partial success honestly: an .ics with
      * one bad VEVENT imports the rest and names the one it could not, rather
      * than failing the whole file or silently dropping it.
+     *
+     * Attendees named in the file are not added. An event inserted with guests
+     * appears on every guest's Google calendar organised by the owner, which
+     * for a forwarded invitation is a duplicate meeting sent to people the
+     * owner was never shown. The result lists who was left off, and inviting
+     * them is `calendar.events.create`, which confirms with the list in view.
      */
     async importIcs(icsContent, calendarId): Promise<CalendarGatewayIcsImport> {
       const connection = await connect();
@@ -343,6 +366,7 @@ export function createGoogleCalendarGatewayService(
       });
       const eventIds: string[] = [];
       const errors: string[] = [];
+      const attendeesLeftOff: CalendarGatewayIcsAttendeesLeftOff[] = [];
       for (const diagnostic of parsed.skipped) {
         errors.push(`Skipped an event in the .ics: ${diagnostic.message}`);
       }
@@ -375,7 +399,7 @@ export function createGoogleCalendarGatewayService(
           errors.push(`${label} was not imported because it could not be checked against events already imported: ${existing.problem} ${existing.fix}`);
           continue;
         }
-        if (existing.value.length > 0) {
+        if (existing.value.items.length > 0) {
           errors.push(`${label} was skipped: an event imported from this .ics entry is already in the calendar.`);
           continue;
         }
@@ -386,15 +410,31 @@ export function createGoogleCalendarGatewayService(
           sourceUid: event.uid,
           ...(zone.timeZone === undefined ? {} : { timeZone: zone.timeZone }),
           ...(event.recurrence === undefined ? {} : { recurrence: [`RRULE:${event.recurrence.rule}`] }),
-          ...(event.attendees === undefined ? {} : { attendees: event.attendees }),
           ...(event.location === undefined ? {} : { location: event.location }),
           ...(event.description === undefined ? {} : { description: event.description }),
           ...(calendarId === undefined ? {} : { calendarId }),
         });
-        if (created.ok) eventIds.push(created.value.id);
-        else errors.push(`${label} was not imported: ${created.problem} ${created.fix}`);
+        if (!created.ok) {
+          errors.push(`${label} was not imported: ${created.problem} ${created.fix}`);
+          continue;
+        }
+        eventIds.push(created.value.id);
+        const guests = (event.attendees ?? []).map((address) => address.trim()).filter((address) => address.length > 0);
+        if (guests.length > 0) {
+          attendeesLeftOff.push({
+            eventId: created.value.id,
+            title: event.summary || event.uid,
+            attendees: guests,
+            next: 'To invite them, create the event with calendar.events.create and these attendees; it asks for confirmation with the list shown.',
+          });
+        }
       }
-      return { imported: eventIds.length, eventIds, errors };
+      return {
+        imported: eventIds.length,
+        eventIds,
+        errors,
+        ...(attendeesLeftOff.length === 0 ? {} : { attendeesLeftOff }),
+      };
     },
   };
 }

@@ -55,13 +55,13 @@ test('the API client uses exact structured reasons and carries them into connect
   expect(disabled.ok ? null : disabled.reason).toBe('api-disabled');
 });
 
-test('ambiguous API prose uses one complete response reading rather than scope/disabled keywords', async () => {
+test('an API refusal that names no known cause stays unclassified with Google\'s message and no reading', async () => {
   const payload = { error: { message: 'Access disabled by organization policy. OAuth scopes are sufficient.', context: 'Administrator denied this account.' } };
   const fake = fakePort(() => noulAnswer(0.01)); installJudgmentPort(fake.port);
   const result = await client(payload).getProfile();
   expect(result.ok ? null : result.reason).toBe('unclassified');
-  expect(fake.requests).toHaveLength(1);
-  expect(fake.requests[0]!.state).toEqual(payload);
+  expect(result.ok ? '' : result.problem).toContain('organization policy');
+  expect(fake.requests).toHaveLength(0);
 });
 
 test('known token echoes are removed and complete protected error fields prevent a reading', async () => {
@@ -87,10 +87,7 @@ test('2-Step state reads localized text beyond the old 4000 character cut', asyn
   expect(JSON.stringify(fake.requests[0]!.state)).toContain('Aktiviert');
 });
 
-test('2-Step page changes, weak readings and protected page text never become enabled', async () => {
-  let text = '2-Step Verification is on.';
-  const fake = fakePort(name => { text = '2-Step Verification is off.'; return noulAnswer(name === 'enabled' ? 0.99 : 0.01); }); installJudgmentPort(fake.port);
-  expect(await readGoogleTwoStepState(page(() => text))).toBe('unknown');
+test('weak readings and protected page text never become enabled', async () => {
   installJudgmentPort(fakePort(() => noulAnswer(0.55)).port);
   expect(await readGoogleTwoStepState(page(() => 'Unclear page'))).toBe('unknown');
   const protectedPort = fakePort(name => noulAnswer(name === 'enabled' ? 0.99 : 0.01)); installJudgmentPort(protectedPort.port);

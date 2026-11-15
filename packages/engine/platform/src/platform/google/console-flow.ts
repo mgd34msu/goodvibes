@@ -19,7 +19,7 @@ import { readConsoleStatus } from './console-reading.js';
  */
 
 import { AUTH_AUDIENCE_URL, AUTH_CLIENTS_URL } from './setup-plan.js';
-import { findElement, looksLikeGoogleSignIn, requireElement } from './browser-elements.js';
+import { captureGooglePage, findElement, looksLikeGoogleSignIn, readTextUntil, requireElement } from './browser-elements.js';
 import { consumeGoogleElement } from './browser-elements.js';
 import { ownGoogleBrowser } from './browser-readings.js';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -127,16 +127,13 @@ export async function readPublishingStatus(
     browser = ownGoogleBrowser(browser, options).browser;
     const pageUrl = options.pageUrl ?? AUTH_AUDIENCE_URL;
     await browser.navigate(pageUrl);
-    const url = await browser.currentUrl();
-    const elements = await browser.snapshot();
+    const { url, elements, text } = await captureGooglePage(browser);
 
     if (await looksLikeGoogleSignIn(url, elements, { browser })) {
       return signInNeeded(url);
     }
 
-    const text = await browser.readText();
     const reading = await readConsoleStatus(text, options);
-    if (await browser.currentUrl() !== url || await browser.readText() !== text) throw new Error('Console page changed during its publishing status reading.');
     if (reading.projectMissing) {
       return projectNotSelectedNeeded();
     }
@@ -274,11 +271,13 @@ export async function createDesktopOAuthClient(
 
     const existing = await findElement(elements, { purpose: `Find an existing OAuth client named exactly ${name}`, nameIncludes: name }, { browser });
     if (existing) {
+      // Setup runs this step only when no complete client id and secret are
+      // stored, so the listed client is one whose secret this machine never kept.
       return {
         kind: 'needs-human',
         reason: 'client-already-exists',
-        problem: `An OAuth client named "${name}" is already listed on the clients page.`,
-        fix: 'Reuse the client id and secret already stored for it, or delete that client on the clients page and re-run this step.',
+        problem: `An OAuth client named "${name}" already exists in the Cloud project, and its client id and secret are not stored on this machine.`,
+        fix: `Open ${AUTH_CLIENTS_URL}, open the client "${name}", add a new client secret there (Google shows a secret only when it is created), and enter the client id and that secret in setup by hand; or delete the client and re-run this step to create a fresh one.`,
       };
     }
 
@@ -344,14 +343,16 @@ export async function createDesktopOAuthClient(
     const textBeforeCreate = await browser.readText();
     await consumeGoogleElement(browser, createButtonLookup.element);
 
-    const resultText = await browser.readText();
-    const credentials = extractClientCredentials(resultText, `${clientsListText}\n${textBeforeCreate}`);
+    // The id and secret appear in a dialog once Google has created the client,
+    // a network round trip after the click.
+    const known = `${clientsListText}\n${textBeforeCreate}`;
+    const credentials = await readTextUntil(browser, (text) => extractClientCredentials(text, known), { signal: options.signal });
     if (!credentials) {
       return {
         kind: 'failed',
         reason: 'credentials-not-readable',
-        problem: 'Clicked "Create" but the client ID and client secret could not be read back from the result dialog.',
-        fix: `Open ${AUTH_CLIENTS_URL} by hand, open the newly created client, and copy the client ID and client secret.`,
+        problem: `Clicked "Create" but the client ID and client secret did not appear in the result dialog. Google may have created the client "${name}" anyway.`,
+        fix: `Open ${AUTH_CLIENTS_URL}, open the client "${name}", add a new client secret there (Google shows a secret only when it is created), and enter the client id and that secret in setup by hand.`,
       };
     }
 

@@ -660,7 +660,7 @@ describe('a connection is proven by using it', () => {
     const proof = await proveGoogleConnection(
       client(
         { ok: true, value: { emailAddress: 'agent@example.com', messagesTotal: 12, threadsTotal: 5, historyId: '1' } },
-        { ok: true, value: [{ id: 'e1', summary: 'Standup', start: '', end: '' }] },
+        { ok: true, value: { items: [{ id: 'e1', summary: 'Standup', start: '', end: '' }], more: false } },
       ),
     );
 
@@ -691,7 +691,7 @@ describe('a connection is proven by using it', () => {
     const proof = await proveGoogleConnection(
       client(
         { ok: false, status: 403, reason: 'api-disabled', problem: 'Gmail API has not been used in project 123 before or it is disabled.', fix: '' },
-        { ok: true, value: [] },
+        { ok: true, value: { items: [], more: false } },
       ),
     );
     expect(proof.mail.detail).toContain('not enabled on the Cloud project');

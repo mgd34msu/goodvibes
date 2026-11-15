@@ -5,6 +5,7 @@ import type { AutomationRun } from './runs.js';
 import type { AutomationRunTrigger } from './types.js';
 import { computeNextRun, jobEnablement } from './manager-runtime-helpers.js';
 import { summarizeError } from '../utils/error-display.js';
+import { scheduleCapacityWaitKey, type AutomationCapacityWait } from './scheduler-capacity.js';
 
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
@@ -23,6 +24,8 @@ interface AutomationSchedulingContext {
   readonly jobs: Map<string, AutomationJob>;
   readonly timers: Map<string, ReturnType<typeof setTimeout>>;
   readonly heartbeatWakes: Map<string, AutomationHeartbeatWake>;
+  /** Occurrences held back at the concurrency limit, for the capacity report. */
+  readonly capacityWaits?: Map<string, AutomationCapacityWait> | undefined;
   readonly running: () => boolean;
   readonly saveJobs: () => Promise<void>;
   readonly activeRunCount: () => number;
@@ -111,6 +114,9 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
   }
 
   const timer = setTimeout(() => {
+    const waitKey = scheduleCapacityWaitKey(job.id);
+    const waiting = context.capacityWaits?.get(waitKey);
+    context.capacityWaits?.delete(waitKey);
     const latest = context.jobs.get(job.id);
     if (!latest?.enabled) return;
     if (latest.execution.wakeMode === 'next-heartbeat') {
@@ -118,12 +124,14 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
       return;
     }
     if (context.activeRunCount() >= context.maxConcurrentRuns()) {
+      const deferredTo = Date.now() + 15_000;
       const deferred: AutomationJob = {
         ...latest,
-        nextRunAt: Date.now() + 15_000,
+        nextRunAt: deferredTo,
         updatedAt: Date.now(),
       };
       context.jobs.set(latest.id, deferred);
+      context.capacityWaits?.set(waitKey, { kind: 'schedule', jobId: latest.id, since: waiting?.since ?? Date.now(), nextRunAt: deferredTo });
       saveJobsAsync(context, 'defer-capacity', latest.id);
       scheduleAutomationJob(context, deferred);
       return;

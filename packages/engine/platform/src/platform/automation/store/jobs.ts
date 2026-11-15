@@ -113,7 +113,7 @@ export class AutomationJobStore {
     }
     // A generated phase is not a durable phase until its row is published. Keep
     // the already scheduled nextRunAt; only subsequent occurrences use it.
-    if (phaseMigration) await this.persist(new Map(snapshot.jobs.map(job => [job.id, job])), () => undefined);
+    if (phaseMigration) await this.persist(new Map(snapshot.jobs.map(job => [job.id, job])));
     return snapshot;
   }
 
@@ -150,7 +150,7 @@ export class AutomationJobStore {
         else merged.delete(id);
       }
       try {
-        await this.persist(merged, () => undefined);
+        await this.persist(merged);
         for (const id of changes.keys()) this.failed.delete(id);
       } catch (error) {
         for (const id of changes.keys()) this.failed.add(id);
@@ -199,10 +199,6 @@ export class AutomationJobStore {
     });
   }
 
-  assertCurrent(): void {
-    if (this.initialized && this.fileIdentity() !== this.identity) throw new AutomationJobMutationStaleError();
-  }
-
   private fileIdentity(): string | null {
     if (this.path === ':memory:') return null;
     if (this.directoryIdentity() !== this.anchorIdentity) throw new AutomationJobMutationStaleError();
@@ -235,34 +231,38 @@ export class AutomationJobStore {
     }
   }
 
-  private async persist(jobs: Map<string, AutomationJob>, assertCurrent: () => void, withPublication?: MutationPublication): Promise<void> {
+  /**
+   * Writes the jobs file. Another process's write is noticed by comparing the
+   * file's identity once, immediately before the rename that publishes this
+   * write; `assertCurrent` is the caller's own check (its revision and signal)
+   * and runs wherever the write could still be abandoned.
+   */
+  private async persist(jobs: Map<string, AutomationJob>, assertCurrent?: () => void, withPublication?: MutationPublication): Promise<void> {
     let published = false;
-    const current = () => {
-      assertCurrent();
+    const unchangedOnDisk = () => {
       if (this.fileIdentity() !== this.identity) throw new AutomationJobMutationStaleError();
     };
     try {
-      current();
+      assertCurrent?.();
       // Create only the descendants whose absence this owner retained. A
       // request cannot substitute a new directory or link before mkdir.
       for (const [parent, identity] of this.parents) {
         if (identity !== null) continue;
-        current(); mkdirSync(parent, { mode: 0o700 });
-        this.parents.set(parent, this.parentIdentity(parent)); current();
+        unchangedOnDisk(); mkdirSync(parent, { mode: 0o700 });
+        this.parents.set(parent, this.parentIdentity(parent));
       }
       await this.store.persist({ version: 1, jobs: [...jobs.values()] }, {
         durable: true,
         synchronousPublish: true,
         withPublication,
-        assertCurrent: current,
+        assertCurrent,
+        beforePublish: unchangedOnDisk,
         afterPublish: () => {
           published = true;
           this.identity = this.fileIdentity();
           this.committed = jobs;
         },
       });
-      current();
-      this.committed = jobs;
     } catch (error) {
       if (published) throw new AutomationJobCommitIndeterminateError(error);
       throw error;

@@ -30,7 +30,7 @@ test('a check-in run cancelled while it is evaluating is not overwritten as comp
   const runs = new Map<string, AutomationRun>();
   const emitted: string[] = [];
   const context = { jobs, runs, saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory: () => {},
-    syncRunToRuntime: () => {}, syncJobToRuntime: () => {}, emitRunQueued: () => {}, emitRunStarted: () => {},
+    syncRunToRuntime: () => {}, syncJobToRuntime: () => {}, emitRunStarted: () => {},
     emitRunCompleted: (_j: AutomationJob, r: AutomationRun) => emitted.push(r.status),
     emitRunFailed: () => {} } as unknown as AutomationManagerExecutionContext;
   const result = await executeCheckinJob(context, async () => {
@@ -55,7 +55,7 @@ test('a run cancelled while its start path fails is not overwritten as failed', 
     spawnTask: () => 'agent-1',
     saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory: () => {},
     syncExecutionRoute: async () => { cancelStoredRun(runs); throw new Error('route sync failed'); },
-    syncRunToRuntime: () => {}, syncJobToRuntime: () => {}, emitRunQueued: () => {}, emitRunStarted: () => {},
+    syncRunToRuntime: () => {}, syncJobToRuntime: () => {}, emitRunStarted: () => {},
     emitRunCompleted: () => {}, emitRunFailed: (_j: AutomationJob, r: AutomationRun) => failed.push(r.status),
     applyFailureToJob: (x: AutomationJob) => ({ ...x, failureCount: x.failureCount + 1 }),
     sessionBrokerAppend: async () => {},
@@ -81,7 +81,7 @@ test('a session target that cannot be resolved records a failed run, fails the j
     spawnTask: () => { spawned += 1; return 'agent-1'; },
     saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory: () => {}, onRunRecorded: () => {},
     syncExecutionRoute: async () => {},
-    syncRunToRuntime: () => {}, syncJobToRuntime: () => {}, emitRunQueued: () => {}, emitRunStarted: () => {},
+    syncRunToRuntime: () => {}, syncJobToRuntime: () => {}, emitRunStarted: () => {},
     emitRunCompleted: () => {},
     emitRunFailed: (_j: AutomationJob, r: AutomationRun, _m: string, retryable: boolean) => failed.push({ status: r.status, error: r.error, retryable }),
     applyFailureToJob: (x: AutomationJob) => ({ ...x, failureCount: x.failureCount + 1 }),

@@ -51,8 +51,8 @@ export class AutomationRouteStore {
    * Replace the file with `routes` as they are at THIS call, after every write
    * already queued has finished. Ordering, not the snapshot point, is what was
    * missing: `PersistentStore.persist` is atomic but says nothing about which
-   * of two in-flight writes lands last, and `AutomationService.upsertRun`,
-   * `upsertRoute` and `removeJob` all rewrite this whole file.
+   * of two in-flight writes lands last, and every save rewrites this whole
+   * file.
    */
   async save(routes: readonly AutomationRouteBinding[]): Promise<void> {
     const snapshot: AutomationRoutesSnapshot = { version: 1, routes: [...routes] };

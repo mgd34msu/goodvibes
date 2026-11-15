@@ -8,7 +8,6 @@ import {
   emitAutomationJobUpdated,
   emitAutomationRunCompleted,
   emitAutomationRunFailed,
-  emitAutomationRunQueued,
   emitAutomationRunStarted,
 } from '../runtime/emitters/index.js';
 import type { AutomationJob } from './jobs.js';
@@ -69,20 +68,6 @@ export function emitAutomationManagerJobAutoDisabled(
     jobId: job.id,
     reason,
     consecutiveFailures: job.failureCount,
-  });
-}
-
-export function emitAutomationManagerRunQueued(
-  runtimeBus: RuntimeEventBus | null,
-  job: AutomationJob,
-  run: AutomationRun,
-): void {
-  if (!runtimeBus) return;
-  emitAutomationRunQueued(runtimeBus, automationEmitterContext(run.id, job.execution.target.sessionId), {
-    jobId: job.id,
-    runId: run.id,
-    scheduledAt: run.queuedAt,
-    forced: run.forceRun,
   });
 }
 

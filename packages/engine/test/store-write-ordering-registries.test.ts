@@ -41,9 +41,9 @@ function tempDir(prefix: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// The automation stores. AutomationManager and AutomationService both write
-// every one of their files through these classes, so the ordering property the
-// two of them depend on is proved where it actually lives.
+// The automation stores. AutomationManager writes every one of its files
+// through these classes, so the ordering property it depends on is proved
+// where it actually lives.
 // ---------------------------------------------------------------------------
 
 function makeAutomationJob(overrides: Partial<AutomationJob> = {}): AutomationJob {
@@ -183,8 +183,7 @@ describe('AutomationRouteStore: a removed route binding does not come back', () 
       } as unknown as AutomationRouteBinding;
       await routes.save([binding]);
 
-      // AutomationService.upsertRun rewrites this whole file on every run, and
-      // removeJob rewrites it to drop the deleted job's bindings. They overlap.
+      // Two whole-file saves of the bindings can overlap.
       const release = store.holdNext();
       const upserting = routes.save([binding]);
       await waitFor(() => store.started >= 2);
@@ -219,8 +218,7 @@ describe('AutomationSourceStore: a removed source does not come back', () => {
       } as unknown as AutomationSourceRecord;
       await sources.save([source]);
 
-      // AutomationService writes this file from upsertJob AND upsertRun, both
-      // of which fire it inside a Promise.all alongside other stores.
+      // Two whole-file saves of the sources can overlap.
       const release = store.holdNext();
       const upserting = sources.save([source]);
       await waitFor(() => store.started >= 2);

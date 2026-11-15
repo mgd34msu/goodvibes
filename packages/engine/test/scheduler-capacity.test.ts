@@ -11,7 +11,6 @@
 import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { computeSchedulerCapacity } from '../platform/src/platform/automation/scheduler-capacity.js';
-import type { AutomationRun } from '../platform/src/platform/automation/runs.js';
 import { automationMutationFixture } from './_helpers/automation-mutation-fixture.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/src/runtime-automation-routes.js';
@@ -231,37 +230,13 @@ describe('GET /api/runtime/scheduler: HTTP route wiring', () => {
 });
 
 describe('scheduler capacity counters (real computation)', () => {
-  function run(id: string, status: AutomationRun['status'], queuedAt: number): AutomationRun {
-    return {
-      id,
-      labels: [],
-      createdAt: queuedAt,
-      updatedAt: queuedAt,
-      jobId: 'job-1',
-      status,
-      triggeredBy: { id: 'source-1', kind: 'manual', label: 'test', enabled: true, createdAt: 1, updatedAt: 1, metadata: {} },
-      target: { kind: 'background' },
-      execution: { target: { kind: 'background' } },
-      queuedAt,
-      forceRun: false,
-      dueRun: false,
-      attempt: 1,
-      deliveryIds: [],
-    };
-  }
-
-  test('counts running runs as slots in use and queued runs as depth, aging from the oldest queued run', () => {
-    const report = computeSchedulerCapacity(4, [
-      run('a', 'running', 100),
-      run('b', 'queued', 4_000),
-      run('c', 'queued', 2_500),
-      run('d', 'completed', 10),
-    ], 10_000);
+  test('counts every waiting piece of work as depth, aging from the one that waited longest', () => {
+    const report = computeSchedulerCapacity(4, 1, [4_000, 2_500], 10_000);
     expect(report).toEqual({ slotsTotal: 4, slotsInUse: 1, queueDepth: 2, oldestQueuedAgeMs: 7_500 });
   });
 
   test('an empty queue has no oldest age', () => {
-    expect(computeSchedulerCapacity(4, [run('a', 'running', 100)], 10_000).oldestQueuedAgeMs).toBeNull();
+    expect(computeSchedulerCapacity(4, 1, [], 10_000)).toEqual({ slotsTotal: 4, slotsInUse: 1, queueDepth: 0, oldestQueuedAgeMs: null });
   });
 
   test('the manager reports the default of four slots, follows automation.maxConcurrentRuns, and counts a started run', async () => {

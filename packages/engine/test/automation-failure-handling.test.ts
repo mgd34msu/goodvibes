@@ -467,13 +467,14 @@ describe('the job store after an outside change', () => {
 });
 
 describe('delivery', () => {
-  function deliveryManager(options: { readonly artifacts?: Record<string, number>; readonly router: (request: { attachments?: Array<{ artifactId: string }> }) => Promise<string>; readonly bus?: RuntimeEventBus }) {
+  function deliveryManager(options: { readonly artifacts?: Record<string, number>; readonly router: (request: { attachments?: Array<{ artifactId: string }> }) => Promise<string>; readonly bus?: RuntimeEventBus; readonly retryPolicy?: { maxAttempts: number; delayMs: number; strategy: 'fixed' } }) {
     const manager = new AutomationDeliveryManager({
       routeBindings,
       featureFlags: allFlags,
       deliveryRouter: { setControlPlaneGateway() {}, deliver: options.router } as never,
       ...(options.artifacts ? { artifactStore: { get: (id: string) => (id in options.artifacts! ? { id, createdAt: options.artifacts![id] } : null) } as never } : {}),
       ...(options.bus ? { runtimeBus: options.bus } : {}),
+      retryPolicy: options.retryPolicy ?? { maxAttempts: 1, delayMs: 0, strategy: 'fixed' },
     });
     return manager;
   }
@@ -500,13 +501,13 @@ describe('delivery', () => {
   });
 
   test('a target that used every try is reported as dead-lettered, and its failure as final', async () => {
-    const base = makeJob();
-    const job = makeJob({ failure: { ...base.failure, retryPolicy: { maxAttempts: 2, delayMs: 0, strategy: 'fixed' } } });
+    const job = makeJob();
     const bus = new RuntimeEventBus();
     const seen: Array<{ type: string; retryable?: boolean; attempts?: number }> = [];
     bus.onDomain('deliveries', (envelope) => { seen.push(envelope.payload as never); });
     const manager = deliveryManager({
       bus,
+      retryPolicy: { maxAttempts: 2, delayMs: 0, strategy: 'fixed' },
       router: async () => { throw new HttpStatusError('HTTP 503: upstream unavailable', { status: 503 }); },
     });
     const attempts = await manager.deliverJobRun(job, makeRun({ status: 'completed' }));
@@ -556,7 +557,6 @@ describe('check-in runs', () => {
       runs,
       jobs,
       onRunRecorded: () => undefined,
-      emitRunQueued: () => undefined,
       emitRunStarted: () => undefined,
       emitRunCompleted: () => undefined,
       emitRunFailed: () => undefined,

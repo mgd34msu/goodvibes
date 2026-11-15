@@ -50,9 +50,8 @@ export class AutomationSourceStore {
   /**
    * Replace the file with `sources` as they are at THIS call, after every write
    * already queued has finished. Ordering, not the snapshot point, is what was
-   * missing: `AutomationService.upsertJob`, `upsertRun` and `upsertSource` all
-   * rewrite this whole file, and `PersistentStore.persist` is atomic but
-   * unordered.
+   * missing: every save rewrites this whole file, and `PersistentStore.persist`
+   * is atomic but unordered.
    */
   async save(sources: readonly AutomationSourceRecord[]): Promise<void> {
     const snapshot: AutomationSourcesSnapshot = { version: 1, sources: [...sources] };

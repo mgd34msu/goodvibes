@@ -193,7 +193,8 @@ export async function updateAutomationJobRecord(
       thinking: thinkingPatch ?? job.execution.thinking,
       wakeMode: patch.wakeMode ?? job.execution.wakeMode,
       timeoutMs: patch.timeoutMs ?? job.execution.timeoutMs ?? (Number(context.configManager.get('automation.defaultTimeoutMs') ?? 0) || undefined),
-      toolAllowlist: patch.toolAllowlist ?? job.execution.toolAllowlist,
+      // An empty list clears the allowlist (no restriction), as on create.
+      toolAllowlist: patch.toolAllowlist === undefined ? job.execution.toolAllowlist : patch.toolAllowlist.length ? patch.toolAllowlist : undefined,
       autoApprove: patch.autoApprove ?? job.execution.autoApprove,
       allowUnsafeExternalContent: patch.allowUnsafeExternalContent ?? job.execution.allowUnsafeExternalContent,
       externalContentSource: patch.externalContentSource ?? job.execution.externalContentSource,

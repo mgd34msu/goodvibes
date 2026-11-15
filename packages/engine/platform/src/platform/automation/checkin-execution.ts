@@ -7,7 +7,7 @@
  * briefing→judgment→conditional-delivery loop (see checkin/service.ts) and
  * returns a terminal outcome, which this module records as a normal, terminal
  * AutomationRun using the same context idioms the main execution path uses
- * (set run, advance job counters, persist, emit queued/started/completed).
+ * (set run, advance job counters, persist, emit started/completed).
  *
  * The check-in run is SYNCHRONOUS and terminal, there is no fire-and-forget
  * agent to reconcile later, so the run it produces is already `completed` or
@@ -83,7 +83,6 @@ export async function executeCheckinJob(
   context.runs.set(baseRun.id, baseRun);
   context.onRunRecorded?.();
   if (context.jobs.has(job.id)) context.jobs.set(runningJob.id, runningJob);
-  context.emitRunQueued(runningJob, baseRun);
   context.emitRunStarted(runningJob, baseRun);
 
   let evaluation: AutomationCheckinOutcome;

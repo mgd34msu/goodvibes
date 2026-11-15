@@ -30,7 +30,7 @@ function fixture() {
   const synced: AutomationJob[] = [];
   const context = { jobs, runs, saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory: () => {},
     syncRunToRuntime: () => {}, syncJobToRuntime: (job: AutomationJob) => synced.push(job),
-    emitRunQueued: () => {}, emitRunStarted: () => {}, emitRunCompleted: () => {}, emitRunFailed: () => {},
+    emitRunStarted: () => {}, emitRunCompleted: () => {}, emitRunFailed: () => {},
     settleRun: settleRunOver({ jobs, runs, syncJobToRuntime: (job: AutomationJob) => { synced.push(job); } }) } as unknown as AutomationManagerExecutionContext;
   return { job, jobs, runs, context, synced };
 }

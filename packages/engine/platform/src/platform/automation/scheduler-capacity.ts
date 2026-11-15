@@ -1,18 +1,13 @@
 /**
- * scheduler-capacity.ts
- *
- * Standalone capacity-reporting logic for the AutomationManager.
- * Extracted so the report can be computed and tested independently
- * of the full manager class.
- *
- * Wire format uses camelCase at the API boundary per platform convention.
+ * The scheduler capacity report: run slots in use, and the work waiting for
+ * one. Wire format uses camelCase at the API boundary per platform convention.
  */
-
-import type { AutomationRun } from './runs.js';
 
 /**
  * Scheduler capacity report returned at the API boundary.
- * All field names are camelCase per platform wire convention.
+ * `queueDepth` counts the work that is due and waiting: heartbeat wakes not yet
+ * processed, scheduled occurrences and retries held back at the concurrency
+ * limit. `oldestQueuedAgeMs` is how long the oldest of them has waited.
  */
 export interface SchedulerCapacityReport {
   readonly slotsTotal: number;
@@ -22,29 +17,46 @@ export interface SchedulerCapacityReport {
 }
 
 /**
- * Compute a scheduler capacity report from raw scheduler state.
+ * A scheduled occurrence or a retry that came due while every run slot was in
+ * use and was put off. A scheduled wait is current while its job is enabled and
+ * still set to the deferred time; a retry wait while its retry timer is armed.
+ */
+export type AutomationCapacityWait =
+  | { readonly kind: 'schedule'; readonly jobId: string; readonly since: number; readonly nextRunAt: number }
+  | { readonly kind: 'retry'; readonly jobId: string; readonly since: number; readonly retryKey: string };
+
+export function scheduleCapacityWaitKey(jobId: string): string {
+  return `schedule:${jobId}`;
+}
+
+export function retryCapacityWaitKey(retryKey: string): string {
+  return `retry:${retryKey}`;
+}
+
+/**
+ * Compute a scheduler capacity report.
  *
  * @param slotsTotal - Maximum concurrent run slots (from config)
- * @param runs - Current run map values
- * @param nowMs - Current timestamp in ms (injectable for testability; defaults to Date.now())
+ * @param slotsInUse - Runs running or starting now
+ * @param waitingSince - When each piece of waiting work came due
+ * @param nowMs - Current timestamp in ms
  */
 export function computeSchedulerCapacity(
   slotsTotal: number,
-  runs: Iterable<AutomationRun>,
+  slotsInUse: number,
+  waitingSince: Iterable<number>,
   nowMs = Date.now(),
 ): SchedulerCapacityReport {
-  let slotsInUse = 0;
-  const queuedRuns: AutomationRun[] = [];
-
-  for (const run of runs) {
-    if (run.status === 'running') slotsInUse += 1;
-    if (run.status === 'queued') queuedRuns.push(run);
+  let queueDepth = 0;
+  let oldest = Number.POSITIVE_INFINITY;
+  for (const since of waitingSince) {
+    queueDepth += 1;
+    if (since < oldest) oldest = since;
   }
-
-  const queueDepth = queuedRuns.length;
-  const oldestQueuedAgeMs = queueDepth > 0
-    ? nowMs - Math.min(...queuedRuns.map((r) => r.queuedAt))
-    : null;
-
-  return { slotsTotal, slotsInUse, queueDepth, oldestQueuedAgeMs };
+  return {
+    slotsTotal,
+    slotsInUse,
+    queueDepth,
+    oldestQueuedAgeMs: queueDepth > 0 ? Math.max(0, nowMs - oldest) : null,
+  };
 }

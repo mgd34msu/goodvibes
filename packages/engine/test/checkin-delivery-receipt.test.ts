@@ -51,7 +51,7 @@ test('receipt persistence failure retains known delivery acceptance and ID witho
     const jobs = new Map<string, AutomationJob>([[job.id, job]]), runs = new Map<string, AutomationRun>();
     let evaluations = 0;
     const context = { jobs, runs, saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory() {},
-      syncRunToRuntime() {}, syncJobToRuntime() {}, emitRunQueued() {}, emitRunStarted() {}, emitRunCompleted() {}, emitRunFailed() {},
+      syncRunToRuntime() {}, syncJobToRuntime() {}, emitRunStarted() {}, emitRunCompleted() {}, emitRunFailed() {},
       settleRun: settleRunOver({ jobs, runs }),
     } as unknown as AutomationManagerExecutionContext;
     const run = await executeCheckinJob(context, async () => { evaluations++; return result; }, job, 'scheduled', true, 1);

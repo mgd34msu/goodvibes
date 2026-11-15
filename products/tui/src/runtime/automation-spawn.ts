@@ -1,2 +1,2 @@
-/** Shared terminal behavior belongs to the engine platform. */
-export { createAutomationAgentControls, createAutomationSpawnTask } from '@goodvibes-jev/engine/terminal-shell/bootstrap-runtime-bindings';
+/** One adapter for every product; it lives with the automation manager. */
+export { createAutomationAgentControls, createAutomationSpawnTask } from '@goodvibes-jev/engine/platform/platform/automation';

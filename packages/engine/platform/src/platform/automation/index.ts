@@ -60,7 +60,6 @@ export type {
 } from './runs.js';
 
 export { AutomationDeliveryManager } from './delivery-manager.js';
-export { AutomationService } from './service.js';
 export { AutomationJobStore } from './store/jobs.js';
 export { AutomationRunStore } from './store/runs.js';
 export { AutomationRouteStore } from './store/routes.js';
@@ -78,3 +77,4 @@ export { readNaturalLanguageSchedule } from './schedule-reading.js';
 export type { ScheduleReading, ScheduleReadingInput } from './schedule-reading.js';
 
 export { automationActionBinding, bindAutomationAction } from './action-source.js';
+export { createAutomationAgentControls, createAutomationSpawnTask } from './agent-controls.js';

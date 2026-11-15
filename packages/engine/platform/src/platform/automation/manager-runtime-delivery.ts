@@ -2,6 +2,7 @@ import { logger } from '../utils/logger.js';
 import type { AutomationDeliveryManager } from './delivery-manager.js';
 import type { AutomationDeliveryTarget } from './delivery.js';
 import { calculateRetryDelay } from './failures.js';
+import { retryCapacityWaitKey, type AutomationCapacityWait } from './scheduler-capacity.js';
 import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -10,6 +11,8 @@ import { readFailureTransience, type FailureTransience } from '../integrations/d
 export interface AutomationFailureFollowUpContext {
   readonly jobs: Map<string, AutomationJob>;
   readonly retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Retries held back at the concurrency limit, for the capacity report. */
+  readonly capacityWaits?: Map<string, AutomationCapacityWait> | undefined;
   readonly deliveryManager: AutomationDeliveryManager | null;
   readonly activeRunCount: () => number;
   readonly maxConcurrentRuns: () => number;
@@ -117,6 +120,9 @@ export function scheduleAutomationFailureFollowUp(
   }
   const timer = setTimeout(() => {
     context.retryTimers.delete(retryKey);
+    const waitKey = retryCapacityWaitKey(retryKey);
+    const waiting = context.capacityWaits?.get(waitKey);
+    context.capacityWaits?.delete(waitKey);
     const latestJob = context.jobs.get(job.id);
     // A one-shot job is disabled once its only occurrence has fired, which
     // must not cancel the retry of that occurrence; an operator or the
@@ -124,6 +130,9 @@ export function scheduleAutomationFailureFollowUp(
     if (!latestJob || (!latestJob.enabled && latestJob.pausedReason !== 'one-shot-complete')) return;
     if (context.activeRunCount() >= context.maxConcurrentRuns()) {
       scheduleAutomationFailureFollowUp(context, latestJob, run, retryAllowed, false);
+      if (context.retryTimers.has(retryKey)) {
+        context.capacityWaits?.set(waitKey, { kind: 'retry', jobId: latestJob.id, since: waiting?.since ?? Date.now(), retryKey });
+      }
       return;
     }
     void context.executeJob(latestJob, 'scheduled', false, run.attempt + 1).catch((error) => {

@@ -2,6 +2,7 @@
  * Delivery policy and delivery-attempt types.
  */
 
+import type { AutomationRetryPolicy } from './failures.js';
 import type { AutomationSurfaceKind } from './types.js';
 
 export type AutomationDeliveryMode = 'none' | 'webhook' | 'surface' | 'integration' | 'link';
@@ -35,3 +36,17 @@ export interface AutomationDeliveryAttempt {
   readonly error?: string | undefined;
   readonly responseId?: string | undefined;
 }
+
+/**
+ * How often a message to one target is tried. It is separate from a job's
+ * retry policy, which decides whether the job's work runs again: a job that
+ * must not re-run an expensive task still gets its message delivered through a
+ * brief outage.
+ */
+export const AUTOMATION_DELIVERY_RETRY_POLICY: AutomationRetryPolicy = Object.freeze({
+  maxAttempts: 3,
+  delayMs: 1_000,
+  strategy: 'exponential',
+  maxDelayMs: 10_000,
+  jitterMs: 250,
+});

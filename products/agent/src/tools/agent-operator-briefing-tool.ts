@@ -183,7 +183,12 @@ function formatSchedules(body: unknown): string {
 }
 
 function formatCapacity(body: unknown): string {
-  return `  scheduler: slots ${readNumber(body, 'slotsInUse') ?? 0}/${readNumber(body, 'slotsTotal') ?? 0}; queue ${readNumber(body, 'queueDepth') ?? 0}; oldest queued ms ${readNumber(body, 'oldestQueuedAgeMs') ?? 0}`;
+  const slots = `slots ${readNumber(body, 'slotsInUse') ?? 0}/${readNumber(body, 'slotsTotal') ?? 0}`;
+  const waiting = readNumber(body, 'queueDepth') ?? 0;
+  const oldestMs = readNumber(body, 'oldestQueuedAgeMs');
+  if (waiting === 0) return `  scheduler: ${slots}; nothing waiting`;
+  const age = oldestMs === null ? '' : `, oldest waiting ${Math.round(oldestMs / 1000)}s`;
+  return `  scheduler: ${slots}; ${waiting} due and waiting for a slot or heartbeat${age}`;
 }
 
 function formatRouteFailureKind(kind: OperatorRouteFailure['kind']): string {

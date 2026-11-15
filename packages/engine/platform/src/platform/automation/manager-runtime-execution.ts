@@ -51,7 +51,6 @@ export interface AutomationManagerExecutionContext {
   readonly syncExecutionRoute: (job: AutomationJob, run: AutomationRun) => Promise<void>;
   readonly syncRunToRuntime: (run: AutomationRun, source: string) => void;
   readonly syncJobToRuntime: (job: AutomationJob, source: string) => void;
-  readonly emitRunQueued: (job: AutomationJob, run: AutomationRun) => void;
   readonly emitRunStarted: (job: AutomationJob, run: AutomationRun) => void;
   readonly emitRunCompleted: (job: AutomationJob, run: AutomationRun, outcome: 'success' | 'partial' | 'failed' | 'cancelled') => void;
   readonly emitRunFailed: (job: AutomationJob, run: AutomationRun, error: string, retryable: boolean) => void;
@@ -243,7 +242,6 @@ export async function executeAutomationJob(
       await Promise.all([context.saveJobs(), context.saveRuns()]);
       context.syncRunToRuntime(runningRun, 'automation.execute');
       context.syncJobToRuntime(updatedJob, 'automation.execute');
-      context.emitRunQueued(updatedJob, runningRun);
       context.emitRunStarted(updatedJob, runningRun);
       return runningRun;
     }
@@ -279,7 +277,6 @@ export async function executeAutomationJob(
     await Promise.all([context.saveJobs(), context.saveRuns()]);
     context.syncRunToRuntime(runningRun, 'automation.execute');
     context.syncJobToRuntime(updatedJob, 'automation.execute');
-    context.emitRunQueued(updatedJob, runningRun);
     context.emitRunStarted(updatedJob, runningRun);
     return runningRun;
   } catch (error) {

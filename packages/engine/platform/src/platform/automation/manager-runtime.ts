@@ -7,7 +7,7 @@ import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { AgentManager } from '../tools/agent/index.js';
 import { AgentMessageBus } from '../agents/message-bus.js';
-import { computeSchedulerCapacity, type SchedulerCapacityReport } from './scheduler-capacity.js';
+import { computeSchedulerCapacity, scheduleCapacityWaitKey, type AutomationCapacityWait, type SchedulerCapacityReport } from './scheduler-capacity.js';
 import { AutomationJobStore } from './store/jobs.js';
 import { AutomationRunStore } from './store/runs.js';
 import { AutomationJobMap, automationJobRevision, ownedAutomationJob, withCurrentSchedulerState, AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError, retainAutomationMutation, type AutomationJobMutationOptions, type RetainedAutomationJobTarget } from './job-mutations.js';
@@ -62,7 +62,6 @@ import {
   emitAutomationManagerJobUpdated,
   emitAutomationManagerRunCompleted,
   emitAutomationManagerRunFailed,
-  emitAutomationManagerRunQueued,
   emitAutomationManagerRunStarted,
 } from './manager-runtime-events.js';
 import {
@@ -143,6 +142,8 @@ export class AutomationManager {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly heartbeatWakes = new Map<string, AutomationHeartbeatWake>();
+  /** Scheduled occurrences and retries put off at the concurrency limit. */
+  private readonly capacityWaits = new Map<string, AutomationCapacityWait>();
   private deliveryManager: AutomationDeliveryManager | null;
   private readonly deliveryInFlight = new Set<string>();
   // Attached post-construction by the CheckinService (attachCheckinEvaluator);
@@ -220,7 +221,6 @@ export class AutomationManager {
       syncExecutionRoute: (job: AutomationJob, run: AutomationRun) => this.syncExecutionRoute(job, run),
       syncRunToRuntime: (run: AutomationRun, source: string) => this.syncRunToRuntime(run, source),
       syncJobToRuntime: (job: AutomationJob, source: string) => this.syncJobToRuntime(job, source),
-      emitRunQueued: (job: AutomationJob, run: AutomationRun) => this.emitRunQueued(job, run),
       emitRunStarted: (job: AutomationJob, run: AutomationRun) => this.emitRunStarted(job, run),
       emitRunCompleted: (job: AutomationJob, run: AutomationRun, outcome: 'success' | 'partial' | 'failed' | 'cancelled') => this.emitRunCompleted(job, run, outcome),
       emitRunFailed: (job: AutomationJob, run: AutomationRun, error: string, retryable: boolean) => emitAutomationManagerRunFailed(this.runtimeBus, job, run, error, retryable),
@@ -337,6 +337,7 @@ export class AutomationManager {
   private removeJobRecord(jobId: string, reason: string): void {
     this.cancelTimer(jobId);
     this.heartbeatWakes.delete(jobId);
+    for (const [key, wait] of this.capacityWaits) if (wait.jobId === jobId) this.capacityWaits.delete(key);
     for (const [key, timer] of this.retryTimers) {
       if (!key.startsWith(`${jobId}:`)) continue;
       clearTimeout(timer);
@@ -409,6 +410,7 @@ export class AutomationManager {
       clearTimeout(timer);
     }
     this.retryTimers.clear();
+    this.capacityWaits.clear();
     if (this.reconcileTimer !== null) {
       clearInterval(this.reconcileTimer);
       this.reconcileTimer = null;
@@ -668,6 +670,7 @@ export class AutomationManager {
       jobs: this.jobs,
       timers: this.timers,
       heartbeatWakes: this.heartbeatWakes,
+      capacityWaits: this.capacityWaits,
       running: () => this.running,
       saveJobs: () => this.saveJobs(),
       activeRunCount: () => this.activeRunCount(),
@@ -810,9 +813,24 @@ export class AutomationManager {
     return total;
   }
 
+  /**
+   * Run slots in use and the work waiting for one: pending heartbeat wakes,
+   * and scheduled occurrences and retries put off at the concurrency limit.
+   * A wait whose job was disabled, edited to another time or removed, or whose
+   * retry was cleared, is dropped here.
+   */
   getSchedulerCapacity(): SchedulerCapacityReport {
-    const report = computeSchedulerCapacity(this.maxConcurrentRuns(), this.runs.values());
-    return { ...report, slotsInUse: this.activeRunCount() };
+    const waitingSince: number[] = [];
+    for (const wake of this.heartbeatWakes.values()) waitingSince.push(wake.queuedAt);
+    for (const [key, wait] of this.capacityWaits) {
+      const job = this.jobs.get(wait.jobId);
+      const current = wait.kind === 'retry'
+        ? this.retryTimers.has(wait.retryKey)
+        : key === scheduleCapacityWaitKey(wait.jobId) && job?.enabled === true && job.nextRunAt === wait.nextRunAt;
+      if (current) waitingSince.push(wait.since);
+      else this.capacityWaits.delete(key);
+    }
+    return computeSchedulerCapacity(this.maxConcurrentRuns(), this.activeRunCount(), waitingSince);
   }
 
   private pruneRunHistory(jobId?: string): void {
@@ -845,6 +863,7 @@ export class AutomationManager {
     return {
       jobs: this.jobs,
       retryTimers: this.retryTimers,
+      capacityWaits: this.capacityWaits,
       deliveryManager: this.deliveryManager,
       activeRunCount: () => this.activeRunCount(),
       maxConcurrentRuns: () => this.maxConcurrentRuns(),
@@ -886,10 +905,6 @@ export class AutomationManager {
 
   private emitJobAutoDisabled(job: AutomationJob, reason: string): void {
     emitAutomationManagerJobAutoDisabled(this.runtimeBus, job, reason);
-  }
-
-  private emitRunQueued(job: AutomationJob, run: AutomationRun): void {
-    emitAutomationManagerRunQueued(this.runtimeBus, job, run);
   }
 
   private emitRunStarted(job: AutomationJob, run: AutomationRun): void {

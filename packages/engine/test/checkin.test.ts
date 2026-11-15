@@ -233,7 +233,6 @@ describe('automation kind:checkin execution branch', () => {
       pruneRunHistory: () => {},
       syncRunToRuntime: () => {},
       syncJobToRuntime: () => {},
-      emitRunQueued: () => events.push('queued'),
       emitRunStarted: () => events.push('started'),
       emitRunCompleted: (_j: unknown, _r: unknown, outcome: string) => events.push(`completed:${outcome}`),
       emitRunFailed: () => events.push('failed'),
@@ -263,7 +262,7 @@ describe('automation kind:checkin execution branch', () => {
     );
     expect(run.status).toBe('completed');
     expect(run.deliveryIds).toEqual(['d1']);
-    expect(events).toEqual(['queued', 'started', 'completed:success']);
+    expect(events).toEqual(['started', 'completed:success']);
     expect(runs.get(run.id)!.status).toBe('completed');
   });
 });

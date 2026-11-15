@@ -343,10 +343,10 @@ export function buildDefaultFailurePolicy(configManager: ConfigManager, override
 /**
  * The automation run lifecycle, from the moves the manager performs: a run is
  * created `running` and settles once to completed, failed or cancelled; a
- * missed run is recorded already final. `queued` is never assigned by this
- * module but is read by scheduler-capacity and is accepted by the persisted
- * run schema, so it stays declared (queued -> running is the start, the other
- * two are an operator or a failed start before it began).
+ * missed run is recorded already final. `queued` is never assigned (work
+ * waiting for a slot is reported by getSchedulerCapacity, not as runs), but the
+ * operator contract's run status still lists it, so it stays declared until
+ * that contract drops it.
  */
 export const automationRunLifecycle = defineLifecycle<AutomationRunStatus>('automation run', {
   queued: ['running', 'cancelled', 'failed'],

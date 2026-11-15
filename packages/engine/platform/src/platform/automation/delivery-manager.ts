@@ -14,8 +14,8 @@ import {
   emitDeliveryStarted,
   emitDeliverySucceeded,
 } from '../runtime/emitters/index.js';
-import type { AutomationDeliveryAttempt, AutomationDeliveryTarget } from './delivery.js';
-import { calculateRetryDelay } from './failures.js';
+import { AUTOMATION_DELIVERY_RETRY_POLICY, type AutomationDeliveryAttempt, type AutomationDeliveryTarget } from './delivery.js';
+import { calculateRetryDelay, type AutomationRetryPolicy } from './failures.js';
 import type { AutomationJob } from './jobs.js';
 import type { AutomationRouteBinding } from './routes.js';
 import type { AutomationRun } from './runs.js';
@@ -125,6 +125,7 @@ export class AutomationDeliveryManager {
   private readonly deliveryRouter: ChannelDeliveryRouter;
   private readonly featureFlags: FeatureFlagReader;
   private readonly artifactStore: Pick<ArtifactStore, 'get'> | undefined;
+  private readonly retryPolicy: AutomationRetryPolicy;
   private runtimeDispatch: DomainDispatch | null = null;
   private runtimeBus: RuntimeEventBus | null = null;
 
@@ -138,8 +139,11 @@ export class AutomationDeliveryManager {
     readonly runtimeStore?: RuntimeStore | undefined;
     readonly runtimeBus?: RuntimeEventBus | undefined;
     readonly featureFlags?: FeatureFlagReader | undefined;
+    /** How often a message to one target is tried; AUTOMATION_DELIVERY_RETRY_POLICY by default. */
+    readonly retryPolicy?: AutomationRetryPolicy | undefined;
   }) {
     this.routeBindings = config.routeBindings;
+    this.retryPolicy = config.retryPolicy ?? AUTOMATION_DELIVERY_RETRY_POLICY;
     this.artifactStore = config.artifactStore;
     this.featureFlags = config.featureFlags ?? null;
     if (config.deliveryRouter) {
@@ -240,7 +244,7 @@ export class AutomationDeliveryManager {
       attempts.push(attempt);
       this.syncAttempt(attempt, run, 'queued', reply);
 
-      const retryPolicy = job.failure.retryPolicy;
+      const retryPolicy = this.retryPolicy;
       let attemptIndex = 0;
       let lastError = '';
       while (attemptIndex < Math.max(1, retryPolicy.maxAttempts)) {

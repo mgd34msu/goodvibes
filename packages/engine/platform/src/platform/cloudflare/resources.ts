@@ -17,6 +17,7 @@ import type {
   CloudflareQueueLike,
   CloudflareR2BucketLike,
   CloudflareSecretsStoreLike,
+  CloudflareSecretsStoreSecretLike,
   CloudflareTunnelLike,
   CloudflareZoneLike,
 } from './types.js';
@@ -170,6 +171,33 @@ export async function ensureSecretsStore(
   throw new CloudflareControlPlaneError(`Cloudflare Secrets Store '${storeName}' did not return a created store.`, 'CLOUDFLARE_SECRETS_STORE_CREATE_FAILED', 502);
 }
 
+/**
+ * Write one secret into the Secrets Store, replacing the value of a secret of
+ * the same name. Scoped to Workers, which is the only reader.
+ */
+export async function ensureSecretsStoreSecret(
+  client: CloudflareApiClient,
+  input: { readonly accountId: string; readonly storeId: string; readonly name: string; readonly value: string },
+): Promise<CloudflareSecretsStoreSecretLike> {
+  const api = client.secretsStore?.stores.secrets;
+  if (!api) {
+    throw new CloudflareControlPlaneError('The Cloudflare client does not expose Secrets Store secret APIs.', 'CLOUDFLARE_SECRETS_STORE_API_UNAVAILABLE', 500);
+  }
+  for await (const existing of api.list(input.storeId, { account_id: input.accountId, search: input.name })) {
+    if (existing.name === input.name) {
+      await api.edit(input.storeId, existing.id, { account_id: input.accountId, value: input.value, scopes: ['workers'] });
+      return existing;
+    }
+  }
+  for await (const created of api.create(input.storeId, {
+    account_id: input.accountId,
+    body: [{ name: input.name, value: input.value, scopes: ['workers'], comment: 'Managed by GoodVibes Cloudflare provisioning' }],
+  })) {
+    return created;
+  }
+  throw new CloudflareControlPlaneError(`The Secrets Store did not return the created secret ${input.name}.`, 'CLOUDFLARE_SECRETS_STORE_SECRET_FAILED', 502);
+}
+
 async function readTunnelIngress(
   api: NonNullable<NonNullable<CloudflareApiClient['zeroTrust']>['tunnels']>['cloudflared'],
   tunnelId: string,
@@ -193,6 +221,8 @@ export async function ensureTunnel(
     readonly tunnelId: string;
     readonly daemonHostname: string;
     readonly tunnelServiceUrl: string;
+    /** A reference the caller keeps the token under; provisioning then stores no copy. */
+    readonly tokenRef?: string | undefined;
     readonly persist: boolean;
     readonly returnGeneratedSecrets: boolean;
     readonly steps: CloudflareProvisionStep[];
@@ -268,7 +298,11 @@ export async function ensureTunnel(
   // The token can be read from Cloudflare again at any time, so a run that
   // keeps nothing locally has nothing to lose by not storing it.
   let tokenRef: string | undefined;
-  if (input.persist) {
+  if (input.tokenRef) {
+    tokenRef = input.tokenRef;
+    context.setConfig('cloudflare.tunnelTokenRef', tokenRef, input.persist);
+    input.steps.push({ name: 'zero-trust-tunnel-token', status: 'ok', message: `The tunnel connector reads its token from ${tokenRef}; no copy was stored.` });
+  } else if (input.persist) {
     await context.storeSecret(CLOUDFLARE_TUNNEL_TOKEN_KEY, token);
     tokenRef = `goodvibes://secrets/goodvibes/${CLOUDFLARE_TUNNEL_TOKEN_KEY}`;
     context.setConfig('cloudflare.tunnelTokenRef', tokenRef, input.persist);
@@ -288,22 +322,41 @@ const DNS_RECORD_COMMENT = 'Managed by GoodVibes platform Cloudflare provisionin
  * it was written for, so it is left alone and the operator is told.
  */
 function skipForeignAccessApp(
-  input: { readonly daemonHostname: string; readonly returnGeneratedSecrets: boolean; readonly steps: CloudflareProvisionStep[] },
+  input: { readonly daemonHostname: string; readonly steps: CloudflareProvisionStep[] },
   app: CloudflareAccessApplicationLike,
   serviceToken: CloudflareAccessServiceTokenLike,
   serviceTokenRef: string | undefined,
-): { readonly serviceTokenId?: string; readonly serviceTokenRef?: string; readonly clientId?: string; readonly clientSecret?: string } {
+): CloudflareAccessOutcome {
   input.steps.push({
     name: 'zero-trust-access-app',
     status: 'warning',
     message: `An Access application named "${app.name ?? 'unnamed'}" already protects ${input.daemonHostname} and was not created by GoodVibes, so it was left unchanged. Rename or delete it in Cloudflare, or set cloudflare.accessAppId to let GoodVibes manage it.`,
     ...(app.id ? { resourceId: app.id } : {}),
   });
+  return accessOutcome(undefined, serviceToken, serviceTokenRef);
+}
+
+export interface CloudflareAccessOutcome {
+  /** Set only when the Access application now protects the daemon hostname. */
+  readonly appId?: string | undefined;
+  readonly serviceTokenId?: string | undefined;
+  readonly serviceTokenRef?: string | undefined;
+  /** The service token's credentials when Cloudflare returned them in this run (it does so once, at creation). */
+  readonly credentials?: { readonly clientId: string; readonly clientSecret: string } | undefined;
+}
+
+function accessOutcome(
+  appId: string | undefined,
+  serviceToken: CloudflareAccessServiceTokenLike,
+  serviceTokenRef: string | undefined,
+): CloudflareAccessOutcome {
   return {
+    ...(appId ? { appId } : {}),
     ...(serviceToken.id ? { serviceTokenId: serviceToken.id } : {}),
     ...(serviceTokenRef ? { serviceTokenRef } : {}),
-    ...(serviceToken.client_id && input.returnGeneratedSecrets ? { clientId: serviceToken.client_id } : {}),
-    ...(serviceToken.client_secret && input.returnGeneratedSecrets ? { clientSecret: serviceToken.client_secret } : {}),
+    ...(serviceToken.client_id && serviceToken.client_secret
+      ? { credentials: { clientId: serviceToken.client_id, clientSecret: serviceToken.client_secret } }
+      : {}),
   };
 }
 
@@ -318,10 +371,9 @@ export async function ensureAccess(
     readonly accessServiceTokenRef: string;
     readonly zone?: CloudflareZoneLike | undefined;
     readonly persist: boolean;
-    readonly returnGeneratedSecrets: boolean;
     readonly steps: CloudflareProvisionStep[];
   },
-): Promise<{ readonly appId?: string; readonly serviceTokenId?: string; readonly serviceTokenRef?: string; readonly clientId?: string; readonly clientSecret?: string }> {
+): Promise<CloudflareAccessOutcome> {
   const api = client.zeroTrust?.access;
   if (!api) {
     throw new CloudflareControlPlaneError('The Cloudflare client does not expose Zero Trust Access APIs.', 'CLOUDFLARE_ACCESS_API_UNAVAILABLE', 500);
@@ -371,30 +423,15 @@ export async function ensureAccess(
 
   if (!input.daemonHostname || !serviceToken.id) {
     input.steps.push({ name: 'zero-trust-access-app', status: 'warning', message: 'Access application was skipped because daemonHostname or service token id is missing.' });
-    return {
-      ...(serviceToken.id ? { serviceTokenId: serviceToken.id } : {}),
-      ...(serviceTokenRef ? { serviceTokenRef } : {}),
-      ...(serviceToken.client_id && input.returnGeneratedSecrets ? { clientId: serviceToken.client_id } : {}),
-      ...(serviceToken.client_secret && input.returnGeneratedSecrets ? { clientSecret: serviceToken.client_secret } : {}),
-    };
+    return accessOutcome(undefined, serviceToken, serviceTokenRef);
   }
   if (!input.zone && isPlaceholderHostname(input.daemonHostname)) {
     input.steps.push({ name: 'zero-trust-access-app', status: 'warning', message: `Access application was skipped because daemonHostname ${input.daemonHostname} is a placeholder hostname.` });
-    return {
-      ...(serviceToken.id ? { serviceTokenId: serviceToken.id } : {}),
-      ...(serviceTokenRef ? { serviceTokenRef } : {}),
-      ...(serviceToken.client_id && input.returnGeneratedSecrets ? { clientId: serviceToken.client_id } : {}),
-      ...(serviceToken.client_secret && input.returnGeneratedSecrets ? { clientSecret: serviceToken.client_secret } : {}),
-    };
+    return accessOutcome(undefined, serviceToken, serviceTokenRef);
   }
   if (input.zone && !hostnameBelongsToZone(input.daemonHostname, input.zone.name)) {
     input.steps.push({ name: 'zero-trust-access-app', status: 'warning', message: `Access application was skipped because daemonHostname ${input.daemonHostname} does not belong to selected zone ${input.zone.name}.` });
-    return {
-      ...(serviceToken.id ? { serviceTokenId: serviceToken.id } : {}),
-      ...(serviceTokenRef ? { serviceTokenRef } : {}),
-      ...(serviceToken.client_id && input.returnGeneratedSecrets ? { clientId: serviceToken.client_id } : {}),
-      ...(serviceToken.client_secret && input.returnGeneratedSecrets ? { clientSecret: serviceToken.client_secret } : {}),
-    };
+    return accessOutcome(undefined, serviceToken, serviceTokenRef);
   }
 
   let app: CloudflareAccessApplicationLike | undefined = input.accessAppId ? { id: input.accessAppId } : undefined;
@@ -436,13 +473,7 @@ export async function ensureAccess(
   }
   if (app.id) context.setConfig('cloudflare.accessAppId', app.id, input.persist);
   input.steps.push({ name: 'zero-trust-access-app', status: 'ok', message: `Configured Zero Trust Access application for ${input.daemonHostname}.`, resourceId: app.id });
-  return {
-    ...(app.id ? { appId: app.id } : {}),
-    ...(serviceToken.id ? { serviceTokenId: serviceToken.id } : {}),
-    ...(serviceTokenRef ? { serviceTokenRef } : {}),
-    ...(serviceToken.client_id && input.returnGeneratedSecrets ? { clientId: serviceToken.client_id } : {}),
-    ...(serviceToken.client_secret && input.returnGeneratedSecrets ? { clientSecret: serviceToken.client_secret } : {}),
-  };
+  return accessOutcome(app.id, serviceToken, serviceTokenRef);
 }
 
 export async function configureDns(
@@ -452,6 +483,8 @@ export async function configureDns(
     readonly zone?: CloudflareZoneLike | undefined;
     readonly daemonHostname: string;
     readonly tunnelId: string;
+    /** Set when the daemon hostname must not be published; the text says why. */
+    readonly withholdDaemonHostname?: string | undefined;
     readonly workerHostname: string;
     readonly workerBaseUrl: string;
     readonly steps: CloudflareProvisionStep[];
@@ -466,7 +499,9 @@ export async function configureDns(
     return [];
   }
   const records: CloudflareDnsRecordLike[] = [];
-  if (input.daemonHostname && input.tunnelId) {
+  if (input.daemonHostname && input.tunnelId && input.withholdDaemonHostname) {
+    input.steps.push({ name: 'dns-daemon-hostname', status: 'warning', message: `Did not publish ${input.daemonHostname}: ${input.withholdDaemonHostname}` });
+  } else if (input.daemonHostname && input.tunnelId) {
     if (hostnameBelongsToZone(input.daemonHostname, input.zone.name)) {
       records.push(await ensureCnameRecord(client, input.zone.id, input.daemonHostname, `${input.tunnelId}.cfargotunnel.com`, input.steps, 'dns-daemon-hostname'));
     } else {
@@ -481,7 +516,7 @@ export async function configureDns(
       input.steps.push({ name: 'dns-worker-hostname', status: 'warning', message: `Skipped Worker DNS record because ${input.workerHostname} does not belong to selected zone ${input.zone.name}.` });
     }
   }
-  if (records.length === 0) input.steps.push({ name: 'dns', status: 'skipped', message: 'No daemonHostname/tunnelId or workerHostname/workerBaseUrl pair was available for DNS automation.' });
+  if (records.length === 0 && !input.withholdDaemonHostname) input.steps.push({ name: 'dns', status: 'skipped', message: 'No daemonHostname/tunnelId or workerHostname/workerBaseUrl pair was available for DNS automation.' });
   return records;
 }
 

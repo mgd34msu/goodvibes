@@ -14,6 +14,7 @@ import { makeProjectTempDir } from './_helpers/project-temp.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { CloudflareControlPlaneManager } from '../platform/src/platform/cloudflare/manager.js';
 import { GOODVIBES_CLOUDFLARE_WORKER_MODULE } from '../platform/src/platform/cloudflare/worker-source.js';
+import { withCloudflareAccess } from '../platform/src/platform/cloudflare/access-client.js';
 import { normalizeProvisionHostnames } from '../platform/src/platform/cloudflare/hostnames.js';
 import { configureDns, ensureAccess, ensureKvNamespace, ensureTunnel, type CloudflareProvisioningContext } from '../platform/src/platform/cloudflare/resources.js';
 import { CloudflareControlPlaneError } from '../platform/src/platform/cloudflare/types.js';
@@ -63,6 +64,7 @@ function makeClient(options: {
     accountGets: 0,
     workerUpdates: [] as Array<Record<string, unknown>>,
     secretUpdates: [] as string[],
+    secretDeletes: [] as string[],
     scheduleUpdates: 0,
   };
   const queues: CloudflareQueueLike[] = Array.from({ length: options.queueCount ?? 0 }, (_, index) => ({ queue_id: `q${index}`, queue_name: `queue-${index}` }));
@@ -130,6 +132,10 @@ function makeClient(options: {
             if (options.failSecretUpdate) throw new Error('token lacks the Worker secrets permission');
             calls.secretUpdates.push(params.name);
             return { name: params.name, type: 'secret_text' };
+          },
+          async delete(_name: string, secretName: string) {
+            calls.secretDeletes.push(secretName);
+            return null;
           },
         },
       },
@@ -366,12 +372,13 @@ describe('disabling the integration', () => {
     expect(result.remote).toBe('not-disabled');
   });
 
-  test('a successful disable reports the Worker as disabled', async () => {
-    const { client } = makeClient();
+  test('a successful disable takes the daemon credential off the Worker and reports it disabled', async () => {
+    const { client, calls } = makeClient();
     const { manager, configManager } = managerFor(client);
     configManager.set('cloudflare.accountId', 'acct-1');
     const result = await manager.disable({ apiToken: 'cf' });
     expect(result.remote).toBe('disabled');
+    expect(calls.secretDeletes).toEqual(['GOODVIBES_OPERATOR_TOKEN']);
   });
 });
 
@@ -422,6 +429,27 @@ describe('existing Cloudflare resources that GoodVibes did not create', () => {
     expect(steps.find((step) => step.name === 'dns-daemon-hostname')?.status).toBe('warning');
   });
 
+  test('a daemon hostname whose Access protection was asked for and not applied is not published', async () => {
+    const { client, creates, updates } = dnsClient([]);
+    const steps: CloudflareProvisionStep[] = [];
+    await configureDns(client, { enabled: true, zone, daemonHostname: 'daemon.buzz.dev', tunnelId: 'tunnel-1', withholdDaemonHostname: 'Access is not applied.', workerHostname: '', workerBaseUrl: '', steps });
+    expect(creates).toEqual([]);
+    expect(updates).toEqual([]);
+    expect(steps.find((step) => step.name === 'dns-daemon-hostname')?.status).toBe('warning');
+  });
+
+  test('clients present the Access service token to the protected daemon hostname and to no other host', async () => {
+    const seen: Array<{ url: string; id: string | null }> = [];
+    const base = Object.assign(async (input: URL | RequestInfo, init?: RequestInit) => {
+      seen.push({ url: String(input), id: new Headers(init?.headers).get('cf-access-client-id') });
+      return new Response('{}');
+    }, { preconnect: () => {} }) as typeof fetch;
+    const accessFetch = withCloudflareAccess(base, 'daemon.buzz.dev', { clientId: 'cid', clientSecret: 'cs' });
+    await accessFetch('https://daemon.buzz.dev/api/batch/config');
+    await accessFetch('https://elsewhere.example/api');
+    expect(seen).toEqual([{ url: 'https://daemon.buzz.dev/api/batch/config', id: 'cid' }, { url: 'https://elsewhere.example/api', id: null }]);
+  });
+
   test('a CNAME GoodVibes made earlier is updated', async () => {
     const { client, updates } = dnsClient([{
       id: 'r1', name: 'daemon.buzz.dev', type: 'CNAME', content: 'old-tunnel.cfargotunnel.com', proxied: true,
@@ -461,7 +489,7 @@ describe('existing Cloudflare resources that GoodVibes did not create', () => {
   };
   const accessInput = (steps: CloudflareProvisionStep[]) => ({
     accountId: 'acct-1', daemonHostname: 'daemon.buzz.dev', accessAppId: '', accessServiceTokenId: '', accessServiceTokenRef: '',
-    persist: false, returnGeneratedSecrets: false, steps,
+    persist: false, steps,
   });
 
   test('an Access application with someone else\'s login policy is not rewritten', async () => {
@@ -516,7 +544,7 @@ describe('resources that cannot be confirmed', () => {
     const steps: CloudflareProvisionStep[] = [];
     await ensureAccess(quietContext, client, {
       accountId: 'acct-1', daemonHostname: 'daemon.buzz.dev', accessAppId: '', accessServiceTokenId: '', accessServiceTokenRef: '',
-      persist: false, returnGeneratedSecrets: false, steps,
+      persist: false, steps,
     });
     expect(steps.find((step) => step.name === 'zero-trust-access-service-token-secret')?.status).toBe('warning');
   });
@@ -620,6 +648,71 @@ describe('the deployed Worker module', () => {
     expect((await enqueue('false')).status).toBe(409);
     expect((await enqueue('1')).status).not.toBe(409);
     expect((await enqueue('TRUE')).status).not.toBe(409);
+  });
+
+  test('the Worker presents the Access service token to the daemon, read from the Secrets Store when bound', async () => {
+    const worker = await loadWorker();
+    const seen: Headers[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (_input: URL | RequestInfo, init?: RequestInit) => { seen.push(new Headers(init?.headers)); return new Response('{}', { status: 200 }); }, { preconnect: () => {} });
+    try {
+      await worker.default.scheduled({}, {
+        GOODVIBES_DAEMON_URL: 'https://daemon.buzz.dev',
+        GOODVIBES_OPERATOR_TOKEN_STORE: { async get() { return 'op-from-store'; } },
+        GOODVIBES_ACCESS_CLIENT_ID: 'cid',
+        GOODVIBES_ACCESS_CLIENT_SECRET_STORE: { async get() { return 'csecret'; } },
+      });
+    } finally { globalThis.fetch = original; }
+    expect(seen[0]?.get('authorization')).toBe('Bearer op-from-store');
+    expect(seen[0]?.get('cf-access-client-id')).toBe('cid');
+    expect(seen[0]?.get('cf-access-client-secret')).toBe('csecret');
+  });
+
+  test('past the daily queue budget nothing is queued and the refusal says when it resets', async () => {
+    const mod = await loadWorker() as unknown as {
+      default: { fetch(request: Request, env: Record<string, unknown>): Promise<Response> };
+      GoodVibesCoordinator: new (state: unknown, env: unknown) => { fetch(request: Request): Promise<Response> };
+    };
+    const storage = new Map<string, unknown>();
+    const coordinator = new mod.GoodVibesCoordinator({ storage: { async get(key: string) { return storage.get(key); }, async put(key: string, value: unknown) { storage.set(key, value); } } }, {});
+    const sent: unknown[] = [];
+    const env = {
+      GOODVIBES_WORKER_TOKEN: 't',
+      GOODVIBES_BATCH_QUEUE: { async send(message: unknown) { sent.push(message); } },
+      GOODVIBES_MAX_QUEUE_MESSAGES_PER_DAY: '2',
+      GOODVIBES_COORDINATOR: { idFromName: (name: string) => name, get: () => ({ fetch: (url: string, init: RequestInit) => coordinator.fetch(new Request(url, init)) }) },
+    };
+    const tick = () => mod.default.fetch(new Request('https://w.example/batch/tick/enqueue', { method: 'POST', headers: { authorization: 'Bearer t' } }), env);
+    expect((await tick()).status).toBe(202);
+    expect((await tick()).status).toBe(202);
+    const refused = await tick();
+    expect(refused.status).toBe(429);
+    const body = await refused.json() as { code: string; resetsAt: number; next: string[] };
+    expect(body.code).toBe('QUEUE_BUDGET_EXHAUSTED');
+    expect(body.resetsAt).toBeGreaterThan(Date.now());
+    expect(sent).toHaveLength(2);
+  });
+
+  test('in free-tier mode a queued job body goes to R2 and the queue carries only its key; without R2 it is refused', async () => {
+    const worker = await loadWorker();
+    const objects = new Map<string, string>();
+    const sent: Array<Record<string, unknown>> = [];
+    const base = {
+      GOODVIBES_WORKER_TOKEN: 't',
+      GOODVIBES_QUEUE_JOB_PAYLOADS: 'true',
+      GOODVIBES_FREE_TIER_MODE: 'true',
+      GOODVIBES_BATCH_QUEUE: { async send(message: Record<string, unknown>) { sent.push(message); } },
+    };
+    const enqueue = (env: Record<string, unknown>) => worker.default.fetch(
+      new Request('https://w.example/batch/jobs/enqueue', { method: 'POST', headers: { authorization: 'Bearer t' }, body: JSON.stringify({ request: { messages: [{ role: 'user', content: 'secret prompt' }] } }) }),
+      env,
+    );
+    expect((await enqueue(base)).status).toBe(409);
+    const accepted = await enqueue({ ...base, GOODVIBES_ARTIFACTS: { async put(key: string, value: string) { objects.set(key, value); } } });
+    expect(accepted.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).not.toContain('secret prompt');
+    expect(objects.get(String(sent[0]?.payloadKey))).toContain('secret prompt');
   });
 
   test('a scheduled tick the daemon refuses fails the invocation', async () => {
@@ -801,9 +894,9 @@ describe('Tunnel and Access credentials with persistConfig false', () => {
     const steps: CloudflareProvisionStep[] = [];
     const result = await ensureAccess(context, client, {
       accountId: 'acct-1', daemonHostname: 'daemon.buzz.dev', accessAppId: '', accessServiceTokenId: '', accessServiceTokenRef: '',
-      persist: false, returnGeneratedSecrets: true, steps,
+      persist: false, steps,
     });
     expect(stored).toEqual([]);
-    expect(result.clientSecret).toBe('secret');
+    expect(result.credentials?.clientSecret).toBe('secret');
   });
 });

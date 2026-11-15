@@ -1,3 +1,4 @@
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
 import { CLOUDFLARE_COMPONENT_IDS } from '../../runtime/cloudflare-control-plane.ts';
 import { normalizeText } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
@@ -14,6 +15,9 @@ import {
   getCloudflareComponentSelection,
   getCloudflareSetupSource,
 } from './onboarding-wizard-cloudflare.ts';
+
+// The schema owns every default name; the wizard shows it and never restates it.
+const DEFAULTS = DEFAULT_CONFIG.cloudflare;
 
 export function buildCloudflareStep(controller: OnboardingWizardControllerLike): OnboardingWizardStepDefinition {
   const config = controller.runtimeSnapshot?.config.cloudflare;
@@ -52,7 +56,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         kind: 'radio',
         id: 'cloudflare.free-tier-mode',
         label: 'Free-tier guardrails',
-        hint: 'Keep conservative queue-operation limits visible for free-tier Cloudflare accounts.',
+        hint: 'Keep job bodies out of Cloudflare Queues: the queue carries only signals and queued job bodies go to R2 (or are refused without R2).',
         options: CLOUDFLARE_YES_NO_OPTIONS,
         defaultValue: config?.freeTierMode === false ? 'no' : 'yes',
       },
@@ -169,8 +173,8 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.worker-name',
         label: 'Worker name',
         hint: 'Cloudflare Worker script name to create or update.',
-        placeholder: 'goodvibes-batch-worker',
-        defaultValue: config?.workerName || 'goodvibes-batch-worker',
+        placeholder: DEFAULTS.workerName,
+        defaultValue: config?.workerName || DEFAULTS.workerName,
       },
       {
         kind: 'text',
@@ -205,16 +209,16 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
           id: 'cloudflare.queue-name',
           label: 'Queue name',
           hint: 'Cloudflare Queue used for GoodVibes batch job signals.',
-          placeholder: 'goodvibes-batch',
-          defaultValue: config?.queueName || 'goodvibes-batch',
+          placeholder: DEFAULTS.queueName,
+          defaultValue: config?.queueName || DEFAULTS.queueName,
         },
         {
           kind: 'text',
           id: 'cloudflare.dead-letter-queue-name',
           label: 'Dead-letter queue name',
           hint: 'Cloudflare dead-letter queue for failed batch signals.',
-          placeholder: 'goodvibes-batch-dlq',
-          defaultValue: config?.deadLetterQueueName || 'goodvibes-batch-dlq',
+          placeholder: DEFAULTS.deadLetterQueueName,
+          defaultValue: config?.deadLetterQueueName || DEFAULTS.deadLetterQueueName,
         },
       );
     }
@@ -226,8 +230,8 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
           id: 'cloudflare.tunnel-name',
           label: 'Tunnel name',
           hint: 'Cloudflare Tunnel name to create or reuse.',
-          placeholder: 'goodvibes-daemon',
-          defaultValue: config?.tunnelName || 'goodvibes-daemon',
+          placeholder: DEFAULTS.tunnelName,
+          defaultValue: config?.tunnelName || DEFAULTS.tunnelName,
         },
         {
           kind: 'text',
@@ -249,8 +253,8 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
           kind: 'text',
           id: 'cloudflare.tunnel-token-ref',
           label: 'Tunnel token secret ref',
-          hint: 'Optional existing goodvibes:// secret ref for a Cloudflare Tunnel token.',
-          placeholder: 'goodvibes://secrets/goodvibes/CLOUDFLARE_TUNNEL_TOKEN',
+          hint: 'Optional goodvibes:// secret ref the daemon reads the tunnel token from. Leave blank and provisioning stores the token as goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN.',
+          placeholder: 'goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN',
           defaultValue: config?.tunnelTokenRef ?? '',
         },
       );
@@ -292,7 +296,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
           id: 'cloudflare.access-service-token-ref',
           label: 'Access service token secret ref',
           hint: 'Optional existing goodvibes:// secret ref for Access service token material.',
-          placeholder: 'goodvibes://secrets/goodvibes/CLOUDFLARE_ACCESS_SERVICE_TOKEN',
+          placeholder: 'goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_ACCESS_SERVICE_TOKEN',
           defaultValue: config?.accessServiceTokenRef ?? '',
         },
       );
@@ -304,9 +308,9 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
           kind: 'text',
           id: 'cloudflare.kv-namespace-name',
           label: 'KV namespace name',
-          hint: 'Cloudflare KV namespace for optional batch/runtime state.',
-          placeholder: 'goodvibes-runtime',
-          defaultValue: config?.kvNamespaceName || 'goodvibes-runtime',
+          hint: 'Cloudflare KV namespace that records the delivery state of each queued batch job.',
+          placeholder: DEFAULTS.kvNamespaceName,
+          defaultValue: config?.kvNamespaceName || DEFAULTS.kvNamespaceName,
         },
         {
           kind: 'text',
@@ -325,9 +329,9 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
           kind: 'text',
           id: 'cloudflare.do-namespace-name',
           label: 'Durable Object namespace name',
-          hint: 'Durable Object namespace expected by the Worker when this advanced component is selected.',
-          placeholder: 'GoodVibesCoordinator',
-          defaultValue: config?.durableObjectNamespaceName || 'GoodVibesCoordinator',
+          hint: 'Durable Object namespace of the Worker coordinator that counts the daily queue budget.',
+          placeholder: DEFAULTS.durableObjectNamespaceName,
+          defaultValue: config?.durableObjectNamespaceName || DEFAULTS.durableObjectNamespaceName,
         },
         {
           kind: 'text',
@@ -345,9 +349,9 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         kind: 'text',
         id: 'cloudflare.r2-bucket-name',
         label: 'R2 bucket name',
-        hint: 'R2 Standard bucket for optional batch artifacts.',
-        placeholder: 'goodvibes-artifacts',
-        defaultValue: config?.r2BucketName || 'goodvibes-artifacts',
+        hint: 'R2 Standard bucket that holds queued batch job bodies so queue messages stay small.',
+        placeholder: DEFAULTS.r2BucketName,
+        defaultValue: config?.r2BucketName || DEFAULTS.r2BucketName,
       });
     }
 
@@ -357,9 +361,9 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
           kind: 'text',
           id: 'cloudflare.secrets-store-name',
           label: 'Secrets Store name',
-          hint: 'Cloudflare Secrets Store name for optional account-level secrets.',
-          placeholder: 'goodvibes',
-          defaultValue: config?.secretsStoreName || 'goodvibes',
+          hint: 'Cloudflare Secrets Store that holds the Worker\'s daemon and Access credentials.',
+          placeholder: DEFAULTS.secretsStoreName,
+          defaultValue: config?.secretsStoreName || DEFAULTS.secretsStoreName,
         },
         {
           kind: 'text',
@@ -378,16 +382,16 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.worker-cron',
         label: 'Worker cron',
         hint: 'Cron trigger installed on the Worker for batch scheduler ticks. Leave blank to skip cron automation.',
-        placeholder: '*/5 * * * *',
-        defaultValue: config?.workerCron || '*/5 * * * *',
+        placeholder: DEFAULTS.workerCron,
+        defaultValue: config?.workerCron || DEFAULTS.workerCron,
       },
       {
         kind: 'text',
         id: 'cloudflare.max-queue-ops-per-day',
         label: 'Max queue ops per day',
-        hint: 'Free-tier queue-operation budget used for local warnings.',
-        placeholder: '10000',
-        defaultValue: String(config?.maxQueueOpsPerDay ?? 10000),
+        hint: 'Daily Cloudflare queue-operation budget. The Worker refuses to queue past it (HTTP 429) and says when it resets; 0 means no limit.',
+        placeholder: String(DEFAULTS.maxQueueOpsPerDay),
+        defaultValue: String(config?.maxQueueOpsPerDay ?? DEFAULTS.maxQueueOpsPerDay),
       },
       {
         kind: 'radio',
@@ -457,7 +461,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: 'cloudflare.disable',
         action: 'cloudflare-disable',
         label: 'Disable Cloudflare integration',
-        hint: 'Calls the daemon route to disable local Cloudflare usage and return the batch queue backend to local behavior.',
+        hint: 'Calls the daemon route: removes the Worker\'s daemon credential, cron and workers.dev route, stops the tunnel connector, returns the batch queue backend to local, and lists what is still deployed.',
         defaultValue: 'Action',
       },
     );
@@ -494,19 +498,19 @@ function cloudflareComponentHint(component: string): string {
     case 'queues':
       return 'Create Cloudflare Queue and dead-letter queue resources for batch job signals.';
     case 'zeroTrustTunnel':
-      return 'Create or reuse a Cloudflare Tunnel so Cloudflare can reach the daemon through a controlled path.';
+      return 'Create or reuse a Cloudflare Tunnel; the daemon runs cloudflared (install it first) so the daemon hostname reaches it.';
     case 'zeroTrustAccess':
-      return 'Configure Cloudflare Access application/service-token protection around the daemon hostname.';
+      return 'Protect the daemon hostname with a Cloudflare Access application; the Worker presents its service token. The hostname is not published unless Access applies.';
     case 'dns':
       return 'Create DNS records for selected custom hostnames. Requires a Cloudflare-managed zone.';
     case 'kv':
-      return 'Create or reuse KV for optional Worker-side state.';
+      return 'Create or reuse KV to record the delivery state of each queued batch job.';
     case 'durableObjects':
-      return 'Use Durable Objects for advanced Worker coordination where supported.';
+      return 'Count the daily queue budget in a Durable Object (added automatically when a queue budget is set).';
     case 'secretsStore':
-      return 'Create or reuse a Cloudflare Secrets Store for optional account-level secrets.';
+      return 'Keep the Worker\'s daemon and Access credentials in a Cloudflare Secrets Store instead of on the script.';
     case 'r2':
-      return 'Create or reuse an R2 Standard bucket for optional batch artifacts.';
+      return 'Create or reuse an R2 Standard bucket that holds queued job bodies so queue messages stay small.';
     default:
       return 'Optional Cloudflare component.';
   }

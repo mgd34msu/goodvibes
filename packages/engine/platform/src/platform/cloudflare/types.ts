@@ -1,5 +1,6 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
+import type { CloudflareTunnelConnectorHandle, CloudflareTunnelConnectorStatus } from './tunnel-connector.js';
 
 export type CloudflareProvisionStepStatus = 'ok' | 'skipped' | 'warning';
 
@@ -60,6 +61,12 @@ export interface CloudflareControlPlaneConfig {
 export interface CloudflareControlPlaneStatus {
   readonly enabled: boolean;
   readonly ready: boolean;
+  /**
+   * Settings and credentials are true when set. Resources (`workerName`,
+   * `queueName`, `deadLetterQueueName`, `tunnel`, `access`, `kv`,
+   * `durableObjects`, `r2`, `secretsStore`) are true only when a provision
+   * created or confirmed them at Cloudflare, never because a name has a default.
+   */
   readonly configured: {
     readonly accountId: boolean;
     readonly apiToken: boolean;
@@ -82,6 +89,8 @@ export interface CloudflareControlPlaneStatus {
   };
   readonly config: CloudflareControlPlaneConfig;
   readonly warnings: readonly string[];
+  /** The daemon's tunnel connector; present only where the daemon runs it. */
+  readonly tunnelConnector?: CloudflareTunnelConnectorStatus | undefined;
 }
 
 export interface CloudflareValidateInput {
@@ -115,6 +124,7 @@ export interface CloudflareProvisionInput extends CloudflareValidateInput {
   readonly tunnelName?: string | undefined;
   readonly tunnelId?: string | undefined;
   readonly tunnelServiceUrl?: string | undefined;
+  /** A goodvibes:// reference the tunnel connector reads its token from, instead of the token provisioning stores. */
   readonly tunnelTokenRef?: string | undefined;
   readonly accessAppId?: string | undefined;
   readonly accessServiceTokenId?: string | undefined;
@@ -122,7 +132,6 @@ export interface CloudflareProvisionInput extends CloudflareValidateInput {
   readonly kvNamespaceName?: string | undefined;
   readonly kvNamespaceId?: string | undefined;
   readonly durableObjectNamespaceName?: string | undefined;
-  readonly durableObjectNamespaceId?: string | undefined;
   readonly r2BucketName?: string | undefined;
   readonly secretsStoreName?: string | undefined;
   readonly secretsStoreId?: string | undefined;
@@ -148,8 +157,9 @@ export interface CloudflareProvisionResult {
   readonly steps: readonly CloudflareProvisionStep[];
   /**
    * The message of every step that finished with a warning (a skipped hostname
-   * component, failed verification, ...). `ok` only says the run reached its end;
-   * a non-empty list means part of what was asked for was not set up.
+   * component, failed verification, ...). `ok` is true only when the Worker
+   * check passed (or was turned off) and Access, when asked for, protects the
+   * daemon hostname; the batch backend is switched to Cloudflare only then.
    */
   readonly warnings?: readonly string[] | undefined;
   readonly account: {
@@ -175,6 +185,8 @@ export interface CloudflareProvisionResult {
     readonly name: string;
     readonly hostname?: string | undefined;
     readonly tokenRef?: string | undefined;
+    /** The daemon's tunnel connector after this run; absent where this process does not run it. */
+    readonly connector?: CloudflareTunnelConnectorStatus | undefined;
   };
   readonly access?: {
     readonly appId?: string | undefined;
@@ -316,6 +328,7 @@ export interface CloudflareDisableInput {
   readonly apiToken?: string | undefined;
   readonly apiTokenRef?: string | undefined;
   readonly workerName?: string | undefined;
+  /** Default true: the Worker's public workers.dev route is turned off. */
   readonly disableWorkerSubdomain?: boolean | undefined;
   readonly disableCron?: boolean | undefined;
   readonly persistConfig?: boolean | undefined;
@@ -326,9 +339,11 @@ export interface CloudflareDisableResult {
   readonly ok: boolean;
   readonly steps: readonly CloudflareProvisionStep[];
   /**
-   * `disabled`: the Worker cron/route changes were made at Cloudflare.
-   * `not-disabled`: they were skipped or failed, so a deployed Worker may keep
+   * `disabled`: the Worker's daemon credential, cron and workers.dev route were
+   * removed at Cloudflare, so it can no longer call the daemon.
+   * `not-disabled`: a step was skipped or failed, so a deployed Worker may keep
    * calling the daemon until it is disabled in the Cloudflare dashboard.
+   * Resources that remain deployed are listed as `still-deployed` steps.
    */
   readonly remote?: 'disabled' | 'not-disabled' | undefined;
 }
@@ -399,6 +414,11 @@ export interface CloudflareR2BucketLike {
 }
 
 export interface CloudflareSecretsStoreLike {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface CloudflareSecretsStoreSecretLike {
   readonly id: string;
   readonly name: string;
 }
@@ -577,6 +597,15 @@ export interface CloudflareApiClient {
     readonly stores: {
       create(params: { readonly account_id: string; readonly body: readonly { readonly name: string }[] }): AsyncIterable<CloudflareSecretsStoreLike>;
       list(params: { readonly account_id: string }): AsyncIterable<CloudflareSecretsStoreLike>;
+      readonly secrets?: {
+        create(storeId: string, params: {
+          readonly account_id: string;
+          readonly body: readonly { readonly name: string; readonly value: string; readonly scopes: readonly string[]; readonly comment?: string }[];
+        }): AsyncIterable<CloudflareSecretsStoreSecretLike>;
+        list(storeId: string, params: { readonly account_id: string; readonly search?: string }): AsyncIterable<CloudflareSecretsStoreSecretLike>;
+        edit(storeId: string, secretId: string, params: { readonly account_id: string; readonly value: string; readonly scopes?: readonly string[] }): Promise<CloudflareSecretsStoreSecretLike>;
+        delete(storeId: string, secretId: string, params: { readonly account_id: string }): Promise<unknown>;
+      };
     };
   };
   readonly zeroTrust?: {
@@ -638,19 +667,22 @@ export interface CloudflareApiClient {
           scriptName: string,
           params: { readonly account_id: string; readonly name: string; readonly text: string; readonly type: 'secret_text' },
         ): Promise<{ readonly name: string; readonly type: 'secret_text' }>;
+        delete(scriptName: string, secretName: string, params: { readonly account_id: string }): Promise<unknown>;
       };
     };
   };
 }
 
 export interface CloudflareControlPlaneOptions {
-  readonly configManager: Pick<ConfigManager, 'get' | 'set'>;
+  /** With `getControlPlaneConfigDir`, what provisioning created is recorded there for status and disable. */
+  readonly configManager: Pick<ConfigManager, 'get' | 'set'> & Partial<Pick<ConfigManager, 'getControlPlaneConfigDir'>>;
   readonly secretsManager?: Pick<SecretsManager, 'get' | 'set' | 'getGlobalHome'> | null | undefined;
   readonly authToken?: (() => string | null) | undefined;
   readonly createClient?: ((apiToken: string) => Promise<CloudflareApiClient>) | undefined;
   readonly fetch?: typeof fetch | undefined;
-  readonly now?: (() => number) | undefined;
   readonly randomUUID?: (() => string) | undefined;
+  /** The daemon's tunnel connector. Only the daemon passes one; other processes report the tunnel without running it. */
+  readonly tunnelConnector?: CloudflareTunnelConnectorHandle | null | undefined;
 }
 
 export class CloudflareControlPlaneError extends Error {

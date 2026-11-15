@@ -321,6 +321,7 @@ function workerSettingsClient(overrides: {
         },
         secrets: {
           update: async (_scriptName, params) => ({ name: params.name, type: params.type }),
+          delete: async () => null,
         },
       },
     },

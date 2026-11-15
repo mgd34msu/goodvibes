@@ -109,7 +109,7 @@ export function buildTokenRequirements(
       scope: 'account',
       permission: 'Workers KV Storage Write',
       alternatives: ['Workers KV Storage Edit', 'KV Storage Write'],
-      reason: 'Create and bind the GoodVibes KV namespace for lightweight edge state.',
+      reason: 'Create and bind the GoodVibes KV namespace that records the delivery state of each queued batch job.',
     });
   }
   if (components.durableObjects) {
@@ -118,7 +118,7 @@ export function buildTokenRequirements(
       scope: 'account',
       permission: 'Workers Scripts Write',
       alternatives: ['Workers Scripts Edit', 'Worker Scripts Write'],
-      reason: 'Apply the Worker migration and Durable Object binding used for edge coordination.',
+      reason: 'Apply the Worker migration and Durable Object binding that counts the daily queue budget.',
     });
   }
   if (components.secretsStore) {
@@ -127,7 +127,7 @@ export function buildTokenRequirements(
       scope: 'account',
       permission: 'Account Secrets Store Write',
       alternatives: ['Account Secrets Store Edit', 'Secrets Store Write', 'Secrets Store Edit'],
-      reason: 'Create or reuse a Cloudflare Secrets Store for future account-level secrets.',
+      reason: 'Create or reuse a Cloudflare Secrets Store that holds the Worker\'s daemon and Access credentials.',
     });
   }
   if (components.r2) {
@@ -137,7 +137,7 @@ export function buildTokenRequirements(
       scopeAlternatives: ['com.cloudflare.edge.r2.bucket'],
       permission: 'Workers R2 Storage Write',
       alternatives: ['R2 Storage Write', 'Workers R2 Storage Edit'],
-      reason: 'Create and bind a Standard R2 bucket for optional GoodVibes artifacts.',
+      reason: 'Create and bind a Standard R2 bucket that holds queued batch job bodies so queue messages stay small.',
     });
   }
   return uniqueRequirements(requirements);

@@ -1,24 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import type { ConfigKey } from '../config/schema.js';
+import { DEFAULT_CONFIG } from '../config/schema.js';
 import { summarizeError } from '../utils/error-display.js';
 import { createCloudflareApiClient } from './client.js';
 import { readCloudflareConfig } from './config.js';
+import { parseAccessCredentials, type CloudflareAccessCredentials } from './access-client.js';
 import {
+  CLOUDFLARE_ACCESS_SERVICE_TOKEN_KEY,
   CLOUDFLARE_API_TOKEN_KEY,
   CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY,
   CLOUDFLARE_WORKER_OPERATOR_TOKEN_KEY,
-  DEFAULT_DLQ_NAME,
-  DEFAULT_DO_NAMESPACE_NAME,
-  DEFAULT_KV_NAMESPACE_NAME,
-  DEFAULT_QUEUE_NAME,
-  DEFAULT_R2_BUCKET_NAME,
-  DEFAULT_SECRETS_STORE_NAME,
-  DEFAULT_TUNNEL_NAME,
-  DEFAULT_WORKER_CRON,
-  DEFAULT_WORKER_NAME,
+  COORDINATOR_CLASS_NAME,
+  WORKER_ACCESS_CLIENT_ID_SECRET,
+  WORKER_ACCESS_CLIENT_SECRET_SECRET,
+  WORKER_CLIENT_TOKEN_SECRET,
+  WORKER_OPERATOR_TOKEN_SECRET,
 } from './constants.js';
 import { discoverZones, resolveZone, selectDiscoveredZone, truncationWarning, tryDiscover } from './discovery.js';
 import { normalizeProvisionHostnames } from './hostnames.js';
+import { describeDeployedResources, openProvisionedStore, type CloudflareProvisionedPatch, type CloudflareProvisionedStore } from './provisioned.js';
 import { buildCloudflareControlPlaneStatus } from './status.js';
 import {
   configureDns,
@@ -28,10 +28,13 @@ import {
   ensureQueueConsumer,
   ensureR2Bucket,
   ensureSecretsStore,
+  ensureSecretsStoreSecret,
   ensureTunnel,
   findDurableObjectNamespace,
+  type CloudflareAccessOutcome,
   type CloudflareProvisioningContext,
 } from './resources.js';
+import type { CloudflareTunnelConnectorStatus } from './tunnel-connector.js';
 import type {
   CloudflareAccessApplicationLike,
   CloudflareApiClient,
@@ -78,7 +81,16 @@ import {
   stripTrailingSlash,
   verifyCreatedTokenPolicies,
 } from './utils.js';
-import { configureWorkerSchedule, configureWorkerSubdomain, describeWorkerUploadDurableObjectMigration, disableWorkerSchedule, disableWorkerSubdomain, uploadWorker } from './worker-settings.js';
+import {
+  configureWorkerSchedule,
+  configureWorkerSubdomain,
+  deleteWorkerSecret,
+  describeWorkerUploadDurableObjectMigration,
+  disableWorkerSchedule,
+  disableWorkerSubdomain,
+  uploadWorker,
+  type WorkerUploadResult,
+} from './worker-settings.js';
 import {
   resolveAccountId as _resolveAccountId,
   resolveWorkerName as _resolveWorkerName,
@@ -90,6 +102,11 @@ import {
 } from './cloudflare-token-resolvers.js';
 
 const WORKER_FETCH_TIMEOUT_MS = 15_000;
+/** How long provisioning waits for a freshly started tunnel connector before it checks the Worker. */
+const TUNNEL_CONNECT_WAIT_MS = 15_000;
+const DEFAULTS = DEFAULT_CONFIG.cloudflare;
+
+type ProvisionRecordDraft = { -readonly [K in keyof CloudflareProvisionedPatch]?: CloudflareProvisionedPatch[K] };
 
 function httpsOrigin(value: string): string | null {
   try {
@@ -114,7 +131,14 @@ export class CloudflareControlPlaneManager {
     const apiToken = await this.resolveApiToken({});
     const workerToken = await this.resolveOperatorToken({});
     const workerClientToken = await this.resolveWorkerClientToken({});
-    return buildCloudflareControlPlaneStatus({ config, apiToken, workerToken, workerClientToken });
+    return buildCloudflareControlPlaneStatus({
+      config,
+      apiToken,
+      workerToken,
+      workerClientToken,
+      provisioned: this.provisionedStore().read(),
+      ...(this.options.tunnelConnector ? { tunnelConnector: this.options.tunnelConnector.status() } : {}),
+    });
   }
 
   tokenRequirements(input: CloudflareTokenRequirementsInput = {}): CloudflareTokenRequirementsResult {
@@ -337,9 +361,13 @@ export class CloudflareControlPlaneManager {
 
   async provision(input: CloudflareProvisionInput): Promise<CloudflareProvisionResult> {
     const steps: CloudflareProvisionStep[] = [];
+    const record: ProvisionRecordDraft = {};
     try {
-      return await this.runProvision(input, steps);
+      const result = await this.runProvision(input, steps, record);
+      this.recordProvisioned(input, record, steps);
+      return result;
     } catch (error: unknown) {
+      this.recordProvisioned(input, record, steps);
       // Provisioning has no rollback. When it stops part-way the steps already
       // taken are the only record of what now exists at Cloudflare, so they
       // travel with the error (in its message, since a route may drop fields).
@@ -356,18 +384,28 @@ export class CloudflareControlPlaneManager {
     }
   }
 
-  private async runProvision(input: CloudflareProvisionInput, steps: CloudflareProvisionStep[]): Promise<CloudflareProvisionResult> {
+  /** What exists at Cloudflare after a run, kept for status and disable; a run that persists nothing records nothing. */
+  private recordProvisioned(input: CloudflareProvisionInput, record: ProvisionRecordDraft, steps: CloudflareProvisionStep[]): void {
+    if (input.persistConfig === false || !record.accountId || Object.keys(record).length <= 1) return;
+    try {
+      this.provisionedStore().merge({ ...record, accountId: record.accountId });
+    } catch (error: unknown) {
+      steps.push({ name: 'record-resources', status: 'warning', message: `Could not record what was provisioned (${summarizeError(error)}); status may not list these components until provisioning runs again.` });
+    }
+  }
+
+  private async runProvision(input: CloudflareProvisionInput, steps: CloudflareProvisionStep[], record: ProvisionRecordDraft): Promise<CloudflareProvisionResult> {
     const persist = input.persistConfig !== false;
     const config = this.readConfig();
     const components = resolveComponents(input.components);
     const accountId = this.resolveAccountId(input.accountId);
     const workerName = this.resolveWorkerName(input.workerName);
-    const queueName = clean(input.queueName) || config.queueName || DEFAULT_QUEUE_NAME;
-    const deadLetterQueueName = clean(input.deadLetterQueueName) || config.deadLetterQueueName || DEFAULT_DLQ_NAME;
+    const queueName = clean(input.queueName) || config.queueName || DEFAULTS.queueName;
+    const deadLetterQueueName = clean(input.deadLetterQueueName) || config.deadLetterQueueName || DEFAULTS.deadLetterQueueName;
     const daemonBaseUrl = stripTrailingSlash(clean(input.daemonBaseUrl) || config.daemonBaseUrl);
     let daemonHostname = normalizeHostname(clean(input.daemonHostname) || config.daemonHostname || hostnameFromUrl(daemonBaseUrl));
     let workerHostname = normalizeHostname(clean(input.workerHostname) || config.workerHostname);
-    const workerCron = clean(input.workerCron) || config.workerCron || DEFAULT_WORKER_CRON;
+    const workerCron = clean(input.workerCron) || config.workerCron || DEFAULTS.workerCron;
     const queueJobPayloads = input.queueJobPayloads === true;
 
     if (components.workers && !daemonBaseUrl) {
@@ -413,6 +451,7 @@ export class CloudflareControlPlaneManager {
     const resourceContext = this.createProvisioningContext();
     const account = await client.accounts.get({ account_id: accountId });
     steps.push({ name: 'validate-account', status: 'ok', message: `Validated Cloudflare account ${account.name}.`, resourceId: account.id });
+    record.accountId = accountId;
 
     // Only a token the account accepted may replace the stored one.
     if (input.storeApiToken && input.apiToken) {
@@ -461,53 +500,126 @@ export class CloudflareControlPlaneManager {
       queue = await ensureQueue(client, accountId, queueName, steps, 'queue');
       deadLetterQueueId = requireQueueId(deadLetterQueue, deadLetterQueueName);
       queueId = requireQueueId(queue, queueName);
+      record.queues = { queueName, queueId, deadLetterQueueName, deadLetterQueueId };
     }
 
-    const kvName = clean(input.kvNamespaceName) || config.kvNamespaceName || DEFAULT_KV_NAMESPACE_NAME;
+    const kvName = clean(input.kvNamespaceName) || config.kvNamespaceName || DEFAULTS.kvNamespaceName;
     const kvId = clean(input.kvNamespaceId) || config.kvNamespaceId;
     const kv = components.kv ? await ensureKvNamespace(resourceContext, client, accountId, kvName, kvId, persist, steps) : undefined;
-    const r2 = components.r2 ? await ensureR2Bucket(resourceContext, client, accountId, clean(input.r2BucketName) || config.r2BucketName || DEFAULT_R2_BUCKET_NAME, persist, steps) : undefined;
-    const secretsStoreName = clean(input.secretsStoreName) || config.secretsStoreName || DEFAULT_SECRETS_STORE_NAME;
+    if (kv) record.kv = { namespaceId: requireKvNamespaceId(kv), title: kv.title ?? kvName };
+    const r2 = components.r2 ? await ensureR2Bucket(resourceContext, client, accountId, clean(input.r2BucketName) || config.r2BucketName || DEFAULTS.r2BucketName, persist, steps) : undefined;
+    if (r2?.name) record.r2 = { bucketName: r2.name };
+    const secretsStoreName = clean(input.secretsStoreName) || config.secretsStoreName || DEFAULTS.secretsStoreName;
     const secretsStoreId = clean(input.secretsStoreId) || config.secretsStoreId;
     const secretsStore = components.secretsStore ? await ensureSecretsStore(resourceContext, client, accountId, secretsStoreName, secretsStoreId, persist, steps) : undefined;
+    if (secretsStore) record.secretsStore = { storeId: secretsStore.id, storeName: secretsStore.name, secrets: [] };
     const tunnel = components.zeroTrustTunnel
       ? await ensureTunnel(resourceContext, client, {
         accountId,
-        tunnelName: clean(input.tunnelName) || config.tunnelName || DEFAULT_TUNNEL_NAME,
+        tunnelName: clean(input.tunnelName) || config.tunnelName || DEFAULTS.tunnelName,
         tunnelId: clean(input.tunnelId) || config.tunnelId,
         daemonHostname,
         tunnelServiceUrl: stripTrailingSlash(clean(input.tunnelServiceUrl) || daemonBaseUrl),
+        tokenRef: clean(input.tunnelTokenRef) || undefined,
         persist,
         returnGeneratedSecrets: input.returnGeneratedSecrets === true,
         steps,
       })
       : undefined;
+    if (tunnel) record.tunnel = { id: tunnel.id, name: tunnel.name };
+
+    // Access comes before the Worker and DNS: the Worker needs the service
+    // token to get past it, and the daemon hostname is published only once the
+    // application protects it.
+    const problems: string[] = [];
+    const access = components.zeroTrustAccess
+      ? await ensureAccess(resourceContext, client, {
+        accountId,
+        daemonHostname,
+        accessAppId: clean(input.accessAppId) || config.accessAppId,
+        accessServiceTokenId: clean(input.accessServiceTokenId) || config.accessServiceTokenId,
+        accessServiceTokenRef: clean(input.accessServiceTokenRef) || config.accessServiceTokenRef,
+        ...(zone ? { zone } : {}),
+        persist,
+        steps,
+      })
+      : undefined;
+    const accessApplied = Boolean(access?.appId);
+    if (access?.appId) record.access = { appId: access.appId, serviceTokenId: access.serviceTokenId, hostname: daemonHostname };
+    if (components.zeroTrustAccess && !accessApplied) {
+      problems.push(`Access protection was asked for and is not applied to ${daemonHostname || 'the daemon hostname'}, so the hostname was not published.`);
+    }
+    const accessCredentials = access && accessApplied ? await this.accessCredentialsFor(access) : null;
+
+    const freeTierMode = this.options.configManager.get('cloudflare.freeTierMode');
+    const queueLimits = {
+      freeTierMode,
+      maxQueueOpsPerDay: this.options.configManager.get('cloudflare.maxQueueOpsPerDay'),
+      maxQueueMessagesPerDay: this.options.configManager.get('batch.maxQueueMessagesPerDay'),
+      maxQueuePayloadBytes: this.options.configManager.get('batch.maxQueuePayloadBytes'),
+    };
+    const budgeted = components.workers && components.queues && (queueLimits.maxQueueOpsPerDay > 0 || queueLimits.maxQueueMessagesPerDay > 0);
+    // The daily queue budget is counted in the coordinator Durable Object. It is
+    // part of the Worker script (no separate account resource, no extra token
+    // permission), so a budgeted queue gets it unless the caller turned it off.
+    const useCoordinator = components.durableObjects || (budgeted && input.components?.durableObjects !== false);
+    if (budgeted && !useCoordinator) {
+      steps.push({ name: 'queue-budget', status: 'warning', message: 'durableObjects was turned off, so nothing counts queue use and the daily queue budget (cloudflare.maxQueueOpsPerDay, batch.maxQueueMessagesPerDay) is not enforced.' });
+    }
 
     let generatedWorkerClientToken: string | undefined;
     let effectiveWorkerClientToken = '';
     let subdomain = '';
     let workerBaseUrl = stripTrailingSlash(clean(input.workerBaseUrl) || config.workerBaseUrl);
     const workerOrigins: string[] = [config.workerBaseUrl];
+    let workerUploaded: WorkerUploadResult | undefined;
     if (components.workers) {
-      const workerUpload = await uploadWorker(client, {
+      // Through a tunnel the daemon is reached at its public hostname; its base
+      // URL is then the tunnel's local origin, which the Worker cannot reach.
+      const workerDaemonUrl = tunnel && daemonHostname ? `https://${daemonHostname}` : daemonBaseUrl;
+      const storeSecrets = secretsStore && this.secretsStoreSecretNames(workerName);
+      const placedInStore: { name: string; id: string }[] = [];
+      if (secretsStore && storeSecrets) {
+        placedInStore.push(await ensureSecretsStoreSecret(client, { accountId, storeId: secretsStore.id, name: storeSecrets.operatorToken, value: operatorToken?.value ?? '' }));
+        if (accessCredentials) {
+          placedInStore.push(await ensureSecretsStoreSecret(client, { accountId, storeId: secretsStore.id, name: storeSecrets.accessClientSecret, value: accessCredentials.clientSecret }));
+        }
+        record.secretsStore = { storeId: secretsStore.id, storeName: secretsStore.name, secrets: placedInStore.map((secret) => ({ name: secret.name, id: secret.id })) };
+        steps.push({ name: 'secrets-store-worker-credentials', status: 'ok', message: `Stored the Worker's daemon credential${accessCredentials ? ' and Access secret' : ''} in Secrets Store ${secretsStore.name}; the Worker reads them from there.`, resourceId: secretsStore.id });
+      }
+      workerUploaded = await uploadWorker(client, {
         accountId,
         workerName,
         queueName: components.queues ? queueName : '',
-        daemonBaseUrl,
+        daemonBaseUrl: workerDaemonUrl,
         queueJobPayloads,
         kvNamespaceId: kv?.id ?? '',
         r2BucketName: r2?.name ?? '',
-        durableObject: components.durableObjects,
+        durableObject: useCoordinator,
+        ...(components.queues ? { queueLimits } : {}),
+        ...(secretsStore && storeSecrets ? {
+          secretsStore: {
+            storeId: secretsStore.id,
+            operatorTokenSecretName: storeSecrets.operatorToken,
+            ...(accessCredentials ? { accessClientSecretName: storeSecrets.accessClientSecret } : {}),
+          },
+        } : {}),
       });
-      steps.push({ name: 'deploy-worker', status: 'ok', message: `Uploaded Worker ${workerName}.`, resourceId: workerName });
-      if (components.durableObjects) {
+      steps.push({ name: 'deploy-worker', status: 'ok', message: `Uploaded Worker ${workerName}${workerDaemonUrl !== daemonBaseUrl ? `; it reaches the daemon at ${workerDaemonUrl} through the tunnel` : ''}.`, resourceId: workerName });
+      if (useCoordinator) {
         steps.push({
           name: 'durable-object-migration',
-          status: workerUpload.durableObjectMigration === 'recovered-existing-class' ? 'warning' : 'ok',
-          message: describeWorkerUploadDurableObjectMigration(workerUpload),
-          resourceId: workerUpload.namespaceId,
+          status: workerUploaded.durableObjectMigration === 'recovered-existing-class' ? 'warning' : 'ok',
+          message: `${describeWorkerUploadDurableObjectMigration(workerUploaded)}${components.durableObjects ? '' : ' Added because the coordinator counts the daily queue budget.'}`,
+          resourceId: workerUploaded.namespaceId,
         });
       }
+      const edgeJobs = [
+        kv ? 'KV records each queued job\'s delivery state (GET /batch/queue/jobs/<id>)' : '',
+        r2 ? 'R2 holds queued job bodies so the queue carries only their keys' : '',
+        useCoordinator && budgeted ? 'the coordinator enforces the daily queue budget' : '',
+      ].filter(Boolean);
+      if (edgeJobs.length > 0) steps.push({ name: 'worker-edge-state', status: 'ok', message: `In the batch path, ${edgeJobs.join('; ')}.` });
 
       if (input.storeOperatorToken && input.operatorToken) {
         if (persist) {
@@ -518,12 +630,17 @@ export class CloudflareControlPlaneManager {
           steps.push({ name: 'store-worker-token', status: 'skipped', message: 'persistConfig is false, so the Worker-to-daemon token was not stored.' });
         }
       }
-      await client.workers.scripts.secrets.update(workerName, {
-        account_id: accountId,
-        name: 'GOODVIBES_OPERATOR_TOKEN',
-        text: operatorToken?.value ?? '',
-        type: 'secret_text',
-      });
+      if (secretsStore && storeSecrets) {
+        // The credential now lives in the Secrets Store; a copy left on the script would outlive a rotation there.
+        await deleteWorkerSecret(client, accountId, workerName, WORKER_OPERATOR_TOKEN_SECRET);
+      } else {
+        await client.workers.scripts.secrets.update(workerName, {
+          account_id: accountId,
+          name: WORKER_OPERATOR_TOKEN_SECRET,
+          text: operatorToken?.value ?? '',
+          type: 'secret_text',
+        });
+      }
       steps.push(operatorToken?.source === 'auth-token'
         ? {
             name: 'set-worker-daemon-secret',
@@ -531,6 +648,22 @@ export class CloudflareControlPlaneManager {
             message: "Configured the Worker-to-daemon bearer token from the daemon's own auth token. Anyone who can read this Worker's secrets can then call the daemon with its main credential; pass a dedicated operatorToken to avoid that.",
           }
         : { name: 'set-worker-daemon-secret', status: 'ok', message: 'Configured Worker-to-daemon bearer token secret.' });
+      if (accessCredentials) {
+        await client.workers.scripts.secrets.update(workerName, { account_id: accountId, name: WORKER_ACCESS_CLIENT_ID_SECRET, text: accessCredentials.clientId, type: 'secret_text' });
+        if (secretsStore && storeSecrets) {
+          await deleteWorkerSecret(client, accountId, workerName, WORKER_ACCESS_CLIENT_SECRET_SECRET);
+        } else {
+          await client.workers.scripts.secrets.update(workerName, { account_id: accountId, name: WORKER_ACCESS_CLIENT_SECRET_SECRET, text: accessCredentials.clientSecret, type: 'secret_text' });
+        }
+        steps.push({ name: 'set-worker-access-secret', status: 'ok', message: 'The Worker presents the Access service token to the daemon hostname.' });
+      } else if (accessApplied) {
+        problems.push('The Worker has no Access service token credential, so Access refuses its calls to the daemon.');
+        steps.push({
+          name: 'set-worker-access-secret',
+          status: 'warning',
+          message: 'Access protects the daemon hostname but the service token secret is not on record, so the Worker would be refused. Set cloudflare.accessServiceTokenRef, or delete the "GoodVibes Daemon" service token in Cloudflare and provision again.',
+        });
+      }
 
       const workerClientToken = await this.resolveWorkerClientToken(input);
       effectiveWorkerClientToken = workerClientToken.value ?? '';
@@ -555,7 +688,7 @@ export class CloudflareControlPlaneManager {
       }
       await client.workers.scripts.secrets.update(workerName, {
         account_id: accountId,
-        name: 'GOODVIBES_WORKER_TOKEN',
+        name: WORKER_CLIENT_TOKEN_SECRET,
         text: effectiveWorkerClientToken,
         type: 'secret_text',
       });
@@ -590,6 +723,13 @@ export class CloudflareControlPlaneManager {
       } else {
         steps.push({ name: 'configure-cron', status: 'skipped', message: 'No Worker cron configured.' });
       }
+      record.worker = {
+        name: workerName,
+        ...(workerBaseUrl ? { baseUrl: workerBaseUrl } : {}),
+        workersDevRoute: input.enableWorkersDev !== false,
+        ...(workerCron ? { cron: workerCron } : {}),
+        daemonCredential: secretsStore && storeSecrets ? 'secrets-store' : 'script-secret',
+      };
     }
 
     const consumer = components.queues && components.workers
@@ -605,35 +745,28 @@ export class CloudflareControlPlaneManager {
       steps.push({ name: 'queue-consumer', status: 'warning', message: 'Cloudflare Queues were provisioned without a Worker consumer.' });
     }
 
-    const durableObject = components.durableObjects
-      ? await findDurableObjectNamespace(resourceContext, client, accountId, clean(input.durableObjectNamespaceName) || config.durableObjectNamespaceName || DEFAULT_DO_NAMESPACE_NAME, persist, steps)
+    const durableObject = useCoordinator && components.workers
+      ? await findDurableObjectNamespace(resourceContext, client, accountId, clean(input.durableObjectNamespaceName) || config.durableObjectNamespaceName || COORDINATOR_CLASS_NAME, persist, steps)
       : undefined;
+    if (durableObject) {
+      const namespaceId = durableObject.id ?? workerUploaded?.namespaceId;
+      record.durableObjects = { className: COORDINATOR_CLASS_NAME, ...(namespaceId ? { namespaceId } : {}) };
+    }
 
     const dnsRecords = await configureDns(client, {
       enabled: components.dns,
       zone,
       daemonHostname,
       tunnelId: tunnel?.id ?? '',
+      ...(components.zeroTrustAccess && !accessApplied
+        ? { withholdDaemonHostname: 'Access protection was asked for and is not applied, and the hostname would reach the daemon without it. Fix the Access step above and provision again.' }
+        : {}),
       workerHostname,
       workerBaseUrl,
       steps,
     });
+    if (dnsRecords.length > 0) record.dns = dnsRecords.map((entry) => ({ name: entry.name, ...(entry.id ? { id: entry.id } : {}) }));
 
-    const access = components.zeroTrustAccess
-      ? await ensureAccess(resourceContext, client, {
-        accountId,
-        daemonHostname,
-        accessAppId: clean(input.accessAppId) || config.accessAppId,
-        accessServiceTokenId: clean(input.accessServiceTokenId) || config.accessServiceTokenId,
-        accessServiceTokenRef: clean(input.accessServiceTokenRef) || config.accessServiceTokenRef,
-        ...(zone ? { zone } : {}),
-        persist,
-        returnGeneratedSecrets: exposeGeneratedSecrets,
-        steps,
-      })
-      : undefined;
-
-    this.setConfig('cloudflare.enabled', true, persist);
     this.setConfig('cloudflare.accountId', accountId, persist);
     if (components.workers) {
       this.setConfig('cloudflare.workerName', workerName, persist);
@@ -645,30 +778,51 @@ export class CloudflareControlPlaneManager {
     if (components.queues) {
       this.setConfig('cloudflare.queueName', queueName, persist);
       this.setConfig('cloudflare.deadLetterQueueName', deadLetterQueueName, persist);
-      this.setConfig('batch.queueBackend', 'cloudflare', persist);
     }
     if (input.batchMode) this.setConfig('batch.mode', input.batchMode, persist);
 
-    const verification = components.workers && input.verify !== false && workerBaseUrl
+    // The connector has to be up before the Worker is checked through the tunnel.
+    const connector = tunnel ? await this.startTunnelConnector(persist, steps) : undefined;
+
+    const verifyRequested = components.workers && input.verify !== false;
+    const verification = verifyRequested && workerBaseUrl
       ? await this.verifyWorker(workerBaseUrl, effectiveWorkerClientToken, workerOrigins)
       : undefined;
     if (verification) {
-      steps.push({
-        name: 'verify-worker',
-        status: verification.ok ? 'ok' : 'warning',
-        message: verification.ok ? 'Verified Worker health and daemon batch proxy.' : 'Worker verification completed with warnings.',
-      });
+      if (verification.ok) {
+        steps.push({ name: 'verify-worker', status: 'ok', message: 'Verified Worker health and daemon batch proxy.' });
+      } else {
+        const failures = [
+          verification.workerHealth.ok ? '' : `health check answered ${verification.workerHealth.status}${verification.workerHealth.error ? ` (${verification.workerHealth.error.slice(0, 200)})` : ''}`,
+          verification.daemonBatchProxy && !verification.daemonBatchProxy.ok ? `daemon proxy answered ${verification.daemonBatchProxy.status}${verification.daemonBatchProxy.error ? ` (${verification.daemonBatchProxy.error.slice(0, 200)})` : ''}` : '',
+        ].filter(Boolean).join('; ');
+        problems.push(`The Worker could not reach the daemon: ${failures}.`);
+        steps.push({ name: 'verify-worker', status: 'warning', message: `Worker check failed: ${failures}. Fix the cause, then run /cloudflare verify and provision again.` });
+      }
+    } else if (verifyRequested) {
+      problems.push('No Worker URL is known, so the Worker was not checked.');
+    } else if (components.workers) {
+      steps.push({ name: 'verify-worker', status: 'skipped', message: 'Verification was turned off, so the integration was switched on without checking that the Worker reaches the daemon.' });
+    }
+
+    // The daemon starts using Cloudflare only when what was asked for works.
+    if (problems.length === 0) {
+      this.setConfig('cloudflare.enabled', true, persist);
+      if (components.queues && components.workers) this.setConfig('batch.queueBackend', 'cloudflare', persist);
+      steps.push({ name: 'switch-on', status: 'ok', message: components.queues && components.workers ? 'Turned the Cloudflare integration on and moved the batch queue backend to Cloudflare.' : 'Turned the Cloudflare integration on.' });
+    } else {
+      steps.push({ name: 'switch-on', status: 'warning', message: `The integration was not turned on and the batch queue backend was not changed, because: ${problems.join(' ')}` });
     }
 
     const generatedSecrets = {
       ...(generatedWorkerClientToken && exposeGeneratedSecrets ? { workerClientToken: generatedWorkerClientToken } : {}),
       ...(tunnel?.token && input.returnGeneratedSecrets ? { tunnelToken: tunnel.token } : {}),
-      ...(access?.clientId && exposeGeneratedSecrets ? { accessServiceTokenClientId: access.clientId } : {}),
-      ...(access?.clientSecret && exposeGeneratedSecrets ? { accessServiceTokenClientSecret: access.clientSecret } : {}),
+      ...(access?.credentials && exposeGeneratedSecrets ? { accessServiceTokenClientId: access.credentials.clientId } : {}),
+      ...(access?.credentials && exposeGeneratedSecrets ? { accessServiceTokenClientSecret: access.credentials.clientSecret } : {}),
     };
 
     return {
-      ok: true,
+      ok: problems.length === 0,
       dryRun: false,
       steps,
       warnings: steps.filter((step) => step.status === 'warning').map((step) => step.message ?? step.name),
@@ -697,6 +851,7 @@ export class CloudflareControlPlaneManager {
           name: tunnel.name,
           ...(daemonHostname ? { hostname: daemonHostname } : {}),
           ...(tunnel.tokenRef ? { tokenRef: tunnel.tokenRef } : {}),
+          ...(connector ? { connector } : {}),
         },
       } : {}),
       ...(access ? {
@@ -707,13 +862,54 @@ export class CloudflareControlPlaneManager {
         },
       } : {}),
       ...(dnsRecords.length > 0 && zone ? { dns: { zoneId: zone.id, zoneName: zone.name, records: dnsRecords } } : {}),
-      ...(kv ? { kv: { namespaceName: kv.title ?? DEFAULT_KV_NAMESPACE_NAME, namespaceId: requireKvNamespaceId(kv) } } : {}),
-      ...(durableObject ? { durableObjects: { namespaceName: durableObject.name ?? durableObject.class ?? DEFAULT_DO_NAMESPACE_NAME, ...(durableObject.id ? { namespaceId: durableObject.id } : {}) } } : {}),
-      ...(r2 ? { r2: { bucketName: r2.name ?? DEFAULT_R2_BUCKET_NAME, storageClass: 'Standard' } } : {}),
+      ...(kv ? { kv: { namespaceName: kv.title ?? kvName, namespaceId: requireKvNamespaceId(kv) } } : {}),
+      ...(durableObject ? { durableObjects: { namespaceName: durableObject.name ?? durableObject.class ?? COORDINATOR_CLASS_NAME, ...(durableObject.id ? { namespaceId: durableObject.id } : {}) } } : {}),
+      ...(r2 ? { r2: { bucketName: r2.name ?? DEFAULTS.r2BucketName, storageClass: 'Standard' } } : {}),
       ...(secretsStore ? { secretsStore: { storeName: secretsStore.name, storeId: secretsStore.id } } : {}),
       ...(verification ? { verification } : {}),
       ...(Object.keys(generatedSecrets).length > 0 ? { generatedSecrets } : {}),
     };
+  }
+
+  /** Start the daemon's tunnel connector for a tunnel this run configured, and say where it stands. */
+  private async startTunnelConnector(persist: boolean, steps: CloudflareProvisionStep[]): Promise<CloudflareTunnelConnectorStatus | undefined> {
+    const connector = this.options.tunnelConnector;
+    if (!connector) {
+      steps.push({ name: 'tunnel-connector', status: 'warning', message: 'This process does not run the tunnel connector. The daemon starts it when the integration is on; if /cloudflare status does not show it connected, restart the daemon.' });
+      return undefined;
+    }
+    if (!persist) {
+      steps.push({ name: 'tunnel-connector', status: 'skipped', message: 'persistConfig is false, so the daemon has no stored tunnel to connect and the connector was not started.' });
+      return connector.status();
+    }
+    await connector.reconcile({ force: true });
+    const status = await connector.waitUntilSettled(TUNNEL_CONNECT_WAIT_MS);
+    steps.push({
+      name: 'tunnel-connector',
+      status: status.state === 'connected' ? 'ok' : 'warning',
+      message: `Tunnel connector ${status.state}: ${status.detail}${status.next?.[0] ? ` Next: ${status.next[0]}.` : ''}`,
+    });
+    return status;
+  }
+
+  private async accessCredentialsFor(access: CloudflareAccessOutcome): Promise<CloudflareAccessCredentials | null> {
+    if (access.credentials) return access.credentials;
+    if (access.serviceTokenRef) {
+      const fromRef = parseAccessCredentials((await this.resolveSecretRef(access.serviceTokenRef)).value);
+      if (fromRef) return fromRef;
+    }
+    return parseAccessCredentials(await this.options.secretsManager?.get(CLOUDFLARE_ACCESS_SERVICE_TOKEN_KEY) ?? null);
+  }
+
+  /** Secrets Store names are account-wide, so they carry the Worker name. */
+  private secretsStoreSecretNames(workerName: string): { readonly operatorToken: string; readonly accessClientSecret: string } {
+    const prefix = workerName.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+    return { operatorToken: `${prefix}_OPERATOR_TOKEN`, accessClientSecret: `${prefix}_ACCESS_CLIENT_SECRET` };
+  }
+
+  private provisionedStore(): CloudflareProvisionedStore {
+    const configManager = this.options.configManager;
+    return openProvisionedStore(typeof configManager.getControlPlaneConfigDir === 'function' ? configManager.getControlPlaneConfigDir() : undefined);
   }
 
   async verify(input: CloudflareVerifyInput = {}): Promise<CloudflareVerifyResult> {
@@ -755,36 +951,87 @@ export class CloudflareControlPlaneManager {
   async disable(input: CloudflareDisableInput = {}): Promise<CloudflareDisableResult> {
     const steps: CloudflareProvisionStep[] = [];
     const persist = input.persistConfig !== false;
-    const accountId = clean(input.accountId) || this.readConfig().accountId;
-    const workerName = clean(input.workerName) || this.readConfig().workerName || DEFAULT_WORKER_NAME;
+    const config = this.readConfig();
+    const accountId = clean(input.accountId) || config.accountId;
+    const workerName = clean(input.workerName) || config.workerName || DEFAULTS.workerName;
     const apiToken = await this.resolveApiToken(input);
+    const store = this.provisionedStore();
+    const record = store.read();
+    const sameAccount = record && record.accountId === accountId ? record : null;
 
     let remote: 'disabled' | 'not-disabled' = 'disabled';
+    let credentialRemoved = false;
+    let cronRemoved = false;
+    let routeRemoved = false;
     if (apiToken.value && accountId) {
       // A revoked token or a Cloudflare outage must not stop the operator from
       // switching the integration off here, so each remote step is isolated and
       // the local configuration is always written.
-      const remoteStep = async (name: string, run: (client: CloudflareApiClient) => Promise<void>): Promise<void> => {
+      const remoteStep = async (name: string, run: (client: CloudflareApiClient) => Promise<void>): Promise<boolean> => {
         try {
           await run(await this.createClient(apiToken.value!));
+          return true;
         } catch (error: unknown) {
           remote = 'not-disabled';
           steps.push({ name, status: 'warning', message: `Could not reach Cloudflare to disable this: ${summarizeError(error)}. The deployed Worker may keep calling the daemon until it is disabled in the Cloudflare dashboard.` });
+          return false;
         }
       };
+      // Without the daemon credential the Worker cannot call the daemon at all,
+      // whatever route or trigger still reaches it.
+      credentialRemoved = await remoteStep('remove-worker-daemon-credential', async (client) => {
+        const removed = await deleteWorkerSecret(client, accountId, workerName, WORKER_OPERATOR_TOKEN_SECRET);
+        const storeSecrets = sameAccount?.secretsStore;
+        const storeApi = client.secretsStore?.stores.secrets;
+        const stored = storeSecrets?.secrets.find((secret) => secret.name === this.secretsStoreSecretNames(workerName).operatorToken);
+        if (storeSecrets && stored && storeApi) await storeApi.delete(storeSecrets.storeId, stored.id, { account_id: accountId });
+        steps.push({
+          name: 'remove-worker-daemon-credential',
+          status: 'ok',
+          message: removed === 'deleted' || stored
+            ? `Removed the daemon credential from Worker ${workerName}; it can no longer call the daemon.`
+            : `Worker ${workerName} held no daemon credential.`,
+        });
+      });
       if (input.disableCron !== false) {
-        await remoteStep('disable-cron', (client) => disableWorkerSchedule(client, accountId, workerName, steps));
+        cronRemoved = await remoteStep('disable-cron', (client) => disableWorkerSchedule(client, accountId, workerName, steps));
       }
-      if (input.disableWorkerSubdomain) {
-        await remoteStep('disable-worker-subdomain', (client) => disableWorkerSubdomain(client, accountId, workerName, steps));
+      if (input.disableWorkerSubdomain !== false) {
+        routeRemoved = await remoteStep('disable-worker-subdomain', (client) => disableWorkerSubdomain(client, accountId, workerName, steps));
       }
     } else {
       remote = 'not-disabled';
-      steps.push({ name: 'cloudflare-api', status: 'skipped', message: 'No Cloudflare API token/account configured; only local config was disabled. The deployed Worker may keep calling the daemon until it is disabled in the Cloudflare dashboard.' });
+      steps.push({ name: 'cloudflare-api', status: 'skipped', message: 'No Cloudflare API token/account configured; only local config was disabled. The deployed Worker still holds the daemon credential and may keep calling the daemon until it is disabled in the Cloudflare dashboard.' });
+    }
+
+    if (this.options.tunnelConnector) {
+      await this.options.tunnelConnector.stop();
+      steps.push({ name: 'stop-tunnel-connector', status: 'ok', message: 'Stopped the tunnel connector; the daemon hostname no longer reaches this daemon.' });
     }
 
     this.setConfig('cloudflare.enabled', false, persist);
     this.setConfig('batch.queueBackend', 'local', persist);
+
+    if (persist && sameAccount?.worker && (credentialRemoved || cronRemoved || routeRemoved)) {
+      try {
+        store.replace({
+          ...sameAccount,
+          updatedAt: Date.now(),
+          worker: {
+            ...sameAccount.worker,
+            ...(credentialRemoved ? { daemonCredential: 'removed' as const } : {}),
+            ...(cronRemoved ? { cron: undefined } : {}),
+            ...(routeRemoved ? { workersDevRoute: false } : {}),
+          },
+        });
+      } catch (error: unknown) {
+        steps.push({ name: 'record-resources', status: 'warning', message: `Could not record the disabled Worker state: ${summarizeError(error)}.` });
+      }
+    }
+    // Disable stops the Worker reaching the daemon; it deletes nothing. Say what is left.
+    for (const resource of describeDeployedResources(sameAccount)) {
+      steps.push({ name: 'still-deployed', status: 'skipped', message: `${resource.message} is still deployed in Cloudflare account ${accountId}. Delete it in the Cloudflare dashboard if it is no longer wanted.`, resourceId: resource.id });
+    }
     return { ok: true, steps, remote };
   }
 
@@ -805,7 +1052,7 @@ export class CloudflareControlPlaneManager {
   }
 
   private resolveWorkerName(inputWorkerName: string | undefined): string {
-    return _resolveWorkerName(this._tokenResolverCtx(), inputWorkerName, DEFAULT_WORKER_NAME);
+    return _resolveWorkerName(this._tokenResolverCtx(), inputWorkerName, DEFAULTS.workerName);
   }
 
   private async resolveApiToken(input: CloudflareValidateInput): Promise<CloudflareResolvedSecret> {

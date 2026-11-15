@@ -1,19 +1,25 @@
 import type { CloudflareComponent } from './types.js';
 
-export const DEFAULT_WORKER_NAME = 'goodvibes-batch-worker';
-export const DEFAULT_QUEUE_NAME = 'goodvibes-batch';
-export const DEFAULT_DLQ_NAME = 'goodvibes-batch-dlq';
-export const DEFAULT_WORKER_CRON = '*/5 * * * *';
-export const DEFAULT_TUNNEL_NAME = 'goodvibes-daemon';
-export const DEFAULT_KV_NAMESPACE_NAME = 'goodvibes-runtime';
-export const DEFAULT_DO_NAMESPACE_NAME = 'GoodVibesCoordinator';
-export const DEFAULT_R2_BUCKET_NAME = 'goodvibes-artifacts';
-export const DEFAULT_SECRETS_STORE_NAME = 'goodvibes';
+// Default resource names live in the config schema (DEFAULT_CONFIG.cloudflare);
+// readCloudflareConfig returns them for any key nobody set.
+
+/** The Durable Object class the uploaded Worker module exports. Fixed by the module source, not a setting. */
+export const COORDINATOR_CLASS_NAME = 'GoodVibesCoordinator';
+
 export const CLOUDFLARE_API_TOKEN_KEY = 'CLOUDFLARE_API_TOKEN';
 export const CLOUDFLARE_TUNNEL_TOKEN_KEY = 'GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN';
 export const CLOUDFLARE_ACCESS_SERVICE_TOKEN_KEY = 'GOODVIBES_CLOUDFLARE_ACCESS_SERVICE_TOKEN';
 export const CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY = 'GOODVIBES_CLOUDFLARE_WORKER_TOKEN';
 export const CLOUDFLARE_WORKER_OPERATOR_TOKEN_KEY = 'GOODVIBES_CLOUDFLARE_OPERATOR_TOKEN';
+
+/** Worker secret and binding names the uploaded module reads. */
+export const WORKER_OPERATOR_TOKEN_SECRET = 'GOODVIBES_OPERATOR_TOKEN';
+export const WORKER_CLIENT_TOKEN_SECRET = 'GOODVIBES_WORKER_TOKEN';
+export const WORKER_ACCESS_CLIENT_ID_SECRET = 'GOODVIBES_ACCESS_CLIENT_ID';
+export const WORKER_ACCESS_CLIENT_SECRET_SECRET = 'GOODVIBES_ACCESS_CLIENT_SECRET';
+/** Secrets Store bindings: the same credentials, read from the account's Secrets Store instead of the script. */
+export const WORKER_OPERATOR_TOKEN_STORE_BINDING = 'GOODVIBES_OPERATOR_TOKEN_STORE';
+export const WORKER_ACCESS_CLIENT_SECRET_STORE_BINDING = 'GOODVIBES_ACCESS_CLIENT_SECRET_STORE';
 
 export const COMPONENT_ORDER: readonly CloudflareComponent[] = [
   'workers',

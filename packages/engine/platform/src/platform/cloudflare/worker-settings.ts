@@ -1,6 +1,10 @@
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { DEFAULT_DO_NAMESPACE_NAME } from './constants.js';
+import {
+  COORDINATOR_CLASS_NAME,
+  WORKER_ACCESS_CLIENT_SECRET_STORE_BINDING,
+  WORKER_OPERATOR_TOKEN_STORE_BINDING,
+} from './constants.js';
 import type {
   CloudflareApiClient,
   CloudflareDurableObjectNamespaceLike,
@@ -56,6 +60,19 @@ export async function uploadWorker(
     readonly kvNamespaceId: string;
     readonly r2BucketName: string;
     readonly durableObject: boolean;
+    /** Limits the Worker enforces before it sends to the queue (0 means no limit). */
+    readonly queueLimits?: {
+      readonly freeTierMode: boolean;
+      readonly maxQueueOpsPerDay: number;
+      readonly maxQueueMessagesPerDay: number;
+      readonly maxQueuePayloadBytes: number;
+    } | undefined;
+    /** Secrets Store secrets the Worker reads its daemon credentials from. */
+    readonly secretsStore?: {
+      readonly storeId: string;
+      readonly operatorTokenSecretName?: string | undefined;
+      readonly accessClientSecretName?: string | undefined;
+    } | undefined;
   },
 ): Promise<WorkerUploadResult> {
   const file = new File(
@@ -69,7 +86,25 @@ export async function uploadWorker(
     { type: 'plain_text', name: 'GOODVIBES_QUEUE_JOB_PAYLOADS', text: input.queueJobPayloads ? 'true' : 'false' },
     ...(input.kvNamespaceId ? [{ type: 'kv_namespace', name: 'GOODVIBES_KV', namespace_id: input.kvNamespaceId }] : []),
     ...(input.r2BucketName ? [{ type: 'r2_bucket', name: 'GOODVIBES_ARTIFACTS', bucket_name: input.r2BucketName }] : []),
-    ...(input.durableObject ? [{ type: 'durable_object_namespace', name: 'GOODVIBES_COORDINATOR', class_name: DEFAULT_DO_NAMESPACE_NAME }] : []),
+    ...(input.durableObject ? [{ type: 'durable_object_namespace', name: 'GOODVIBES_COORDINATOR', class_name: COORDINATOR_CLASS_NAME }] : []),
+    ...(input.queueLimits ? [
+      { type: 'plain_text', name: 'GOODVIBES_FREE_TIER_MODE', text: input.queueLimits.freeTierMode ? 'true' : 'false' },
+      { type: 'plain_text', name: 'GOODVIBES_MAX_QUEUE_OPS_PER_DAY', text: String(input.queueLimits.maxQueueOpsPerDay) },
+      { type: 'plain_text', name: 'GOODVIBES_MAX_QUEUE_MESSAGES_PER_DAY', text: String(input.queueLimits.maxQueueMessagesPerDay) },
+      { type: 'plain_text', name: 'GOODVIBES_MAX_QUEUE_PAYLOAD_BYTES', text: String(input.queueLimits.maxQueuePayloadBytes) },
+    ] : []),
+    ...(input.secretsStore?.operatorTokenSecretName ? [{
+      type: 'secrets_store_secret',
+      name: WORKER_OPERATOR_TOKEN_STORE_BINDING,
+      store_id: input.secretsStore.storeId,
+      secret_name: input.secretsStore.operatorTokenSecretName,
+    }] : []),
+    ...(input.secretsStore?.accessClientSecretName ? [{
+      type: 'secrets_store_secret',
+      name: WORKER_ACCESS_CLIENT_SECRET_STORE_BINDING,
+      store_id: input.secretsStore.storeId,
+      secret_name: input.secretsStore.accessClientSecretName,
+    }] : []),
   ];
   const migrationPlan = await resolveDurableObjectMigration(client, input.accountId, input.workerName, input.durableObject);
   const metadata = buildWorkerMetadata(bindings, migrationPlan.migrations);
@@ -142,7 +177,7 @@ async function resolveDurableObjectMigration(
   const migrations: WorkerMigrationMetadata = {
     ...(currentTag ? { old_tag: currentTag } : {}),
     new_tag: GOODVIBES_DO_MIGRATION_TAG,
-    steps: [{ new_sqlite_classes: [DEFAULT_DO_NAMESPACE_NAME] }],
+    steps: [{ new_sqlite_classes: [COORDINATOR_CLASS_NAME] }],
   };
   return {
     migrations,
@@ -188,7 +223,7 @@ async function findExistingDurableObjectNamespace(
     for await (const namespace of client.durableObjects.namespaces.list({ account_id: accountId })) {
       const className = clean(namespace.class) || clean(namespace.name);
       const scriptName = clean(namespace.script);
-      if (className === DEFAULT_DO_NAMESPACE_NAME && (!scriptName || scriptName === workerName)) {
+      if (className === COORDINATOR_CLASS_NAME && (!scriptName || scriptName === workerName)) {
         return namespace;
       }
     }
@@ -363,6 +398,31 @@ export async function disableWorkerSubdomain(
       ? `Disabled workers.dev route for ${workerName}; existing workers.dev route state could not be read first: ${readFailure}`
       : `Disabled workers.dev route for ${workerName}.`,
   });
+}
+
+/**
+ * Remove a secret from the Worker script. A secret that is not there counts as
+ * removed, so disable and a move to the Secrets Store can run twice.
+ */
+export async function deleteWorkerSecret(
+  client: CloudflareApiClient,
+  accountId: string,
+  workerName: string,
+  secretName: string,
+): Promise<'deleted' | 'absent'> {
+  try {
+    await client.workers.scripts.secrets.delete(workerName, secretName, { account_id: accountId });
+    return 'deleted';
+  } catch (error: unknown) {
+    if (cloudflareStatus(error) === 404) return 'absent';
+    throw error;
+  }
+}
+
+function cloudflareStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const status = Object.getOwnPropertyDescriptor(error, 'status')?.value;
+  return typeof status === 'number' ? status : undefined;
 }
 
 async function readAccountWorkerSubdomain(

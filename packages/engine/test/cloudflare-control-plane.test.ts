@@ -62,6 +62,7 @@ function makeCloudflareClient(options: { readonly zones?: readonly CloudflareZon
   const durableObjectNamespaces: CloudflareDurableObjectNamespaceLike[] = [{ id: 'do-1', name: 'GoodVibesCoordinator', class: 'GoodVibesCoordinator', script: 'goodvibes-batch-worker', use_sqlite: true }];
   const r2Buckets: CloudflareR2BucketLike[] = [];
   const secretsStores: CloudflareSecretsStoreLike[] = [];
+  const storeSecrets: { storeId: string; id: string; name: string; value: string }[] = [];
   const tunnels: CloudflareTunnelLike[] = [];
   const accessServiceTokens: Array<{ id: string; name: string; client_id?: string; client_secret?: string }> = [];
   const accessApplications: Array<{ id: string; name: string; domain: string; type: string }> = [];
@@ -77,6 +78,7 @@ function makeCloudflareClient(options: { readonly zones?: readonly CloudflareZon
     accessServiceTokenCreates: [] as string[],
     workerUpdates: [] as Array<{ readonly scriptName: string; readonly metadata: Record<string, unknown> }>,
     secretUpdates: [] as Array<{ readonly scriptName: string; readonly name: string; readonly text: string }>,
+    secretDeletes: [] as Array<{ readonly scriptName: string; readonly name: string }>,
     scheduleUpdates: [] as Array<{ readonly scriptName: string; readonly crons: readonly string[] }>,
     consumerCreates: [] as Array<{ readonly queueId: string; readonly scriptName: string; readonly deadLetterQueue?: string }>,
     scriptSubdomains: [] as string[],
@@ -247,6 +249,28 @@ function makeCloudflareClient(options: { readonly zones?: readonly CloudflareZon
         list() {
           return items(secretsStores);
         },
+        secrets: {
+          async *create(storeId: string, params: { body: readonly { name: string; value: string }[] }) {
+            for (const body of params.body) {
+              const secret = { id: `secret-${body.name}`, name: body.name };
+              storeSecrets.push({ storeId, ...secret, value: body.value });
+              yield secret;
+            }
+          },
+          list(storeId: string) {
+            return items(storeSecrets.filter((secret) => secret.storeId === storeId).map(({ id, name }) => ({ id, name })));
+          },
+          async edit(storeId: string, secretId: string, params: { value: string }) {
+            const secret = storeSecrets.find((entry) => entry.storeId === storeId && entry.id === secretId);
+            if (secret) secret.value = params.value;
+            return { id: secretId, name: secret?.name ?? '' };
+          },
+          async delete(storeId: string, secretId: string) {
+            const index = storeSecrets.findIndex((entry) => entry.storeId === storeId && entry.id === secretId);
+            if (index >= 0) storeSecrets.splice(index, 1);
+            return null;
+          },
+        },
       },
     },
     zeroTrust: {
@@ -350,6 +374,10 @@ function makeCloudflareClient(options: { readonly zones?: readonly CloudflareZon
           async update(scriptName, params) {
             calls.secretUpdates.push({ scriptName, name: params.name, text: params.text });
             return { name: params.name, type: 'secret_text' };
+          },
+          async delete(scriptName: string, secretName: string) {
+            calls.secretDeletes.push({ scriptName, name: secretName });
+            return null;
           },
         },
       },
@@ -684,6 +712,10 @@ describe('CloudflareControlPlaneManager', () => {
     expect(JSON.stringify(bindings)).toContain('GOODVIBES_KV');
     expect(JSON.stringify(bindings)).toContain('GOODVIBES_ARTIFACTS');
     expect(JSON.stringify(bindings)).toContain('GOODVIBES_COORDINATOR');
+    // The Worker's credentials live in the Secrets Store and it presents the Access service token.
+    expect(JSON.stringify(bindings)).toContain('secrets_store_secret');
+    expect(calls.secretUpdates.map((update) => update.name)).toContain('GOODVIBES_ACCESS_CLIENT_ID');
+    expect(calls.secretDeletes.map((entry) => entry.name)).toContain('GOODVIBES_OPERATOR_TOKEN');
     expect(calls.tunnelConfigUpdates[0]?.config).toEqual({
       ingress: [
         { hostname: 'daemon.example.com', service: 'http://127.0.0.1:3421' },
@@ -770,8 +802,8 @@ describe('CloudflareControlPlaneManager', () => {
       verify: false,
     });
 
-    // The run reached its end, but nothing hostname-bound was set up: the result says so.
-    expect(result.ok).toBe(true);
+    // Access was asked for and could not be applied, so the run is not ok and nothing hostname-bound was set up.
+    expect(result.ok).toBe(false);
     expect(result.warnings?.length).toBeGreaterThanOrEqual(3);
     expect(result.warnings?.join('\n')).toContain('does not belong to selected zone buzznet.dev');
     expect(calls.dnsCreates).toEqual([]);
@@ -804,7 +836,11 @@ describe('CloudflareControlPlaneManager', () => {
     });
 
     expect(result.verification?.ok).toBe(false);
-    expect(result.warnings).toContain('Worker verification completed with warnings.');
+    expect(result.ok).toBe(false);
+    expect(result.warnings?.join('\n')).toContain('Worker check failed');
+    // A Worker that cannot reach the daemon does not get the batch backend.
+    expect(configManager.get('batch.queueBackend')).toBe('local');
+    expect(configManager.get('cloudflare.enabled')).toBe(false);
   });
 
   test('a clean provision carries no warnings', async () => {

@@ -18,7 +18,7 @@ Select `Use Cloudflare for batch or remote daemon work` on the first onboarding 
 | --- | --- |
 | Cloudflare enabled/disabled | The master switch |
 | Batch mode | `off`, `explicit`, or `eligible-by-default` (explained under Batch modes below) |
-| Components | Workers and Queues are the normal defaults; Tunnel, Access, DNS, KV, Durable Objects, Secrets Store, and R2 are advanced optional components |
+| Components | Workers and Queues are the normal defaults; Tunnel, Access, DNS, KV, Durable Objects, Secrets Store, and R2 are advanced optional components (see What provisioning sets up) |
 | Resource names/refs | Account, zone/domain, worker, queue, tunnel, Access, KV, DO, R2, and Secrets Store identifiers |
 | Token setup path | One of the five paths in the next section |
 | Provision on apply | Whether the final onboarding apply provisions resources immediately |
@@ -46,7 +46,7 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 /cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME>
 /cloudflare discover --token-env CLOUDFLARE_API_TOKEN
 /cloudflare validate --token-env CLOUDFLARE_API_TOKEN
-/cloudflare provision --account <account-id> --batch-mode explicit --tunnel-token-ref goodvibes://secrets/goodvibes/CLOUDFLARE_TUNNEL_TOKEN
+/cloudflare provision --account <account-id> --batch-mode explicit --tunnel-token-ref goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN
 /cloudflare verify [--worker-url <url>] [--worker-token <token> | --worker-token-ref <ref>]
 /cloudflare disable --yes
 ```
@@ -55,7 +55,7 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 
 Every flag that takes a value must be given one: `/cloudflare validate --token-env` with no name is refused with a message, instead of falling back to the stored token.
 
-`/cloudflare disable` turns the integration off and saves that in config. Without `--yes` it only describes what it would do and changes nothing. By default it also disables the Worker cron; add `--keep-cron` to leave the cron running, and `--disable-worker-subdomain` to turn off the workers.dev subdomain too.
+`/cloudflare disable` turns the integration off and saves that in config. Without `--yes` it only describes what it would do and changes nothing. With `--yes` it removes the daemon credential from the Worker (so the Worker can no longer call the daemon), turns off the Worker cron (add `--keep-cron` to leave it running) and, with `--disable-worker-subdomain`, the Worker's workers.dev route (`POST /api/cloudflare/disable` turns the route off unless `disableWorkerSubdomain` is `false`), stops the tunnel connector, and returns the batch queue backend to `local`. It deletes nothing at Cloudflare: every resource still deployed (Worker script, queues, tunnel, Access application, DNS records, KV, R2, Secrets Store) is listed as a `still-deployed` step, to delete in the Cloudflare dashboard if it is no longer wanted. Provisioning again restores the credential.
 
 `/cloudflare provision` also accepts `--no-verify` (skip the check after provisioning), `--no-store-token` (do not store the API token), `--no-workers-dev` (do not enable the workers.dev route), `--worker-cron`, `--daemon-url`, `--worker-url`, `--dlq`, and the plain-value `--operator-token` and `--worker-client-token` (the `-ref` forms are preferred, because a value typed on the command line stays visible in the transcript).
 
@@ -79,6 +79,30 @@ The TUI integrates with these daemon routes, each backing the matching `/cloudfl
 
 Errors return JSON with `error`; failures raised by the Cloudflare integration also carry a `code`. Sign-in and request-body failures (401, 403, 400) carry only `error`. The TUI displays route failures as actionable wizard or command output and does not block normal local daemon usage unless the user explicitly depends on Cloudflare provisioning.
 
+## What provisioning sets up
+
+`/cloudflare provision` reports `ok: true` only when what was asked for works: the Worker check (`/batch/health` and the Worker's proxy to the daemon) passed, or was turned off with `--no-verify`, and Access, when selected, protects the daemon hostname. Only then does it turn `cloudflare.enabled` on and move `batch.queueBackend` to `cloudflare`; otherwise the result is `ok: false`, the integration stays off, and the `switch-on` step says why.
+
+`/cloudflare status` lists a resource component (Worker, queues, Tunnel, Access, KV, Durable Objects, R2, Secrets Store) as configured only after a provision created or confirmed it. The record of what provisioning created is kept in the daemon's control-plane directory as `cloudflare-resources.json`.
+
+| Component | What it does in the batch path |
+| --- | --- |
+| Workers | The Worker proxies `/batch/*` to the daemon, queues tick and job signals, and runs the cron tick. |
+| Queues | Carries tick and job signals to the Worker's queue consumer, with a dead-letter queue. |
+| Zero Trust Tunnel | The daemon runs `cloudflared tunnel run` for the provisioned tunnel and restarts it when it exits; status shows the connector as `not-installed`, `starting`, `connected`, `failed` or `stopped`. Install `cloudflared` first. The token is stored as `goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN` (or read from `--tunnel-token-ref`) and given to `cloudflared` in its environment. With a tunnel, the Worker reaches the daemon at `https://<daemonHostname>`. |
+| Zero Trust Access | Creates the Access application before the daemon hostname is published; the Worker presents the Access service token (`CF-Access-Client-Id`, `CF-Access-Client-Secret`). If Access was selected and could not be applied, the daemon hostname is not published. |
+| DNS | Publishes the daemon and Worker hostnames in the selected zone. |
+| KV | Records each queued job's delivery state; `GET /batch/queue/jobs/<jobId>` on the Worker returns it, including the daemon's job id once delivered. A redelivered message that was already delivered is acknowledged without a second daemon call. |
+| Durable Objects | The Worker's coordinator counts queue operations and messages per UTC day. It is added automatically when a queue budget is set, unless Durable Objects are turned off explicitly. |
+| R2 | Holds queued job bodies so queue messages carry only their key; the body is deleted once the daemon has the job. |
+| Secrets Store | Holds the Worker's daemon credential and Access secret; the Worker reads them from the store instead of from script secrets. |
+
+### Free tier and the daily queue budget
+
+`cloudflare.freeTierMode` (default on) keeps job bodies out of Cloudflare Queues: `POST /batch/jobs/enqueue` puts the body in R2 and queues only its key, and without R2 it is refused (`409 QUEUE_PAYLOADS_NEED_R2`). With free-tier mode off, a body up to `batch.maxQueuePayloadBytes` travels in the queue message and a larger one goes to R2 (or is refused with `413` without R2).
+
+`cloudflare.maxQueueOpsPerDay` and `batch.maxQueueMessagesPerDay` are enforced by the Worker before it sends anything to the queue. Past either limit the Worker answers `429 QUEUE_BUDGET_EXHAUSTED` with the use so far, when the budget resets (midnight UTC), and what to do instead (post `/batch/jobs` to reach the daemon directly). `GET /batch/queue/budget` returns today's use. `0` means no limit. Changing these settings takes effect at the next provision.
+
 ## Batch modes
 
 `off` keeps all work on the immediate local path.
@@ -96,8 +120,8 @@ Raw Cloudflare tokens are transient form or command input only. Persistent refer
 ```text
 goodvibes://secrets/goodvibes/CLOUDFLARE_API_TOKEN
 goodvibes://secrets/env/CLOUDFLARE_API_TOKEN
-goodvibes://secrets/goodvibes/CLOUDFLARE_TUNNEL_TOKEN
-goodvibes://secrets/goodvibes/CLOUDFLARE_ACCESS_SERVICE_TOKEN
+goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN
+goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_ACCESS_SERVICE_TOKEN
 ```
 
 The platform may also store generated Worker client, Tunnel, Access service, and daemon/operator token material as GoodVibes secret references when provisioning needs them.

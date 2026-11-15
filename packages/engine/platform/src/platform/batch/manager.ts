@@ -290,7 +290,7 @@ export class DaemonBatchManager {
       void this.tick().catch((error) => {
         logger.warn('Batch manager tick failed', { error: summarizeError(error) });
       });
-    }, this.getNumberConfig('batch.tickIntervalMs', 60_000));
+    }, this.options.configManager.get('batch.tickIntervalMs'));
     this.interval.unref?.();
   }
 
@@ -307,22 +307,22 @@ export class DaemonBatchManager {
       fallback: this.getFallback(),
       queueBackend: this.getQueueBackend(),
       cloudflare: {
-        enabled: this.getBooleanConfig('cloudflare.enabled', false),
-        freeTierMode: this.getBooleanConfig('cloudflare.freeTierMode', true),
-        accountId: this.getStringConfig('cloudflare.accountId', ''),
-        workerName: this.getStringConfig('cloudflare.workerName', 'goodvibes-batch-worker'),
-        workerBaseUrl: this.getStringConfig('cloudflare.workerBaseUrl', ''),
-        daemonBaseUrl: this.getStringConfig('cloudflare.daemonBaseUrl', ''),
-        queueName: this.getStringConfig('cloudflare.queueName', 'goodvibes-batch'),
-        deadLetterQueueName: this.getStringConfig('cloudflare.deadLetterQueueName', 'goodvibes-batch-dlq'),
-        maxQueueOpsPerDay: this.getNumberConfig('cloudflare.maxQueueOpsPerDay', 10_000),
+        enabled: this.options.configManager.get('cloudflare.enabled'),
+        freeTierMode: this.options.configManager.get('cloudflare.freeTierMode'),
+        accountId: this.options.configManager.get('cloudflare.accountId'),
+        workerName: this.options.configManager.get('cloudflare.workerName'),
+        workerBaseUrl: this.options.configManager.get('cloudflare.workerBaseUrl'),
+        daemonBaseUrl: this.options.configManager.get('cloudflare.daemonBaseUrl'),
+        queueName: this.options.configManager.get('cloudflare.queueName'),
+        deadLetterQueueName: this.options.configManager.get('cloudflare.deadLetterQueueName'),
+        maxQueueOpsPerDay: this.options.configManager.get('cloudflare.maxQueueOpsPerDay'),
       },
       limits: {
-        tickIntervalMs: this.getNumberConfig('batch.tickIntervalMs', 60_000),
-        maxDelayMs: this.getNumberConfig('batch.maxDelayMs', 5 * 60 * 1000),
-        maxJobsPerProviderBatch: this.getNumberConfig('batch.maxJobsPerProviderBatch', 100),
-        maxQueuePayloadBytes: this.getNumberConfig('batch.maxQueuePayloadBytes', 16 * 1024),
-        maxQueueMessagesPerDay: this.getNumberConfig('batch.maxQueueMessagesPerDay', 1_000),
+        tickIntervalMs: this.options.configManager.get('batch.tickIntervalMs'),
+        maxDelayMs: this.options.configManager.get('batch.maxDelayMs'),
+        maxJobsPerProviderBatch: this.options.configManager.get('batch.maxJobsPerProviderBatch'),
+        maxQueuePayloadBytes: this.options.configManager.get('batch.maxQueuePayloadBytes'),
+        maxQueueMessagesPerDay: this.options.configManager.get('batch.maxQueueMessagesPerDay'),
       },
       supportedProviders: this.options.providerRegistry
         .listProviders()
@@ -358,8 +358,10 @@ export class DaemonBatchManager {
         413,
       );
     }
-    if (input.source?.kind === 'cloudflare-queue') {
-      const maxPayload = this.getNumberConfig('batch.maxQueuePayloadBytes', 16 * 1024);
+    // The queue message limit is for bodies that travelled in the queue; the
+    // provisioned Worker keeps larger bodies in R2 and says so on the job.
+    if (input.source?.kind === 'cloudflare-queue' && input.metadata?.['goodvibes.payload'] !== 'r2') {
+      const maxPayload = this.options.configManager.get('batch.maxQueuePayloadBytes');
       if (payloadBytes > maxPayload) {
         throw new DaemonBatchError(
           `Cloudflare queue batch signal is ${payloadBytes} bytes, above configured limit ${maxPayload}. Store the payload in the daemon and queue only a signal.`,
@@ -523,8 +525,8 @@ export class DaemonBatchManager {
   ): Promise<void> {
     const queued = Object.values(this.load()).filter((job) => job.status === 'queued');
     if (queued.length === 0) return;
-    const maxDelayMs = this.getNumberConfig('batch.maxDelayMs', 5 * 60 * 1000);
-    const maxJobs = this.getNumberConfig('batch.maxJobsPerProviderBatch', 100);
+    const maxDelayMs = this.options.configManager.get('batch.maxDelayMs');
+    const maxJobs = this.options.configManager.get('batch.maxJobsPerProviderBatch');
     const grouped = new Map<string, DaemonBatchJob[]>();
     for (const job of queued) {
       // A flush sends its own job now; other jobs still wait for their delay.
@@ -973,20 +975,6 @@ export class DaemonBatchManager {
     return value === 'cloudflare' ? 'cloudflare' : 'local';
   }
 
-  private getNumberConfig(key: Parameters<ConfigManager['get']>[0], fallback: number): number {
-    const value = this.options.configManager.get(key);
-    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-  }
-
-  private getBooleanConfig(key: Parameters<ConfigManager['get']>[0], fallback: boolean): boolean {
-    const value = this.options.configManager.get(key);
-    return typeof value === 'boolean' ? value : fallback;
-  }
-
-  private getStringConfig(key: Parameters<ConfigManager['get']>[0], fallback: string): string {
-    const value = this.options.configManager.get(key);
-    return typeof value === 'string' ? value : fallback;
-  }
 }
 
 function emptyTickResult(): DaemonBatchTickResult {

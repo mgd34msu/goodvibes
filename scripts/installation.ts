@@ -166,21 +166,37 @@ export function switchRelease(prefix: string, release: string): void {
   symlinkSync(`releases/${release}`, temporary);
   try { renameSync(temporary, join(prefix, 'current')); } finally { rmSync(temporary, { force: true }); }
 }
+/** The command wrappers and unit as an interrupted update left them on disk, as v2 receipt fields. */
+function writtenFiles(receipt: Installation): Pick<Installation, 'schema' | 'wrappers' | 'unit'> {
+  const wrappers: Record<string, string> = {};
+  for (const name of COMMANDS) {
+    const file = join(receipt.prefix, 'commands', name); plainPath(file);
+    wrappers[name] = present(file) ? readFileSync(file, 'utf8') : receipt.wrappers[name]!;
+  }
+  const unit = unitPath(receipt); plainPath(unit);
+  return { schema: 2, wrappers, unit: receipt.service && present(unit) ? readFileSync(unit, 'utf8') : receipt.unit };
+}
 /**
  * An update that was killed outright (hang-up, SIGKILL, power loss) after it moved `current` leaves the
  * receipt naming the previous release while `current` and the generated files are already the new ones:
  * `current` naming another release than the receipt is that fact, so no separate marker is kept.
- * Put the receipt's release back so update and uninstall can proceed; the abandoned release is removed by
- * the next successful update. Returns whether a recovery was needed.
+ * For an update, put the receipt's release back so it can proceed; the abandoned release is removed by the next
+ * successful update. For an uninstall nothing is put back: the receipt held in memory adopts the release `current`
+ * names and the files the interrupted update wrote, which the uninstall then removes, so an installation whose
+ * previous release is gone can still be removed. Returns whether a recovery was needed.
  */
-export function recoverInterruptedUpdate(receipt: Installation): boolean {
+export function recoverInterruptedUpdate(receipt: Installation, purpose: 'update' | 'uninstall' = 'update'): boolean {
   plainPath(receipt.prefix);
   const current = join(receipt.prefix, 'current');
   if (!present(current) || !lstatSync(current).isSymbolicLink()) return false;
   const target = readlinkSync(current);
   if (target === `releases/${receipt.release}` || !target.startsWith('releases/') || !RELEASE_NAME.test(target.slice('releases/'.length))) return false;
+  if (purpose === 'uninstall') {
+    Object.assign(receipt, { release: target.slice('releases/'.length), ...writtenFiles(receipt) });
+    return true;
+  }
   const previous = join(receipt.prefix, 'releases', receipt.release); plainPath(previous);
-  if (!present(previous)) throw new Error(`An earlier update was interrupted and the previous release ${previous} is gone, so it cannot be restored. Remove ${receipt.prefix} and install again; user data is kept.`);
+  if (!present(previous)) throw new Error(`An earlier update was interrupted and the previous release ${previous} is gone, so it cannot be restored; nothing was changed. Remove it with \`./scripts/uninstall.sh --prefix ${receipt.prefix}\` from this checkout (user data is kept), then install again.`);
   switchRelease(receipt.prefix, receipt.release);
   if (receipt.schema === 2) {
     for (const name of COMMANDS) atomicWrite(join(receipt.prefix, 'commands', name), receipt.wrappers[name]!, 0o755);
@@ -188,13 +204,7 @@ export function recoverInterruptedUpdate(receipt: Installation): boolean {
   } else {
     // A digest receipt cannot regenerate the previous files. The interrupted update itself wrote what is on disk,
     // so adopt that exact text in a v2 receipt rather than reporting the installer's own files as edited.
-    const wrappers: Record<string, string> = {};
-    for (const name of COMMANDS) {
-      const file = join(receipt.prefix, 'commands', name); plainPath(file);
-      wrappers[name] = present(file) ? readFileSync(file, 'utf8') : receipt.wrappers[name]!;
-    }
-    const unit = unitPath(receipt); plainPath(unit);
-    Object.assign(receipt, { schema: 2, wrappers, unit: receipt.service && present(unit) ? readFileSync(unit, 'utf8') : receipt.unit });
+    Object.assign(receipt, writtenFiles(receipt));
     atomicWrite(join(receipt.prefix, 'installation.json'), JSON.stringify(receipt, null, 2) + '\n');
   }
   console.warn(`An earlier update was interrupted; restored the previous release ${receipt.release.slice(0, 12)}.`);
@@ -262,7 +272,7 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
     if (!receipt) { rmSync(lockPath(prefix), { force: true }); console.log(`No Jev installation at ${prefix}. Preserved data remains untouched.`); return; }
     await withLock(receipt.dataDir, async () => {
       if (realpathSync(process.env.HOME ?? '') !== receipt.home) throw new Error('Run uninstall as the user who owns this installation.');
-      recoverInterruptedUpdate(receipt);
+      recoverInterruptedUpdate(receipt, 'uninstall');
       assertOwnedFiles(receipt);
       if (receipt.service) {
         // A re-run after a failure that came after the unit was removed: nothing is left to stop or disable.

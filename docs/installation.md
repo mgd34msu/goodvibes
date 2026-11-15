@@ -235,6 +235,11 @@ longer running are released first, as for an installation. A saved installer can
 this operation without release downloads. `scripts/uninstall.sh` also recognizes
 receipt-owned installations made by the earlier checkout installer and invokes
 their installed uninstaller. Their `--prefix` and `--purge` options remain available.
+When that installed uninstaller is damaged or gone (a deleted `releases/`
+directory, a broken `current` link), `uninstall.sh` run from a checkout removes the
+installation with the checkout's own `scripts/uninstall.ts`, using the `bun` on your
+PATH or one left in another release of that installation; with neither, it prints
+the exact `bun .../scripts/uninstall.ts --prefix DIR` command to run once Bun is installed.
 Without a receipt or a checkout, `uninstall.sh` runs the current installer script; set `GOODVIBES_VERSION=vX.Y.Z` to run that release's script instead.
 
 ## Explicit developer source installation
@@ -249,8 +254,9 @@ fall back to building source when a release asset is unavailable.
 A checkout installation that fails, or is interrupted with Ctrl-C or a
 termination signal or a hang-up (closing the terminal), restores the previously
 installed version, restarts the service if it was running before, and releases
-its locks. If the process is killed outright during an update, the next update or
-uninstall restores the previous version first. A first installation that is
+its locks. If the process is killed outright during an update, the next update
+restores the previous version first, and uninstall removes the installation as
+the interrupted update left it, even when the previous version is gone. A first installation that is
 killed outright is already recorded as installed, so uninstall removes it and
 running the installer again completes it; one killed earlier, while it was still
 copying the new version, leaves only that unfinished copy, which the next run

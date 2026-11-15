@@ -139,11 +139,11 @@ function noMatch(cwd: string, filters: readonly string[]): string {
   return `No test files under ${cwd} matched ${filters.join(' ')}. Paths are relative to that directory (or to the current directory).`;
 }
 
-/** Test files of `cwd` selected by bun-style filters, minus `--path-ignore-patterns`. */
-function expandFiles(cwd: string, filters: readonly string[], flags: readonly string[]): string[] {
+/** Test files of `cwd` (from `discovered`) selected by bun-style filters, minus `--path-ignore-patterns`. */
+function expandFiles(cwd: string, discovered: readonly string[], filters: readonly string[], flags: readonly string[]): string[] {
   const ignores = flags.filter((flag) => flag.startsWith('--path-ignore-patterns=')).flatMap((flag) => flag.slice(23).split(','))
     .map((pattern) => new Bun.Glob(pattern.replace(/^\.\//, '')));
-  const files = discoverTestFiles(cwd).filter((file) => !ignores.some((glob) => glob.match(file))
+  const files = discovered.filter((file) => !ignores.some((glob) => glob.match(file))
     && (filters.length === 0 || filters.some((filter) => selects(cwd, file, filter))));
   if (files.length === 0) throw new Error(noMatch(cwd, filters));
   return files;
@@ -163,9 +163,12 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
   const split = splitArgs(run.args);
   const flags = split.flags;
   const filters = resolveFilters(cwd, split.filters);
+  const multiProcess = (run.jobs ?? 1) > 1;
+  // One walk of the test tree serves the filter check and the per-file split.
+  const discovered = filters.length > 0 || multiProcess ? discoverTestFiles(cwd) : [];
   // Checked before anything is created, so a bad list leaves no temp directory behind.
   if (filters.length > 0) {
-    const files = discoverTestFiles(cwd);
+    const files = discovered;
     for (const filter of checkFilters(cwd, files, filters)) process.stderr.write(`goodvibes: warning: ${noMatch(cwd, [filter])}\n`);
     if (cwd === ENGINE_ROOT) {
       const selected = files.filter((file) => filters.some((filter) => selects(cwd, file, filter)));
@@ -246,7 +249,7 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
   };
   try {
     let exitCode: number;
-    const files = (run.jobs ?? 1) <= 1 ? [] : expandFiles(cwd, filters, flags);
+    const files = multiProcess ? expandFiles(cwd, discovered, filters, flags) : [];
     if (files.length <= 1) {
       // One process, output streamed as it comes: the whole selection when jobs is 1, or the one selected file.
       exitCode = (await spawnBun([...flags, ...filters], false)).code;

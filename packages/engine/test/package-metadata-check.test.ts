@@ -67,6 +67,7 @@ beforeEach(() => {
     mkdirSync(dirname(destination), { recursive: true });
     copyFileSync(join(ENGINE_ROOT, 'scripts', script), destination);
   }
+  write('packages/engine/platform/src/platform/utils/process-lock.ts', readFileSync(join(ENGINE_ROOT, 'platform/src/platform/utils/process-lock.ts'), 'utf8'));
   write('packages/judgment/scripts/process-owner.ts', readFileSync(resolve(ENGINE_ROOT, '../judgment/scripts/process-owner.ts'), 'utf8'));
   symlinkSync(resolve(ENGINE_ROOT, '../../node_modules'), join(root, 'node_modules'), 'junction');
   symlinkSync(resolve(ENGINE_ROOT, 'node_modules'), join(root, 'packages/engine/node_modules'), 'junction');

@@ -19,12 +19,34 @@ if [ -f "$prefix/installation.json" ]; then
     release=$(sed -n 's/^ *"release": *"\([0-9a-f-]*\)",*$/\1/p' "$prefix/installation.json" | head -n 1)
     [ -z "$release" ] || release_root="$prefix/releases/$release"
   fi
-  [ -x "$release_root/runtime/bun" ] && [ -f "$release_root/uninstall.js" ] || {
-    echo "The uninstaller recorded for $prefix is missing ($release_root/uninstall.js), so it cannot be run; nothing was removed. Re-run the checkout installer with --prefix $prefix to repair that installation, then uninstall it." >&2; exit 1;
-  }
   set -- --prefix "$prefix"
   if [ "$purge" = 1 ]; then set -- "$@" --purge; fi
-  exec "$release_root/runtime/bun" "$release_root/uninstall.js" "$@"
+  if [ -x "$release_root/runtime/bun" ] && [ -f "$release_root/uninstall.js" ]; then
+    exec "$release_root/runtime/bun" "$release_root/uninstall.js" "$@"
+  fi
+  # The installed uninstaller is damaged or gone. It needs only the receipt, so this checkout's copy of it does
+  # the same job, run by any Bun: one on PATH or one left in another release of this installation.
+  checkout=
+  if [ -f "$0" ]; then
+    checkout=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+    [ -f "$checkout/scripts/uninstall.ts" ] && [ -f "$checkout/scripts/installation.ts" ] || checkout=
+  fi
+  if [ -n "$checkout" ]; then
+    runtime=$(command -v bun 2>/dev/null || true)
+    if [ -z "$runtime" ]; then
+      for candidate in "$prefix"/releases/*/runtime/bun; do
+        if [ -x "$candidate" ]; then runtime=$candidate; break; fi
+      done
+    fi
+    if [ -n "$runtime" ]; then
+      echo "The installed uninstaller for $prefix is missing ($release_root/uninstall.js); removing it with $checkout/scripts/uninstall.ts instead." >&2
+      exec "$runtime" "$checkout/scripts/uninstall.ts" "$@"
+    fi
+    echo "The installed uninstaller for $prefix is missing ($release_root/uninstall.js) and no Bun was found to run this checkout's copy; nothing was removed. Install Bun (https://bun.sh), then run: bun $checkout/scripts/uninstall.ts $*" >&2
+    exit 1
+  fi
+  echo "The installed uninstaller for $prefix is missing ($release_root/uninstall.js); nothing was removed. From a goodvibes-jev checkout, run: ./scripts/uninstall.sh $*" >&2
+  exit 1
 fi
 if [ "$explicit_prefix" = 1 ]; then
   echo "No receipt-owned installation at $prefix. User data remains untouched."

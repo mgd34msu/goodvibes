@@ -21,8 +21,7 @@ function writeFixture(version: string): string {
 }
 
 function check(root: string): { status: number | null; stderr: string } {
-  const { WORKSPACE_PACKAGES_JSON: _inherited, ...inherited } = process.env;
-  const result = Bun.spawnSync(['bun', SCRIPT], { env: { ...inherited, WORKSPACE_ROOT: root } });
+  const result = Bun.spawnSync(['bun', SCRIPT], { env: { ...process.env, WORKSPACE_ROOT: root } });
   return { status: result.exitCode, stderr: result.stderr.toString() };
 }
 

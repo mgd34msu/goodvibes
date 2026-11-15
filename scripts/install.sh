@@ -4018,8 +4018,25 @@ main() {
           */commands/goodvibes|*/commands/goodvibes-daemon|*/commands/goodvibes-agent)
             owned_prefix=$(dirname "$(dirname "$linked")")
             if [ -f "$owned_prefix/installation.json" ]; then
-              [ -x "$owned_prefix/current/runtime/bun" ] && [ -f "$owned_prefix/current/uninstall.js" ] || fail INSTALL_E113 'The receipt-owned uninstaller is missing; restore that installation before removing it.'
-              exec "$owned_prefix/current/runtime/bun" "$owned_prefix/current/uninstall.js" --prefix "$owned_prefix"
+              if [ -x "$owned_prefix/current/runtime/bun" ] && [ -f "$owned_prefix/current/uninstall.js" ]; then
+                exec "$owned_prefix/current/runtime/bun" "$owned_prefix/current/uninstall.js" --prefix "$owned_prefix"
+              fi
+              # The installed uninstaller needs only the receipt; the checkout this script runs from has it too.
+              owned_checkout=
+              if [ -f "$0" ]; then
+                owned_checkout=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+                [ -f "$owned_checkout/scripts/uninstall.ts" ] && [ -f "$owned_checkout/scripts/installation.ts" ] || owned_checkout=
+              fi
+              [ -n "$owned_checkout" ] || fail INSTALL_E113 "The installed uninstaller of $owned_prefix is missing; nothing was removed. From a goodvibes-jev checkout, run: ./scripts/uninstall.sh --prefix $owned_prefix"
+              owned_runtime=$(command -v bun 2>/dev/null || true)
+              if [ -z "$owned_runtime" ]; then
+                for owned_candidate in "$owned_prefix"/releases/*/runtime/bun; do
+                  if [ -x "$owned_candidate" ]; then owned_runtime=$owned_candidate; break; fi
+                done
+              fi
+              [ -n "$owned_runtime" ] || fail INSTALL_E122 "The installed uninstaller of $owned_prefix is missing and no Bun was found to run this checkout's copy; nothing was removed. Install Bun (https://bun.sh), then run: bun $owned_checkout/scripts/uninstall.ts --prefix $owned_prefix"
+              say "The installed uninstaller of $owned_prefix is missing; removing it with $owned_checkout/scripts/uninstall.ts instead." >&2
+              exec "$owned_runtime" "$owned_checkout/scripts/uninstall.ts" --prefix "$owned_prefix"
             fi ;;
         esac
       fi

@@ -15,7 +15,7 @@ const files = VERSION_FALLBACKS.map(target => {
   const path = join(repoRoot, target.path);
   const source = readFileSync(path, 'utf8');
   const pattern = fallbackPattern(target.declaration);
-  if ([...source.matchAll(pattern)].length !== 1) throw new Error('Expected exactly one compiled version fallback');
+  if ([...source.matchAll(pattern)].length !== 1) throw new Error(`Expected exactly one \`let ${target.declaration} = '<version>';\` line in ${target.path}; nothing was written.`);
   const next = source.replace(
     pattern,
     `let ${target.declaration} = '${version}';`,
@@ -32,18 +32,15 @@ for (const workspace of VERSIONED_WORKSPACES) {
   const after = manifest.version === version ? before : `${JSON.stringify({ ...manifest, version }, null, 2)}\n`;
   files.push({ path, before, after });
 }
-const attempted: typeof files = [];
-try {
-  for (const file of files) {
-    if (file.after === file.before) continue;
-    attempted.push(file); writeFileSync(file.path, file.after);
+// Every write sets a carrier to the root version, so a run cut short is finished
+// by running it again; nothing is rolled back.
+for (const file of files) {
+  if (file.after === file.before) continue;
+  try {
+    writeFileSync(file.path, file.after);
+  } catch (error) {
+    throw new Error(`Could not write ${file.path}; fix that and run \`bun run sync:version\` again.`, { cause: error });
   }
-} catch (error) {
-  const failures: unknown[] = [error];
-  for (const file of attempted.reverse()) {
-    try { writeFileSync(file.path, file.before); } catch (restoreError) { failures.push(restoreError); }
-  }
-  throw new AggregateError(failures, 'Version synchronization failed; inspect any failed restoration');
 }
 
 console.log(`synced all workspace manifests and compiled version fallbacks -> ${version}`);

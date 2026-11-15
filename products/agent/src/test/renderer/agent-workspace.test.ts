@@ -1435,7 +1435,7 @@ describe('renderAgentWorkspace', () => {
     const output = text(renderAgentWorkspace(workspace, 132, 54));
 
     expect(output).toContain('Memory: 1; prompt 1; queue 1; session 1.');
-    expect(output).toContain('Notes: 0; skills 1/1; routines 1/1; personas 1.');
+    expect(output).toContain('Notes: 0; skills 1/1 enabled; routines 1/1 enabled; personas 1.');
     expect(output).toContain('Learning curator: memory queue 1; note queue 0; setup gaps 3; injected review 4.');
     expect(output).toContain('Prompt plan');
     expect(output).toContain('score reviewed context');
@@ -1516,8 +1516,8 @@ describe('renderAgentWorkspace', () => {
     workspace.moveEditorField(2);
     const procedureOutput = text(renderAgentWorkspace(workspace, 132, 48));
     expect(procedureOutput).toContain('Procedure *');
-    expect(output).toContain('Enter next/save');
-    expect(output).toContain('Esc cancel');
+    expect(output).toContain('next/save');
+    expect(output).toContain('esc  cancel');
 
     workspace.cancelLocalEditor();
     workspace.selectedCategoryIndex = workspace.categories.findIndex((category) => category.id === 'routines');
@@ -2029,8 +2029,8 @@ describe('renderAgentWorkspace', () => {
     expect(output).toContain('Success criteria');
     expect(output).toContain('Workspace hint');
     expect(output).toContain('Priority');
-    // The rest of the form is reachable, and the window says how much is below.
-    expect(output).toMatch(/\d+ more field\(s\) below/);
+    // With the key help in the footer only, the whole form fits at this height.
+    expect(output).toContain('Confirm *');
     expect(output).toContain('editing delegate-task');
   });
 

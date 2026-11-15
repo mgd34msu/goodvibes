@@ -505,7 +505,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
     const enabledChannels = snapshot.channels.filter((channel) => channel.enabled).length;
     const configuredTargets = snapshot.channels.filter((channel) => channel.defaultTarget === 'configured').length;
     base.push(
-      { text: `Personal Ops: notes ${snapshot.localNoteCount}; routines ${snapshot.localRoutineCount}/${snapshot.enabledRoutineCount}; schedule-ready ${ready.length}.`, fg: PALETTE.info },
+      { text: `Personal Ops: notes ${snapshot.localNoteCount}; routines ${snapshot.enabledRoutineCount}/${snapshot.localRoutineCount} enabled; schedule-ready ${ready.length}.`, fg: PALETTE.info },
       { text: 'Daily brief: plan inbox, agenda, tasks, reminders, routines, delivery, notes, and autonomy before live reads or effects.', fg: PALETTE.good },
       { text: `Tasks: work plan and host task inspection; reminders via confirmed schedules; receipts ${snapshot.routineScheduleReceiptCount}.`, fg: PALETTE.good },
       { text: 'Review queue: saved inbox threads/calendar events, refresh routes, and follow-up boundaries stay in one read-only list.', fg: PALETTE.good },
@@ -567,7 +567,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
     ].filter((item) => item.reviewState !== 'reviewed').length;
     base.push(
       { text: `Memory: ${snapshot.localMemoryCount}; prompt ${snapshot.localMemoryPromptActiveCount}; queue ${snapshot.localMemoryReviewQueueCount}; session ${snapshot.sessionMemoryCount}.${liveCounterStaleSuffix(snapshot)}`, fg: PALETTE.info },
-      { text: `Notes: ${snapshot.localNoteCount}; skills ${snapshot.localSkillCount}/${snapshot.enabledSkillCount}; routines ${snapshot.localRoutineCount}/${snapshot.enabledRoutineCount}; personas ${snapshot.localPersonaCount}.`, fg: PALETTE.info },
+      { text: `Notes: ${snapshot.localNoteCount}; skills ${snapshot.enabledSkillCount}/${snapshot.localSkillCount} enabled; routines ${snapshot.enabledRoutineCount}/${snapshot.localRoutineCount} enabled; personas ${snapshot.localPersonaCount}.`, fg: PALETTE.info },
       { text: `Learning curator: memory queue ${snapshot.localMemoryReviewQueueCount}; note queue ${snapshot.localNoteReviewQueueCount}; setup gaps ${behaviorNeedsSetup}; injected review ${injectedNeedsReview}.`, fg: behaviorNeedsSetup > 0 || injectedNeedsReview > 0 ? PALETTE.warn : PALETTE.good },
       { text: 'Prompt plan: score reviewed context, show suppressed records, and route review before behavior expands.', fg: PALETTE.good },
       { text: `Active persona: ${snapshot.activePersonaName}.`, fg: PALETTE.info },
@@ -642,8 +642,11 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
       { text: 'Use /agent, /setup, or /onboarding to reopen this workspace later.', fg: PALETTE.muted },
     );
   }
-  if (snapshot.warnings.length > 0) {
-    base.push({ text: `Warnings: ${snapshot.warnings.map((warning) => compactText(warning, 60)).join('; ')}`, fg: PALETTE.warn });
-  }
   return base;
+}
+
+/** The snapshot's warnings, drawn first in the context pane so a short pane never cuts them. */
+export function snapshotWarningLines(snapshot: AgentWorkspaceRuntimeSnapshot | null): ContextLine[] {
+  if (!snapshot || snapshot.warnings.length === 0) return [];
+  return [{ text: `Warnings: ${snapshot.warnings.map((warning) => compactText(warning, 60)).join('; ')}`, fg: PALETTE.warn }];
 }

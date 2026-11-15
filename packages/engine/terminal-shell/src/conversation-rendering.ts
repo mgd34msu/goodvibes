@@ -285,7 +285,7 @@ export function createConversationRenderer(presentation: ConversationPresentatio
         const glyphs = laneGlyphs(context.treeGlyphSet ?? 'rounded');
         context.history.addLine(paintBeadRow([{ role: 'bead', color: 0 }], {
             status: status === 'error' ? 'err' : 'ok',
-            name: beadName(toolCall),
+            name: beadName(toolCall, presentation.model?.toolLabel),
             arg: beadArgument(toolCall),
             summary: summary ? { text: cellText(summary), tone: status === 'error' ? 'bad' : 'faint' } : null,
             time: durationMs !== undefined ? formatBeadTime(durationMs) : undefined,

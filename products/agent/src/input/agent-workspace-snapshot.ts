@@ -2,7 +2,8 @@ import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.t
 import { basename, sep } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
-import { memoryRecordTemporalStatus } from '@goodvibes-jev/engine/platform/platform/state';
+import { memoryRecordTemporalStatus, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
+import { storeFileChangeStamp } from '../agent/store-change-stamp.ts';
 import { describeMemoryPromptEligibility, isPromptActiveMemory } from '../agent/memory-prompt.ts';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
 import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
@@ -199,6 +200,22 @@ export function readLiveAgentRoutineCounters(context: CommandContext): AgentWork
     enabled: snapshot.enabledRoutines.length,
     items: snapshot.routines.map(summarizeRoutineItem),
   };
+}
+
+/**
+ * One stamp for the stores the live counters read: the shared memory file and
+ * the routine store, two stat calls. Null when a store has no file to stamp
+ * (an in-memory memory API, or no memory file yet), so the caller reads it.
+ */
+export function readLiveAgentCounterStamp(context: CommandContext): string | null {
+  const shellPaths = context.workspace?.shellPaths;
+  const memory = context.clients?.agentKnowledgeApi?.memory;
+  if (!shellPaths) return memory ? null : 'no-stores';
+  // A stub shell path service may carry no home; such a store is read every paint.
+  const home: unknown = shellPaths.homeDirectory;
+  const memoryStamp = !memory ? 'no-memory' : typeof home === 'string' ? storeFileChangeStamp(resolveCanonicalMemoryDbPath(home)) : 'absent';
+  if (memoryStamp === 'absent') return null;
+  return `${memoryStamp}|${AgentRoutineRegistry.fromShellPaths(shellPaths).changeStamp()}`;
 }
 
 /**

@@ -38,7 +38,7 @@ const TOOL_LABELS: Record<string, string> = {
   models: 'Checking models',
   agent_model_compare: 'Comparing models',
   settings: 'Adjusting settings',
-  agent_settings_import: 'Importing settings',
+  import_goodvibes_settings: 'Importing settings',
   setup: 'Checking setup',
   security: 'Reviewing safety',
   sessions: 'Looking at past conversations',
@@ -83,13 +83,45 @@ function humanize(name: string): string {
     .replace(/^./, (c) => c.toUpperCase());
 }
 
+/** What a call's `action` argument does, for tools whose actions both read and write. */
+type VerbClass = 'read' | 'change' | 'run' | 'send' | 'delete';
+
+const ACTION_CLASS: Readonly<Record<string, VerbClass>> = {
+  list: 'read', search: 'read', get: 'read', show: 'read', status: 'read', inspect: 'read', read: 'read',
+  review: 'read', stale: 'read', preview_import: 'read', provider: 'read', curator: 'read', candidate: 'read',
+  channel: 'read', deliveries: 'read', triage: 'read', refinement: 'read',
+  create: 'change', update: 'change', set: 'change', reset: 'change', edit: 'change', enable: 'change',
+  disable: 'change', import: 'change', pause: 'change', resume: 'change', clear_active: 'change', setup: 'change',
+  autonomous: 'change', remind: 'change', reminder: 'change',
+  run: 'run', start: 'run', use: 'run', run_refinement: 'run',
+  send: 'send', notify: 'send', post: 'send', reply: 'send', share: 'send',
+  delete: 'delete', remove: 'delete', forget: 'delete', clear: 'delete',
+};
+
+/** The phrase per verb class for multi-action tools; a class not listed keeps the tool's own phrase. */
+const ACTION_PHRASES: Readonly<Record<string, Partial<Record<VerbClass, string>>>> = {
+  agent_local_registry: { change: 'Updating notes & routines', run: 'Using notes & routines', delete: 'Deleting from notes & routines' },
+  memory: { change: 'Saving to memory', run: 'Refining memory', delete: 'Forgetting a memory' },
+  settings: { read: 'Checking settings' },
+  schedule: { change: 'Updating a schedule', run: 'Running a scheduled job', delete: 'Deleting a schedule' },
+  channels: { change: 'Setting up a message channel' },
+};
+
+function own<T>(table: Readonly<Record<string, T>>, key: string): T | undefined {
+  // Own keys only: a name like an Object.prototype member must not resolve to a function.
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
 /**
- * Return the human phrase for a tool call, falling back to a humanized
- * version of the raw name for unknown tools (including MCP tools).
+ * Return the human phrase for a tool call. A multi-action tool is named by
+ * what its `action` argument does (reading, changing, running, sending,
+ * deleting); otherwise the tool's own phrase, or a humanized version of the
+ * raw name for unknown tools (including MCP tools).
  */
-export function friendlyToolLabel(toolName: string): string {
+export function friendlyToolLabel(toolName: string, args?: Readonly<Record<string, unknown>>): string {
   const short = toolName.includes('__') ? toolName.split('__').pop()! : toolName;
-  // Own keys only: a tool named like an Object.prototype member must not resolve to a function.
-  const own = (key: string): string | undefined => (Object.hasOwn(TOOL_LABELS, key) ? TOOL_LABELS[key] : undefined);
-  return own(short) ?? own(toolName) ?? humanize(toolName);
+  const action = args?.action;
+  const verb = typeof action === 'string' ? own(ACTION_CLASS, action) : undefined;
+  const byAction = verb ? (own(ACTION_PHRASES, short) ?? own(ACTION_PHRASES, toolName))?.[verb] : undefined;
+  return byAction ?? own(TOOL_LABELS, short) ?? own(TOOL_LABELS, toolName) ?? humanize(toolName);
 }

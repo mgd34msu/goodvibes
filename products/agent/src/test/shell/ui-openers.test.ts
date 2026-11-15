@@ -9,7 +9,7 @@ import { getBundledTheme, resolveTheme } from '@goodvibes-jev/engine/platform/pl
 import { dirname } from 'node:path';
 import { SettingsModal } from '../../input/settings-modal.ts';
 import { activeTokens, getActiveThemeMode, getActiveThemeName, listThemeChoices, normalizeThemeName, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
-import { resetTerminalPaletteForTests } from '../../renderer/terminal-palette.ts';
+import { resetTerminalPaletteForTests } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 
 type CatalogPickerStub = ModelPickerCatalogState<unknown> & { clearFilteredCaches(): void };
 

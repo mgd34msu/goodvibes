@@ -2,12 +2,12 @@
 |                                                                                |
 | ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ |
 |                                                                                |
-|     ✦ Runtime activity  3 running                                     esc      |
+|     ✦ Runtime activity  2 running · 1 finished                        esc      |
 |                                                                                |
 |   ◐ rsync -a ~/Photos/2026 /mnt/backup/photos               running · 3m5s     |
 |   ◐ python3 scripts/fetch_fares.py --from OPO --to LIS       running · 42s     |
 |     --date 2026-10-02                                                          |
-|   ✕ ffmpeg -i interview.m4a interview.wav                     failed · 42s     |
+|   ✕ ffmpeg -i interview.m4a interview.wav              done (exit 1) · 12s     |
 |                                                                                |
 |     Esc closes this view; processes keep running.                              |
 |                                                                                |
@@ -503,18 +503,31 @@
 3 32 bg=#161a22
 3 33 fg=#94a3b8
 3 33 bg=#161a22
+3 34 fg=#94a3b8
 3 34 bg=#161a22
+3 35 fg=#94a3b8
 3 35 bg=#161a22
+3 36 fg=#94a3b8
 3 36 bg=#161a22
+3 37 fg=#94a3b8
 3 37 bg=#161a22
+3 38 fg=#94a3b8
 3 38 bg=#161a22
+3 39 fg=#94a3b8
 3 39 bg=#161a22
+3 40 fg=#94a3b8
 3 40 bg=#161a22
+3 41 fg=#94a3b8
 3 41 bg=#161a22
+3 42 fg=#94a3b8
 3 42 bg=#161a22
+3 43 fg=#94a3b8
 3 43 bg=#161a22
+3 44 fg=#94a3b8
 3 44 bg=#161a22
+3 45 fg=#94a3b8
 3 45 bg=#161a22
+3 46 fg=#94a3b8
 3 46 bg=#161a22
 3 47 bg=#161a22
 3 48 bg=#161a22
@@ -1188,12 +1201,19 @@
 8 53 bg=#161a22
 8 54 bg=#161a22
 8 55 bg=#161a22
+8 56 fg=#ef4444
 8 56 bg=#161a22
+8 57 fg=#ef4444
 8 57 bg=#161a22
+8 58 fg=#ef4444
 8 58 bg=#161a22
+8 59 fg=#ef4444
 8 59 bg=#161a22
+8 60 fg=#ef4444
 8 60 bg=#161a22
+8 61 fg=#ef4444
 8 61 bg=#161a22
+8 62 fg=#ef4444
 8 62 bg=#161a22
 8 63 fg=#ef4444
 8 63 bg=#161a22

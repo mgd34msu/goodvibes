@@ -9,13 +9,15 @@ import { buildMcpContext } from '@goodvibes-jev/engine/terminal-shell/renderer/m
  */
 
 import { GATE_PRESETS } from '@goodvibes-jev/engine/platform/platform/gate';
-import '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { SettingsModal, SettingEntry, FlagEntry, SubscriptionEntry, SettingsCategory } from '../input/settings-modal.ts';
 import { describeUiRouting, formatValue, getSettingLabel } from './settings-modal-helpers.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
-import '../input/concealed-input.ts';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { formatProviderAuthRouteId } from '../provider-auth-route-display.ts';
+import { isDaemonOwnedConfigKey } from '../config/daemon-config-routing.ts';
+
+/** The one statement of who acts on a setting the connected host owns, shown on every such setting. */
+export const HOST_OWNED_SETTING_RULE = 'Owned by the connected host: the host acts on this setting, not the Agent. A change here is written to the host\'s settings and takes effect when the host applies them.';
 
 export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   display: SHARED_CATEGORY_INFO['display'],
@@ -35,7 +37,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   helper: SHARED_CATEGORY_INFO['helper'],
   tts: SHARED_CATEGORY_INFO['tts'],
   voice:
-    'Two independent voice capabilities. Free local voice engines (voice.local.*) as the peer beside the premium provider route above: every key ships empty and an unset engine reports an honest unconfigured status rather than an error; the managed setup downloads and verifies the engines, points these keys at them, and proves the result by speaking a phrase and reading it back. Wake-word detection (voice.wake.*, rendered as its own unit below): listening continuously for a spoken wake phrase and handing the utterance that follows to speech-to-text. Off by default, and delivery to THIS surface is off by default too (voice.wake.surfaces.agent), because two terminal surfaces both acting on one spoken utterance is a confusing default, but it is LIVE here when you turn both on: a recorder subprocess (voice.wake.captureCommand) feeds the pinned classifier through a WASM runtime, voice.wake.activationSound plays at a confirmed wake, a persistent listening row shows in the footer per voice.wake.indicator, and what you say next goes to speech-to-text and lands in the conversation input, or is sent straight away with voice.wake.autoSubmit. Both of the rows that used to refuse now run: voice.wake.noiseSuppression "speex" applies the SpeexDSP denoiser (carried in the package, nothing to install) between the microphone and everything downstream, and voice.wake.vadThreshold above 0 screens frames through a pinned speech gate so non-speech never reaches the classifier; that one needs the gate downloaded, and above 0 without it the detector refuses to start rather than claiming to screen frames it is not screening. Turning detection on fetches and verifies the models if they are missing, and says what it fetched; a detector that still cannot run says so rather than pretending to listen. Its published recall figures are measured on synthesised speech only, so no human recording of the phrase is behind them.',
+    'Two independent voice capabilities. Free local voice engines (voice.local.*) as the peer beside the premium provider route above: every key ships empty and an unset engine reports an honest unconfigured status rather than an error; the managed setup downloads and verifies the engines, points these keys at them, and proves the result by speaking a phrase and reading it back. Wake-word detection (voice.wake.*, rendered as its own unit below): listening continuously for a spoken wake phrase and handing the utterance that follows to speech-to-text. Off by default, and delivery to THIS surface is off by default too (voice.wake.surfaces.agent), because two terminal surfaces both acting on one spoken utterance is a confusing default, but it is LIVE here when you turn both on: a recorder subprocess (voice.wake.captureCommand) feeds the pinned classifier through a WASM runtime, voice.wake.activationSound plays at a confirmed wake, a persistent listening row shows in the footer per voice.wake.indicator, and what you say next goes to speech-to-text and lands in the conversation input, or is sent straight away with voice.wake.autoSubmit. voice.wake.noiseSuppression "speex" applies the SpeexDSP denoiser (carried in the package, nothing to install) between the microphone and everything downstream, and voice.wake.vadThreshold above 0 screens frames through a pinned speech gate so non-speech never reaches the classifier; that one needs the gate downloaded, and above 0 without it the detector refuses to start rather than claiming to screen frames it is not screening. Turning detection on fetches and verifies the models if they are missing, and says what it fetched; a detector that still cannot run says so rather than pretending to listen. Its published recall figures are measured on synthesised speech only, so no human recording of the phrase is behind them.',
   automation: SHARED_CATEGORY_INFO['automation'],
   checkin:
     'Proactive check-in: off by default. When enabled, on a cadence the Agent assembles a compact briefing of current state, asks the model to judge whether anything warrants contacting you, and delivers a message through the configured channel only when the judgment says yes. Every run, delivered, quiet, skipped for quiet hours, or errored, leaves a receipt (checkin.receipts.list) so this automatic behavior stays accountable even when it decides to say nothing.',
@@ -50,13 +52,13 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   watchers: 'Polling watcher and heartbeat behavior for runtime recovery and periodic checks.',
   network: 'Outbound TLS and remote fetch network policy.',
   relay:
-    "Outbound zero-knowledge relay reachability for the connected GoodVibes daemon: an end-to-end encrypted tunnel (ECDH P-256 -> HKDF -> AES-256-GCM) that terminates INSIDE the daemon, so the relay operator only ever sees ciphertext plus connection metadata (who paired with whom, byte counts, timing), never plaintext requests, responses, or the operator token. relay.enabled is the relay-connect feature's switch. These are the connected daemon's own settings (imported here, not live-shared): changing them in Agent does not itself start or stop the daemon's relay registration.",
+    "Outbound zero-knowledge relay reachability for the connected GoodVibes daemon: an end-to-end encrypted tunnel (ECDH P-256 -> HKDF -> AES-256-GCM) that terminates INSIDE the daemon, so the relay operator only ever sees ciphertext plus connection metadata (who paired with whom, byte counts, timing), never plaintext requests, responses, or the operator token. relay.enabled is the relay-connect feature's switch.",
   cluster:
-    "Which of your machines reads each inbound surface, for operators running more than one goodvibes daemon on a network. Exactly one machine is elected per surface, one reads the work Slack account, one reads the mailbox, so a message is picked up once rather than answered twice by every copy of you. cluster.enabled is the switch and it is off by default. The group keys, rotation window, beacon and roster intervals decide which machines count as yours and how often they re-prove it. These are the connected daemon's own settings: the Agent composes no inbound consumer of its own and never takes part in an election, but it owns the daemon's configuration, so changes here reach the runtime that acts on them.",
+    "Which of your machines reads each inbound surface, for operators running more than one goodvibes daemon on a network. Exactly one machine is elected per surface, one reads the work Slack account, one reads the mailbox, so a message is picked up once rather than answered twice by every copy of you. cluster.enabled is the switch and it is off by default. The group keys, rotation window, beacon and roster intervals decide which machines count as yours and how often they re-prove it. The Agent composes no inbound consumer of its own and never takes part in an election.",
   orchestration:
     'Visible agent orchestration limits: sub-agent recursion and its max depth. The active-agent ceiling itself lives under Fleet (fleet.maxSize).',
   fleet:
-    'Maximum fleet size, the one ceiling on agents this runtime is responsible for: native spawned agents, ACP-hosted agents, and elastic fix-task agents all count against it. Renamed from orchestration.maxActiveAgents.',
+    'Maximum fleet size, the one ceiling on agents this runtime is responsible for: native spawned agents, ACP-hosted agents, and elastic fix-task agents all count against it.',
   planner:
     'Planning-decomposition agent limits: decomposition strategy, max turns, token ceiling, and wall-clock timeout before falling back to the deterministic heuristic path.',
   daemon:
@@ -81,7 +83,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   google:
     "The Google OAuth connection record: the Cloud project id, the consent screen's publishing status, and the refresh-token reference the mail and calendar services share.",
   update:
-    'Connected-host self-update posture: whether the daemon checks for, verifies, and swaps in new releases on its own, how often it checks, and where releases are resolved from. The daemon applies these itself; the Agent only edits the shared keys.',
+    'Connected-host self-update posture: whether the daemon checks for, verifies, and swaps in new releases on its own, how often it checks, and where releases are resolved from.',
   pricing:
     'Manual model prices (USD per 1M tokens, keyed provider:model). A manual price outranks registration, provider-served, and catalog prices in the one pricing resolver; unknown models stay honestly unpriced.',
   power:
@@ -249,6 +251,7 @@ export const { currentSettingValue, buildSettingContext } = createSettingContext
     if (entry.metadataUnavailable) lines.push(`Editing unavailable: ${entry.metadataUnavailable}`);
     else if (entry.locked) lines.push(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`);
     if (entry.conflict) lines.push(`Conflict: inspect with /settings and resolve host-owned sync state in the owning host.`);
+    if (isDaemonOwnedConfigKey(entry.setting.key)) lines.push('', HOST_OWNED_SETTING_RULE);
 
     if (entry.setting.key === 'permissions.mode') {
       lines.push('', 'Legacy behavior.autoApprove selects YOLO. Choosing an execution mode replaces that override.');

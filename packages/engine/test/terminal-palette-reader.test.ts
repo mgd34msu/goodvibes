@@ -14,12 +14,12 @@
  */
 
 import { afterEach, describe, expect, jest, test } from 'bun:test';
-import { installBackgroundThemeProbe, OSC11_QUERY } from '../../renderer/terminal-bg-probe.ts';
-import { PALETTE_QUERIES, sweepPaletteReplies } from '../../renderer/terminal-palette-probe.ts';
-import { TerminalPaletteReader } from '../../renderer/terminal-palette-reader.ts';
-import { getTerminalPalette, resetTerminalPaletteForTests, type TerminalPalette } from '../../renderer/terminal-palette.ts';
-import { activeTokens, getActiveThemeMode as activeThemeMode, getActiveThemeName, refreshForTerminalPalette, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
-import { withTimers } from '../helpers/fake-timers.ts';
+import { installBackgroundThemeProbe, OSC11_QUERY } from '@goodvibes-jev/engine/terminal-shell/terminal-bg-probe';
+import { PALETTE_QUERIES, sweepPaletteReplies } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
+import { TerminalPaletteReader } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
+import { getTerminalPalette, resetTerminalPaletteForTests, type TerminalPalette } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
+import { activeTokens, getActiveThemeMode as activeThemeMode, getActiveThemeName, refreshForTerminalPalette, setActiveThemeMode, setActiveThemeName } from '@goodvibes-jev/engine/terminal-shell/theme';
+import { withTimers } from './helpers/fake-timers.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 const readers: TerminalPaletteReader[] = [];

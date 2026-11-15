@@ -2,14 +2,11 @@ import { renderThrobberLine } from './throbber.ts';
 import { createShellFooter, statusCostText as priceUsage } from '@goodvibes-jev/engine/terminal-shell/shell-footer';
 import { presetForMode, type GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
 import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
-import '@goodvibes-jev/engine/platform/platform/providers';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
-import './composer.ts';
 import { renderStatusLine, type StatusChip } from './status-line.ts';
 import { type ThrobberState } from './throbber.ts';
 import { type BackToBottomState } from './back-to-bottom.ts';
-import './voice-capture-chip.ts';
 
 /**
  * shell-surface.ts, everything under the transcript, top to bottom:
@@ -34,7 +31,7 @@ import './voice-capture-chip.ts';
  * back-to-bottom pill. The composer holds only input (its placeholder, even
  * while the keyboard is in the work tree). The status line
  * opens with the chips that are never dropped for lack of room: the mode
- * (muted; plan in the info color), or "! auto-approve" in the error color
+ * (muted; plan in the info color), or "! YOLO" in the error color
  * while everything is auto-approved, the live microphone and the power note
  * ("sleep disabled" / "held: …"). Then, while a turn runs, the `esc`
  * interrupt keycap; the working directory and any background work; then the
@@ -47,11 +44,6 @@ import './voice-capture-chip.ts';
  * which says what the next Esc does, then main kept in sight.
  */
 
-/**
- * The work tree's keys, shown on the status line while the keyboard is in it.
- * Esc leads: the way back to typing is never dropped for lack of room; the
- * other keys give way from the end (status-line.ts keeps whole keys in order).
- */
 import type { ShellFooterView } from '@goodvibes-jev/engine/terminal-shell/shell-footer-view';
 export type { ShellFooterView };
 
@@ -99,7 +91,7 @@ export interface ShellFooterBuildOptions {
    * The power status note (see power-status.ts's describePowerStatus),
    * "sleep disabled" while the owner keep-awake toggle holds, or
    * "held: <reasons>" while the automatic work inhibitor holds. A kept chip at
-   * the left end of the status line beside the auto-approve warning: both are
+   * the left end of the status line beside the "! YOLO" warning: both are
    * safety-relevant and both stay visible at once.
    */
   readonly powerNote?: string;
@@ -122,16 +114,6 @@ export interface ShellFooterBuildResult {
   readonly lines: Line[];
   readonly height: number;
 }
-
-/** The status line under the composer. */
-
-/**
- * Real height of the most recently rendered footer. estimateShellFooterHeight
- * prefers it so the pre-render viewport math accounts for the throbber rows
- * the static formula cannot see. Null before any footer has rendered.
- */
-
-/** Rows the footer takes for this many prompt rows (exact when main is at rest). */
 
 function blankRow(width: number): Line {
   const line = createEmptyLine(width);
@@ -165,7 +147,7 @@ function composerModeStyle(options: ShellFooterBuildOptions): { label: string; c
 /**
  * The status line's mode chip: the mode's name (muted; plan in the info
  * color; a request that leaves this terminal in the remote color), or
- * "! auto-approve" in the error color while everything is auto-approved.
+ * "! YOLO" in the error color while everything is auto-approved.
  * While the warning shows, only plan keeps its name beside it (a read-only
  * posture still worth knowing); any other name would only repeat or
  * contradict it.
@@ -181,14 +163,6 @@ function modeChips(label: string, dangerMode: boolean): StatusChip[] {
   if (dangerMode) chips.push({ text: '! YOLO', fg: t.error, bold: true, keep: true });
   return chips;
 }
-
-/** Format a USD amount with a precision that suits its magnitude. */
-
-/** "~$0.246" for a priced model (an estimate, hence the ~); null when the model has no price. */
-
-/** The chips no view hides: auto-approve, the live microphone, the power note. */
-
-/** The working directory with the home directory as ~ (only on a whole path segment). */
 
 /** The compaction threshold as a fraction [0..1] (0.85 when unset or nonsense). */
 function compactFraction(value: number | undefined): number {

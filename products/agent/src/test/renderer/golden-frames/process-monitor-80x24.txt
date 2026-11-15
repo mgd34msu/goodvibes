@@ -2,12 +2,12 @@
 |                                                                                |
 | ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ |
 |                                                                                |
-|     ✦ Runtime activity  3 running                                     esc      |
+|     ✦ Runtime activity  2 running · 1 finished                        esc      |
 |                                                                                |
 |   ◐ rsync -a ~/Photos/2026 /mnt/backup/photos               running · 3m5s     |
 |   ◐ python3 scripts/fetch_fares.py --from OPO --to LIS       running · 42s     |
 |     --date 2026-10-02                                                          |
-|   ✕ ffmpeg -i interview.m4a interview.wav                     failed · 42s     |
+|   ✕ ffmpeg -i interview.m4a interview.wav              done (exit 1) · 12s     |
 |                                                                                |
 |     Esc closes this view; processes keep running.                              |
 |                                                                                |
@@ -503,18 +503,31 @@
 3 32 bg=#232438
 3 33 fg=#8e8ba3
 3 33 bg=#232438
+3 34 fg=#8e8ba3
 3 34 bg=#232438
+3 35 fg=#8e8ba3
 3 35 bg=#232438
+3 36 fg=#8e8ba3
 3 36 bg=#232438
+3 37 fg=#8e8ba3
 3 37 bg=#232438
+3 38 fg=#8e8ba3
 3 38 bg=#232438
+3 39 fg=#8e8ba3
 3 39 bg=#232438
+3 40 fg=#8e8ba3
 3 40 bg=#232438
+3 41 fg=#8e8ba3
 3 41 bg=#232438
+3 42 fg=#8e8ba3
 3 42 bg=#232438
+3 43 fg=#8e8ba3
 3 43 bg=#232438
+3 44 fg=#8e8ba3
 3 44 bg=#232438
+3 45 fg=#8e8ba3
 3 45 bg=#232438
+3 46 fg=#8e8ba3
 3 46 bg=#232438
 3 47 bg=#232438
 3 48 bg=#232438
@@ -1188,12 +1201,19 @@
 8 53 bg=#232438
 8 54 bg=#232438
 8 55 bg=#232438
+8 56 fg=#f2767e
 8 56 bg=#232438
+8 57 fg=#f2767e
 8 57 bg=#232438
+8 58 fg=#f2767e
 8 58 bg=#232438
+8 59 fg=#f2767e
 8 59 bg=#232438
+8 60 fg=#f2767e
 8 60 bg=#232438
+8 61 fg=#f2767e
 8 61 bg=#232438
+8 62 fg=#f2767e
 8 62 bg=#232438
 8 63 fg=#f2767e
 8 63 bg=#232438

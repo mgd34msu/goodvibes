@@ -48,7 +48,7 @@ function resultPalette(): { text: string; good: string; muted: string; dim: stri
 }
 import { actionResultColor, type AgentWorkspaceContextLine as ContextLine } from './agent-workspace-style.ts';
 import { buildEditorRows } from './agent-workspace-editor-rows.ts';
-import { compactText, reviewerReadinessContextLines, snapshotLines } from './agent-workspace-context-lines.ts';
+import { compactText, reviewerReadinessContextLines, snapshotLines, snapshotWarningLines } from './agent-workspace-context-lines.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, ONBOARDING_CRITICAL_STEP_IDS } from '../input/agent-workspace-onboarding-finish.ts';
 
 function onboardingCategoryReadiness(
@@ -436,11 +436,6 @@ function onboardingActionColumns(workspace: AgentWorkspace, action: AgentWorkspa
   };
 }
 
-function actionChange(workspace: AgentWorkspace, category: AgentWorkspaceCategory, action: AgentWorkspaceAction): string {
-  // Always show the action label via onboardingActionColumns for consistency across categories.
-  return onboardingActionColumns(workspace, action).setting;
-}
-
 function actionMetaLine(workspace: AgentWorkspace, category: AgentWorkspaceCategory, action: AgentWorkspaceAction): ContextLine {
   // Same About-style detail line on every category.
   return {
@@ -463,7 +458,6 @@ function editorContextLines(editor: AgentWorkspaceLocalEditor, snapshot: AgentWo
   const lines: ContextLine[] = [
     { text: editor.title, fg: PALETTE.title, bold: true },
     { text: compactText(editor.message), fg: editor.messageTone === 'warn' ? PALETTE.warn : PALETTE.info },
-    { text: 'Enter next/save; Ctrl-J newline; Esc cancel.', fg: PALETTE.muted },
   ];
   if (selected) {
     lines.push(
@@ -499,7 +493,10 @@ function editorContextLines(editor: AgentWorkspaceLocalEditor, snapshot: AgentWo
 }
 
 function buildContextRows(workspace: AgentWorkspace, category: AgentWorkspaceCategory, action: AgentWorkspaceAction | null, width: number): WorkspaceRow[] {
+  // Warnings lead the context: a short pane shows them before anything else,
+  // and every area scrolls to the rest.
   const lines: ContextLine[] = [
+    ...snapshotWarningLines(workspace.runtimeSnapshot),
     { text: category.label, fg: PALETTE.title, bold: true },
     { text: category.summary, fg: PALETTE.subtitle },
     ...(workspace.actionSearchActive ? [
@@ -510,7 +507,6 @@ function buildContextRows(workspace: AgentWorkspace, category: AgentWorkspaceCat
           : 'Type to search every Agent workspace action.',
         fg: workspace.actionSearchQuery.length > 0 && workspace.actionSearchResults.length === 0 ? PALETTE.warn : PALETTE.info,
       },
-      { text: 'Enter opens; Esc clears.', fg: PALETTE.muted },
     ] satisfies ContextLine[] : []),
     ...(workspace.localEditor ? editorContextLines(workspace.localEditor, workspace.runtimeSnapshot) : []),
   ];
@@ -523,18 +519,6 @@ function buildContextRows(workspace: AgentWorkspace, category: AgentWorkspaceCat
     : [];
   const snapshotContextLines = snapshotLines(workspace, category, workspace.runtimeSnapshot);
   lines.push(...selectedActionLines, ...snapshotContextLines);
-
-  const onboarding = isOnboardingCategory(category);
-  if (workspace.lastActionResult) {
-    lines.push(
-      { text: onboarding ? 'Result' : 'Action Result', fg: PALETTE.title, bold: true },
-      { text: workspace.lastActionResult.title, fg: actionResultColor(workspace.lastActionResult), bold: true },
-      { text: compactText(workspace.lastActionResult.detail), fg: PALETTE.text },
-    );
-    if (!onboarding && workspace.lastActionResult.command) {
-      lines.push({ text: `Command: ${workspace.lastActionResult.command}`, fg: PALETTE.muted });
-    }
-  }
 
   return lines.flatMap((entry): WorkspaceRow[] => {
     if (entry.text.length === 0) return [{ text: '', kind: 'empty', dim: true }];
@@ -621,7 +605,6 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
     const isFinishFooterRow = finishActionIndex >= 0 && index === finishActionIndex;
     const selected = index === workspace.selectedActionIndex;
     const searchResult = workspace.actionSearchActive ? workspace.actionSearchResults[index] : null;
-    const actionCategory = searchResult?.category ?? category;
     const label = searchResult ? `${searchResult.category.label} / ${action.label}` : action.label;
     const marker = selected ? GLYPHS.navigation.selected : ' ';
 
@@ -638,7 +621,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
         });
       }
       const finishDetail = prereqsMet
-        ? 'Finish setup'
+        ? actionCommand(action)
         : (() => {
           const checklist = workspace.runtimeSnapshot?.setupChecklist ?? [];
           const unmet = [...ONBOARDING_CRITICAL_STEP_IDS]
@@ -648,7 +631,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
           return `Finish needs: ${unmet}`;
         })();
       const text = settingTable
-        ? `${marker} ${padDisplay('Finish setup', labelWidth)}  ${padDisplay('', valueWidth)}  ${padDisplay('', valueWidth)}`
+        ? `${marker} ${padDisplay('Finish setup', labelWidth)}  ${padDisplay(finishDetail, (valueWidth * 2) + 2)}`
         : `${marker} ${padDisplay('Finish setup', labelWidth)}  ${padDisplay(finishDetail, commandWidth)}`;
       rows.push({
         text,
@@ -663,7 +646,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
           const columns = onboardingActionColumns(workspace, action);
           return `${marker} ${padDisplay(columns.setting, labelWidth)}  ${padDisplay(columns.defaultValue, valueWidth)}  ${padDisplay(columns.currentValue, valueWidth)}`;
         })()
-        : `${marker} ${padDisplay(label, labelWidth)}  ${padDisplay(actionChange(workspace, actionCategory, action), commandWidth)}`;
+        : `${marker} ${padDisplay(label, labelWidth)}  ${padDisplay(actionCommand(action), commandWidth)}`;
       rows.push({
         text,
         selected: selected && workspace.focusPane === 'actions',
@@ -724,12 +707,14 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
   const contextRows = buildContextRows(workspace, category, action, contextWidth);
   const layoutOptions = { ...baseOptions, contextNeed: contextRows.length };
   const metrics = getFullscreenWorkspaceMetrics(layoutOptions);
+  // Context longer than its share scrolls in every area (PgUp/PgDn, or
+  // Ctrl+PgUp/PgDn while a result holds the plain keys) instead of being cut.
   let shownContextRows = contextRows;
-  if (category.id === 'work') {
+  if (category.id === 'work' || contextRows.length > metrics.contextRows) {
     const count = Math.max(1, metrics.contextRows - 1);
     workspace.workContextScroll = Math.min(workspace.workContextScroll, Math.max(0, contextRows.length - count));
     shownContextRows = [
-      { text: `Ledger details ${workspace.workContextScroll + 1}–${Math.min(contextRows.length, workspace.workContextScroll + count)}/${contextRows.length} · ${workspace.lastActionResult ? 'Ctrl+PgUp/PgDn' : 'PgUp/PgDn'}`, fg: PALETTE.muted },
+      { text: `${category.id === 'work' ? 'Ledger details' : 'Details'} ${workspace.workContextScroll + 1}–${Math.min(contextRows.length, workspace.workContextScroll + count)}/${contextRows.length} · ${workspace.lastActionResult ? 'Ctrl+PgUp/PgDn' : 'PgUp/PgDn'}`, fg: PALETTE.muted },
       ...contextRows.slice(workspace.workContextScroll, workspace.workContextScroll + count),
     ];
   }

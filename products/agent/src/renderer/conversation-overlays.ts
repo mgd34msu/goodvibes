@@ -26,9 +26,7 @@ import { renderHelpOverlay, renderShortcutsOverlay } from './help-overlay.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
 import { renderAgentWorkspace } from './agent-workspace.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
-import './conversation-layout.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
-import './surface-kit-parts.ts';
 import { getSharedToastCenter } from './toast-center.ts';
 
 export interface ConversationOverlayContext {
@@ -85,9 +83,9 @@ export interface ConversationLayerContext {
 }
 
 /**
- * The Agent workspace as it is painted on screen. Disk state (memory count,
- * routine start counts) is mirrored on every repaint first, so the counters
- * never show a stale point-in-time snapshot.
+ * The Agent workspace as it is painted on screen. Each paint first compares
+ * the memory and routine stores' change stamp and re-reads their counters only
+ * when a store changed, so the counters follow the disk without a per-paint scan.
  */
 export function renderAgentWorkspaceLayer(workspace: InputHandler['agentWorkspace'], width: number, height: number): SurfaceLayer {
   workspace.syncLiveCountersForRender();

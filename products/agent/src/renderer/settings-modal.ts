@@ -1,7 +1,6 @@
 import { settingCategoryLabel } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
 import { createSettingsRows, settingsNavigationHints } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-rows';
 import { createSettingsLayout, settingsCategoryRows } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-layout';
-import '@goodvibes-jev/engine/terminal-shell/renderer/mcp-form-rows';
 import { createSettingsDocumentation } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
 /**
  * renderSettingsModal, the settings modal drawn with the surface kit.
@@ -38,20 +37,8 @@ import {
 } from './settings-modal-context.ts';
 import { formatProviderAuthRouteId } from '../provider-auth-route-display.ts';
 import { activeTokens } from './theme.ts';
-import '../utils/terminal-width.ts';
 import { type KitHint } from './surface-kit.ts';
 import { type KitRow } from './surface-kit-list.ts';
-import './surface-kit-parts.ts';
-
-// ---------------------------------------------------------------------------
-// Rows
-// ---------------------------------------------------------------------------
-
-/**
- * Keep a long value from crowding the name out (the documentation shows it in
- * full). While editing, the value gets all the room the label leaves, and a
- * draft longer than that keeps its end (where the cursor is) in view.
- */
 
 function flagRow(entry: FlagEntry, selected: boolean, focused: boolean): KitRow {
   const t = activeTokens();
@@ -70,8 +57,6 @@ function flagRow(entry: FlagEntry, selected: boolean, focused: boolean): KitRow 
 
 const categoryOf = (entry: SettingEntry): string => settingCategoryLabel(entry.setting.key, CATEGORY_LABELS);
 
-/** The rows of the right-hand list for the current view, and which one is selected. */
-
 function categoryRows(modal: SettingsModal): KitRow[] {
   return settingsCategoryRows({
     groups: SETTINGS_CATEGORY_GROUPS,
@@ -83,22 +68,6 @@ function categoryRows(modal: SettingsModal): KitRow[] {
     count: (category) => categoryItemCount(modal, category),
   });
 }
-
-// ---------------------------------------------------------------------------
-// Documentation block
-// ---------------------------------------------------------------------------
-
-/** Fact lines folded into one compact line above the list (the row itself shows the current value). */
-
-/** Window the documentation by modal.contextScroll (PgUp/PgDn), marking hidden lines honestly. */
-
-// ---------------------------------------------------------------------------
-// Right pane
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Hints
-// ---------------------------------------------------------------------------
 
 /** The static strings this surface can show (checked by package verification). */
 export function renderSettingsModalPackageText(): string {
@@ -164,12 +133,6 @@ export function renderSettingsModalPackageText(): string {
 
   return lines.join('\n');
 }
-
-// ---------------------------------------------------------------------------
-// Renderer
-// ---------------------------------------------------------------------------
-
-/** Below this many text columns the category list folds into the breadcrumb (←→ still switch). */
 
 const { docLines, windowDoc, settingsDocumentation } = createSettingsDocumentation<SettingsModal>(settingContextLines, {
   clampStoredOffset: true,

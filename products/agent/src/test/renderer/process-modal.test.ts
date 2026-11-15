@@ -24,6 +24,7 @@ function seedProcess(cmd: string, status = 'running'): string {
     status,
     // The manager reports whether a process ended as a field; the status text only describes how.
     done: status !== 'running',
+    exitCode: status === 'running' ? null : status === 'done' ? 0 : 1,
     startTime: Date.now() - 1200,
   } as TestProcessRecord);
   return id;
@@ -66,22 +67,21 @@ describe('ProcessModal state', () => {
     expect(modal.active).toBe(false);
   });
 
-  test('refresh() populates entries from running shell processes only', () => {
-    seedProcess('bun run build');
+  test('refresh() lists running processes first, then the finished ones the manager keeps', () => {
     seedProcess('bun test', 'done');
+    seedProcess('bun run build');
     const modal = createProcessModal();
     modal.refresh();
-    expect(modal.entries).toHaveLength(1);
-    expect(modal.entries[0]?.type).toBe('exec');
-    expect(modal.entries[0]?.label).toContain('bun run build');
+    expect(modal.entries.map((e) => [e.label, e.outcome])).toEqual([['bun run build', 'running'], ['bun test', 'succeeded']]);
   });
 
-  test('a process ended by its timeout is not listed as running (its status does not start with "done")', () => {
+  test('a process ended by its timeout is listed as finished and failed, not as running', () => {
     seedProcess('for i in 1 2 3; do echo tick; sleep 5; done', 'timed out (signal SIGTERM)');
     seedProcess('bun run dev');
     const modal = createProcessModal();
     modal.refresh();
-    expect(modal.entries.map((e) => e.label)).toEqual([expect.stringContaining('bun run dev')]);
+    expect(modal.entries.map((e) => e.outcome)).toEqual(['running', 'failed']);
+    expect(modal.entries[1]!.status).toBe('timed out (signal SIGTERM)');
   });
 
   test('moveDown() wraps around to first entry', () => {
@@ -118,7 +118,7 @@ describe('renderProcessModal', () => {
   const H = 30;
 
   test('renders the empty state when no processes are running', () => {
-    expect(layerTextBlock(renderProcessModal(createProcessModal(), W, H))).toContain('No running shell processes');
+    expect(layerTextBlock(renderProcessModal(createProcessModal(), W, H))).toContain('No running or recently finished shell processes');
   });
 
   test('is a kit modal layer that fits the screen', () => {
@@ -174,7 +174,7 @@ test('process summaries use current typed records and omit entries removed durin
     stop: () => false,
   } });
   modal.refresh();
-  expect(modal.entries.map(row => row.id)).toEqual([active, activeWithTerminalText]);
+  expect(modal.entries.map(row => row.id)).toEqual([active, activeWithTerminalText, completed]);
   expect(modal.entries[0]!.elapsedMs).toBeGreaterThanOrEqual(1200);
 });
 
@@ -196,15 +196,17 @@ describe('ProcessModal selection follows the process', () => {
     modal.close();
   });
 
-  test('when the selected process itself exits the selection stays inside the list', () => {
+  test('when the selected process itself exits the selection follows it into the finished rows', () => {
     seedProcess('sleep a');
     const b = seedProcess('sleep b');
+    seedProcess('sleep c');
     const modal = createProcessModal();
     modal.open();
     modal.moveDown();
     processes.get(b)!.done = true;
     modal.refresh();
-    expect(modal.selectedIndex).toBe(0);
+    expect(modal.getSelected()?.id).toBe(b);
+    expect(modal.selectedIndex).toBe(2);
     modal.close();
   });
 });

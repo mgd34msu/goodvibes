@@ -14,23 +14,23 @@ import {
   DEFAULT_PROBE_TIMEOUT_MS,
   installBackgroundThemeProbe,
   OSC11_QUERY,
-} from '../../renderer/terminal-bg-probe.ts';
+} from '@goodvibes-jev/engine/terminal-shell/terminal-bg-probe';
 import {
   PALETTE_PROBE_TIMEOUT_MS,
   PALETTE_QUERIES,
   type PaletteProbeResolution,
   parseOscColorToHex,
   TerminalPaletteProbe,
-} from '../../renderer/terminal-palette-probe.ts';
+} from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import {
   getTerminalPalette,
   onTerminalPalette,
   resetTerminalPaletteForTests,
   type TerminalPalette,
-} from '../../renderer/terminal-palette.ts';
-import { activeTheme, refreshForTerminalPalette, resolveTheme, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
+} from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
+import { activeTheme, refreshForTerminalPalette, resolveTheme, setActiveThemeMode, setActiveThemeName } from '@goodvibes-jev/engine/terminal-shell/theme';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { withTimers } from '../helpers/fake-timers.ts';
+import { withTimers } from './helpers/fake-timers.ts';
 
 afterEach(() => {
   setActiveThemeName('goodvibes');

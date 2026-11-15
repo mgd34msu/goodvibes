@@ -37,7 +37,7 @@ import {
   resetTerminalPaletteForTests,
   setTerminalPalette,
   type TerminalPalette,
-} from '../../renderer/terminal-palette.ts';
+} from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import { DEFAULT_PANEL_PALETTE, extendPalette } from '../../renderer/polish.ts';
 import { buildStatusToken } from '../../renderer/status-token.ts';
 import { FULLSCREEN_PALETTE } from '../../renderer/fullscreen-primitives.ts';

@@ -271,15 +271,22 @@ export function fixtureShortcuts(width: number, height: number, onBase = false):
 const PROCESSES = [
   { id: 'p1', cmd: 'rsync -a ~/Photos/2026 /mnt/backup/photos', status: 'running' },
   { id: 'p2', cmd: 'python3 scripts/fetch_fares.py --from OPO --to LIS --date 2026-10-02', status: 'running' },
-  { id: 'p3', cmd: 'ffmpeg -i interview.m4a interview.wav', status: 'failed' },
+  { id: 'p3', cmd: 'ffmpeg -i interview.m4a interview.wav', status: 'done (exit 1)' },
 ];
+
+/** The manager's record for a fixture process: p3 finished with exit 1 after 12 seconds. */
+function fixtureProcessRecord(id: string, startedAgoMs: number): Record<string, unknown> {
+  return id === 'p3'
+    ? { startTime: FIXTURE_NOW - startedAgoMs, done: true, exitCode: 1, completedAt: FIXTURE_NOW - startedAgoMs + 12_000 }
+    : { startTime: FIXTURE_NOW - startedAgoMs, done: false, exitCode: null };
+}
 
 export function fixtureProcessModal(width: number, height: number, onBase = false): Line[] {
   return withFixedClock(() => {
     const modal = new ProcessModal({
       processManager: {
         list: () => PROCESSES,
-        getStatus: (id: string) => ({ startTime: FIXTURE_NOW - (id === 'p1' ? 185_000 : 42_000) }),
+        getStatus: (id: string) => fixtureProcessRecord(id, id === 'p1' ? 185_000 : 42_000),
         stop: () => true,
       } as never,
     });
@@ -444,7 +451,7 @@ export function fixtureActivity(width: number, height: number, onBase = false): 
 export function fixtureStacked(width: number, height: number): Line[] {
   return withFixedClock(() => {
     const processes = new ProcessModal({
-      processManager: { list: () => PROCESSES, getStatus: () => ({ startTime: FIXTURE_NOW - 42_000 }), stop: () => true } as never,
+      processManager: { list: () => PROCESSES, getStatus: (id: string) => fixtureProcessRecord(id, 42_000), stop: () => true } as never,
     });
     processes.refresh();
     const tail = new LiveTailModal({ processManager: { stop: () => true, getOutput: () => ({ stdout: 'fetching fares...\n3 fares found', stderr: '' }) } as never });

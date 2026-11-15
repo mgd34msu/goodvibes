@@ -1,5 +1,5 @@
 import type { CommandContext } from './command-registry.ts';
-import { readLiveAgentMemoryCounters, readLiveAgentRoutineCounters } from './agent-workspace-snapshot.ts';
+import { readLiveAgentCounterStamp, readLiveAgentMemoryCounters, readLiveAgentRoutineCounters } from './agent-workspace-snapshot.ts';
 import type { AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 
 export interface SyncAgentWorkspaceLiveCountersOptions {
@@ -9,22 +9,24 @@ export interface SyncAgentWorkspaceLiveCountersOptions {
   readonly clampSelection: () => void;
 }
 
+/** The store stamp each snapshot's live counters were last read at. */
+const syncedAt = new WeakMap<AgentWorkspaceRuntimeSnapshot, string>();
+
 /**
- * Quiet, render-path refresh of the two counters a dogfood finding
- * named as stale: the memory count and the routine counts (incl. each
- * routine's live start count). Call this once per repaint, before rendering,
- * so an external disk mutation (another shell deleting a memory, a CLI
- * `routines start` bumping a start count) shows up on the NEXT paint instead
- * of requiring the user to trigger a workspace action first.
+ * Quiet, render-path refresh of the memory count and the routine counts
+ * (incl. each routine's live start count). Called once per repaint, before
+ * rendering, so a change made elsewhere (the model saving a memory, another
+ * shell deleting one, a CLI `routines start`) shows on the next paint instead
+ * of after the next workspace action.
+ *
+ * A paint first compares the stores' change stamp (two stat calls) with the
+ * stamp the snapshot was read at; only a changed store is read again, so the
+ * memory scan and each routine's requirement probes run when a store changes,
+ * not per paint. A snapshot replaced by a full rebuild has no stamp yet and is
+ * read once.
  *
  * Unlike AgentWorkspace.refreshRuntimeSnapshot(), this never touches status
- * or lastActionResult -- it must be safe to call on every passive repaint,
- * including ones triggered by unrelated key presses. It also intentionally
- * does NOT rebuild the entire runtime snapshot (~20 registry/config reads):
- * that full rebuild stays reserved for real action completions elsewhere on
- * AgentWorkspace. Re-deriving just these two counters keeps the render-path
- * cost proportional to "did the memory/routine store change", not to the
- * whole workspace's surface area.
+ * or lastActionResult; it must be safe on every passive repaint.
  *
  * On a read failure the previous counters are kept (never overwritten with a
  * fabricated 0) and runtimeSnapshot.liveCountersStale is set so the render
@@ -35,9 +37,11 @@ export function syncAgentWorkspaceLiveCounters(options: SyncAgentWorkspaceLiveCo
   const { context, runtimeSnapshot, setRuntimeSnapshot, clampSelection } = options;
   if (!context || !runtimeSnapshot) return;
   try {
+    const stamp = readLiveAgentCounterStamp(context);
+    if (stamp !== null && syncedAt.get(runtimeSnapshot) === stamp && runtimeSnapshot.liveCountersStale !== true) return;
     const memory = readLiveAgentMemoryCounters(context);
     const routines = readLiveAgentRoutineCounters(context);
-    setRuntimeSnapshot({
+    const next: AgentWorkspaceRuntimeSnapshot = {
       ...runtimeSnapshot,
       localMemoryCount: memory.count,
       localMemoryReviewQueueCount: memory.reviewQueueCount,
@@ -47,7 +51,9 @@ export function syncAgentWorkspaceLiveCounters(options: SyncAgentWorkspaceLiveCo
       enabledRoutineCount: routines.enabled,
       localRoutines: routines.items,
       liveCountersStale: false,
-    });
+    };
+    if (stamp !== null) syncedAt.set(next, stamp);
+    setRuntimeSnapshot(next);
   } catch {
     setRuntimeSnapshot({ ...runtimeSnapshot, liveCountersStale: true });
   }

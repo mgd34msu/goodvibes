@@ -1,9 +1,11 @@
 /**
  * The process monitor (F2, or Enter on the process indicator): background
- * shell processes drawn with the modal surface kit. One kit row per process
- * (status marker, command, status and elapsed time right-aligned), keycap
- * hints. Enter opens the process full screen with its timestamped output
- * (the live tail modal where that view is not wired), k stops the selected
+ * shell processes drawn with the modal surface kit. Running processes first,
+ * then the finished ones the process manager still keeps (with their output),
+ * newest first. One kit row per process (status marker, command, the manager's
+ * own status text and the elapsed or run time right-aligned), coloured by how
+ * it ended. Enter opens the process full screen with its output (the live
+ * tail modal where that view is not wired), k stops the selected running
  * process. Esc only closes the view: the processes keep running.
  */
 
@@ -18,13 +20,17 @@ export interface ProcessEntry {
   readonly id: string;
   readonly label: string;
   readonly type: 'exec';
+  /** The process manager's own status text: running, done (exit N), timed out ..., killed by .... */
   readonly status: string;
+  /** Running time so far, or how long a finished process ran. */
   readonly elapsedMs: number;
+  /** How it ended: still running, exited 0, or anything else (non-zero exit, signal, timeout). */
+  readonly outcome?: 'running' | 'succeeded' | 'failed';
 }
 
 const MAX_LABEL_LENGTH = 200;
 const PROCESS_MODAL_TITLE = 'Runtime activity';
-const PROCESS_MODAL_EMPTY_MESSAGE = 'No running shell processes.';
+const PROCESS_MODAL_EMPTY_MESSAGE = 'No running or recently finished shell processes.';
 const PROCESS_MODAL_NOTE = 'Esc closes this view; processes keep running.';
 const PROCESS_MODAL_HINTS: readonly KitHint[] = [['↑↓', 'move'], ['⏎', 'output'], ['k', 'stop process']];
 
@@ -76,20 +82,26 @@ export class ProcessModal {
     // process finishes or starts, and an index left in place would point `k` at a
     // different process than the one the user selected.
     const selectedId = this.entries[this.selectedIndex]?.id;
-    const result: ProcessEntry[] = [];
+    const running: ProcessEntry[] = [];
+    const finished: Array<{ entry: ProcessEntry; completedAt: number }> = [];
 
     for (const process of this.deps.processManager.list()) {
       const current = this.deps.processManager.getStatus(process.id);
-      if (!current || current.done) continue;
-      const startTime = current.startTime;
-      result.push({
-        id: process.id,
-        label: truncateCmd(process.cmd),
-        type: 'exec',
-        status: process.status,
-        elapsedMs: now - startTime,
+      if (!current) continue;
+      const base = { id: process.id, label: truncateCmd(process.cmd), type: 'exec' as const, status: process.status };
+      if (!current.done) {
+        running.push({ ...base, elapsedMs: now - current.startTime, outcome: 'running' });
+        continue;
+      }
+      const completedAt = current.completedAt ?? now;
+      const succeeded = current.exitCode === 0 && !current.signal && current.timedOut !== true;
+      finished.push({
+        entry: { ...base, elapsedMs: Math.max(0, completedAt - current.startTime), outcome: succeeded ? 'succeeded' : 'failed' },
+        completedAt,
       });
     }
+    finished.sort((a, b) => b.completedAt - a.completedAt);
+    const result = [...running, ...finished.map((item) => item.entry)];
 
     this.entries = result;
     const followed = selectedId === undefined ? -1 : result.findIndex((entry) => entry.id === selectedId);
@@ -128,8 +140,9 @@ export function renderProcessModalPackageText(): string {
     PROCESS_MODAL_EMPTY_MESSAGE,
     PROCESS_MODAL_NOTE,
     '<n> running',
+    '<n> finished',
     'running',
-    'failed',
+    'done (exit <n>)',
     '<duration>',
     ...PROCESS_MODAL_HINTS.map(([, action]) => action),
   ].join('\n');
@@ -137,16 +150,23 @@ export function renderProcessModalPackageText(): string {
 
 function rowFor(entry: ProcessEntry, selected: boolean): KitRow {
   const t = activeTokens();
-  const running = entry.status === 'running';
-  const failed = entry.status === 'failed';
+  const outcome = entry.outcome ?? 'running';
+  const running = outcome === 'running';
+  const failed = outcome === 'failed';
   return {
     label: entry.label,
     right: `${entry.status} · ${formatDuration(entry.elapsedMs)}`,
-    rightFg: failed ? t.error : undefined,
-    mark: running ? '◐' : failed ? '✕' : '○',
-    markFg: running ? t.brand : failed ? t.error : t.textFaint,
+    rightFg: failed ? t.error : running ? undefined : t.success,
+    mark: running ? '◐' : failed ? '✕' : '✓',
+    markFg: running ? t.brand : failed ? t.error : t.success,
     selected,
   };
+}
+
+function processCountText(entries: readonly ProcessEntry[]): string {
+  const running = entries.filter((entry) => (entry.outcome ?? 'running') === 'running').length;
+  const finished = entries.length - running;
+  return [running > 0 ? `${running} running` : '', finished > 0 ? `${finished} finished` : ''].filter(Boolean).join(' · ');
 }
 
 /** Render the process monitor as a SurfaceLayer in screen coordinates. */
@@ -161,7 +181,7 @@ export function renderProcessModal(modal: ProcessModal, screenWidth: number, scr
   const height = modalHeightFor(screenWidth, screenHeight, { hints }, body);
   const f = beginModal(screenWidth, screenHeight, {
     title: PROCESS_MODAL_TITLE,
-    sub: empty ? undefined : `${modal.entries.length} running`,
+    sub: empty ? undefined : processCountText(modal.entries),
     hints,
     height,
   });

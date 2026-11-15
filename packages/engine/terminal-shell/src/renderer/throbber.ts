@@ -24,7 +24,7 @@ import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
 import { getDisplayWidth, interpolateColor, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatElapsed } from '../format.js';
-import { beadArgument, beadName } from './bead.js';
+import { beadArgument, beadName, type ToolLabel } from './bead.js';
 import { activeTokens } from './theme.js';
 /** Column of the spinner (the input area's first fill column). */
 const THROBBER_SPINNER_X = 3;
@@ -131,7 +131,7 @@ export interface ThrobberActivityInput {
     readonly now: number;
 }
 /** "bash", "npm test": a call's short name and key argument, the way its bead names it. */
-function describeToolCall(call: ThrobberToolCall, nameTool: typeof beadName): {
+function describeToolCall(call: ThrobberToolCall, toolLabel: ToolLabel | undefined): {
     tool: string;
     argument: string;
 } {
@@ -143,15 +143,19 @@ function describeToolCall(call: ThrobberToolCall, nameTool: typeof beadName): {
     catch {
         argument = '';
     }
-    return { tool: nameTool(asCall), argument: truncateDisplay(argument, ARGUMENT_MAX) };
+    return { tool: beadName(asCall, toolLabel), argument: truncateDisplay(argument, ARGUMENT_MAX) };
 }
 /** What main is doing now, or null at rest (the throbber is not drawn). */
-export function resolveThrobberActivity(input: ThrobberActivityInput, nameTool: typeof beadName = beadName): ThrobberActivity | null {
+/** Product vocabulary for the running call's name, the same option the work tree takes. */
+export interface ThrobberPresentation {
+    readonly toolLabel?: ToolLabel | undefined;
+}
+export function resolveThrobberActivity(input: ThrobberActivityInput, presentation: ThrobberPresentation = {}): ThrobberActivity | null {
     const runningAgentCount = input.runningAgentCount ?? 0;
     const since = (start: number | undefined): number | undefined => (start !== undefined && start > 0 ? Math.max(0, input.now - start) : undefined);
     const turnElapsed = since(input.turnStartMs);
     if (input.turnActive && input.pendingApproval) {
-        return { kind: 'approval', ...describeToolCall(input.pendingApproval, nameTool), elapsedMs: turnElapsed };
+        return { kind: 'approval', ...describeToolCall(input.pendingApproval, presentation.toolLabel), elapsedMs: turnElapsed };
     }
     if (input.compacting)
         return { kind: 'compacting', elapsedMs: since(input.compactingSinceMs) };
@@ -169,7 +173,7 @@ export function resolveThrobberActivity(input: ThrobberActivityInput, nameTool: 
     if (!input.turnActive)
         return delegatedActivity();
     if (input.activeTool) {
-        return { kind: 'tool', ...describeToolCall(input.activeTool, nameTool), elapsedMs: since(input.activeTool.startedAtMs) ?? turnElapsed };
+        return { kind: 'tool', ...describeToolCall(input.activeTool, presentation.toolLabel), elapsedMs: since(input.activeTool.startedAtMs) ?? turnElapsed };
     }
     if (input.completionActivity)
         return { kind: 'completion', phase: input.completionActivity.phase, elapsedMs: since(input.completionActivity.startedAtMs) };

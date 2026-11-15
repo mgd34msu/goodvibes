@@ -1,9 +1,11 @@
 /**
  * The live tail of one background process (Enter in the process monitor),
- * drawn with the modal surface kit: the command in the title (crumb under
- * "Runtime activity"), the output in an element panel with every line
- * wrapped in full, following the newest output unless scrolled back. Esc
- * goes back to the process monitor; the process keeps running (k stops it).
+ * drawn with the modal surface kit: the process's status in the crumb under
+ * "Runtime activity", the command, then the output in an element panel with
+ * every shown line wrapped in full, following the newest output unless
+ * scrolled back. Standard error follows standard output under its own
+ * heading (the manager keeps the two streams apart). Esc goes back to the
+ * process monitor; a running process keeps running (k stops it).
  */
 
 import type { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -13,6 +15,9 @@ import { beginModal, finishModal, scrollCountText, wrapLines, type KitHint, type
 import { panel } from './surface-kit-parts.ts';
 
 const LIVE_TAIL_EMPTY_OUTPUT = '(no output yet)';
+const LIVE_TAIL_NO_OUTPUT = '(no output)';
+const LIVE_TAIL_PRUNED = '(output no longer kept)';
+const LIVE_TAIL_STDERR_HEADING = '── stderr ──';
 const LIVE_TAIL_HINTS: readonly KitHint[] = [['↑↓', 'scroll'], ['k', 'stop process'], ['esc', 'back, the process keeps running']];
 
 /** The static strings this surface can show (checked by package verification). */
@@ -22,6 +27,9 @@ export function renderLiveTailModalPackageText(): string {
     'Live output',
     '$ <process>',
     LIVE_TAIL_EMPTY_OUTPUT,
+    LIVE_TAIL_NO_OUTPUT,
+    LIVE_TAIL_PRUNED,
+    LIVE_TAIL_STDERR_HEADING,
     '<n> more ↑',
     '<n> more ↓',
     ...LIVE_TAIL_HINTS.map(([, action]) => action),
@@ -29,7 +37,7 @@ export function renderLiveTailModalPackageText(): string {
 }
 
 export interface LiveTailModalDeps {
-  readonly processManager: Pick<ProcessManager, 'stop' | 'getOutput'>;
+  readonly processManager: Pick<ProcessManager, 'stop' | 'getOutput'> & Partial<Pick<ProcessManager, 'list'>>;
 }
 
 export class LiveTailModal {
@@ -67,9 +75,19 @@ export class LiveTailModal {
   getOutput(): string {
     if (!this.entry) return '';
     const output = this.deps.processManager.getOutput(this.entry.id);
-    if (!output) return '';
-    const combined = [output.stdout, output.stderr].filter(Boolean).join('\n').trim();
-    return combined || LIVE_TAIL_EMPTY_OUTPUT;
+    if (!output) return LIVE_TAIL_PRUNED;
+    const stdout = output.stdout.replace(/\s+$/, '');
+    const stderr = output.stderr.replace(/\s+$/, '');
+    const combined = stderr ? [stdout, LIVE_TAIL_STDERR_HEADING, stderr].filter(Boolean).join('\n') : stdout;
+    if (combined) return combined;
+    return this.status() === 'running' ? LIVE_TAIL_EMPTY_OUTPUT : LIVE_TAIL_NO_OUTPUT;
+  }
+
+  /** The manager's current status text for the open process (it may have finished since it was opened). */
+  status(): string {
+    if (!this.entry) return '';
+    const listed = this.deps.processManager.list?.().find((process) => process.id === this.entry!.id);
+    return listed?.status ?? this.entry.status;
   }
 }
 
@@ -82,9 +100,10 @@ export function renderLiveTailModal(
   const entry = modal.entry;
   if (!entry) return null;
   const t = activeTokens();
+  const status = modal.status();
   const f = beginModal(screenWidth, screenHeight, {
     title: 'Runtime activity',
-    crumbs: ['Live output'],
+    crumbs: [status === 'running' ? 'Live output' : `Output · ${status}`],
     hints: LIVE_TAIL_HINTS,
     // Esc is a hint of its own here: it goes back to the process list.
     escKey: false,
@@ -95,15 +114,24 @@ export function renderLiveTailModal(
   const panelTop = f.top + command.length + 1;
   const p = panel(f.canvas, f.l - 2, panelTop, f.r - f.l + 5, Math.max(3, f.bottom - panelTop + 1));
   const textW = p.r - p.l + 1;
-  const lines = (modal.getOutput() || LIVE_TAIL_EMPTY_OUTPUT).split('\n').flatMap((line) => wrapLines(line, textW));
   const capacity = Math.max(1, p.bottom - p.top + 1);
-  const maxScroll = Math.max(0, lines.length - capacity);
-  modal.scrollOffset = Math.min(modal.scrollOffset, maxScroll);
-  const end = lines.length - modal.scrollOffset;
+  // Only the source lines that reach the window are wrapped: walk back from the
+  // newest line until the window and the scroll offset are filled.
+  const source = (modal.getOutput() || LIVE_TAIL_EMPTY_OUTPUT).split('\n');
+  const rows: string[] = [];
+  let firstSource = source.length;
+  while (firstSource > 0 && rows.length < capacity + modal.scrollOffset) {
+    firstSource -= 1;
+    rows.unshift(...wrapLines(source[firstSource]!, textW));
+  }
+  modal.scrollOffset = Math.min(modal.scrollOffset, Math.max(0, rows.length - capacity));
+  const end = rows.length - modal.scrollOffset;
   const start = Math.max(0, end - capacity);
-  lines.slice(start, end).forEach((line, k) => {
-    f.canvas.put(p.l, p.top + k, line, { fg: line === LIVE_TAIL_EMPTY_OUTPUT ? t.textFaint : t.text, bg: p.bg });
+  const faint = new Set([LIVE_TAIL_EMPTY_OUTPUT, LIVE_TAIL_NO_OUTPUT, LIVE_TAIL_PRUNED, LIVE_TAIL_STDERR_HEADING]);
+  rows.slice(start, end).forEach((line, k) => {
+    f.canvas.put(p.l, p.top + k, line, { fg: faint.has(line) ? t.textFaint : t.text, bg: p.bg });
   });
-  f.hintRight = scrollCountText(start, lines.length - end);
+  // Above: the wrapped rows over the window plus the source lines not wrapped at all.
+  f.hintRight = scrollCountText(start + firstSource, rows.length - end);
   return finishModal(f);
 }

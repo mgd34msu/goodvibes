@@ -166,9 +166,11 @@ function str(value: unknown): string | undefined {
 export function toolFamily(name: string): string {
     return (name.includes('__') ? name.split('__').pop()! : name).toLowerCase();
 }
+/** A product's phrase for a tool call: its name, and its arguments when the phrase depends on the action. */
+export type ToolLabel = (name: string, args?: Readonly<Record<string, unknown>> | undefined) => string;
 /** The name drawn on the bead row. */
-export function beadName(call: Pick<ToolCall, 'name'>, label?: ((name: string) => string) | undefined): string {
-    return cellText(label ? label(call.name) : call.name.includes('__') ? call.name.split('__').pop()! : call.name);
+export function beadName(call: Pick<ToolCall, 'name'> & { readonly arguments?: Readonly<Record<string, unknown>> | undefined }, label?: ToolLabel | undefined): string {
+    return cellText(label ? label(call.name, call.arguments) : call.name.includes('__') ? call.name.split('__').pop()! : call.name);
 }
 /** The key argument drawn after the name (the path, the command, the pattern). */
 export function beadArgument(call: ToolCall): string {

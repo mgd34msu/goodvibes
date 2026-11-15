@@ -63,13 +63,13 @@ describe('LiveTailModal state', () => {
     expect(modal.getOutput()).toBe('');
   });
 
-  test('getOutput() reads the selected exec entry and combines its current stdout and stderr', () => {
+  test('getOutput() reads the selected exec entry: stdout, then stderr under its own heading', () => {
     const id = 'exec-output';
     let output = { stdout: 'hello', stderr: 'warning\n' };
     const getOutput = mock((_id: string) => output);
     const modal = createLiveTailModal({ getOutput, stop: () => false });
     modal.open(makeEntry({ id, label: 'echo hello' }));
-    expect(modal.getOutput()).toBe('hello\nwarning');
+    expect(modal.getOutput()).toBe('hello\n── stderr ──\nwarning');
     expect(getOutput).toHaveBeenLastCalledWith(id);
     output = { stdout: 'hello\nnext line\n', stderr: '' };
     expect(modal.getOutput()).toBe('hello\nnext line');
@@ -112,7 +112,7 @@ describe('LiveTailModal state', () => {
     expect(modal.getOutput()).toBe('(no output yet)');
     expect(getOutput).toHaveBeenLastCalledWith('empty');
     modal.open(makeEntry({ id: 'pruned', status: 'done' }));
-    expect(modal.getOutput()).toBe('');
+    expect(modal.getOutput()).toBe('(output no longer kept)');
     expect(getOutput).toHaveBeenLastCalledWith('pruned');
   });
 
@@ -153,10 +153,10 @@ describe('renderLiveTailModal', () => {
     expect(output).toContain('$ tail me');
   });
 
-  test('renders (no output yet) for missing exec output', () => {
+  test('says the output is no longer kept once the process record is gone', () => {
     const modal = createLiveTailModal();
     modal.open(makeEntry({ id: 'no-such-exec', label: 'cmd' }));
-    expect(text(modal)).toContain('no output yet');
+    expect(text(modal)).toContain('output no longer kept');
   });
 
   test('hints name stopping the process and going back without stopping it', () => {

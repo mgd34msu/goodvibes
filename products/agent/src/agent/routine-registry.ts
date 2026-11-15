@@ -2,6 +2,7 @@ import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleRevi
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
+import { storeFileChangeStamp } from './store-change-stamp.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText, assertStoreRewritable, runLockedStoreUpdate } from './persona-registry.ts';
 import { formatAgentRecordReviewState } from './record-labels.ts';
@@ -191,6 +192,11 @@ export class AgentRoutineRegistry {
 
   public static fromShellPaths(shellPaths: AgentLocalStorePaths, effects?: Parameters<typeof writeStoreFile>[2]): AgentRoutineRegistry {
     return new AgentRoutineRegistry(routineStorePath(shellPaths), effects);
+  }
+
+  /** Changes whenever the routine store is written, by this process or another; one stat. */
+  public changeStamp(): string {
+    return storeFileChangeStamp(this.storePath);
   }
 
   public snapshot(): AgentRoutineSnapshot {

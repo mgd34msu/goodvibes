@@ -163,11 +163,6 @@ export function renderModelWorkspacePackageText(): string {
 }
 
 /**
- * Returns a plain-language hardware fit line for a local model, or an empty
- * string when the model is not local or when the verdict is unknown.
- * Uses the process-level cached hardware probe, never probes per render.
- */
-/**
  * Format a param count (e.g. 70e9) as a human-readable size token (e.g. '70B', '1.5B').
  * Used to build the sizeDescriptor passed to fitVerdictLabel.
  */

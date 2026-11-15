@@ -23,7 +23,7 @@ import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platf
 import { contractIsActive, contractCommitNote, contractStatusSummary, projectContractTree } from './work-tree-contract.js';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
-import { beadArgument, beadBody, beadName, beadStatus, beadSummary, cellText, formatBeadTime, formatCost, inferResultToolName, isBackgroundCall, needsAttention, toolFamily, type BeadBody, type BeadStatus, type BeadSummary, } from './renderer/bead.js';
+import { beadArgument, beadBody, beadName, beadStatus, beadSummary, cellText, formatBeadTime, formatCost, inferResultToolName, isBackgroundCall, needsAttention, toolFamily, type BeadBody, type ToolLabel, type BeadStatus, type BeadSummary, } from './renderer/bead.js';
 import { SPINE, type LaneId } from './renderer/lane-graph-layout.js';
 import { userMessageFingerprint, type AgentLaneInfo, type TurnOutcome, type TurnTiming, type WorkTreeSources } from './work-tree-sources.js';
 type Message = ConversationMessageSnapshot;
@@ -836,7 +836,7 @@ export function orphanResultBead(message: ToolMessage, index: number, collapse: 
 }
 /** Product vocabulary and visibility only; status still comes from execution evidence. */
 export interface WorkTreePresentation {
-    readonly toolLabel?: ((name: string) => string) | undefined;
+    readonly toolLabel?: ToolLabel | undefined;
     readonly showUnverifiedOutput?: boolean | undefined;
 }
 export function createWorkTreeModelAdapter(presentation: WorkTreePresentation) {

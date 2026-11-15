@@ -1,3 +1,4 @@
+import { createSessionPickerRenderer } from '@goodvibes-jev/engine/terminal-shell/renderer/session-picker';
 /**
  * renderSessionPickerModal, the /sessions picker drawn with the modal surface kit.
  *
@@ -7,14 +8,8 @@
  * only shows that command as a status line under the list.
  */
 
-import './theme.ts';
 import type { SessionPickerModal } from '../input/session-picker-modal.ts';
 import { renderSessionPickerStatePackageText } from '../input/session-picker-modal.ts';
-import './modal-utils.ts';
-import './surface-kit.ts';
-import './surface-kit-list.ts';
-
-/** Short age for the right column: HH:MM today, "Mon D" this year, the full date otherwise. */
 
 /** The static strings this surface can show (checked by package verification). */
 export function renderSessionPickerPackageText(): string {
@@ -39,16 +34,7 @@ export function renderSessionPickerPackageText(): string {
   ].join('\n');
 }
 
-/**
- * Render the session picker as a modal layer.
- *
- * @param modal         SessionPickerModal state.
- * @param screenWidth   Terminal width.
- * @param screenHeight  Terminal height.
- * @param now           Clock for the recency groups (tests pass a fixed value).
- */
-
-import { createSessionPickerRenderer } from '@goodvibes-jev/engine/terminal-shell/renderer/session-picker';
+/** The session picker as a modal layer: (modal, screenWidth, screenHeight, now?). */
 export const { renderSessionPickerModal } = createSessionPickerRenderer<SessionPickerModal>({
   allowDelete: false,
   mouseNavigation: false,

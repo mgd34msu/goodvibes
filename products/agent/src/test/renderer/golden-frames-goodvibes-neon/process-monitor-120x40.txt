@@ -3,11 +3,11 @@
 |                                                                                                                        |
 |        ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄         |
 |                                                                                                                        |
-|            ✦ Runtime activity  3 running                                                              esc              |
+|            ✦ Runtime activity  2 running · 1 finished                                                 esc              |
 |                                                                                                                        |
 |          ◐ rsync -a ~/Photos/2026 /mnt/backup/photos                                        running · 3m5s             |
 |          ◐ python3 scripts/fetch_fares.py --from OPO --to LIS --date 2026-10-02              running · 42s             |
-|          ✕ ffmpeg -i interview.m4a interview.wav                                              failed · 42s             |
+|          ✕ ffmpeg -i interview.m4a interview.wav                                       done (exit 1) · 12s             |
 |                                                                                                                        |
 |            Esc closes this view; processes keep running.                                                               |
 |                                                                                                                        |
@@ -988,18 +988,31 @@
 4 39 bg=#161a22
 4 40 fg=#94a3b8
 4 40 bg=#161a22
+4 41 fg=#94a3b8
 4 41 bg=#161a22
+4 42 fg=#94a3b8
 4 42 bg=#161a22
+4 43 fg=#94a3b8
 4 43 bg=#161a22
+4 44 fg=#94a3b8
 4 44 bg=#161a22
+4 45 fg=#94a3b8
 4 45 bg=#161a22
+4 46 fg=#94a3b8
 4 46 bg=#161a22
+4 47 fg=#94a3b8
 4 47 bg=#161a22
+4 48 fg=#94a3b8
 4 48 bg=#161a22
+4 49 fg=#94a3b8
 4 49 bg=#161a22
+4 50 fg=#94a3b8
 4 50 bg=#161a22
+4 51 fg=#94a3b8
 4 51 bg=#161a22
+4 52 fg=#94a3b8
 4 52 bg=#161a22
+4 53 fg=#94a3b8
 4 53 bg=#161a22
 4 54 bg=#161a22
 4 55 bg=#161a22
@@ -1838,12 +1851,19 @@
 8 85 bg=#161a22
 8 86 bg=#161a22
 8 87 bg=#161a22
+8 88 fg=#ef4444
 8 88 bg=#161a22
+8 89 fg=#ef4444
 8 89 bg=#161a22
+8 90 fg=#ef4444
 8 90 bg=#161a22
+8 91 fg=#ef4444
 8 91 bg=#161a22
+8 92 fg=#ef4444
 8 92 bg=#161a22
+8 93 fg=#ef4444
 8 93 bg=#161a22
+8 94 fg=#ef4444
 8 94 bg=#161a22
 8 95 fg=#ef4444
 8 95 bg=#161a22

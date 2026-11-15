@@ -18,14 +18,11 @@ export function buildEditorRows(editor: AgentWorkspaceLocalEditor, width: number
     { text: editor.message, fg: editor.messageTone === 'warn' ? PALETTE.warn : PALETTE.info },
     { text: '' },
   ];
-  const footerRows: WorkspaceRow[] = [
-    { text: '' },
-    { text: 'Enter next/save · Up/Down field · Backspace edit · Ctrl-J newline · Esc cancel', fg: PALETTE.muted },
-  ];
   // Window the fields by the rows each really takes (values and hints wrap),
   // keeping the selected field in view and room for the two more markers.
+  // The key help is the workspace footer's, not repeated here.
   const fieldRows = editor.fields.map((_, index) => buildEditorFieldRows(editor, index, width));
-  const budget = Math.max(1, height - rows.length - footerRows.length - 2);
+  const budget = Math.max(1, height - rows.length - 2);
   let start = Math.min(editor.selectedFieldIndex, Math.max(0, editor.fields.length - 1));
   let used = fieldRows[start]?.length ?? 0;
   let end = start + 1;
@@ -34,7 +31,6 @@ export function buildEditorRows(editor: AgentWorkspaceLocalEditor, width: number
   if (start > 0) rows.push({ text: `${GLYPHS.navigation.moreAbove} ${start} more field(s) above`, kind: 'more', fg: PALETTE.dim, dim: true });
   for (let index = start; index < end; index += 1) rows.push(...fieldRows[index]!);
   if (end < editor.fields.length) rows.push({ text: `${GLYPHS.navigation.moreBelow} ${editor.fields.length - end} more field(s) below`, kind: 'more', fg: PALETTE.dim, dim: true });
-  rows.push(...footerRows);
   while (rows.length < height) rows.push({ text: '', kind: 'empty' });
   return rows.slice(0, height);
 }

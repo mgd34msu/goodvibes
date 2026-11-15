@@ -25,15 +25,12 @@
  *
  * ## What counts as one of the owner's channels
  *
- * `profile.ownerChannels` when it is set. This function falls back to
- * `occasions.nudgeChannel` when that is empty and the caller passes it in
- * `nudgeChannels`: a channel trusted to carry "your mother's birthday is
- * coming up" outbound is a channel the owner has claimed as their own. The
- * conversational turn contract (spawn-contract.ts) deliberately passes no
- * nudge channels, because a reminder destination is not a grant for a tool
- * that reads personal data; so on a conversational turn only
- * `profile.ownerChannels` authorizes capture, and the refusal names that
- * setting.
+ * `profile.ownerChannels`, and nothing else. Empty means no channel counts as
+ * the owner, as that setting's description says. `occasions.nudgeChannel` is
+ * where reminders are sent, not a grant: a destination the owner chose for
+ * outbound reminders says nothing about who else can write on it (a group the
+ * bot sits in, a second allow-listed sender). A refusal names
+ * `profile.ownerChannels`, the one setting that changes the answer.
  *
  * A turn with no channel at all is a local surface, the owner typed it
  * directly into the TUI, the agent or the web UI, and it carries their
@@ -64,17 +61,14 @@ export interface CaptureChannelIdentity {
 
 export interface CaptureAuthorityInput {
   readonly channel?: CaptureChannelIdentity | undefined;
-  /** `profile.ownerChannels`, verbatim. Empty ⇒ fall back to the nudge channels. */
+  /** `profile.ownerChannels`, verbatim. Empty ⇒ no channel carries the owner's authority. */
   readonly ownerChannels?: string | undefined;
-  /** `occasions.nudgeChannel`, verbatim, the channels already reaching the owner. */
-  readonly nudgeChannels?: string | undefined;
 }
 
 /** Which setting decided this, so a refusal can name the thing to change. */
 export type CaptureAuthoritySource =
   | 'local-surface'
   | 'profile.ownerChannels'
-  | 'occasions.nudgeChannel'
   | 'unlisted-channel';
 
 export interface CaptureAuthorityDecision {
@@ -113,9 +107,8 @@ export function parseOwnerChannelList(
 
 /**
  * True when `channel` is named by `list`. An entry with no address matches
- * every address on that surface, `telegram` means "Telegram", not "Telegram
- * only when I happen to know the chat id", which is what the shipped
- * `occasions.nudgeChannel` default relies on.
+ * every address on that surface: `telegram` means "Telegram", not "Telegram
+ * only when I happen to know the chat id".
  */
 function listNames(
   list: readonly { readonly surfaceKind: string; readonly address: string }[],
@@ -183,18 +176,6 @@ export function resolveCaptureAuthority(
       source: 'unlisted-channel',
       reason: `${kind} is not listed in profile.ownerChannels, so I cannot record anything to your profile from it. `
         + `Add ${kind} to profile.ownerChannels if messages there are from you.`,
-    };
-  }
-
-  // Empty setting: the channels already carrying the owner's private reminders.
-  const inherited = parseOwnerChannelList(input.nudgeChannels);
-  if (listNames(inherited, input.channel ?? {})) {
-    return {
-      authority: 'owner-direct',
-      surface: 'agent',
-      canCapture: true,
-      source: 'occasions.nudgeChannel',
-      reason: `${kind} is one of the channels already set to reach you (occasions.nudgeChannel), so messages on it are treated as you speaking.`,
     };
   }
 

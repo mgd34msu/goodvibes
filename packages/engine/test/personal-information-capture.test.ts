@@ -30,7 +30,7 @@ const ITINERARY_DETAILS = [
 ];
 
 function ownerDirect() {
-  return resolveCaptureAuthority({ channel: undefined, ownerChannels: '', nudgeChannels: '' });
+  return resolveCaptureAuthority({ channel: undefined, ownerChannels: '' });
 }
 
 describe('what a conversational turn is spawned with', () => {
@@ -111,24 +111,22 @@ describe('which turns carry the owner\'s own authority', () => {
     expect(decision.source).toBe('local-surface');
   });
 
-  it('telegram does, on the shipped defaults, with nothing configured', () => {
-    // occasions.nudgeChannel ships as 'telegram', the channel already trusted
-    // to carry his private reminders outbound. This is the reported case.
+  it('no channel does with nothing configured, and the reminder destination is no grant', () => {
+    // occasions.nudgeChannel ships as 'telegram'; it is where reminders go,
+    // not who may write to the profile.
     const decision = resolveCaptureAuthority({
       channel: { surfaceKind: 'telegram' },
       ownerChannels: '',
-      nudgeChannels: 'telegram',
     });
-    expect(decision.canCapture).toBe(true);
-    expect(decision.authority).toBe('owner-direct');
-    expect(decision.source).toBe('occasions.nudgeChannel');
+    expect(decision.canCapture).toBe(false);
+    expect(decision.authority).toBe('channel-message');
+    expect(decision.reason).toContain('profile.ownerChannels');
   });
 
   it('a channel he never named does not, and the refusal names the setting', () => {
     const decision = resolveCaptureAuthority({
       channel: { surfaceKind: 'sms' },
       ownerChannels: '',
-      nudgeChannels: 'telegram',
     });
     expect(decision.canCapture).toBe(false);
     expect(decision.authority).toBe('channel-message');
@@ -136,20 +134,17 @@ describe('which turns carry the owner\'s own authority', () => {
     expect(decision.reason).toContain('sms');
   });
 
-  it('an explicit list wins over the inherited one, in both directions', () => {
+  it('only the explicit list grants', () => {
     const allowed = resolveCaptureAuthority({
       channel: { surfaceKind: 'slack' },
       ownerChannels: 'slack',
-      nudgeChannels: 'telegram',
     });
     expect(allowed.canCapture).toBe(true);
     expect(allowed.source).toBe('profile.ownerChannels');
 
-    // Telegram is the nudge channel, but the explicit list did not name it.
     const refused = resolveCaptureAuthority({
       channel: { surfaceKind: 'telegram' },
       ownerChannels: 'slack',
-      nudgeChannels: 'telegram',
     });
     expect(refused.canCapture).toBe(false);
   });
@@ -160,7 +155,6 @@ describe('which turns carry the owner\'s own authority', () => {
     const decision = resolveCaptureAuthority({
       channel: { routed: true },
       ownerChannels: '',
-      nudgeChannels: 'telegram',
     });
     expect(decision.canCapture).toBe(false);
     expect(decision.authority).toBe('channel-message');
@@ -178,14 +172,13 @@ describe('which turns carry the owner\'s own authority', () => {
       { surfaceKind: 'telegram', address: '12345' },
       { surfaceKind: 'slack', address: '' },
     ]);
-    const pinned = { ownerChannels: 'telegram:12345', nudgeChannels: '' };
+    const pinned = { ownerChannels: 'telegram:12345' };
     expect(resolveCaptureAuthority({ channel: { surfaceKind: 'telegram', address: '12345' }, ...pinned }).canCapture).toBe(true);
     expect(resolveCaptureAuthority({ channel: { surfaceKind: 'telegram', address: '99999' }, ...pinned }).canCapture).toBe(false);
     // Unpinned matches any chat on that surface.
     expect(resolveCaptureAuthority({
       channel: { surfaceKind: 'telegram', address: '99999' },
       ownerChannels: 'telegram',
-      nudgeChannels: '',
     }).canCapture).toBe(true);
   });
 });
@@ -348,7 +341,6 @@ describe('the profile capture tool', () => {
     const refusedAuthority = resolveCaptureAuthority({
       channel: { surfaceKind: 'sms' },
       ownerChannels: '',
-      nudgeChannels: 'telegram',
     });
     const result = await toolWith(port, refusedAuthority).execute({
       action: 'record_trip',
@@ -367,7 +359,7 @@ describe('the profile capture tool', () => {
     const { plans, port } = fakePort();
     const base = toolWith(port);
     const refused = base.bindCapture(resolveCaptureAuthority({
-      channel: { surfaceKind: 'sms' }, ownerChannels: '', nudgeChannels: '',
+      channel: { surfaceKind: 'sms' }, ownerChannels: '',
     }));
     const args = { action: 'record_trip', title: 'T', from: '2026-08-06', to: '2026-08-09', said: 'x' };
     expect(JSON.parse((await refused.execute(args)).output as string).stored).toBe(false);

@@ -985,6 +985,23 @@ describe('one notification, and the merchant decides what silence means', () => 
     });
   }
 
+  test('a notice channel that throws within budget is the same as one that reached nobody', async () => {
+    const outcomes: string[] = [];
+    for (const failure of ['returned', 'thrown'] as const) {
+      const merchant = shapes()[0]!.get();
+      const harness = buildHarness({ merchant });
+      const deliver = harness.deps.notifier.deliver.bind(harness.deps.notifier);
+      harness.deps.notifier.deliver = async (input) => {
+        if (input.kind !== 'veto') return deliver(input);
+        if (failure === 'thrown') throw new Error('the channel token was rejected');
+        return [{ channel: 'telegram', delivered: false, backfillable: false }];
+      };
+      const outcome = await runOn(harness, merchant);
+      outcomes.push(outcome.kind === 'purchased' ? `purchased:${outcome.record.windowOutcome}` : `${outcome.kind}`);
+    }
+    expect(outcomes).toEqual(['purchased:proceeding-undelivered', 'purchased:proceeding-undelivered']);
+  });
+
   test('an over-budget total asks, and silence does not submit', async () => {
     const harness = buildHarness({ merchant: alpha, dailyItemMinorUnits: 5_000, answer: null });
     const outcome = await runOn(harness, alpha);

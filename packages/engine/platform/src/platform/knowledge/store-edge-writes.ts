@@ -2,6 +2,7 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import type { KnowledgeEdgeRecord, KnowledgeEdgeUpsertInput } from './types.js';
 import { nowMs } from './store-schema.js';
+import { edgeEndpointKey, lookupRecord } from './store-indexed-map.js';
 
 const guardedEdgeInputs = new WeakMap<KnowledgeEdgeUpsertInput, () => void>();
 /** Local commit authority does not survive copying or serialization. */
@@ -10,7 +11,7 @@ export function guardKnowledgeEdgeInput(input: KnowledgeEdgeUpsertInput, assertC
 }
 
 export function findKnowledgeEdge(edges: ReadonlyMap<string, KnowledgeEdgeRecord>, input: KnowledgeEdgeUpsertInput): KnowledgeEdgeRecord | undefined {
-    return [...edges.values()].find((edge) => (
+    return lookupRecord(edges, edgeEndpointKey(input), (edge) => (
       edge.fromKind === input.fromKind
       && edge.fromId === input.fromId
       && edge.toKind === input.toKind

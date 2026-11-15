@@ -335,7 +335,7 @@ const CASES: readonly AdapterCase[] = [
   },
   {
     name: 'msteams',
-    configKeys: ['surfaces.msteams.appPassword'],
+    configKeys: ['surfaces.msteams.webhookSecret'],
     call: (presented, context) => handleMSTeamsSurfaceWebhook(new Request('http://localhost/msteams', {
       method: 'POST',
       headers: { 'x-goodvibes-msteams-token': presented, 'content-type': 'application/json' },

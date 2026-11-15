@@ -17,7 +17,6 @@ import {
   dispatchDaemonApiRoutes,
   GATEWAY_REST_ROUTES,
 } from '../daemon-api/src/index.js';
-import { AccountsSnapshotResponseSchema } from '../contracts/src/index.js';
 import type {
   DaemonSystemRouteContext,
   DaemonIntegrationRouteContext,
@@ -276,7 +275,6 @@ describe('createDaemonIntegrationRouteHandlers per-request auth', () => {
     expect(body).toEqual(snapshot);
     expect(Object.hasOwn(body, 'channels')).toBe(false);
     expect(Object.hasOwn(body, 'channelCount')).toBe(false);
-    expect(() => AccountsSnapshotResponseSchema.parse(body)).not.toThrow();
   });
 
   test('getEvents drops event domains the runtime does not define', async () => {

@@ -815,10 +815,22 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         addressCurrent();
       }
       catch (error) {
-        await releaseUnlessStopped();
-        if (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable')) throw error;
-        if (error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
-        return { done: noticeRefusal(error) };
+        const ownerLost = signal?.aborted === true || error instanceof CheckoutOwnershipError || !addressStillCurrent();
+        const ownHandling = (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable'))
+          || error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError;
+        if (ownerLost || ownHandling) {
+          await releaseUnlessStopped();
+          if (ownHandling) throw error;
+          return { done: noticeRefusal(error) };
+        }
+        // A channel that throws reached nobody, exactly like one that returns
+        // failed deliveries, so it follows the same rule: the window's own
+        // undeliverable edge (an approval denies, a veto proceeds).
+        logger.warn('A purchase notice channel failed; the window treats the notice as undelivered', {
+          purchaseId: request.purchaseId, kind, error: error instanceof Error ? error.message : String(error),
+        });
+        deliveries = [];
+        restoredDeadline = undefined;
       }
       const deadlineMs = restoredDeadline ? await restoredDeadline : windowDeadlineMs(now(), minutes);
       addressCurrent();

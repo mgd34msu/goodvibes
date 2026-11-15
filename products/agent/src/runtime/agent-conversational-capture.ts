@@ -97,7 +97,7 @@ export function missingConversationalCaptureTools(
  * other way would be resolved by the caller that knows where it came from.
  */
 export function resolveAgentTurnCaptureAuthority(): CaptureAuthorityDecision {
-  return resolveCaptureAuthority({ channel: undefined, ownerChannels: '', nudgeChannels: '' });
+  return resolveCaptureAuthority({ channel: undefined, ownerChannels: '' });
 }
 
 /**

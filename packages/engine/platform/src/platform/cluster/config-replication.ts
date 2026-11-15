@@ -483,7 +483,12 @@ export class ConfigReplicationService {
     await this.sendSealed(entry, value, check);
   }
 
-  /** Seal `value` to every current member and send it. */
+  /**
+   * Seal `value` to every current member and send it: one envelope when every
+   * sealed copy fits, otherwise one envelope per member (the shape a joining
+   * member already receives), so a long credential in a large group still
+   * reaches everyone.
+   */
   private async sendSealed(entry: ConfigReplicaEntry, value: string, check: () => void): Promise<void> {
     const members = this.host.groupState()?.members ?? [];
     const sealed: Record<string, unknown> = {};
@@ -491,8 +496,28 @@ export class ConfigReplicationService {
       if (member.nodeId === this.host.nodeId) continue;
       sealed[member.nodeId] = sealForMember(member.agreementKey, value, SECRET_SEAL_CONTEXT);
     }
-    if (Object.keys(sealed).length === 0) return;
-    await this.send(check, CONFIG_MESSAGE_TYPES.delta, { secretPath: entry.path, origin: entry.origin, revision: entry.revision, sealed });
+    const recipients = Object.keys(sealed);
+    if (recipients.length === 0) return;
+    const header = { secretPath: entry.path, origin: entry.origin, revision: entry.revision };
+    const body = { ...header, sealed };
+    if (recipients.length === 1 || Buffer.byteLength(JSON.stringify(body), 'utf8') <= CONFIG_BODY_LIMIT) {
+      await this.send(check, CONFIG_MESSAGE_TYPES.delta, body);
+      return;
+    }
+    const failed: string[] = [];
+    for (const nodeId of recipients) {
+      // One member that cannot be reached must not stop the ones after it.
+      try {
+        await this.send(check, CONFIG_MESSAGE_TYPES.delta, { ...header, sealed: { [nodeId]: sealed[nodeId] } });
+      } catch (error) {
+        check();
+        failed.push(nodeId);
+        this.host.logger.warn('cluster: a credential could not be sent to a member', { path: entry.path, to: nodeId, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    if (failed.length > 0) {
+      throw new Error(`The credential at ${entry.path} was not sent to ${failed.length} of ${recipients.length} members (${failed.join(', ')}). It is stored on this machine; set it again to resend it.`);
+    }
   }
 
   /**

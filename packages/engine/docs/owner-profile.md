@@ -603,9 +603,7 @@ conversational turn's authority is decided from the channel it arrived on:
   own occasion-reminder destination (`occasions.nudgeChannel`) is not an owner
   grant: it names where reminders are sent, and a tool that reads and writes
   personal data needs the owner to have said, in `profile.ownerChannels`, that
-  messages on a channel are theirs. The refusal names that setting. (The
-  resolver itself still accepts a nudge-channel fallback for callers that pass
-  one; the conversational turn does not.)
+  messages on a channel are theirs. The refusal names that setting.
 - **Any other channel, or a routed turn whose surface did not come through.**
   Authority stays `channel-message`, refused exactly as before. A turn that
   arrived over a route but could not say which one is refused rather than
@@ -614,8 +612,8 @@ conversational turn's authority is decided from the channel it arrived on:
 
 A channel entry with no address, `telegram` on its own, names the whole
 surface: it means "Telegram", not "Telegram, but only the one chat id I
-happen to remember", matching how the shipped `occasions.nudgeChannel`
-default already behaves. Every refusal from this path says which setting to
+happen to remember", the same reading `occasions.nudgeChannel` gives an
+entry. Every refusal from this path says which setting to
 change (`profile.ownerChannels`) and why, so a legitimate channel the owner
 wants recognised is one settings edit away rather than a silent gap.
 

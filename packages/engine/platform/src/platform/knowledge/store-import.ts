@@ -6,6 +6,7 @@ import { activationSourceIds } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError as Held, type KnowledgeNodeActivationOptions } from './activation/types.js';
 import { observeKnowledgeValue } from './local-value-observation.js';
 import { findKnowledgeEdge, prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow } from './store-edge-writes.js';
+import { copyRecordMap, extractionSourceKey, lookupRecord, sourceUriKey } from './store-indexed-map.js';
 import { prepareKnowledgeExtractionRecord, prepareKnowledgeSourceRecord, writeKnowledgeExtractionRow, writeKnowledgeSourceRow } from './store-evidence-writes.js';
 import { assertPreparedNodeWrites, markPreparedNodeWritten, preparedNodeWrites, prepareNodeActivationPass, writePreparedNodeActivationCache, type NodeMutationDraft } from './store-node-activation.js';
 import { recordKnowledgeNodeRevisions, writeKnowledgeNodeRow } from './store-node-history.js';
@@ -15,6 +16,28 @@ import type { KnowledgeStore } from './store.js';
 import type { KnowledgeEdgeRecord, KnowledgeEdgeUpsertInput, KnowledgeExtractionRecord, KnowledgeExtractionUpsertInput,
   KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeNodeRecord, KnowledgeNodeRevisionRecord, KnowledgeNodeUpsertInput,
   KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from './types.js';
+
+/** Largest one imported record may be, in JSON characters. An import of any size is
+ * applied in batches; only a single record over this is refused, by name. */
+export const KNOWLEDGE_IMPORT_RECORD_MAX_CHARS = 1_000_000;
+
+export class KnowledgeImportRecordTooLargeError extends Error {
+  override readonly name = 'KnowledgeImportRecordTooLargeError';
+  constructor(readonly kind: string, readonly index: number, readonly id: string | undefined, readonly chars: number) {
+    super(`Import ${kind} record ${index + 1}${id ? ` (${id})` : ''} has ${chars} characters; the limit is ${KNOWLEDGE_IMPORT_RECORD_MAX_CHARS}. Nothing was imported; shorten or drop that record and import again.`);
+  }
+}
+
+/** Refuses the import before any write when one record is over the limit. One JSON pass per record. */
+export function assertKnowledgeImportRecordSizes(input: KnowledgeImportInput): void {
+  const kinds = [['source', input.sources], ['extraction', input.extractions], ['node', input.nodes], ['edge', input.edges], ['issue', input.issues]] as const;
+  for (const [kind, records] of kinds) {
+    for (const [index, record] of records.entries()) {
+      const chars = JSON.stringify(record)?.length ?? 0;
+      if (chars > KNOWLEDGE_IMPORT_RECORD_MAX_CHARS) throw new KnowledgeImportRecordTooLargeError(kind, index, (record as { readonly id?: string }).id, chars);
+    }
+  }
+}
 
 /** Exact physically published identities; immutable arrays retain the committed rows. */
 export interface KnowledgeImportReceipt {
@@ -60,7 +83,7 @@ export interface KnowledgeImportView {
   readonly nodePublished?: ((record: KnowledgeNodeRecord, previous: KnowledgeNodeRecord | undefined, snapshot: KnowledgeRecordSnapshot) => void) | undefined;
 }
 function extractionFor(extractions: ReadonlyMap<string, KnowledgeExtractionRecord>, sourceId: string): KnowledgeExtractionRecord | null {
-  return [...extractions.values()].find((record) => record.sourceId === sourceId) ?? null;
+  return lookupRecord(extractions, extractionSourceKey(sourceId), (record) => record.sourceId === sourceId) ?? null;
 }
 
 /** Stage complete ordinary records and judgments without changing the live store or SQL. */
@@ -78,13 +101,15 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
   }
   let graphCheck: (() => void) | undefined;
   function assertCurrent(): void { assertEvidenceCurrent(); graphCheck?.(); }
-  const sources = new Map(view.sources), extractions = new Map(view.extractions), edges = new Map(view.edges), issues = new Map(view.issues);
+  const sources = copyRecordMap(view.sources), extractions = copyRecordMap(view.extractions), edges = copyRecordMap(view.edges), issues = new Map(view.issues);
   const sourceWrites: KnowledgeSourceRecord[] = [], extractionWrites: KnowledgeExtractionRecord[] = [];
   const edgeWrites: KnowledgeEdgeRecord[] = [], issueWrites: KnowledgeIssueRecord[] = [];
   const removedExtractions = new Set<string>();
   for (const source of input.sources) {
     watch(() => source.id ? view.sources.get(source.id) : source.canonicalUri ? store.getSourceByCanonicalUri(source.canonicalUri) : null);
-    const existing = source.id ? sources.get(source.id) : source.canonicalUri ? [...sources.values()].find((record) => record.canonicalUri === source.canonicalUri) : undefined;
+    const canonicalUri = source.canonicalUri;
+    const existing = source.id ? sources.get(source.id) : canonicalUri
+      ? lookupRecord(sources, sourceUriKey(canonicalUri), (record) => record.canonicalUri === canonicalUri) : undefined;
     const preparedSource = prepareKnowledgeSourceRecord(source, existing);
     const record = copyKnowledgeRepresentation(preparedSource, captureKnowledgeStoreInput(preparedSource));
     sources.set(record.id, record); sourceWrites.push(record);

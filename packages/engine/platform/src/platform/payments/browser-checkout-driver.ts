@@ -59,9 +59,10 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  *
  * `submitOrder` reports the url it landed on and, without help, nothing else.
  * Reading a merchant order number off a confirmation page, or recognising a
- * 3-D Secure interstitial, is site-specific knowledge, and checkout-page.ts
- * exists to keep site-specific knowledge out of this port. A composition that
- * can read its own merchants supplies `describeSubmission`; one that cannot
+ * 3-D Secure interstitial, is page knowledge, and checkout-page.ts keeps it
+ * out of this port. The daemon's composition supplies `describeSubmission`
+ * (checkout-landing.ts reads the landing page for a confirmation and its order
+ * number); a composition without one, or a landing page that shows neither,
  * gets a null order id AND `verified: false`, which checkout-flow.ts records
  * and reports honestly as submitted-but-unconfirmed rather than as a purchase
  * nothing here actually watched complete.
@@ -174,6 +175,8 @@ export interface CheckoutBrowserEngine {
 export interface CheckoutSubmission {
   readonly url: string;
   readonly navigated: boolean;
+  /** The page the submit was clicked on, for a composition that reads where it landed. */
+  readonly target: CheckoutEngineTarget;
 }
 
 /**
@@ -534,7 +537,7 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     const url = readUrl(result) ?? await this.url();
     const describe = this.deps.describeSubmission;
     if (describe === undefined) return { url, orderId: null, challenge: null, verified: false };
-    const described = await describe({ url, navigated: result['navigated'] === true });
+    const described = await describe({ url, navigated: result['navigated'] === true, target: this.target });
     // Being wired is not evidence; what it found is. A composition that looked
     // and saw nothing, no order id, no challenge, no explicit confirmation,
     // gets the same honest `verified: false` as a composition with no

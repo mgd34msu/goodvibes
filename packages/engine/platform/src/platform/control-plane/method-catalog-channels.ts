@@ -676,7 +676,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'channels.routing.assign',
     title: 'Assign Channel Routing Rule',
-    description: 'Create or update a channel-to-profile routing rule in the daemon-persisted routing table. Requires explicit confirmation or fresh recorded native admission for a paired autonomous caller.',
+    description: 'Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation or fresh recorded native admission for a paired autonomous caller.',
     category: 'channels',
     scopes: ['write:channels'],
     access: 'admin',

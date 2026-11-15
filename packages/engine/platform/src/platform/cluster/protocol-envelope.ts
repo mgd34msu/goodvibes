@@ -145,12 +145,12 @@ export interface EnvelopeDraft {
  */
 function assertEnvelopeFits(envelope: ClusterEnvelope, signatureBytes: number): void {
   if (Buffer.byteLength(JSON.stringify(envelope), 'utf8') + Buffer.byteLength(',"sig":""') + signatureBytes > MAX_ENVELOPE_BYTES) {
-    throw new Error('Cluster envelope exceeds the UTF-8 datagram size limit');
+    throw new Error(`Cluster envelope exceeds the UTF-8 datagram size limit of ${MAX_ENVELOPE_BYTES} bytes`);
   }
 }
 function serializeSignedEnvelope(envelope: SignedClusterEnvelope): string {
   const raw = JSON.stringify(envelope);
-  if (Buffer.byteLength(raw, 'utf8') > MAX_ENVELOPE_BYTES) throw new Error('Cluster envelope exceeds the UTF-8 datagram size limit');
+  if (Buffer.byteLength(raw, 'utf8') > MAX_ENVELOPE_BYTES) throw new Error(`Cluster envelope exceeds the UTF-8 datagram size limit of ${MAX_ENVELOPE_BYTES} bytes`);
   return raw;
 }
 

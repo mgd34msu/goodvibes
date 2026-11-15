@@ -29,6 +29,7 @@ import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, p
 import type { PlanningSourceIdentity } from './store-planning-source-selector.js';
 import { applyKnowledgeImport, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
 import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } from './store-edge-writes.js';
+import { IndexedRecordMap, edgeEndpointKey, extractionSourceKey, nodeSlugKey, sourceUriKey } from './store-indexed-map.js';
 import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, knowledgeEdgeChangesFromRows, type KnowledgeEdgeChangeSnapshot, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
 import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError, type KnowledgeNodeActivationOptions } from './activation/types.js';
@@ -282,11 +283,13 @@ export class KnowledgeStore {
   /** Identity of the saved file as this store last loaded or wrote it; see refreshIfChanged(). */
   private imageIdentity: string | undefined;
   private refreshing: Promise<boolean> | null = null;
-  private readonly sources = new Map<string, KnowledgeSourceRecord>();
-  private readonly nodes = new Map<string, KnowledgeNodeRecord>();
-  private readonly edges = new Map<string, KnowledgeEdgeRecord>();
+  // Indexed by the keys ingest and scope selection look records up by, so
+  // those lookups do not walk the whole collection (store-indexed-map.ts).
+  private readonly sources = new IndexedRecordMap<KnowledgeSourceRecord>((record) => record.canonicalUri ? sourceUriKey(record.canonicalUri) : undefined);
+  private readonly nodes = new IndexedRecordMap<KnowledgeNodeRecord>((record) => nodeSlugKey(record.kind, record.slug));
+  private readonly edges = new IndexedRecordMap<KnowledgeEdgeRecord>(edgeEndpointKey);
   private readonly issues = new Map<string, KnowledgeIssueRecord>();
-  private readonly extractions = new Map<string, KnowledgeExtractionRecord>();
+  private readonly extractions = new IndexedRecordMap<KnowledgeExtractionRecord>((record) => extractionSourceKey(record.sourceId));
   private readonly jobRuns = new Map<string, KnowledgeJobRunRecord>();
   private readonly refinementTasks = new Map<string, KnowledgeRefinementTaskRecord>();
   private readonly usageRecords = new Map<string, KnowledgeUsageRecord>();

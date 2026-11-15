@@ -926,6 +926,35 @@ export class SecretsManager {
     return null;
   }
 
+  /**
+   * The entry `set(key, _, { scope })` replaces, exactly as stored: the
+   * scope's own write stores (secure first, as reads see them), never the
+   * environment, another tier, another surface's silo or a followed reference.
+   * A caller that must undo a failed write restores this, not the effective
+   * value `get()` would resolve. An unreadable store throws rather than
+   * reading as "no entry", so an undo never deletes what it could not see.
+   */
+  async getWriteScopeEntry(key: string, scope: SecretScope): Promise<string | null> {
+    for (const medium of ['secure', 'plaintext'] as const) {
+      const target = this.resolveWriteTarget(scope, medium);
+      const result = target.secure ? this.readEncryptedStore(target.path) : this.readPlaintextStore(target.path);
+      if (result.status === 'unreadable') {
+        throw new SecretStoreUnreadableError(`The secrets store at ${target.path} exists but cannot be read (${result.reason}).`);
+      }
+      if (result.status === 'ok' && Object.hasOwn(result.secrets, key)) return result.secrets[key] ?? null;
+    }
+    return null;
+  }
+
+  /** Remove `key` from the scope's own write stores only; the counterpart of {@link getWriteScopeEntry}. */
+  async deleteWriteScopeEntry(key: string, scope: SecretScope): Promise<void> {
+    const stores = (['secure', 'plaintext'] as const)
+      .map((medium) => this.resolveWriteTarget(scope, medium))
+      .filter((store) => existsSync(store.path) && this.storeContainsKey(store, key));
+    if (stores.length === 0) return;
+    await this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(store => store.path), () => this.deleteFromScopeOwned(key, stores)));
+  }
+
   private async getInternal(key: string, seen: Set<string>): Promise<string | null> {
     const envValue = ownEnvValue(key);
     if (envValue !== undefined) {

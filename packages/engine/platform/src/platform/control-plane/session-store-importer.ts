@@ -2,8 +2,12 @@
  * session-store-importer.ts
  *
  * Boot-time migration that folds every pre-existing session store into the ONE
- * home-scoped durable broker store. Idempotent and safe to run repeatedly, the
- * merge is keyed on session id, so a re-run over the same sources is a no-op.
+ * home-scoped durable broker store. Each session is folded ONCE: its id goes
+ * into a small ledger beside the store, and a session already in the store or
+ * in the ledger is never taken from a source again. So a session deleted from
+ * the store stays deleted although a source (a terminal's local store, the
+ * companion directory) still holds it, and a boot with nothing new to fold
+ * writes nothing. The store itself is never its own source.
  *
  * Sources folded in (the one-broker session-spine effort, see CHANGELOG 1.0.0):
  *  1. Companion chat files, ~/.goodvibes/companion-chat/sessions/*.json
@@ -14,10 +18,15 @@
  *
  * No session is dropped (closed included); deletion remains the GC's job. Corrupt
  * or partial files are logged and skipped per-file, the run never aborts.
+ *
+ * The sources are not retired here: the project stores are still the local
+ * session stores of the terminal apps, and the companion directory is the
+ * companion chat's own persistence. The pre-split home store is retired by the
+ * sweep that folds it (pre-split-control-plane-sweep.ts).
  */
 
 import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { PersistentStore } from '../state/persistent-store.js';
 import { CompanionChatPersistence } from '../companion/companion-chat-persistence.js';
 import { defaultSessionsDir } from '../companion/companion-chat-persistence.js';
@@ -65,6 +74,20 @@ interface MergeState {
   readonly sessions: Map<string, SharedSessionRecord>;
   readonly messages: Map<string, SharedSessionMessage>;
   readonly inputs: Map<string, SharedSessionInputRecord>;
+  /** Session ids folded by any earlier run (and by this one, as it goes). */
+  readonly folded: Set<string>;
+  /** Session ids this run added. */
+  readonly added: Set<string>;
+}
+
+/** The ids already folded, beside the store: `<store>.folded.json`. */
+type FoldedSessionLedger = {
+  readonly version: 1;
+  readonly sessionIds: readonly string[];
+};
+
+function foldedLedgerPath(homeStorePath: string): string {
+  return `${homeStorePath.replace(/\.json$/, '')}.folded.json`;
 }
 
 /** Raised when the home store exists but cannot be read, so it is never overwritten. */
@@ -118,10 +141,13 @@ export function discoverLegacySessionSources(input: {
 }
 
 /**
- * Fold every source into the home store at `homeStorePath`, idempotently.
- * Starts from the existing home store, merges each source keyed by session id
- * (newer updatedAt wins; messages/inputs union-deduped by id), and re-persists
- * atomically. A second run over the same sources produces the same store.
+ * Fold every source into the home store at `homeStorePath`, once per session.
+ * A source session is added when the store does not hold it and no earlier run
+ * folded it (the ledger); its messages and inputs come with it. The store is
+ * written only when something was added (or it does not exist yet), and the
+ * ledger only when it gained an id. The first run after the ledger existed
+ * folds as before, so nothing a source holds is lost; from then on a session
+ * deleted from the store stays deleted.
  *
  * @throws HomeSessionStoreUnreadableError when the home store exists but cannot
  *         be read. Nothing is written then: persisting the legacy-only merge
@@ -133,20 +159,27 @@ export async function importLegacySessionStores(input: {
   readonly sources: readonly LegacySessionSource[];
 }): Promise<ImportLegacySessionsResult> {
   const homeStore = new PersistentStore<SharedSessionStoreSnapshot>(input.homeStorePath);
-  const existing = loadSessionBrokerState(await loadHomeSnapshot(homeStore, input.homeStorePath));
+  const homeSnapshot = await loadHomeSnapshot(homeStore, input.homeStorePath);
+  const existing = loadSessionBrokerState(homeSnapshot);
+  const ledgerPath = foldedLedgerPath(input.homeStorePath);
+  const ledgerStore = new PersistentStore<FoldedSessionLedger>(ledgerPath);
+  const ledger = await loadFoldedLedger(ledgerStore, ledgerPath);
   const state: MergeState = {
     sessions: new Map(existing.sessions),
     messages: new Map(),
     inputs: new Map(),
+    folded: new Set(ledger?.sessionIds ?? []),
+    added: new Set(),
   };
   for (const bucket of existing.messages.values()) for (const m of bucket) state.messages.set(m.id, m);
   for (const bucket of existing.inputs.values()) for (const i of bucket) state.inputs.set(i.id, i);
 
-  const startCount = state.sessions.size;
   const missingSources: string[] = [];
   const skippedFiles: string[] = [];
+  const live = resolve(input.homeStorePath);
 
   for (const source of input.sources) {
+    if (source.kind === 'broker-store' && resolve(source.path) === live) continue;
     if (!existsSync(source.path)) {
       missingSources.push(source.path);
       continue;
@@ -158,13 +191,38 @@ export async function importLegacySessionStores(input: {
     }
   }
 
-  await homeStore.persist(buildSnapshot(state));
+  // Only a change is written: a boot with nothing new leaves the store alone.
+  // A store that does not exist yet is created, so the pre-split sweep that
+  // runs next can tell a duplicate from the only copy.
+  if (state.added.size > 0 || homeSnapshot === null) await homeStore.persist(buildSnapshot(state));
+  if (ledger === null || state.folded.size !== ledger.sessionIds.length) {
+    await ledgerStore.persist({ version: 1, sessionIds: [...state.folded].sort() });
+  }
   return {
     total: state.sessions.size,
-    imported: state.sessions.size - startCount,
+    imported: state.added.size,
     missingSources,
     skippedFiles,
   };
+}
+
+/**
+ * The folded-session ledger, or null when there is none yet. An unreadable
+ * ledger is reported like an unreadable store: guessing it empty would bring
+ * every deleted session back.
+ */
+async function loadFoldedLedger(store: PersistentStore<FoldedSessionLedger>, path: string): Promise<FoldedSessionLedger | null> {
+  let loaded: FoldedSessionLedger | null;
+  try {
+    loaded = await store.load();
+  } catch (error) {
+    throw new HomeSessionStoreUnreadableError(path, error);
+  }
+  if (loaded === null) return null;
+  if (loaded.version !== 1 || !Array.isArray(loaded.sessionIds) || loaded.sessionIds.some((id) => typeof id !== 'string')) {
+    throw new HomeSessionStoreUnreadableError(path, new Error('the folded-session ledger has an unrecognized shape'));
+  }
+  return loaded;
 }
 
 async function loadHomeSnapshot(
@@ -203,13 +261,17 @@ async function mergeBrokerStore(
     const stamped = record.project === 'unknown' && source.project
       ? { ...record, project: source.project }
       : record;
-    upsertSession(state, stamped);
+    foldSession(state, stamped);
   }
   for (const bucket of loaded.messages.values()) {
-    for (const message of bucket) if (!state.messages.has(message.id)) state.messages.set(message.id, message);
+    for (const message of bucket) {
+      if (state.added.has(message.sessionId) && !state.messages.has(message.id)) state.messages.set(message.id, message);
+    }
   }
   for (const bucket of loaded.inputs.values()) {
-    for (const inputRecord of bucket) if (!state.inputs.has(inputRecord.id)) state.inputs.set(inputRecord.id, inputRecord);
+    for (const inputRecord of bucket) {
+      if (state.added.has(inputRecord.sessionId) && !state.inputs.has(inputRecord.id)) state.inputs.set(inputRecord.id, inputRecord);
+    }
   }
 }
 
@@ -222,22 +284,35 @@ async function mergeCompanionDir(
   const stored = await persistence.loadAll();
   for (const { meta, messages } of stored) {
     const converted = companionMessagesToShared(meta.id, messages);
+    if (!foldSession(state, companionSessionToShared(meta, converted, source.project ?? 'unknown'))) continue;
     for (const message of converted) if (!state.messages.has(message.id)) state.messages.set(message.id, message);
-    upsertSession(state, companionSessionToShared(meta, converted, source.project ?? 'unknown'));
   }
   // loadAll sets aside or skips files it cannot use; name them so the result
   // does not under-report.
   for (const rejected of persistence.rejectedOnLoad()) skippedFiles.push(join(source.path, rejected.file));
 }
 
-function upsertSession(state: MergeState, incoming: SharedSessionRecord): void {
-  const current = state.sessions.get(incoming.id);
-  if (!current || incoming.updatedAt >= current.updatedAt) {
-    const participants = current
-      ? mergeParticipants(current, incoming)
-      : incoming.participants;
-    state.sessions.set(incoming.id, { ...incoming, participants });
+/**
+ * Take a source session when it was never folded before and the store does
+ * not hold it. Within one run two sources may both hold a new session; the
+ * newer copy wins and participants are unioned. Returns true when the session
+ * is one this run is adding.
+ */
+function foldSession(state: MergeState, incoming: SharedSessionRecord): boolean {
+  if (state.added.has(incoming.id)) {
+    const current = state.sessions.get(incoming.id)!;
+    if (incoming.updatedAt >= current.updatedAt) {
+      state.sessions.set(incoming.id, { ...incoming, participants: mergeParticipants(current, incoming) });
+    }
+    return true;
   }
+  if (state.folded.has(incoming.id)) return false;
+  // Recorded either way, so a later delete of this session sticks.
+  state.folded.add(incoming.id);
+  if (state.sessions.has(incoming.id)) return false;
+  state.sessions.set(incoming.id, incoming);
+  state.added.add(incoming.id);
+  return true;
 }
 
 function mergeParticipants(

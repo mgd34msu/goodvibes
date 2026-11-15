@@ -32,7 +32,7 @@ test('legacy teardown drains an admitted assignment before closing its store', a
   const entered = deferred(); const release = deferred();
   const original = registration.store.upsert.bind(registration.store);
   const upsert = spyOn(registration.store, 'upsert').mockImplementation(async (input) => { entered.resolve(); await release.promise; return original(input); });
-  const saving = catalog.invoke(assign, makeInvocation({ surfaceKind: 'telegram', routeId: 'fixture', profileId: 'fixture-profile', confirm: true }));
+  const saving = catalog.invoke(assign, makeInvocation({ surfaceKind: 'slack', routeId: 'fixture', profileId: 'fixture-profile', confirm: true }));
   const observed = saving.then((value) => ({ value }), (error: unknown) => ({ error }));
   try {
     await entered.promise;
@@ -111,7 +111,7 @@ test('an explicit close waits for an accepted assignment to survive reopen', asy
   const entered = deferred(); const release = deferred();
   const original = registration.store.upsert.bind(registration.store);
   const upsert = spyOn(registration.store, 'upsert').mockImplementation(async (input) => { entered.resolve(); await release.promise; return original(input); });
-  const saving = catalog.invoke(assign, makeInvocation({ surfaceKind: 'telegram', routeId: 'fixture', profileId: 'persisted', confirm: true }));
+  const saving = catalog.invoke(assign, makeInvocation({ surfaceKind: 'slack', routeId: 'fixture', profileId: 'persisted', confirm: true }));
   void saving.catch(() => {});
   try {
     await entered.promise;

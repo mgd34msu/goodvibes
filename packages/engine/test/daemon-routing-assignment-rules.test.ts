@@ -45,6 +45,13 @@ describe('channels.routing assignment rules', () => {
     expect(registration.resolver.getProfileForChannel('email')).toBe('work');
   });
 
+  test('a surface whose messages never consult an assignment is refused, naming the ones that do', async () => {
+    await expect(catalog.invoke(ASSIGN, confirmed({ channelId: 'telegram:12345', profileId: 'work' })))
+      .rejects.toMatchObject({ status: 400, code: 'ROUTING_SURFACE_NOT_ROUTED' });
+    const listed = (await catalog.invoke(LIST, makeInvocation({}))) as { total: number };
+    expect(listed.total).toBe(0);
+  });
+
   test('an assignment naming a profile this host does not hold is kept but flagged in the log', async () => {
     await catalog.invoke(ASSIGN, confirmed({ surfaceKind: 'slack', profileId: 'wrok' }));
     expect(registration.resolver.getProfileForChannel('slack')).toBe('wrok');

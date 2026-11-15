@@ -76,6 +76,8 @@ function harness(options: {
         },
         get: async (key) => secrets.get(key) ?? null,
         delete: async (key) => { secrets.delete(key); },
+        getWriteScopeEntry: async (key) => secrets.get(key) ?? null,
+        deleteWriteScopeEntry: async (key) => { secrets.delete(key); },
       },
       audit: (entry) => { audit.push(entry); },
     },
@@ -176,6 +178,17 @@ describe('credentials.set: refusals leave the setting exactly as it was', () => 
     await expect(
       createCredentialSetHandler(h.deps)(invocation({ key: SECRET_CONFIG_KEY, value: TOKEN })),
     ).rejects.toThrow(/did not read back/);
+    expect(h.secrets.has(SECRET_STORE_KEY)).toBe(false);
+  });
+
+  test('a failed write never copies a value resolved from elsewhere into the written scope', async () => {
+    // The effective value comes from the environment or a password manager;
+    // the written scope held nothing, so after the refusal it holds nothing.
+    const h = harness({ failConfigWrite: true });
+    const deps = { ...h.deps, secrets: { ...h.deps.secrets, get: async () => 'resolved-from-the-environment' } };
+    await expect(
+      createCredentialSetHandler(deps)(invocation({ key: SECRET_CONFIG_KEY, value: TOKEN })),
+    ).rejects.toThrow(/left exactly as they were/);
     expect(h.secrets.has(SECRET_STORE_KEY)).toBe(false);
   });
 

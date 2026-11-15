@@ -217,15 +217,20 @@ devices are unpaired to fit under it again.
 ## Per-device token lifecycle
 
 - **List** paired devices with `pairing.tokens.list`: id, user-visible name, created timestamp,
-  and last-seen timestamp for every device, plus whether the legacy shared token has been
-  revoked. The secret is never returned by this call.
+  last-seen timestamp and, for a token a paired device minted, `mintedBy` (that device's id), plus
+  whether the legacy shared token has been revoked. The secret is never returned by this call.
 - **Rename** a device with `pairing.tokens.rename({ id, name })`. An unknown id is a 404
   `PAIRING_TOKEN_NOT_FOUND`.
 - **Revoke** one device with `pairing.tokens.delete({ id })`. Revocation is immediate; the token
-  fails the very next request with a 401, and every other paired device keeps working. An unknown
-  id is a 404 `PAIRING_TOKEN_NOT_FOUND`, never a `200`-noop.
+  fails the very next request with a 401. Every token that device minted (and any those minted)
+  is revoked with it and listed in `alsoRevoked`, so cutting off a lost phone leaves nothing it
+  handed out behind; every other paired device keeps working. An unknown id is a 404
+  `PAIRING_TOKEN_NOT_FOUND`, never a `200`-noop.
 - **Mint** a fresh token for the same use case pairing normally does, `pairing.tokens.create({
-  name })` or `pairing.handoff.create`, both bounded by [the device cap](#device-cap).
+  name })` or `pairing.handoff.create`, both bounded by [the device cap](#device-cap). A token
+  a paired device mints with `pairing.tokens.create` or `pairing.tokens.migrate` records that
+  device as `mintedBy`; a device whose own pairing is gone cannot mint (403
+  `PAIRING_TOKEN_NOT_FOUND`).
 
 ## Legacy: the shared token
 

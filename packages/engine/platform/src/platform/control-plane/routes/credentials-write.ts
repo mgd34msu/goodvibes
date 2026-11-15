@@ -85,6 +85,10 @@ export interface CredentialWriteSecrets {
   set(key: string, value: string, options?: { scope?: SecretScope | undefined }): Promise<void>;
   get(key: string): Promise<string | null>;
   delete(key: string, options?: { scope?: SecretScope | undefined }): Promise<void>;
+  /** The raw entry the scope's own stores hold: no environment, other tier or followed reference. */
+  getWriteScopeEntry(key: string, scope: SecretScope): Promise<string | null>;
+  /** Remove the entry from the scope's own stores only. */
+  deleteWriteScopeEntry(key: string, scope: SecretScope): Promise<void>;
 }
 
 export interface CredentialWriteDeps {
@@ -198,12 +202,13 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
     const scope = resolveSecretWriteScope(secretKey);
     const audited = principalFields(invocation);
 
-    // What the store holds now, kept so a failed write can put it back: the
-    // write below replaces it in place, and a working credential must not be
-    // lost to a refused change.
+    // What the written scope holds now, exactly as stored, kept so a failed
+    // write can put it back. Not the resolved value: that may come from the
+    // environment, another tier or a password-manager reference, and writing
+    // it back here would file a plaintext copy that never existed.
     let previous: string | null;
     try {
-      previous = await deps.secrets.get(secretKey);
+      previous = await deps.secrets.getWriteScopeEntry(secretKey, scope);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       record(deps, { action: 'set', configKey: key, secretKey, scope, outcome: 'refused', ...audited, detail });
@@ -215,12 +220,12 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
       );
     }
 
-    // True when the store holds what it held before this call.
+    // True when the written scope holds what it held before this call.
     const restorePrevious = async (): Promise<boolean> => {
       try {
-        if (previous === null) await deps.secrets.delete(secretKey, { scope });
+        if (previous === null) await deps.secrets.deleteWriteScopeEntry(secretKey, scope);
         else await deps.secrets.set(secretKey, previous, { scope });
-        return (await deps.secrets.get(secretKey)) === previous;
+        return (await deps.secrets.getWriteScopeEntry(secretKey, scope)) === previous;
       } catch {
         return false;
       }
@@ -249,7 +254,7 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
 
     let readBack: string | null;
     try {
-      readBack = await deps.secrets.get(secretKey);
+      readBack = await deps.secrets.getWriteScopeEntry(secretKey, scope);
     } catch {
       readBack = null;
     }

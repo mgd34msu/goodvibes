@@ -9,9 +9,8 @@
  * surface did exactly that, and a hand-written row is a second statement of the
  * same shape with nothing keeping the two in step.
  *
- * The shapes here are the ones packages/contracts/src/zod-schemas/providers.ts
- * already validates on the wire; this is the same contract expressed where the
- * generators can read it.
+ * These descriptors are the one statement of those shapes; the generated
+ * contract and every client read them from here.
  *
  * `models.current.set` is a PATCH and NOT `models.select`: the id's verb tail is
  * the catalog's own vocabulary (core-verbs.ts), and setting the current model is

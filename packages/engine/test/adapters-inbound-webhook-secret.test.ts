@@ -3,7 +3,8 @@
  * is checked first, so the account credential used for delivery is not the value
  * a caller needs, and Telegram checks the same secret its registration hands out.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import { handleMatrixSurfaceWebhook } from '../platform/src/platform/adapters/matrix/index.js';
 import { handleMattermostSurfaceWebhook } from '../platform/src/platform/adapters/mattermost/index.js';
 import { handleMSTeamsSurfaceWebhook } from '../platform/src/platform/adapters/msteams/index.js';
@@ -21,7 +22,6 @@ function context(config: Record<string, string>, registry: Record<string, string
 const SURFACES: ReadonlyArray<{ name: string; handler: Handler; header: string; credentialKey: string; secretKey: string }> = [
   { name: 'matrix', handler: handleMatrixSurfaceWebhook, header: 'x-goodvibes-matrix-token', credentialKey: 'surfaces.matrix.accessToken', secretKey: 'surfaces.matrix.webhookSecret' },
   { name: 'mattermost', handler: handleMattermostSurfaceWebhook, header: 'x-goodvibes-mattermost-token', credentialKey: 'surfaces.mattermost.botToken', secretKey: 'surfaces.mattermost.webhookSecret' },
-  { name: 'msteams', handler: handleMSTeamsSurfaceWebhook, header: 'x-goodvibes-msteams-token', credentialKey: 'surfaces.msteams.appPassword', secretKey: 'surfaces.msteams.webhookSecret' },
 ];
 
 const post = (header: string, token: string): Request => new Request('http://localhost/webhook', {
@@ -48,6 +48,55 @@ for (const surface of SURFACES) {
     });
   });
 }
+
+describe('msteams inbound authentication', () => {
+  // No conversation: an admitted request stops at the 400 that follows the
+  // authentication step, so the status says only whether it was admitted.
+  const activity = { type: 'message', channelId: 'msteams', serviceUrl: 'https://smba.trafficmanager.net/teams/' };
+  const teamsPost = (headers: Record<string, string>): Request => new Request('http://localhost/msteams', {
+    method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(activity),
+  });
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'test-key', endorsements: ['msteams'] };
+  const sign = (claims: Record<string, unknown>): string => {
+    const header = Buffer.from(JSON.stringify({ alg: 'RS256', kid: 'test-key', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    const signature = cryptoSign('RSA-SHA256', Buffer.from(`${header}.${payload}`), privateKey).toString('base64url');
+    return `${header}.${payload}.${signature}`;
+  };
+  const now = Math.floor(Date.now() / 1000);
+  const claims = { iss: 'https://api.botframework.com', aud: 'teams-app', exp: now + 600, nbf: now - 60, serviceurl: activity.serviceUrl };
+
+  test('the app password is never accepted as a bearer', async () => {
+    const ctx = context({ 'surfaces.msteams.appId': 'teams-app', 'surfaces.msteams.appPassword': 'delivery-credential' });
+    expect((await handleMSTeamsSurfaceWebhook(teamsPost({ authorization: 'Bearer delivery-credential' }), ctx)).status).toBe(401);
+    expect((await handleMSTeamsSurfaceWebhook(teamsPost({ 'x-goodvibes-msteams-token': 'delivery-credential' }), ctx)).status).toBe(401);
+  });
+
+  test('a relay secret, when set, is accepted', async () => {
+    const ctx = context({ 'surfaces.msteams.webhookSecret': 'relay-secret' });
+    expect((await handleMSTeamsSurfaceWebhook(teamsPost({ 'x-goodvibes-msteams-token': 'relay-secret' }), ctx)).status).not.toBe(401);
+  });
+
+  test('a Bot Framework token for this app is accepted; one for another app, issuer or connector is not', async () => {
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('openidconfiguration')) return Response.json({ jwks_uri: 'https://login.botframework.com/v1/.well-known/keys' });
+      return Response.json({ keys: [jwk] });
+    }) as typeof fetch);
+    try {
+      const ctx = context({ 'surfaces.msteams.appId': 'teams-app' });
+      const call = (token: string) => handleMSTeamsSurfaceWebhook(teamsPost({ authorization: `Bearer ${token}` }), ctx);
+      expect((await call(sign(claims))).status).not.toBe(401);
+      expect((await call(sign({ ...claims, aud: 'another-app' }))).status).toBe(401);
+      expect((await call(sign({ ...claims, iss: 'https://example.test' }))).status).toBe(401);
+      expect((await call(sign({ ...claims, serviceurl: 'https://elsewhere.example.test/' }))).status).toBe(401);
+      expect((await call(sign({ ...claims, exp: now - 3600 }))).status).toBe(401);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
 
 describe('telegram inbound secret', () => {
   const telegramPost = (secret: string): Request => new Request('http://localhost/telegram', {

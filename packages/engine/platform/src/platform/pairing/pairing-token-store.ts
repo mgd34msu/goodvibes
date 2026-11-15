@@ -12,7 +12,10 @@
  * back name / created / last-seen only, never the hash, never the secret.
  *
  * Revocation is immediate: `revoke()` deletes the record, so the very next
- * `authenticate()` of that token misses and the request is unauthorized.
+ * `authenticate()` of that token misses and the request is unauthorized. A
+ * token minted by a paired device records that device (`mintedBy`), and
+ * revoking the device revokes every token it minted, so cutting off a lost
+ * phone cannot leave a credential it handed out behind.
  *
  * The legacy single shared token keeps working (authenticated elsewhere) until
  * it is revoked here via `revokeLegacyShared()`; a client on the shared token
@@ -58,6 +61,8 @@ interface StoredPairingToken {
   readonly tokenHash: string;
   readonly createdAt: number;
   lastSeenAt?: number | undefined;
+  /** The pairing that minted this one, when a paired device (not the owner's own machine) asked. */
+  mintedBy?: string | undefined;
   /** Issued once per exact credential incarnation; never derived by hashing
    * another hash. Kept private alongside its original verifier, not listable. */
   nativeContinuationRevision?: { readonly id: string; readonly createdAt: number; readonly tokenHash: string };
@@ -129,6 +134,8 @@ export interface PublicPairingToken {
   readonly name: string;
   readonly createdAt: number;
   readonly lastSeenAt?: number | undefined;
+  /** The paired device that minted this token; revoking it revokes this one too. */
+  readonly mintedBy?: string | undefined;
 }
 
 /** The result of minting a token, the ONLY time the plaintext secret is exposed. */
@@ -172,6 +179,8 @@ export class PairingTokenStoreBusyError extends Error {
   }
 }
 
+const PAIRING_ID_PATTERN = /^pair-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('pairing token store is not a JSON object');
@@ -188,11 +197,12 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
   const ids = new Set<string>(), hashes = new Set<string>();
   for (const record of snapshot.tokens) {
     if (!record || typeof record !== 'object' || Array.isArray(record)
-      || typeof record.id !== 'string' || !/^pair-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.id)
+      || typeof record.id !== 'string' || !PAIRING_ID_PATTERN.test(record.id)
       || typeof record.tokenHash !== 'string' || !/^[0-9a-f]{64}$/.test(record.tokenHash)
       || typeof record.name !== 'string' || !record.name.trim()
       || typeof record.createdAt !== 'number' || !Number.isFinite(record.createdAt)
       || (record.lastSeenAt !== undefined && (typeof record.lastSeenAt !== 'number' || !Number.isFinite(record.lastSeenAt)))
+      || (record.mintedBy !== undefined && (typeof record.mintedBy !== 'string' || !PAIRING_ID_PATTERN.test(record.mintedBy)))
       || ids.has(record.id) || hashes.has(record.tokenHash)) {
       throw new Error('pairing token store has an invalid or duplicate record');
     }
@@ -261,6 +271,35 @@ function generateTokenValue(): string {
 /** The `pairing:<id>` principal id a pairing-token request authenticates as. */
 export function pairingPrincipalId(tokenId: string): string {
   return `pairing:${tokenId}`;
+}
+
+/** The pairing id behind a `pairing:<id>` principal, or undefined for any other principal. */
+export function pairingTokenIdOfPrincipal(principalId: string | undefined): string | undefined {
+  return principalId?.startsWith('pairing:') ? principalId.slice('pairing:'.length) : undefined;
+}
+
+/** `id` and every pairing minted, directly or through another, by it. */
+function withMintedDescendants(tokens: readonly StoredPairingToken[], id: string): Set<string> {
+  const ids = new Set([id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const token of tokens) {
+      if (token.mintedBy !== undefined && ids.has(token.mintedBy) && !ids.has(token.id)) { ids.add(token.id); grew = true; }
+    }
+  }
+  return ids;
+}
+
+/**
+ * A paired device asked for a token, but its own pairing is gone (revoked in
+ * the meantime). Nothing is minted: a revoked device cannot hand out access.
+ */
+export class PairingMinterRevokedError extends Error {
+  readonly code = 'PAIRING_TOKEN_NOT_FOUND';
+  constructor() {
+    super('This device is no longer paired, so it cannot pair another. Pair it again from the owner\'s machine.');
+    this.name = 'PairingMinterRevokedError';
+  }
 }
 
 /** Principals whose credential the move from `before` to `after` ended. */
@@ -996,16 +1035,24 @@ export class PairingTokenManager {
    *   keep authenticating; only the next NEW pairing is refused, until enough
    *   devices are unpaired to fit under the cap again.
    */
-  mint(input: { readonly name: string }): MintedPairingToken {
+  /**
+   * `mintedBy` is the pairing id of the paired device asking (from its
+   * principal); absent when the owner's own machine or shared token mints.
+   */
+  mint(input: { readonly name: string; readonly mintedBy?: string | undefined }): MintedPairingToken {
     return this.mintInternal(input, { enforceCap: true });
   }
 
   private mintInternal(
-    input: { readonly name: string },
+    input: { readonly name: string; readonly mintedBy?: string | undefined },
     options: { readonly enforceCap: boolean },
   ): MintedPairingToken {
     let replaced = false;
     return this.mutate((snapshot) => {
+      if (input.mintedBy !== undefined && !snapshot.tokens.some(record => record.id === input.mintedBy)) {
+        throw new PairingMinterRevokedError();
+      }
+      let replacedId: string | undefined;
       const cap = options.enforceCap ? this.currentCap() : null;
       if (cap !== null && snapshot.tokens.length >= cap) {
         const normalized = input.name.trim().toLowerCase();
@@ -1015,13 +1062,17 @@ export class PairingTokenManager {
           name: existing.name, maxPaired: cap, pairedCount: snapshot.tokens.length,
         });
         snapshot.tokens = snapshot.tokens.filter(record => record.id !== existing.id);
+        replacedId = existing.id;
         replaced = true;
       }
       const token = generateTokenValue();
       const record: StoredPairingToken = {
         id: `pair-${randomUUID()}`, name: input.name.trim() || 'Unnamed device',
         tokenHash: hashToken(token), createdAt: Date.now(),
+        ...(input.mintedBy !== undefined && input.mintedBy !== replacedId ? { mintedBy: input.mintedBy } : {}),
       };
+      // A device paired again keeps answering for what its old pairing minted.
+      if (replacedId !== undefined) for (const item of snapshot.tokens) if (item.mintedBy === replacedId) item.mintedBy = record.id;
       snapshot.tokens.push(record);
       return { value: { id: record.id, name: record.name, token, createdAt: record.createdAt }, changed: true };
     }, true, () => !replaced);
@@ -1038,7 +1089,7 @@ export class PairingTokenManager {
    * outcome than being one over a cap that no longer describes reality. A new
    * device pairing for the first time is still bounded.
    */
-  mintForMigration(input: { readonly name: string }): MintedPairingToken {
+  mintForMigration(input: { readonly name: string; readonly mintedBy?: string | undefined }): MintedPairingToken {
     return this.mintInternal(input, { enforceCap: false });
   }
 
@@ -1089,6 +1140,7 @@ export class PairingTokenManager {
       name: t.name,
       createdAt: t.createdAt,
       ...(t.lastSeenAt !== undefined ? { lastSeenAt: t.lastSeenAt } : {}),
+      ...(t.mintedBy !== undefined ? { mintedBy: t.mintedBy } : {}),
     }));
   }
 
@@ -1102,13 +1154,23 @@ export class PairingTokenManager {
     });
   }
 
-  /** Revoke one pairing. A persistence failure throws instead of reporting success. */
+  /** Revoke one pairing and every pairing it minted. A persistence failure throws instead of reporting success. */
   revoke(id: string): boolean {
+    return this.revokeWithMinted(id).revoked;
+  }
+
+  /**
+   * Revoke one pairing and, with it, every pairing minted by it (directly or
+   * through another). `alsoRevoked` names the minted ones, so the caller can
+   * say what else stopped working.
+   */
+  revokeWithMinted(id: string): { readonly revoked: boolean; readonly alsoRevoked: readonly string[] } {
     return this.mutate(snapshot => {
-      const before = snapshot.tokens.length;
-      snapshot.tokens = snapshot.tokens.filter(record => record.id !== id);
-      const changed = snapshot.tokens.length !== before;
-      return { value: changed, changed };
+      if (!snapshot.tokens.some(record => record.id === id)) return { value: { revoked: false, alsoRevoked: [] }, changed: false };
+      const ids = withMintedDescendants(snapshot.tokens, id);
+      snapshot.tokens = snapshot.tokens.filter(record => !ids.has(record.id));
+      ids.delete(id);
+      return { value: { revoked: true, alsoRevoked: [...ids] }, changed: true };
     });
   }
 

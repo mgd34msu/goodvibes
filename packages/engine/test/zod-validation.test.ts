@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod/v4';
 import { ContractError } from '../errors/src/index.ts';
-import {
-  ControlAuthLoginResponseSchema,
-  ControlAuthCurrentResponseSchema,
-  AccountsSnapshotResponseSchema,
-  ControlStatusResponseSchema,
-  SerializedEventEnvelopeSchema,
-} from '../contracts/src/index.ts';
+import { SerializedEventEnvelopeSchema } from '../contracts/src/index.ts';
 import { invokeContractRoute, createHttpTransport } from '../transport-http/src/index.ts';
 import { readEventEnvelope } from '../transport-realtime/src/index.ts';
 
@@ -40,6 +34,15 @@ function makeTransport(responseBody: unknown) {
 
 const LOGIN_ROUTE = { id: 'control.auth.login', method: 'POST', path: '/api/control-plane/invoke/control.auth.login' };
 
+// A response schema a caller hands the transport; the transport's own rule is
+// what is under test here, not any one method's shape.
+const LoginResponseSchema = z.object({
+  authenticated: z.boolean(),
+  token: z.string(),
+  username: z.string(),
+  expiresAt: z.number(),
+});
+
 // ---------------------------------------------------------------------------
 // 1. Happy path, valid response passes through unchanged
 // ---------------------------------------------------------------------------
@@ -56,7 +59,7 @@ describe('zod-validation: happy path', () => {
       makeTransport(validBody),
       LOGIN_ROUTE,
       {},
-      { responseSchema: ControlAuthLoginResponseSchema },
+      { responseSchema: LoginResponseSchema },
     );
 
     expect(result).toEqual(validBody);
@@ -88,7 +91,7 @@ describe('zod-validation: contract violations', () => {
         makeTransport(malformedBody),
         LOGIN_ROUTE,
         {},
-        { responseSchema: ControlAuthLoginResponseSchema },
+        { responseSchema: LoginResponseSchema },
       ),
     ).rejects.toMatchObject({ kind: 'contract' });
   });
@@ -105,7 +108,7 @@ describe('zod-validation: contract violations', () => {
       makeTransport(wrongTypes),
       LOGIN_ROUTE,
       {},
-      { responseSchema: ControlAuthLoginResponseSchema },
+      { responseSchema: LoginResponseSchema },
     ).catch((err: unknown) => err);
 
     expect(caught).toBeInstanceOf(ContractError);
@@ -113,61 +116,12 @@ describe('zod-validation: contract violations', () => {
     expect(msg).toContain('authenticated');
     expect(msg).toContain(LOGIN_ROUTE.path);
   });
-
-  it('throws ContractError for accounts.snapshot when providers is wrong type', async () => {
-    const badSnapshot = {
-      capturedAt: Date.now(),
-      providers: 'not-an-array',
-      configuredCount: 0,
-      issueCount: 0,
-    };
-
-    await expect(
-      invokeContractRoute(
-        makeTransport(badSnapshot),
-        { id: 'accounts.snapshot', method: 'GET', path: '/api/control-plane/invoke/accounts.snapshot' },
-        {},
-        { responseSchema: AccountsSnapshotResponseSchema },
-      ),
-    ).rejects.toMatchObject({ kind: 'contract' });
-  });
-
-  it('throws ContractError for control.status when version field is missing', async () => {
-    const badStatus = { status: 'ok' /* missing: version */ };
-
-    await expect(
-      invokeContractRoute(
-        makeTransport(badStatus),
-        { id: 'control.status', method: 'GET', path: '/api/status' },
-        {},
-        { responseSchema: ControlStatusResponseSchema },
-      ),
-    ).rejects.toMatchObject({ kind: 'contract' });
-  });
 });
 
 // ---------------------------------------------------------------------------
 // 3. Schema unit tests, no transport needed
 // ---------------------------------------------------------------------------
 describe('zod-validation: schema correctness', () => {
-  it('ControlAuthCurrentResponseSchema parses all auth modes', () => {
-    for (const authMode of ['anonymous', 'invalid', 'session', 'shared-token'] as const) {
-      const result = ControlAuthCurrentResponseSchema.safeParse({
-        authenticated: true,
-        authMode,
-        tokenPresent: false,
-        authorizationHeaderPresent: false,
-        sessionCookiePresent: false,
-        principalId: null,
-        principalKind: null,
-        admin: false,
-        scopes: [],
-        roles: [],
-      });
-      expect(result.success).toBe(true);
-    }
-  });
-
   it('SerializedEventEnvelopeSchema accepts envelope with only required fields', () => {
     const minimal = { type: 'STREAM_DELTA', payload: { type: 'STREAM_DELTA', content: 'hi' } };
     expect(SerializedEventEnvelopeSchema.safeParse(minimal).success).toBe(true);
@@ -178,11 +132,6 @@ describe('zod-validation: schema correctness', () => {
     expect(SerializedEventEnvelopeSchema.safeParse(newer).success).toBe(true);
     expect(readEventEnvelope(newer)).toEqual({ type: 'X', ts: 1, payload: { type: 'X' } });
     expect(readEventEnvelope({ type: 'X' })).toBeNull();
-  });
-
-  it('ControlAuthLoginResponseSchema rejects partial body', () => {
-    const partial = { authenticated: true }; // missing token, username, expiresAt
-    expect(ControlAuthLoginResponseSchema.safeParse(partial).success).toBe(false);
   });
 
   it('inline schema validation works for arbitrary method response shapes', async () => {

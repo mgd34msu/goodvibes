@@ -17,6 +17,7 @@ import {
   deliverToSubscription,
   type PushTransport,
   type StoredPushSubscription,
+  type VapidSecretStore,
 } from '../platform/src/platform/push/index.ts';
 import { PUSH_ALLOW_LOCAL_ENDPOINTS_ENV } from '../platform/src/platform/push/subscription-validation.ts';
 
@@ -26,15 +27,16 @@ function realKeys(): { p256dh: string; auth: string } {
   return { p256dh: ecdh.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') };
 }
 
-function memorySecrets(failGets = 0): { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void> } {
+function memorySecrets(failReads = 0): VapidSecretStore {
   const values = new Map<string, string>();
-  let remaining = failGets;
+  let remaining = failReads;
   return {
-    get: async (key) => {
+    getOrCreateDaemonSecret: async (key, create) => {
       if (remaining > 0) { remaining--; throw new Error('keychain is locked'); }
-      return values.get(key) ?? null;
+      const value = values.get(key) ?? create();
+      values.set(key, value);
+      return value;
     },
-    set: async (key, value) => { values.set(key, value); },
   };
 }
 

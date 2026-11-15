@@ -682,7 +682,7 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     key: 'surfaces.msteams.webhookSecret',
     type: 'string',
     default: '',
-    description: 'Microsoft Teams inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret.',
+    description: 'Secret for a relay in front of the Microsoft Teams webhook that cannot forward the Bot Framework token. Activities straight from Azure Bot Service need none: their token is verified against surfaces.msteams.appId. The app password is never accepted as an inbound secret.',
   },
   {
     key: 'surfaces.msteams.tenantId',

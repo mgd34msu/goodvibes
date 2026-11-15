@@ -92,5 +92,6 @@ import { getOperatorContract, getPeerContract } from '@goodvibes-jev/engine/cont
 import { getOperatorContractPath, getPeerContractPath } from '@goodvibes-jev/engine/contracts/node';
 ```
 
-See the [zod-schemas README](./src/zod-schemas/README.md) for the runtime Zod
-schema exports re-exported from this package root.
+See the [zod-schemas README](./src/zod-schemas/README.md) for the event-envelope
+Zod schemas re-exported from this package root. Method response shapes come
+from the generated operator contract only.

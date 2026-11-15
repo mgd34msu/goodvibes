@@ -116,16 +116,6 @@
       "types": "./contracts/dist/node.d.ts",
       "import": "./contracts/dist/node.js"
     },
-    "./contracts/zod-schemas/accounts": {
-      "bun": "./contracts/src/zod-schemas/accounts.ts",
-      "types": "./contracts/dist/zod-schemas/accounts.d.ts",
-      "import": "./contracts/dist/zod-schemas/accounts.js"
-    },
-    "./contracts/zod-schemas/auth": {
-      "bun": "./contracts/src/zod-schemas/auth.ts",
-      "types": "./contracts/dist/zod-schemas/auth.d.ts",
-      "import": "./contracts/dist/zod-schemas/auth.js"
-    },
     "./contracts/zod-schemas/events": {
       "bun": "./contracts/src/zod-schemas/events.ts",
       "types": "./contracts/dist/zod-schemas/events.d.ts",
@@ -135,16 +125,6 @@
       "bun": "./contracts/src/zod-schemas/index.ts",
       "types": "./contracts/dist/zod-schemas/index.d.ts",
       "import": "./contracts/dist/zod-schemas/index.js"
-    },
-    "./contracts/zod-schemas/providers": {
-      "bun": "./contracts/src/zod-schemas/providers.ts",
-      "types": "./contracts/dist/zod-schemas/providers.d.ts",
-      "import": "./contracts/dist/zod-schemas/providers.js"
-    },
-    "./contracts/zod-schemas/session": {
-      "bun": "./contracts/src/zod-schemas/session.ts",
-      "types": "./contracts/dist/zod-schemas/session.d.ts",
-      "import": "./contracts/dist/zod-schemas/session.js"
     },
     "./contracts/operator-contract.json": "./contracts/artifacts/operator-contract.json",
     "./contracts/operator-openapi.json": "./contracts/artifacts/operator-openapi.json",

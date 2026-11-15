@@ -257,7 +257,6 @@ The daemon emits five event types on the `providers` RuntimeEventBus domain. Sub
 | `PROVIDER_VOICE_USAGE` | One billable voice call on a metered provider (a local engine emits nothing) | `provider: string`, optional `modelId: string`, `kind: 'tts' \| 'stt'`, `billableUnits: number`, `unit: 'characters' \| 'seconds'` |
 | `MODEL_CHANGED` | The current model is switched (see below) | `registryKey: string`, `provider: string`, optional `previous: { registryKey, provider }` |
 
-Only `MODEL_CHANGED` has an exported Zod contract (`ModelChangedEventSchema`); the other four are emitter-only event shapes.
 
 ### `MODEL_CHANGED`
 
@@ -283,23 +282,13 @@ The `previous` field is omitted when there is no meaningful prior selection (e.g
 
 ---
 
-## Zod contract schemas
+## Response shapes
 
-Importable from `@goodvibes-jev/engine/platform/contracts`:
-
-```ts
-import {
-  ListProviderModelsResponseSchema,
-  CurrentModelResponseSchema,
-  PatchCurrentModelBodySchema,
-  PatchCurrentModelErrorSchema,
-  PatchCurrentModelResponseSchema,
-  ModelChangedEventSchema,
-} from '@goodvibes-jev/engine/platform/contracts';
-
-// Validate a response body at runtime:
-const result = ListProviderModelsResponseSchema.safeParse(responseBody);
-```
+These routes are described as the `models.*` operator methods in the method
+catalog, and their shapes come from there: the generated operator contract
+(`getOperatorMethod('models.list').outputSchema` and its siblings from
+`@goodvibes-jev/engine/contracts`) is the one statement of each response, and the
+operator client validates responses against it.
 
 ---
 

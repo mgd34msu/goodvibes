@@ -37,6 +37,7 @@ const PUBLIC_PAIRING_TOKEN_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   lastSeenAt: NUMBER_SCHEMA,
+  mintedBy: STRING_SCHEMA,
 }, ['id', 'name', 'createdAt']);
 
 /** The minted token, the ONE shape that carries the plaintext secret, returned once. */
@@ -73,7 +74,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.tokens.list',
     title: 'List Paired Device Tokens',
-    description: 'List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, and last-seen timestamp. The token secret is never stored in listable form and is never returned.',
+    description: 'List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, and mintedBy (the paired device that minted it, when one did). The token secret is never stored in listable form and is never returned.',
     category: 'pairing',
     scopes: ['read:control-plane'],
     transport: ['ws'],
@@ -85,7 +86,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.tokens.create',
     title: 'Mint Paired Device Token',
-    description: 'Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable.',
+    description: 'Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND.',
     category: 'pairing',
     scopes: ['write:control-plane'],
     transport: ['ws'],
@@ -105,12 +106,12 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.tokens.delete',
     title: 'Revoke Paired Device Token',
-    description: 'Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every OTHER paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop.',
+    description: 'Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop.',
     category: 'pairing',
     scopes: ['write:control-plane'],
     transport: ['ws'],
     inputSchema: objectSchema({ id: STRING_SCHEMA }, ['id']),
-    outputSchema: objectSchema({ id: STRING_SCHEMA, revoked: BOOLEAN_SCHEMA }, ['id', 'revoked']),
+    outputSchema: objectSchema({ id: STRING_SCHEMA, revoked: BOOLEAN_SCHEMA, alsoRevoked: arraySchema(STRING_SCHEMA) }, ['id', 'revoked', 'alsoRevoked']),
   }),
   methodDescriptor({
     id: 'pairing.tokens.migrate',

@@ -40,6 +40,7 @@ import {
   PushService,
   type PushSubscriptionPolicy,
   type StoredPushSubscription,
+  type VapidSecretStore,
 } from '../platform/src/platform/push/index.ts';
 
 // ---------------------------------------------------------------------------
@@ -286,12 +287,13 @@ describe('removal requires evidence the subscription is already dead', () => {
 // The VAPID contact
 // ---------------------------------------------------------------------------
 describe('the VAPID sub contact', () => {
-  function memorySecrets(): { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void> } {
+  function memorySecrets(): VapidSecretStore {
     const values = new Map<string, string>();
     return {
-      get: async (key) => values.get(key) ?? null,
-      set: async (key, value) => {
+      getOrCreateDaemonSecret: async (key, create) => {
+        const value = values.get(key) ?? create();
         values.set(key, value);
+        return value;
       },
     };
   }
@@ -381,9 +383,10 @@ describe('push.vapidSubject reaches a real delivery', () => {
     };
     const deps = {
       secretsManager: {
-        get: async (key: string): Promise<string | null> => secrets.get(key) ?? null,
-        set: async (key: string, value: string): Promise<void> => {
+        getOrCreateDaemonSecret: async (key: string, create: () => string): Promise<string> => {
+          const value = secrets.get(key) ?? create();
           secrets.set(key, value);
+          return value;
         },
       },
       shellPaths: { resolveUserPath: (...segments: string[]): string => join(dir, ...segments) },
@@ -419,8 +422,7 @@ describe('push.vapidSubject reaches a real delivery', () => {
     };
     const deps = {
       secretsManager: {
-        get: async (): Promise<string | null> => null,
-        set: async (): Promise<void> => undefined,
+        getOrCreateDaemonSecret: async (_key: string, create: () => string): Promise<string> => create(),
       },
       shellPaths: { resolveUserPath: (...segments: string[]): string => join(dir, ...segments) },
       surfaceRoot: 'test-surface',
@@ -440,8 +442,11 @@ describe('the stored VAPID key pair', () => {
     const values = new Map<string, string>([[VAPID_SECRET_KEY, raw]]);
     return {
       values,
-      get: async (key: string) => values.get(key) ?? null,
-      set: async (key: string, value: string) => { values.set(key, value); },
+      getOrCreateDaemonSecret: async (key: string, create: () => string) => {
+        const value = values.get(key) ?? create();
+        values.set(key, value);
+        return value;
+      },
     };
   }
 

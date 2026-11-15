@@ -46,9 +46,10 @@
  * The seam also carries `armSubmitApproval`, a composition-only path onto the
  * engine's `setOwnerApproval` (see browser-checkout-driver.ts's header for why
  * this is deliberately not reachable from `platform/payments/`), and the
- * driver factory is built with whatever `describeSubmission` this composition
- * supplies, absent by default, which is what makes an unverified submission
- * the honest default rather than a claimed purchase nothing here confirmed.
+ * driver factory reads the page a submit landed on (payments/checkout-landing.ts)
+ * for the order confirmation and its number, unless the composition supplies
+ * its own `describeSubmission`. A landing page that shows neither leaves the
+ * purchase unverified, never a claimed purchase nothing here confirmed.
  */
 import {
   BrowserEngine,
@@ -60,6 +61,7 @@ import type { BrowserEngineOptions, UntrustedContentPort } from '../../browser/i
 import { createUntrustedContentPort } from '../../security/untrusted-content.js';
 import { CardMaterialRedactor } from '../../payments/card-redaction.js';
 import { createBrowserCheckoutDriverFactory } from '../../payments/browser-checkout-driver.js';
+import { describeCheckoutLanding } from '../../payments/checkout-landing.js';
 import type {
   CheckoutSubmission,
   CheckoutSubmissionDescription,
@@ -115,13 +117,9 @@ export interface BrowserCompositionDeps {
   readonly onBrowserCheckout?: ((seam: BrowserCheckoutSeam) => void) | undefined;
   /**
    * Reads a merchant order id or a verification step off a submitted
-   * checkout's landing page.
-   *
-   * Absent by default, which is honest: reading a merchant's own confirmation
-   * page is site-specific knowledge this platform does not carry. Without it, a
-   * submitted purchase is recorded and reported as unverified rather than as
-   * an indistinguishable-from-confirmed "purchased", see checkout-flow.ts and
-   * browser-checkout-driver.ts's header for what that changes.
+   * checkout's landing page. Absent: the landing page's own words are read in
+   * code (payments/checkout-landing.ts), one read per purchase; a page that
+   * shows no confirmation leaves the purchase unverified.
    */
   readonly describeSubmission?:
     | ((submission: CheckoutSubmission) => Promise<CheckoutSubmissionDescription>)
@@ -256,12 +254,13 @@ export function composeDaemonBrowser(
   if (built === null) return null;
 
   if (onCheckout !== undefined && cardFieldGuard !== undefined) {
+    const describeSubmission = deps.describeSubmission ?? describeCheckoutLanding(built.engineFor);
     onCheckout({
       cardFieldGuard,
       driverFor: createBrowserCheckoutDriverFactory({
         engineFor: built.engineFor,
         cardFieldGuard,
-        ...(deps.describeSubmission === undefined ? {} : { describeSubmission: deps.describeSubmission }),
+        describeSubmission,
       }),
       armSubmitApproval: async (approval) => {
         (await built.engineFor()).setOwnerApproval(approval);
@@ -282,8 +281,7 @@ export function composeDaemonBrowser(
         const page = await engine.restoreCheckoutRecovery(value, owner);
         try {
           page.assertCurrent();
-          const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => engine, cardFieldGuard,
-            ...(deps.describeSubmission === undefined ? {} : { describeSubmission: deps.describeSubmission }),
+          const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => engine, cardFieldGuard, describeSubmission,
           })(page.sessionId, page.pageId, { snapshotId: page.snapshotId, signal: owner.signal, assertCurrent: page.assertCurrent });
           page.assertCurrent(); return Object.freeze({ ...page, driver });
         } catch (error) { await page.release(); throw error; }

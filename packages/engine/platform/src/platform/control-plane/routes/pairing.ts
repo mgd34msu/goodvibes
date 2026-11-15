@@ -9,19 +9,20 @@
  * These verbs manage the daemon's own paired-device tokens, so they require an
  * authenticated operator principal (the invoke layer already gates on the
  * write:/read:control-plane scopes the descriptors declare); the secret is
- * returned only by mint/migrate, and only once.
+ * returned only by mint/migrate, and only once. A token minted by a paired
+ * device records that device, and revoking the device revokes it too.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { PairingTokenManager } from '../../pairing/pairing-token-store.js';
-import { PairingLimitReachedError } from '../../pairing/pairing-token-store.js';
+import { PairingLimitReachedError, PairingMinterRevokedError, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 
 /** The narrow slice of PairingTokenManager these verbs need. */
 export type PairingGatewayService = Pick<
   PairingTokenManager,
-  'list' | 'mint' | 'mintForMigration' | 'rename' | 'revoke' | 'isLegacyRevoked' | 'revokeLegacyShared'
+  'list' | 'mint' | 'mintForMigration' | 'rename' | 'revokeWithMinted' | 'isLegacyRevoked' | 'revokeLegacyShared'
 >;
 
 function requirePrincipal(invocation: GatewayMethodInvocation): void {
@@ -54,6 +55,9 @@ function rethrowAsVerbError(error: unknown): never {
   if (error instanceof PairingLimitReachedError) {
     throw new GatewayVerbError(error.message, error.code, 409);
   }
+  if (error instanceof PairingMinterRevokedError) {
+    throw new GatewayVerbError(error.message, error.code, 403);
+  }
   throw error;
 }
 
@@ -63,7 +67,7 @@ function createMintHandler(service: PairingGatewayService): GatewayMethodHandler
     const params = readInvocationParams(invocation);
     const name = requireString(params.name, 'name');
     try {
-      return { token: service.mint({ name }) };
+      return { token: service.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId) }) };
     } catch (error) {
       rethrowAsVerbError(error);
     }
@@ -80,7 +84,7 @@ function createMigrateHandler(service: PairingGatewayService): GatewayMethodHand
       // node that is already using this daemon. Refusing it at the cap would
       // strand a working device on a token that is about to be revoked, so the
       // migration mint is exempt from the cap.
-      return { token: service.mintForMigration({ name }) };
+      return { token: service.mintForMigration({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId) }) };
     } catch (error) {
       rethrowAsVerbError(error);
     }
@@ -108,11 +112,12 @@ function createRevokeHandler(service: PairingGatewayService, onRevoked?: Pairing
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
     const id = requireString(params.id, 'id');
-    if (!service.revoke(id)) {
+    const outcome = service.revokeWithMinted(id);
+    if (!outcome.revoked) {
       throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
     }
-    onRevoked?.({ id, principalId: invocation.context.principalId });
-    return { id, revoked: true };
+    for (const revokedId of [id, ...outcome.alsoRevoked]) onRevoked?.({ id: revokedId, principalId: invocation.context.principalId });
+    return { id, revoked: true, alsoRevoked: [...outcome.alsoRevoked] };
   };
 }
 

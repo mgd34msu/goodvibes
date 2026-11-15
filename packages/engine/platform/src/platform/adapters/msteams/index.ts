@@ -5,6 +5,7 @@ import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surfa
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { logger } from '../../utils/logger.js';
+import { looksLikeJwt, sameServiceUrl, verifyBotFrameworkToken, type BotFrameworkClaims } from './bot-framework-auth.js';
 
 function stripTeamsMarkup(text: string): string {
   return text
@@ -52,28 +53,42 @@ function teamsMentioned(
   });
 }
 
-export async function handleMSTeamsSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const credential = await resolveSurfaceCredential(
+/**
+ * Who may post an activity. Azure Bot Service signs each one with a Bot
+ * Framework token issued for this bot's app id, which is verified here. A
+ * relay that cannot carry that token uses a secret of its own
+ * (`surfaces.msteams.webhookSecret`). The app password is never accepted as a
+ * bearer: it is the bot's delivery credential, not something a caller holds.
+ */
+async function authenticateTeamsRequest(req: Request, context: SurfaceAdapterContext): Promise<
+  | { readonly kind: 'relay' }
+  | { readonly kind: 'bot-framework'; readonly claims: BotFrameworkClaims }
+  | { readonly kind: 'refused'; readonly response: Response }
+> {
+  const relaySecret = await resolveSurfaceCredential(
     context,
-    // A secret of its own for inbound calls comes first, so the account's
-    // delivery credential is not the shared secret a caller must hold. The
-    // delivery credential stays as the fallback for a surface that has not set one.
     { kind: 'config', key: 'surfaces.msteams.webhookSecret' },
     { kind: 'registry', service: 'msteams', field: 'signingSecret' },
     { kind: 'env', name: 'MSTEAMS_WEBHOOK_SECRET' },
-    { kind: 'config', key: 'surfaces.msteams.appPassword' },
-    { kind: 'registry', service: 'msteams', field: 'password' },
-    { kind: 'env', name: 'MSTEAMS_APP_PASSWORD' },
   );
-  if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('msteams', credential);
-  if (credential.state === 'absent') {
-    return Response.json({ error: 'Webhook not configured' }, { status: 503 });
+  if (relaySecret.state === 'unresolvable') return { kind: 'refused', response: surfaceCredentialUnavailable('msteams', relaySecret) };
+  const appId = readString(context.configManager.get('surfaces.msteams.appId')) ?? readString(process.env['MSTEAMS_APP_ID']);
+  if (relaySecret.state === 'absent' && !appId) {
+    return { kind: 'refused', response: Response.json({ error: 'Webhook not configured: set surfaces.msteams.appId (Azure Bot Service) or surfaces.msteams.webhookSecret (a relay)' }, { status: 503 }) };
   }
-  const configuredSecret = credential.value;
-  const providedToken = readBearerOrHeaderToken(req, 'x-goodvibes-msteams-token');
-  if (!constantTimeEquals(configuredSecret, providedToken)) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const presented = readBearerOrHeaderToken(req, 'x-goodvibes-msteams-token');
+  if (relaySecret.state === 'resolved' && constantTimeEquals(relaySecret.value, presented)) return { kind: 'relay' };
+  if (appId && looksLikeJwt(presented)) {
+    const verified = await verifyBotFrameworkToken(presented, { appId });
+    if (verified.ok) return { kind: 'bot-framework', claims: verified.claims };
+    logger.info('handleMSTeamsSurfaceWebhook: Bot Framework token refused', { reason: verified.reason });
   }
+  return { kind: 'refused', response: Response.json({ error: 'Unauthorized' }, { status: 401 }) };
+}
+
+export async function handleMSTeamsSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
+  const caller = await authenticateTeamsRequest(req, context);
+  if (caller.kind === 'refused') return caller.response;
   const rawBody = await readTextBodyWithinLimit(req);
   if (rawBody instanceof Response) return rawBody;
   let body: unknown = null;
@@ -86,6 +101,20 @@ export async function handleMSTeamsSurfaceWebhook(req: Request, context: Surface
   }
   const activity = readRecord(body);
   if (!activity) return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+  if (caller.kind === 'bot-framework') {
+    // A token is bound to the connector it lets the bot answer and to the
+    // channels its key is endorsed for; an activity naming another is refused.
+    const activityServiceUrl = readString(activity.serviceUrl);
+    const channel = readString(activity.channelId);
+    const endorsed = caller.claims.endorsements;
+    if (!caller.claims.serviceUrl || !activityServiceUrl || !sameServiceUrl(caller.claims.serviceUrl, activityServiceUrl)
+      || (endorsed !== undefined && (!channel || !endorsed.includes(channel)))) {
+      logger.info('handleMSTeamsSurfaceWebhook: Bot Framework token does not cover this activity', {
+        reason: endorsed !== undefined && (!channel || !endorsed.includes(channel)) ? 'channel-not-endorsed' : 'service-url-mismatch',
+      });
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  }
   const activityType = readString(activity.type)?.toLowerCase();
   if (activityType && activityType !== 'message' && activityType !== 'invoke') {
     logger.info('handleMSTeamsSurfaceWebhook: activity ignored', {

@@ -14,6 +14,7 @@ import type {
   KnowledgeExtractionRecord,
 } from './types.js';
 import { isInKnowledgeSpaceScope, normalizeKnowledgeSpaceId } from './spaces.js';
+import { extractionSourceKey, lookupRecord, nodeSlugKey, sourceUriKey } from './store-indexed-map.js';
 
 export interface KnowledgeStoreReadView {
   readonly ready: boolean;
@@ -281,10 +282,7 @@ export function getKnowledgeExtraction(view: KnowledgeStoreReadView, id: string)
 }
 
 export function getKnowledgeExtractionBySourceId(view: KnowledgeStoreReadView, sourceId: string): KnowledgeExtractionRecord | null {
-  for (const extraction of view.extractions.values()) {
-    if (extraction.sourceId === sourceId) return extraction;
-  }
-  return null;
+  return lookupRecord(view.extractions, extractionSourceKey(sourceId), (extraction) => extraction.sourceId === sourceId) ?? null;
 }
 
 export function getKnowledgeJobRun(view: KnowledgeStoreReadView, id: string): KnowledgeJobRunRecord | null {
@@ -335,10 +333,7 @@ export function getKnowledgeSourceByCanonicalUri(
   view: KnowledgeStoreReadView,
   canonicalUri: string,
 ): KnowledgeSourceRecord | null {
-  for (const source of view.sources.values()) {
-    if (source.canonicalUri === canonicalUri) return source;
-  }
-  return null;
+  return lookupRecord(view.sources, sourceUriKey(canonicalUri), (source) => source.canonicalUri === canonicalUri) ?? null;
 }
 
 export function getKnowledgeNodeByKindAndSlug(
@@ -346,10 +341,7 @@ export function getKnowledgeNodeByKindAndSlug(
   kind: KnowledgeNodeRecord['kind'],
   slug: string,
 ): KnowledgeNodeRecord | null {
-  for (const node of view.nodes.values()) {
-    if (node.kind === kind && node.slug === slug) return node;
-  }
-  return null;
+  return lookupRecord(view.nodes, nodeSlugKey(kind, slug), (node) => node.kind === kind && node.slug === slug) ?? null;
 }
 
 export function edgesForKnowledgeStore(

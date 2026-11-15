@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // Channel routing surface, HANDLERS for the platform-defined methods
 //   - channels.routing.list   (read-only)
-//   - channels.routing.assign (admin, confirmation-gated)
+//   - channels.routing.assign (admin, confirmation-gated; only surfaces that
+//     consult the assignment, PROFILE_ROUTED_SURFACE_KINDS)
 //   - channels.routing.delete (admin, dangerous, confirmation-gated)
 //
 // The platform's GatewayMethodCatalog already registered the canonical descriptors
@@ -109,20 +110,38 @@ function optionalString(value: unknown): string | undefined {
 }
 
 /** Route surfaces, the mail inbox (routed by provider name, not a delivery surface), and the wildcard. */
-const ASSIGNABLE_SURFACE_KINDS: readonly string[] = [...ROUTE_SURFACE_KINDS, 'email', WILDCARD_SURFACE];
+const KNOWN_SURFACE_KINDS: readonly string[] = [...ROUTE_SURFACE_KINDS, 'email', WILDCARD_SURFACE];
+
+/**
+ * The surfaces whose inbound items this daemon resolves a profile for: the
+ * Slack, Discord and email inboxes stamp each item with the assigned profile
+ * (inbox-bridge.ts). The wildcard reaches those same consumers. An assignment
+ * on any other surface would be stored, listed and never read, so it is
+ * refused with the list of surfaces it can apply to.
+ */
+const PROFILE_ROUTED_SURFACE_KINDS: readonly string[] = ['slack', 'discord', 'email', WILDCARD_SURFACE];
 
 /**
  * An assignment that can never match an inbound route is refused when it is
- * made, not left to look created. A surface the daemon does not route, or a
- * surfaceKind/routeId that disagrees with the channelId it came with, would
- * be stored and silently never apply.
+ * made, not left to look created. A surface the daemon does not route, a
+ * surface that does not consult the assignment, or a surfaceKind/routeId that
+ * disagrees with the channelId it came with, would be stored and silently
+ * never apply.
  */
 function assertAssignableChannel(channelId: string, surfaceKind: string | undefined, routeId: string | undefined): void {
   const parsed = parseChannelId(channelId);
-  if (!ASSIGNABLE_SURFACE_KINDS.includes(parsed.surfaceKind)) {
+  if (!KNOWN_SURFACE_KINDS.includes(parsed.surfaceKind)) {
     throw new HandlerError(
-      `Unknown surfaceKind '${parsed.surfaceKind}'; use one of: ${ASSIGNABLE_SURFACE_KINDS.join(', ')}`,
+      `Unknown surfaceKind '${parsed.surfaceKind}'; use one of: ${PROFILE_ROUTED_SURFACE_KINDS.join(', ')}`,
       'ROUTING_INVALID_SURFACE_KIND',
+      400,
+    );
+  }
+  if (!PROFILE_ROUTED_SURFACE_KINDS.includes(parsed.surfaceKind)) {
+    throw new HandlerError(
+      `Not assigned: messages on ${parsed.surfaceKind} are not answered by an assigned profile, so this assignment would never apply. `
+        + `Profile assignments apply to the inbox items of: ${PROFILE_ROUTED_SURFACE_KINDS.join(', ')}.`,
+      'ROUTING_SURFACE_NOT_ROUTED',
       400,
     );
   }

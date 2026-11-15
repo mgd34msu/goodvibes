@@ -81,6 +81,24 @@ describe('PairingTokenManager', () => {
     expect(mgr.revoke(a.id)).toBe(false);
   });
 
+  test('revoking a device revokes every token it minted, and a revoked device cannot mint', () => {
+    const file = tempFile();
+    const mgr = new PairingTokenManager(file);
+    const phone = mgr.mint({ name: 'phone' });
+    const minted = mgr.mint({ name: 'tablet', mintedBy: phone.id });
+    const grandchild = mgr.mint({ name: 'laptop', mintedBy: minted.id });
+    const unrelated = mgr.mint({ name: 'desk' });
+    expect(mgr.list().find((entry) => entry.id === minted.id)?.mintedBy).toBe(phone.id);
+
+    expect(mgr.revokeWithMinted(phone.id)).toEqual({ revoked: true, alsoRevoked: [minted.id, grandchild.id] });
+    for (const store of [mgr, new PairingTokenManager(file)]) {
+      expect(store.authenticate(minted.token)).toBeNull();
+      expect(store.authenticate(grandchild.token)).toBeNull();
+      expect(store.authenticate(unrelated.token)?.id).toBe(unrelated.id);
+    }
+    expect(() => mgr.mint({ name: 'late', mintedBy: phone.id })).toThrow('no longer paired');
+  });
+
   test('revocation and records survive a reload (persisted)', () => {
     const file = tempFile();
     const mgr = new PairingTokenManager(file);

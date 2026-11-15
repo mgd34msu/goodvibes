@@ -28,23 +28,6 @@ describe('operator-client schema registry', () => {
       ContractZodSchemas as Record<string, unknown>,
     );
 
-    const EXPECTED_METHODS = [
-      'accounts.snapshot',
-      'control.auth.current',
-      'control.auth.login',
-      'control.status',
-      'local_auth.status',
-    ] as const;
-
-    for (const methodId of EXPECTED_METHODS) {
-      test(`resolves schema for "${methodId}"`, () => {
-        const schema = registry[methodId];
-        expect(schema).not.toBeUndefined(); // presence-only: schema registered for method
-        // Confirm it is a real Zod schema by checking the safeParse surface
-        expect(typeof (schema as { safeParse?: unknown })?.safeParse).toBe('function');
-      });
-    }
-
     test('does not register non-contract schemas under wrong keys', () => {
       // The incorrect derivation of local_auth.status was "local.auth.status" -
       // verify that key is absent from the registry.

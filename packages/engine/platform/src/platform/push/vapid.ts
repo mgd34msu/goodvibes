@@ -20,10 +20,14 @@
 import { createPrivateKey, generateKeyPairSync, sign as cryptoSign, type JsonWebKey } from 'node:crypto';
 import { DEFAULT_VAPID_SUBJECT, VAPID_SUBJECT_HINT, isValidVapidSubject } from './vapid-subject.js';
 
-/** The narrow slice of SecretsManager this module needs, get/set one secret. */
+/**
+ * The narrow slice of SecretsManager this module needs: the store's own
+ * create-once for daemon-owned material. An unreadable tier or a reference is
+ * refused there rather than read as "no key yet", so a passing hiccup cannot
+ * mint a new pair and orphan every browser subscription.
+ */
 export interface VapidSecretStore {
-  get(key: string): Promise<string | null>;
-  set(key: string, value: string): Promise<void>;
+  getOrCreateDaemonSecret(key: string, create: () => string): Promise<string>;
 }
 
 interface StoredVapidKeypair {
@@ -177,15 +181,14 @@ export class VapidManager {
   }
 
   private async loadOrGenerate(): Promise<StoredVapidKeypair> {
-    const existing = await this.store.get(VAPID_SECRET_KEY);
-    if (existing) return readStoredKeypair(existing);
-    const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-    const privateJwk = privateKey.export({ format: 'jwk' }) as JsonWebKey;
-    const keypair: StoredVapidKeypair = {
-      publicKey: publicKeyFromJwk(publicKey.export({ format: 'jwk' }) as JsonWebKey),
-      privateJwk,
-    };
-    await this.store.set(VAPID_SECRET_KEY, JSON.stringify(keypair));
-    return keypair;
+    const raw = await this.store.getOrCreateDaemonSecret(VAPID_SECRET_KEY, () => {
+      const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+      const keypair: StoredVapidKeypair = {
+        publicKey: publicKeyFromJwk(publicKey.export({ format: 'jwk' }) as JsonWebKey),
+        privateJwk: privateKey.export({ format: 'jwk' }) as JsonWebKey,
+      };
+      return JSON.stringify(keypair);
+    });
+    return readStoredKeypair(raw);
   }
 }

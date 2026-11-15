@@ -143,7 +143,7 @@ test('scalar credential set and clear refuse structured references before effect
   const original = [fallback()];
   const deps: CredentialWriteDeps = {
     config: { get: () => original, setDynamic: () => { calls++; } },
-    secrets: { set: async () => { calls++; }, get: async () => { calls++; return null; }, delete: async () => { calls++; } },
+    secrets: { set: async () => { calls++; }, get: async () => { calls++; return null; }, delete: async () => { calls++; }, getWriteScopeEntry: async () => { calls++; return null; }, deleteWriteScopeEntry: async () => { calls++; } },
     additionalSecretKeys: [key],
   };
   const context: GatewayMethodInvocation['context'] = { principalId: 'synthetic-operator', principalKind: 'user', clientKind: 'web', admin: true };

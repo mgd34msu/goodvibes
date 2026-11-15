@@ -194,10 +194,6 @@ export function conversationalTurnCapabilities(
   const captureAuthority = resolveCaptureAuthority({
     channel,
     ownerChannels: options.configReader?.get('profile.ownerChannels') ?? '',
-    // A reminder destination is not an owner grant for a newly offered tool
-    // that can read personal data. Only profile.ownerChannels authorizes this
-    // channel capability; the legacy authority resolver remains unchanged.
-    nudgeChannels: '',
   });
   return {
     // Routing may narrow the declared set, never widen it. Profile includes

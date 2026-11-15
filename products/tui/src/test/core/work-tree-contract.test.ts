@@ -8,9 +8,9 @@ import { createSessionContractViews, wireWorkTree } from '../../core/work-tree-w
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { renderAgentView } from '../../core/agent-view-render.ts';
 import { buildContractOwnerModel, buildTurnModel, orphanResultBead, transcriptUnits, turnSignature } from '../../core/work-tree-model.ts';
-import { renderTurn } from '../../core/work-tree-render.ts';
+import { renderTurn } from '@goodvibes-jev/engine/terminal-shell/work-tree-render';
 import { contractStatusSummary, projectContractTree } from '../../core/work-tree-contract.ts';
-import type { AgentLaneInfo, WorkTreeSources } from '../../core/work-tree-sources.ts';
+import type { AgentLaneInfo, WorkTreeSources } from '@goodvibes-jev/engine/terminal-shell/work-tree-sources';
 import { contractFixture, contractUnit, contractCriterion } from '../helpers/contract-work-tree-fixtures.ts';
 
 type Message = ConversationMessageSnapshot;

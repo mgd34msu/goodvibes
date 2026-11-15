@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { MAIN, SessionFocus, STOP_CONFIRM_MS, type SessionFocusDeps, type SessionMark } from '../../core/session-focus.ts';
+import { MAIN, SessionFocus, STOP_CONFIRM_MS, type SessionFocusDeps, type SessionMark } from '@goodvibes-jev/engine/terminal-shell/session-focus';
 
 type Known = { name: string; mark: SessionMark; parent?: string | null };
 

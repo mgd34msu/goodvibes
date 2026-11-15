@@ -13,7 +13,7 @@ import {
   NATIVE_SUBMISSION_JOURNAL_MAX_BYTES,
   NativeWorkSubmissionJournal,
   type NativeSubmissionJournalBinding,
-} from '../../runtime/native-work-submission-journal.ts';
+} from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 
 const binding: NativeSubmissionJournalBinding = {
@@ -58,7 +58,7 @@ test('journal writes strict durable private data and restart preserves exact ori
 
 test('a separate process recovers the identical retained request', async () => fixture(async path => {
   await new NativeWorkSubmissionJournal(path).save(binding, command, null);
-  const module = new URL('../../runtime/native-work-submission-journal.ts', import.meta.url).href;
+  const module = import.meta.resolve('@goodvibes-jev/engine/terminal-shell/native');
   const result = Bun.spawnSync([process.execPath, '--eval', `
     import { NativeWorkSubmissionJournal } from ${JSON.stringify(module)};
     console.log(JSON.stringify(await new NativeWorkSubmissionJournal(${JSON.stringify(path)}).read(${JSON.stringify(binding)})));

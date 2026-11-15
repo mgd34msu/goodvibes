@@ -24,7 +24,7 @@ import {
   type TermColorCaps,
 } from '../../renderer/term-caps.ts';
 import { DiffEngine } from '../../renderer/diff.ts';
-import { TerminalBuffer } from '../../renderer/buffer.ts';
+import { TerminalBuffer } from '@goodvibes-jev/engine/terminal-shell/buffer';
 
 // ---------------------------------------------------------------------------
 // Helpers

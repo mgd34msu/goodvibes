@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect } from 'bun:test';
-import { TerminalBuffer } from '../../renderer/buffer.ts';
+import { TerminalBuffer } from '@goodvibes-jev/engine/terminal-shell/buffer';
 
 // ---------------------------------------------------------------------------
 // TerminalBuffer.reset()

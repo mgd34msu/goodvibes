@@ -1,7 +1,4 @@
-import {
-  dispatchPolicyCommand as dispatchEnginePolicyCommand,
-  type PolicyFrontDoorContext,
-} from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import type { PolicyFrontDoorContext } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 
@@ -19,10 +16,3 @@ export function createPolicyCommandContext(context: CommandContext): PolicyFront
     },
   };
 }
-
-/** Compatibility entry for callers that already selected a policy subcommand. */
-export async function dispatchPolicyCommand(args: string[], context: CommandContext): Promise<void> {
-  await dispatchEnginePolicyCommand(args, createPolicyCommandContext(context));
-}
-
-export { renderPolicyUsage } from '@goodvibes-jev/engine/platform/platform/gate/policy';

@@ -6,8 +6,8 @@
  * submission as pending that nothing was working on any more.
  */
 import { expect, test } from 'bun:test';
-import { NativeWorkSubmissionControls, type NativeWorkSubmissionSelection } from '../../runtime/native-work-submission.ts';
-import type { NativeSubmissionJournalRecord } from '../../runtime/native-work-submission-journal.ts';
+import { NativeWorkSubmissionControls, type NativeWorkSubmissionSelection } from '@goodvibes-jev/engine/terminal-shell/native';
+import type { NativeSubmissionJournalRecord } from '@goodvibes-jev/engine/terminal-shell/native';
 
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 

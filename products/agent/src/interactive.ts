@@ -6,7 +6,7 @@ import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
-import { captureNativeConversationInput, type NativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
+import { captureNativeConversationInput, type NativeConversationInput, type ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import { formatRefusal, refusal } from '@goodvibes-jev/engine/errors';
 import { routeNativeConversationInput, dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
@@ -361,7 +361,7 @@ async function main() {
     () => render(),
   );
   commandContext.nativeConversationIntake = commandContext.nativeWorkLedger.intake;
-  unsubs.push(() => commandContext.nativeWorkLedger?.close());
+  unsubs.push(() => commandContext.nativeWorkLedger?.dispose());
   unsubs.push(() => shellPassthrough.cancelRunning());
   unsubs.push(() => input.settingsModal.close());
   // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence (work-tree-wiring.ts).

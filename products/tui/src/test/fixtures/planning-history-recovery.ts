@@ -28,23 +28,23 @@ const saved = JSON.stringify(store.listSources(1000));
 const judgment = fakePort(() => noulAnswer(0.99)); const previous = installJudgmentPort(judgment.port);
 const configManager = { get: (key: string) => key === 'daemon.enabled' ? true : key === 'controlPlane.publicBaseUrl' ? baseUrl : undefined } as unknown as ConfigManager;
 const host = createNativeWorkLedgerHost({ configManager, homeDirectory: home, journalPath, workspace: () => home });
-host.selectProject(projectId); // Explicit exact host project, never inferred from legacy records.
+host.view.selectProject(projectId); // Explicit exact host project, never inferred from legacy records.
 const history = createPlanningModalSurface({ projectId, service: {
   status: input => service.status(input), getState: input => service.getState(input),
   listDecisions: input => service.listDecisions(input), getLanguage: input => service.getLanguage(input),
 } });
-const native = createNativeWorkLedgerModalSurface(host.readSelection);
+const native = createNativeWorkLedgerModalSurface(host);
 const modal = new ConfigModal(); const opened: string[] = []; const output: string[] = [];
 const dispatched: { text: string; requestId: string; inputId: string }[] = [];
 const registry = new CommandRegistry(); registerPlanningRuntimeCommands(registry);
-registerNativeWorkLedgerCommand(registry, host.selectProject, host.discoverProject, host.submission);
+registerNativeWorkLedgerCommand(registry, host.view);
 const runtime = { sessionId: 'compiled-planning-history' };
 const context = {
   session: { runtime }, platform: { configManager }, provider: {},
   workspace: { projectPlanningService: service, projectPlanningProjectId: projectId,
     shellPaths: { homeDirectory: home, workingDirectory: home } },
   renderRequest() {},
-  nativeConversationIntake: host.intake,
+  nativeConversationIntake: host.view.intake,
   print: (line: string) => output.push(line),
   openModal(name: string) { opened.push(name); assert.ok(name === history.name || name === native.name); modal.open(name === history.name ? history : native); },
   dispatchNativeIntakeTurn: async (state: NativeConversationIntakeState) => {
@@ -68,7 +68,7 @@ async function command(prompt: string) {
   await waitFor(() => done, prompt); assert.equal(state.commandMode, false);
 }
 const text = (surface: typeof history) => surface.buildView().tabs.flatMap(tab => [...(tab.header ?? []), ...tab.rows.map(row => row.label)]).join('\n');
-const key = (logicalName: string) => handleConfigModalToken({ configModal: modal, requestRender() {}, handleEscape: () => modal.close() }, { ...enter, logicalName });
+const key = (logicalName: string) => handleConfigModalToken({ configModal: modal, requestRender() {}, handleEscape: () => modal.close() }, { ...enter, logicalName, ctrl: logicalName.length === 1 });
 async function inspectHistory() {
   const readsBefore = judgment.requests.length;
   await command('/project-plan history'); await waitFor(() => text(history).includes('Preserve synthetic history'));
@@ -114,5 +114,5 @@ try {
   assert.deepEqual(readFileSync(dbPath), historicalBytes);
   console.log(JSON.stringify({ mode, opened, output, dispatched, historicalUnchanged: true, judgmentReads: judgment.requests.length }));
 } finally {
-  modal.close(); host.intake.close(); host.submission.close(); await store.close(); installJudgmentPort(previous);
+  modal.close(); host.view.dispose(); await store.close(); installJudgmentPort(previous);
 }

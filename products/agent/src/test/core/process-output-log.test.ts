@@ -3,7 +3,7 @@ import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/e
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { processEndpointCandidates } from '@goodvibes-jev/engine/terminal-shell';
-import { MAX_LINES, ProcessOutputLog } from '../../core/process-output-log.ts';
+import { MAX_LINES, ProcessOutputLog } from '@goodvibes-jev/engine/terminal-shell/process-output-log';
 import { makeProcessOutputReadingFixture, processEvidenceRows as rowsOf } from '../helpers/process-output-reading.ts';
 
 const rec = (stdout: string[], stderr: string[] = [], done = false) => ({ stdout, stderr, done });

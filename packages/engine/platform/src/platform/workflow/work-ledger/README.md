@@ -142,9 +142,13 @@ owner and exposes only its service. Independent processes may coordinate file
 writes, but authentication and revocation remain routed through the authority
 owner; this does not implement distributed revocation epochs.
 
-Schema v2 adds only `work_ledgers(project_id, format_version, revision,
-state_json)`. Each project row contains its state, immutable history and exact
-request receipts in one atomic SQLite image. Legacy source metadata remains
+Each project has one `work_ledgers(project_id, format_version, revision,
+state_json)` row holding its current works, attempts and evidence, and one
+`work_ledger_events` row per history event with that event's request receipt
+(actor, request id, signature). A command appends its events and replaces the
+project row in one transaction, so a write does not grow with the history. A
+row written by an earlier build (format 2: the whole ledger in one row) is read
+as before and stored in the new form on its next write. Legacy source metadata remains
 unchanged and is never converted into authority or verification. Old binaries
 refuse schema v2. No automatic WorkPlanStore import or duplicate editable mirror
 is created.

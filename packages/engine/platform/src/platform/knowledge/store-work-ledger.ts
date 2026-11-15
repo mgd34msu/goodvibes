@@ -13,8 +13,61 @@ export interface KnowledgeWorkLedgerStorage extends WorkLedgerStorage {
   close(): Promise<void>;
 }
 
+const WORK_LEDGER_EVENTS_TABLE = 'CREATE TABLE IF NOT EXISTS work_ledger_events (project_id TEXT NOT NULL, sequence INTEGER NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, signature TEXT NOT NULL, event_json TEXT NOT NULL, PRIMARY KEY (project_id, sequence))';
+
 export function createWorkLedgerTable(db: Pick<SqlDatabase, 'run'>): void {
   db.run('CREATE TABLE IF NOT EXISTS work_ledgers (project_id TEXT PRIMARY KEY NOT NULL, format_version INTEGER NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL)');
+  db.run(WORK_LEDGER_EVENTS_TABLE);
+}
+
+/**
+ * Format 3 keeps the ledger's current records (works, attempts, evidence) in its
+ * `work_ledgers` row and each history event once, as its own `work_ledger_events`
+ * row with the receipt fields beside it. A command appends its events and replaces
+ * the small row; nothing it writes grows with the length of the history. Format 2
+ * (the whole ledger, every event twice, in one row) is still read and becomes
+ * format 3 on its next write.
+ */
+const WORK_LEDGER_FORMAT = 3;
+
+/** The stored ledger as written, history and receipts included, before any validation. */
+export function readKnowledgeWorkLedgerImage(db: Pick<SqlDatabase, 'exec'>, projectId: string, format: unknown, image: unknown): unknown {
+  if (typeof image !== 'string') throw new Error('Work ledger persisted format is invalid');
+  if (format === 2) return JSON.parse(image);
+  if (format !== WORK_LEDGER_FORMAT) throw new Error('Work ledger persisted format is invalid');
+  const head: unknown = JSON.parse(image);
+  if (!head || typeof head !== 'object' || Array.isArray(head)) throw new Error('Work ledger persisted format is invalid');
+  const history: unknown[] = [];
+  const receipts: unknown[] = [];
+  for (const row of db.exec('SELECT actor_id, request_id, signature, event_json FROM work_ledger_events WHERE project_id = ? ORDER BY sequence', [projectId])[0]?.values ?? []) {
+    if (typeof row[3] !== 'string') throw new Error('Work ledger persisted format is invalid');
+    const event: unknown = JSON.parse(row[3]);
+    history.push(event);
+    receipts.push({ actorId: row[0], requestId: row[1], signature: row[2], event });
+  }
+  return { ...head, history, receipts };
+}
+
+/**
+ * Write `next`, which extends the stored ledger: the events after the stored
+ * revision are appended and the ledger row is replaced. A format 2 row is
+ * rewritten as format 3 once, all its events included.
+ */
+export function writeKnowledgeWorkLedger(db: Pick<SqlDatabase, 'exec' | 'run'>, next: WorkLedgerState): void {
+  if ((db.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_ledger_events'")[0]?.values.length ?? 0) === 0) db.run(WORK_LEDGER_EVENTS_TABLE);
+  const head = db.exec('SELECT format_version, revision FROM work_ledgers WHERE project_id = ?', [next.projectId])[0]?.values[0];
+  const appended = head?.[0] === WORK_LEDGER_FORMAT ? Number(head[1]) : 0;
+  if (appended > next.revision || next.history.length !== next.revision || next.receipts.length !== next.revision) throw new Error('Work ledger commit does not extend the current history');
+  if (appended === 0) db.run('DELETE FROM work_ledger_events WHERE project_id = ?', [next.projectId]);
+  for (let index = appended; index < next.revision; index++) {
+    const event = next.history[index]!;
+    const receipt = next.receipts[index]!;
+    db.run('INSERT INTO work_ledger_events(project_id, sequence, actor_id, request_id, signature, event_json) VALUES (?, ?, ?, ?, ?, ?)',
+      [next.projectId, event.sequence, receipt.actorId, receipt.requestId, receipt.signature, JSON.stringify(event)]);
+  }
+  const { history: _history, receipts: _receipts, ...current } = next;
+  db.run('INSERT INTO work_ledgers(project_id, format_version, revision, state_json) VALUES (?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version, revision=excluded.revision, state_json=excluded.state_json',
+    [next.projectId, WORK_LEDGER_FORMAT, next.revision, JSON.stringify(current)]);
 }
 
 /** A current-version file must never be "repaired" into an empty authority. */
@@ -46,8 +99,7 @@ export function migrateWorkLedgerTableToVersion2(db: Pick<SqlDatabase, 'exec' | 
 export function readKnowledgeWorkLedger(db: Pick<SqlDatabase, 'exec'>, projectId: string): WorkLedgerState {
   const row = db.exec('SELECT format_version, revision, state_json FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0];
   if (!row) return createEmptyWorkLedgerState(projectId);
-  if (row[0] !== 2 || typeof row[2] !== 'string') throw new Error('Work ledger persisted format is invalid');
-  const state = workLedgerStateSchema.parse(JSON.parse(row[2]));
+  const state = workLedgerStateSchema.parse(readKnowledgeWorkLedgerImage(db, projectId, row[0], row[2]));
   if (state.projectId !== projectId || state.revision !== row[1]) throw new Error('Work ledger persisted identity is invalid');
   return state;
 }
@@ -169,7 +221,7 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
             if (declared !== undefined) { drainOwned(declared); throw new Error('Historical import publication requires a synchronous native owner'); }
           }
           cached = undefined;
-          db.run('INSERT INTO work_ledgers(project_id, format_version, revision, state_json) VALUES (?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version, revision=excluded.revision, state_json=excluded.state_json', [projectId, next.version, next.revision, JSON.stringify(next)]);
+          writeKnowledgeWorkLedger(db, next);
         }
         return { changed: decision.next !== null, value: decision.value };
       }, refresh).then(result => {

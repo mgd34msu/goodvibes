@@ -10,7 +10,7 @@ import type {
 } from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
 
 import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
-import type { ProductInputContext } from '../runtime/native-conversation-input.ts';
+import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 
 import type { ConversationManager } from '../core/conversation';
@@ -120,7 +120,7 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   /** Open the notification history (/notifications): every system notice in full. */
 
   /**
-   * Open an agent or a background process full screen (core/session-focus.ts).
+   * Open an agent or a background process full screen (terminal-shell session-focus).
    * False when it is not known here (the caller keeps its own fallback).
    */
 }

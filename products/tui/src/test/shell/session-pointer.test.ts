@@ -4,7 +4,7 @@ import { makeViewScene, type ViewScene } from '../helpers/session-view-scenes.ts
 import { SurfacePointer } from '../../input/surface-pointer.ts';
 import { beginModal, finishModal } from '../../renderer/surface-kit.ts';
 import { drawList } from '../../renderer/surface-kit-list.ts';
-import { BeadContentCache } from '../../core/bead-content-cache.ts';
+import { BeadContentCache } from '@goodvibes-jev/engine/terminal-shell/bead-content-cache';
 import { InfiniteBuffer, SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { InputHandler } from '../../input/handler.ts';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';

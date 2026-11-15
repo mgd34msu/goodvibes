@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createOperatorNativeWorkExecutionClient, type NativeWorkExecutionIdentity, type NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import type { WorkLedgerReadClient, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { nativeWorkIntegrationView } from '../../../runtime/native-work-integration.ts';
-import type { NativeWorkLedgerSelection } from '../../../runtime/native-work-ledger.ts';
+import { nativeWorkModalSource } from '../../helpers/native-work-modal-source.ts';
 import { createNativeWorkLedgerModalSurface } from '../../../views/modals/native-work-ledger-modal.ts';
 import { ConfigModal } from '../../../input/config-modal.ts';
 import { handleConfigModalToken } from '../../../input/handler-modal-routes.ts';
@@ -35,12 +35,12 @@ function fixture(initial: Inspection | undefined = live()) {
     verification: { state: 'unverified', reason: 'No current proof', evidence: null }, attention: [],
   }] };
   const reader: WorkLedgerReadClient = { projectId: snapshot.projectId, readSnapshot: async () => snapshot, history: async () => [], subscribe: () => () => {}, dispose() {} };
-  let selection: NativeWorkLedgerSelection = { available: true, identity: 'host-A', projectId: snapshot.projectId, bind: () => ({ available: true, client: reader,
+  const source = nativeWorkModalSource(snapshot.projectId, () => ({ available: true, client: reader,
     execution: createOperatorNativeWorkExecutionClient({ invoke: async <T>(operation: string, args: unknown, options?: { signal?: AbortSignal }): Promise<T> => {
       calls.push(operation); signals.push(options?.signal); return await response(args as NativeWorkExecutionIdentity) as T;
     } }, snapshot.projectId),
-  }) };
-  const surface = createNativeWorkLedgerModalSurface(() => selection);
+  }));
+  const surface = createNativeWorkLedgerModalSurface(source);
   const modal = new ConfigModal();
   const route = { configModal: modal, requestRender() {}, handleEscape: () => modal.close() };
   const key = (logicalName: string) => handleConfigModalToken(route, { type: 'key', logicalName } as never);
@@ -51,13 +51,13 @@ function fixture(initial: Inspection | undefined = live()) {
     expect(modal.getActiveTabId()).toBe(id);
   };
   const inspect = async (): Promise<void> => {
-    tab('work'); key('down'); handleConfigModalToken(route, { type: 'text', value: 'i' }); await tick(); tab('integration');
+    tab('work'); key('down'); handleConfigModalToken(route, { type: 'key', name: 'i', logicalName: 'i', ctrl: true, shift: false, meta: false }); await tick(); tab('integration');
   };
   return { surface, modal, calls, signals, key, frame, tab, inspect, reader,
     open: async () => { modal.open(surface); await tick(); frame(); },
     replace: (value: Inspection | undefined) => { response = target => execution(value, target); },
     respond: (fn: typeof response) => { response = fn; },
-    switchHost: () => { selection = { ...selection, identity: 'host-B' }; },
+    switchHost: () => { source.replaceHost({ baseUrl: 'http://native-fixture.invalid', token: 'replaced-token', workspace: '/', credentialIdentity: 'host-B' }); },
     text: () => surface.buildView().tabs.find(tab => tab.id === 'integration')!.rows.map(row => row.label).join('\n'),
   };
 }

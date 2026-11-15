@@ -19,7 +19,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { AgentLaneInfo, WorkTreeSources } from '../../core/work-tree-sources.ts';
+import type { AgentLaneInfo, WorkTreeSources } from '@goodvibes-jev/engine/terminal-shell/work-tree-sources';
 import { SessionViews } from '../../shell/session-views.ts';
 import { renderStatusLine } from '../../renderer/status-line.ts';
 import { appendConversationMessages, type ConversationRenderContext } from '../../core/conversation-rendering.ts';

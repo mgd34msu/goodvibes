@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
-import { operatorWorkLedgerSelection } from '../../../runtime/native-work-ledger.ts';
+import { operatorWorkModalSource } from '../../helpers/native-work-modal-source.ts';
 import { createNativeWorkLedgerModalSurface } from '../../../views/modals/native-work-ledger-modal.ts';
 import { ConfigModal } from '../../../input/config-modal.ts';
 import { handleConfigModalToken } from '../../../input/handler-modal-routes.ts';
@@ -36,7 +36,7 @@ test('actual native conflict and autonomous fix-passed reach the TUI as separate
     if (!conflicted || conflicted.item.state !== 'recorded') throw new Error('Expected the actual conflicted item');
     const item = conflicted.item;
     expect(existsSync(item.worktreePath!)).toBe(true);
-    const surface = createNativeWorkLedgerModalSurface(() => operatorWorkLedgerSelection('paired-native-host', before.projectId, platformClient));
+    const surface = createNativeWorkLedgerModalSurface(operatorWorkModalSource(before.projectId, platformClient));
     const route = { configModal: modal, requestRender() {}, handleEscape: () => modal.close() };
     const key = (logicalName: string) => handleConfigModalToken(route, { type: 'key', logicalName } as never);
     const tab = (id: string) => {
@@ -99,7 +99,7 @@ for (const afterRepair of [false, true]) test(`an actual legacy runner keeps nat
       expectedRevision: ready.identity.expectedRevision, integration: { state: 'unavailable', reason: 'unsupported-runner' },
       progress: { semanticState: 'deciding', stage: 'fix-plan' } });
     expect(Object.keys(before.integration!).sort()).toEqual(['reason', 'state']);
-    const surface = createNativeWorkLedgerModalSurface(() => operatorWorkLedgerSelection('paired-legacy-runner', before.projectId, platformClient));
+    const surface = createNativeWorkLedgerModalSurface(operatorWorkModalSource(before.projectId, platformClient));
     const route = { configModal: modal, requestRender() {}, handleEscape: () => modal.close() };
     const key = (logicalName: string) => handleConfigModalToken(route, { type: 'key', logicalName } as never);
     const tab = (id: string) => {

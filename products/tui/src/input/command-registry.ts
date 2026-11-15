@@ -13,7 +13,7 @@ import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodv
 import { withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
 import { SHARED_COMMAND_CONFIRMATIONS } from './shared-command-confirmations.ts';
-import type { ProductInputContext } from '../runtime/native-conversation-input.ts';
+import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 
 import type { ConversationManager } from '../core/conversation';
@@ -207,7 +207,7 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   /** The Agents modal; `target` selects a process, `hosted` opens the attached hosted session. */
   openAgents?: (options?: { readonly target?: ViewTarget; readonly hosted?: boolean }) => void;
   /**
-   * Open an agent or a background process full screen (core/session-focus.ts).
+   * Open an agent or a background process full screen (terminal-shell session-focus).
    * False when it is not known here (the caller keeps its own fallback).
    */
 

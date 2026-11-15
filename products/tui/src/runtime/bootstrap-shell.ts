@@ -178,7 +178,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     workspace: () => services.workingDirectory,
   });
   const views = createShellViews({
-    nativeWorkLedgerSelection: nativeWorkLedgerHost.readSelection,
+    nativeWorkLedgerSelection: nativeWorkLedgerHost,
     providerRegistry: services.providerRegistry,
     uiServices,
     toolRegistry,
@@ -215,12 +215,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
 
   const commandRegistry = new CommandRegistry();
   registerBuiltinCommands(commandRegistry);
-  registerNativeWorkLedgerCommand(
-    commandRegistry,
-    nativeWorkLedgerHost.selectProject,
-    nativeWorkLedgerHost.discoverProject,
-    nativeWorkLedgerHost.submission,
-  );
+  registerNativeWorkLedgerCommand(commandRegistry, nativeWorkLedgerHost.view);
   registerTuiLegacyImportCommands(commandRegistry, options.daemonHomeDirectory);
   const remoteRuntime = createShellRemoteCommandService({
     readModels: uiServices.readModels,
@@ -316,14 +311,11 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     persist: saveHistory,
   });
 
-  commandContext.nativeConversationIntake = nativeWorkLedgerHost.intake;
+  commandContext.nativeConversationIntake = nativeWorkLedgerHost.view.intake;
   return {
     commandRegistry,
     commandContext,
-    closeNativeWorkSubmission: () => {
-      nativeWorkLedgerHost.submission.close();
-      nativeWorkLedgerHost.intake.close();
-    },
+    closeNativeWorkSubmission: () => nativeWorkLedgerHost.view.dispose(),
     gitStatusProvider,
     lastGitInfoRef,
     inputHistory,

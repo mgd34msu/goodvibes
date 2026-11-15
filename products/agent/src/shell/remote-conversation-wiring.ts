@@ -13,7 +13,7 @@ import { bindActiveExecutionMode } from '../permissions/execution-mode.ts';
  * where it used to have one call.
  */
 
-import type { NativeConversationInput } from '../runtime/native-conversation-input.ts';
+import type { NativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
 import { nativeConversationIntakeLines, type NativeConversationIntakeActions, type NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 import { createRemoteConversationRouter, sameNativeRemoteConnection, type ConnectedHostResolution } from '../runtime/client/remote-conversation.ts';
 import { mirrorHostedSessionToStore, recoverUnmirroredHostedSessions, type HostedAttachReply } from '../runtime/client/hosted-session-mirror.ts';

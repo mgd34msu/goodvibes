@@ -55,7 +55,7 @@ test('explicit host/project selection, replacement and reopen', async () => {
 });
 test('reported complete never implies verified; stable IDs and criterion revisions render', () => {
   const e = event(1); const s: WorkLedgerReadSnapshot = { ...snapshot(1), works: [{ work: e.work, attempt: null, verification: { state: 'unverified', reason: 'No evidence', evidence: null }, attention: [{ kind: 'verification', reason: 'Check it' }] }] };
-  const text = nativeWorkLedgerLines({ status: 'ready', snapshot: s, history: [e], cursor: 1 }).join('\n');
+  const text = nativeWorkLedgerLines({ status: 'ready', snapshot: s, history: [e], cursor: 1, executionAvailable: false }).join('\n');
   expect(text).toContain('Reported: complete · Verification: unverified'); expect(text).toContain('work-stable'); expect(text).toContain('Criteria revision 1'); expect(text).toContain('Attention (verification): Check it'); expect(text).toContain('Evidence: none');
 });
 test('passive discovery is discarded after explicit project selection, close or host replacement', async () => {

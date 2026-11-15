@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
 /** One durable transaction publishes native continuation claim and its exact ledger successor. */
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
+import { writeKnowledgeWorkLedger } from './store-work-ledger.js';
 import type { DurableContractKey } from '../contract/durable-admission.js';
 import type { NativeExecutionOriginal, NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
 import { reduceWorkLedgerContinuation } from '../workflow/work-ledger/service.js';
@@ -85,8 +86,7 @@ export function createNativeCiContinuationStorage(sqlite: SQLiteStore, projectId
         }, { now: Date.now, newId: () => { throw new Error('Unexpected native continuation identity'); } });
         const next = parseNativeCiContinuation({ ...record, state: 'claimed', failureRevision, successor: reduced.target }, record);
         assertCurrent(before);
-        db.run('INSERT INTO work_ledgers(project_id,format_version,revision,state_json) VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version,revision=excluded.revision,state_json=excluded.state_json',
-          [projectId, reduced.state.version, reduced.state.revision, JSON.stringify(reduced.state)]);
+        writeKnowledgeWorkLedger(db, reduced.state);
         put(db, next);
         return { changed: true, value: next };
       }, refresh);

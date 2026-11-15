@@ -5,6 +5,7 @@ import { NativeExecutionMoveRefused, executionIntentMoveText, executionRecordMov
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';
 import { nativeSettlementDigest, nativeWorkSettlementSchema, nativeSettlementStorageKey, captureNativeSettlementPublication, nativeSettlementPublicationCommitment, type NativeWorkSettlementReceipt, type NativeWorkSettlementPublication } from '../workflow/work-ledger/native-settlement-types.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
+import { readKnowledgeWorkLedgerImage, writeKnowledgeWorkLedger } from './store-work-ledger.js';
 import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, sameDurableRequest, type DurableContractKey, type DurableContractRequest, type DurableContractReceipt } from '../contract/durable-admission.js';
 import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
 import type { WorkLedgerState } from '../workflow/work-ledger/types.js';
@@ -84,8 +85,8 @@ export function validateNativeWorkSettlementTable(db: SqlReader): void {
 /** Validate every existing authority row before admitting the additive schema. */
 export function migrateNativeWorkSettlementTable(db: Pick<SqlDatabase, 'exec' | 'run'>): void {
   for (const row of db.exec('SELECT project_id,format_version,revision,state_json FROM work_ledgers')[0]?.values ?? []) {
-    const ledger = readWorkLedgerState(JSON.parse(String(row[3])), String(row[0]));
-    if (row[1] !== ledger.version || row[2] !== ledger.revision) throw new NativeWorkExecutionError('invalid');
+    const ledger = readWorkLedgerState(readKnowledgeWorkLedgerImage(db, String(row[0]), row[1], row[3]), String(row[0]));
+    if (row[2] !== ledger.revision) throw new NativeWorkExecutionError('invalid');
   }
   validateNativeWorkExecutionTable(db); validateNativeWorkExecutionIntentTable(db);
   createNativeWorkSettlementTable(db); validateNativeWorkSettlementTable(db);
@@ -137,10 +138,12 @@ function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const child of Object.values(value)) deepFreeze(child); }
   return value;
 }
-function validatedLedger(projectId: string, image: string): WorkLedgerState {
+function validatedLedger(db: SqlReader, projectId: string, format: unknown, image: string): WorkLedgerState {
   const known = validatedLedgers.get(projectId);
+  // A format 3 row names its revision and its events are only appended, so the
+  // same row text is the same ledger.
   if (known && known.image === image) return known.ledger;
-  const ledger = deepFreeze(readWorkLedgerState(JSON.parse(image), projectId));
+  const ledger = deepFreeze(readWorkLedgerState(readKnowledgeWorkLedgerImage(db, projectId, format, image), projectId));
   validatedLedgers.set(projectId, { image, ledger });
   return ledger;
 }
@@ -158,8 +161,8 @@ function readLedger(db: SqlReader, projectId: string, cache?: LedgerRevisionCach
   if (kept && kept.version === head[0] && kept.revision === head[1]) return kept.ledger;
   const image = db.exec('SELECT state_json FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0]?.[0];
   if (image === undefined) throw new NativeWorkExecutionError('invalid');
-  const ledger = validatedLedger(projectId, String(image));
-  if (head[0] !== ledger.version || head[1] !== ledger.revision) throw new NativeWorkExecutionError('invalid');
+  const ledger = validatedLedger(db, projectId, head[0], String(image));
+  if (head[1] !== ledger.revision) throw new NativeWorkExecutionError('invalid');
   if (cache) cache.entry = { version: head[0], revision: head[1], ledger };
   return ledger;
 }
@@ -363,7 +366,7 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
         // clock and format callback. Candidate comparison below is not adoption
         // of durable source: only the actual afterDurable image may retain it.
         assertCurrent();
-        db.run('INSERT INTO work_ledgers(project_id,format_version,revision,state_json) VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version,revision=excluded.revision,state_json=excluded.state_json', [projectId, reduced.state.version, reduced.state.revision, JSON.stringify(reduced.state)]);
+        writeKnowledgeWorkLedger(db, reduced.state);
         db.run('INSERT INTO native_work_execution_settlements(project_id,key_hash,format_version,state_json) VALUES (?,?,?,?)', [projectId, nativeSettlementStorageKey(receipt), receipt.version, JSON.stringify(receipt)]);
         read(db, projectId, lookup, record, candidate);
         assertCurrent();

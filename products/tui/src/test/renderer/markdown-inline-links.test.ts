@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { renderInlineMarkdown } from '../../renderer/markdown-inline.ts';
 import { renderMarkdown } from '../../renderer/markdown.ts';
-import { TerminalBuffer } from '../../renderer/buffer.ts';
+import { TerminalBuffer } from '@goodvibes-jev/engine/terminal-shell/buffer';
 import { DiffEngine } from '../../renderer/diff.ts';
 
 test('untrusted hyperlink targets cannot emit terminal controls through markdown or direct cells', () => {

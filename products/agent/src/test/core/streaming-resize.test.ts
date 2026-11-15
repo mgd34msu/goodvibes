@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { ConversationManager } from '../../core/conversation';
-import { renderStreamingContinuation } from '../../core/work-tree-render.ts';
+import { renderStreamingContinuation } from '@goodvibes-jev/engine/terminal-shell/work-tree-render';
 import { createTestConfigManager } from '../helpers/test-managers.ts';
 
 // ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ const NARROW = 40;
  * header says "working" and the spine's │ runs beside the text.
  */
 function streamed(content: string, width: number): ReturnType<typeof renderStreamingContinuation> {
-  return renderStreamingContinuation(content, width, { gutter: [], gutterWidth: 6 }, 'rounded');
+  return renderStreamingContinuation(content, width, { gutter: [], gutterWidth: 6 }, 'rounded', false);
 }
 
 function manager(getWidth: () => number): ConversationManager {

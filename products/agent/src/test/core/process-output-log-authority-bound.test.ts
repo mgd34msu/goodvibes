@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ProcessOutputLog } from '../../core/process-output-log.ts';
+import { ProcessOutputLog } from '@goodvibes-jev/engine/terminal-shell/process-output-log';
 import { makeProcessOutputReadingFixture } from '../helpers/process-output-reading.ts';
 
 const logs: ProcessOutputLog[] = [];

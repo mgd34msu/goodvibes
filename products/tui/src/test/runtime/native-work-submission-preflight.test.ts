@@ -36,7 +36,7 @@ for (const change of ['close', 'workspace', 'token', 'store', 'home', 'project',
   await pairNativeTestHost(second, baseUrl, 'synthetic-first-token');
   const configManager = { get: (key: string) => key === 'daemon.enabled' ? true : key === 'controlPlane.publicBaseUrl' ? baseUrl : undefined } as unknown as ConfigManager;
   const host = createNativeWorkLedgerHost({ configManager, homeDirectory: () => selectedHome, daemonHomeDirectory: home, journalPath, workspace: () => workspace });
-  const actions = { submit: () => host.submission.submitFile('source.json'), close: () => host.submission.close(), project: () => host.selectProject('other') };
+  const actions = { submit: () => host.view.submitFile!('source.json'), close: () => host.view.dispose(), project: () => host.view.selectProject('other') };
   try {
     const pending = actions.submit();
     expect((await actions.submit())?.status).toBe('pending'); // overlaps the first file read

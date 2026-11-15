@@ -1,5 +1,5 @@
 import { legacyMigrationPreparationRevision } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
-import { nativeWorkExecutionLines } from '../runtime/native-work-execution.ts';
+import { nativeWorkExecutionLines } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeWorkLedgerState } from '../runtime/native-work-ledger.ts';
 
 /** Plain terminal text only; ledger content never becomes an action or terminal escape. */
@@ -10,6 +10,7 @@ export function nativeWorkLedgerLines(state: NativeWorkLedgerState): string[] {
   const lines = ['Native work ledger · explicit execution controls'];
   if (state.status !== 'ready') return [...lines, `${plain(state.status)}: ${safe(state.reason)}`];
   lines.push(`Project ${safe(state.snapshot.projectId)} · snapshot ${plain(state.snapshot.cursor)} · history ${plain(state.cursor)}`);
+  if (state.reason) lines.push(`Showing the last rows read: ${safe(state.reason)}`);
   if (!state.snapshot.works.length) lines.push('No native work recorded for this project.');
   for (const view of state.snapshot.works) {
     const { work, attempt, verification } = view;

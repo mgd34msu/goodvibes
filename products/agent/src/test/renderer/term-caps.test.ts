@@ -11,7 +11,7 @@ import {
   type TermColorCaps,
 } from '@goodvibes-jev/engine/terminal-shell';
 import { DiffEngine } from '../../renderer/diff.ts';
-import { TerminalBuffer } from '../../renderer/buffer.ts';
+import { TerminalBuffer } from '@goodvibes-jev/engine/terminal-shell/buffer';
 
 // ---------------------------------------------------------------------------
 // DiffEngine integration, color emission per capability

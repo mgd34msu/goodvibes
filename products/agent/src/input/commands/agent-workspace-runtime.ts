@@ -1,7 +1,6 @@
 import { handleNativeIntakeCommand, handleNativeSubmissionCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
 import '../../runtime/native-conversation-intake.ts';
-import '../../runtime/native-work-submission.ts';
-import { nativeWorkExecutionLines } from '../../runtime/native-work-execution.ts';
+import { nativeWorkExecutionLines } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { AGENT_WORKSPACE_CATEGORY_IDS } from '../agent-workspace-types.ts';
 

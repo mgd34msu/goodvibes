@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { NativeWorkExecutionControls, nativeWorkExecutionLines, type NativeWorkExecutionAction } from '../../runtime/native-work-execution.ts';
+import { NativeWorkExecutionControls, nativeWorkExecutionLines, type NativeWorkExecutionAction } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { WorkLedgerReadClient, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionIdentity, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 

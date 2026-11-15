@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import type { BlockMeta } from '../../core/conversation-types.ts';
+import type { BlockMeta } from '@goodvibes-jev/engine/terminal-shell/work-tree-types';
 import type { ConversationManager } from '../../core/conversation.ts';
-import { WorkTreeController } from '../../core/work-tree-focus.ts';
+import { WorkTreeController } from '@goodvibes-jev/engine/terminal-shell/work-tree-focus';
 import { handleWorkTreeToken } from '../../input/handler-work-tree-route.ts';
-import { backgroundProcessId } from '../../core/work-tree-render.ts';
+import { backgroundProcessId } from '@goodvibes-jev/engine/terminal-shell/work-tree-render';
 import { appendConversationMessages, type ConversationRenderContext } from '../../core/conversation-rendering.ts';
 import { lanesScene } from '../helpers/work-tree-scenes.ts';
 

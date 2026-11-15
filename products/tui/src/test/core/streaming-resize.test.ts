@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { ConversationManager } from '../../core/conversation';
-import { renderStreamingContinuation } from '../../core/work-tree-render.ts';
+import { renderStreamingContinuation } from '@goodvibes-jev/engine/terminal-shell/work-tree-render';
 import { createTestConfigManager } from '../helpers/test-managers.ts';
 
 // ---------------------------------------------------------------------------

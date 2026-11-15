@@ -8,9 +8,9 @@ import { createSessionContractViews, wireWorkTree } from '../../core/work-tree-w
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { renderAgentView } from '../../core/agent-view-render.ts';
 import { buildContractOwnerModel, buildTurnModel, orphanResultBead, transcriptUnits, turnSignature } from '../../core/work-tree-model.ts';
-import { renderTurn } from '../../core/work-tree-render.ts';
+import { renderTurn } from '@goodvibes-jev/engine/terminal-shell/work-tree-render';
 import { contractStatusSummary, projectContractTree } from '../../core/work-tree-contract.ts';
-import type { AgentLaneInfo, WorkTreeSources } from '../../core/work-tree-sources.ts';
+import type { AgentLaneInfo, WorkTreeSources } from '@goodvibes-jev/engine/terminal-shell/work-tree-sources';
 import { contractFixture, contractUnit, contractCriterion } from '../helpers/contract-work-tree-fixtures.ts';
 
 type Message = ConversationMessageSnapshot;
@@ -23,7 +23,7 @@ function model(contract: ContractView, collapse = new Map<string, boolean>()) {
   return buildTurnModel({ messages, offset: 0, unit, sources: { agent: (id) => id === 'owner' ? owner(contract) : null, now: () => 3000 }, collapse, streamingIndex: -1 });
 }
 function draw(contract: ContractView, collapse = new Map<string, boolean>(), width = 120) {
-  return renderTurn(model(contract, collapse), { width, glyphSet: 'rounded', focusId: null, lineNumberMode: 'off', collapseThreshold: 20, collapseState: collapse, isNavigableSystem: () => false, frame: 0 });
+  return renderTurn(model(contract, collapse), { width, glyphSet: 'rounded', focusId: null, lineNumberMode: 'off', collapseThreshold: 20, collapseState: collapse, isNavigableSystem: () => false, frame: 0 }, { paragraphSpacing: false, systemAccent: 'info' });
 }
 const text = (lines: ReturnType<typeof renderAgentView>): string => lines.map((line) => line.map((cell) => cell.char).join('')).join('\n');
 

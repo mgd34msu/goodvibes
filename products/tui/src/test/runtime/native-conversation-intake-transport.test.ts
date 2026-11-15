@@ -82,9 +82,9 @@ async function fixture() {
   await pairNativeTestHost(home, baseUrl, 'synthetic-intake-token');
   const configManager = { get: (key: string) => key === 'daemon.enabled' ? true : key === 'controlPlane.publicBaseUrl' ? baseUrl : undefined } as unknown as ConfigManager;
   const host = createNativeWorkLedgerHost({ configManager, homeDirectory: home, daemonHomeDirectory: home, journalPath, workspace: () => home });
-  const intake = host.intake; const close = () => { intake.close(); host.submission.close(); };
+  const intake = host.view.intake!; const close = () => host.view.dispose();
   const printed: string[] = []; let dispatches = 0; const registry = new CommandRegistry();
-  registerNativeWorkLedgerCommand(registry, host.selectProject, host.discoverProject, host.submission);
+  registerNativeWorkLedgerCommand(registry, host.view);
   const context = { nativeConversationIntake: intake, dispatchNativeIntakeTurn: async () => { dispatches++; }, print: (line: string) => printed.push(line) } as unknown as CommandContext;
   return { intake, home, baseUrl, requests, captures, printed, executionStarts, executions, dispatches: () => dispatches,
     run: (action: string) => registry.execute('work', [action], context),

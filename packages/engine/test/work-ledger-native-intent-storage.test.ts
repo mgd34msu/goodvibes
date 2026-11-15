@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { readKnowledgeWorkLedgerImage } from '../platform/src/platform/knowledge/store-work-ledger.js';
 import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import { SQLiteStore, loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
@@ -53,8 +54,8 @@ async function mutateImage(file: string, mutate: (db: SqlDatabase) => void) {
 }
 function downgradeLedgerRows(db: SqlDatabase): void {
   const withoutSource = (work: LedgerWork) => { const { source: _source, ...old } = work; return old; };
-  for (const row of db.exec('SELECT project_id, state_json FROM work_ledgers')[0]?.values ?? []) {
-    const state = workLedgerStateSchema.parse(JSON.parse(String(row[1])));
+  for (const row of db.exec('SELECT project_id, format_version, state_json FROM work_ledgers')[0]?.values ?? []) {
+    const state = workLedgerStateSchema.parse(readKnowledgeWorkLedgerImage(db, String(row[0]), row[1], row[2]));
     const event = (value: WorkLedgerEvent) => value.type === 'import_legacy' ? { ...value, works: value.works.map(withoutSource) } : { ...value, work: withoutSource(value.work) };
     const legacy = { ...state, version: 1, works: state.works.map(withoutSource), history: state.history.map(event),
       receipts: state.receipts.map(receipt => ({ ...receipt, event: event(receipt.event) })) };

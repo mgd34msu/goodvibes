@@ -1,12 +1,12 @@
 import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
-import type { NativeHostedTurnClient } from '../../runtime/native-hosted-turn.ts';
+import type { NativeHostedTurnClient } from '@goodvibes-jev/engine/terminal-shell/native-hosted-turn';
 import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeConversationIntakeControls, type NativeConversationIntakeSelection } from '../../runtime/native-conversation-intake.ts';
-import { captureNativeConversationInput } from '../../runtime/native-conversation-input.ts';
+import { captureNativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import type { NativeIntakeJournalBinding, NativeIntakeJournalRecord, NativeIntakeExecutionIntent, NativeIntakeJournalOptions } from '../../runtime/native-conversation-intake-journal.ts';
 import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult, NativeConversationIntakeSourceRef, OperatorNativeConversationIntakeClient, NativeConversationTurnPermit } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';

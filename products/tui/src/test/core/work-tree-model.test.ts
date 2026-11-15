@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { buildTurnModel, MAX_NEST_DEPTH, transcriptUnits, turnSignature, type TurnModel, type TurnRow } from '../../core/work-tree-model.ts';
-import type { AgentLaneInfo, WorkTreeSources } from '../../core/work-tree-sources.ts';
-import { WorkTreeTimingStore } from '../../core/work-tree-sources.ts';
+import type { AgentLaneInfo, WorkTreeSources } from '@goodvibes-jev/engine/terminal-shell/work-tree-sources';
+import { WorkTreeTimingStore } from '@goodvibes-jev/engine/terminal-shell/work-tree-sources';
 
 type Message = ConversationMessageSnapshot;
 const call = (id: string, name: string, args: Record<string, unknown> = {}): ToolCall => ({ id, name, arguments: args });

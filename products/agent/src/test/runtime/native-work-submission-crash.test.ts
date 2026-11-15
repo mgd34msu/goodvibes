@@ -34,9 +34,9 @@ test('SIGKILL after server persistence recovers the same journal identity across
     }
     throw new Error(`Unexpected method: ${path}`);
   } });
-  const controlModule = new URL('../../runtime/native-work-submission.ts', import.meta.url).href;
+  const controlModule = import.meta.resolve('@goodvibes-jev/engine/terminal-shell/native');
   const hostModule = new URL('../../runtime/native-work-submission-host.ts', import.meta.url).href;
-  const journalModule = new URL('../../runtime/native-work-submission-journal.ts', import.meta.url).href;
+  const journalModule = import.meta.resolve('@goodvibes-jev/engine/terminal-shell/native');
   writeFileSync(script, `import { NativeWorkSubmissionControls } from ${JSON.stringify(controlModule)};
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from ${JSON.stringify(hostModule)};
 import { NativeWorkSubmissionJournal } from ${JSON.stringify(journalModule)};

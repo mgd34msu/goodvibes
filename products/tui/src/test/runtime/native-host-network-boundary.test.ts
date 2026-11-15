@@ -9,6 +9,9 @@ import { createNativeHostFetch } from '@goodvibes-jev/engine/terminal-shell/nati
 import { createNativeWorkSubmissionBinding } from '../../runtime/native-work-submission-host.ts';
 import { createNativeConversationIntakeBinding } from '../../runtime/native-conversation-intake-host.ts';
 import { createNativeWorkLedgerHost } from '../../runtime/native-work-ledger-host.ts';
+import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
+import { createNativeLedgerBinding, type NativeLedgerBindingFactory } from '@goodvibes-jev/engine/terminal-shell/native/bound-work-ledger-host';
+import type { NativeWorkLedgerBinding } from '@goodvibes-jev/engine/terminal-shell/native/work-ledger-projection';
 import { executeNativeHeadless } from '../../cli/native-headless.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerTuiLegacyImportCommands } from '../../input/commands/legacy-work-ledger-import-runtime.ts';
@@ -77,19 +80,37 @@ for (const status of [307, 308]) test(`native POST bodies never cross a ${status
   } finally { submission.dispose(); intake.dispose(); f.close(); }
 });
 
+/**
+ * The TUI host with its binding handed to the test instead of the view: the view
+ * reads nothing, and the test's binding keeps the host's own selection check.
+ */
+function heldBindingHost(f: Awaited<ReturnType<typeof redirectFixture>>) {
+  let binding: NativeWorkLedgerBinding | undefined;
+  const bind: NativeLedgerBindingFactory = (host, project, current) => {
+    binding = createNativeLedgerBinding(host, project, current);
+    return { available: false, reason: 'The binding is held by the test.' };
+  };
+  const host = createNativeWorkLedgerHost({ configManager: f.configManager, homeDirectory: f.home, workspace: () => f.home, journalPath: f.host.journalPath }, bind);
+  return { host, binding: () => binding, select() {
+    host.view.selectProject('project'); host.view.open();
+    if (!binding?.available) throw new Error('Missing fixture binding');
+    return binding;
+  } };
+}
+
 test('native ledger discovery, readers and execution refuse redirected authority', async () => {
   const f = await redirectFixture();
-  const host = createNativeWorkLedgerHost({ configManager: f.configManager, homeDirectory: f.home, workspace: () => f.home });
-  let binding: ReturnType<Extract<ReturnType<typeof host.readSelection>, { available: true }>['bind']> | undefined;
+  const held = heldBindingHost(f);
+  let binding: NativeWorkLedgerBinding | undefined;
   try {
-    await host.discoverProject(); expect(host.readSelection().available).toBe(false);
-    host.selectProject('project'); const selected = host.readSelection(); if (!selected.available) throw new Error('Missing fixture selection');
-    binding = selected.bind(() => {}); if (!binding.available) throw new Error('Missing fixture binding');
+    expect((await held.host.view.intake!.status())?.status).toBe('unavailable');
+    binding = held.select();
+    if (!binding.available) throw new Error('Missing fixture binding');
     await expect(binding.client.readSnapshot()).rejects.toThrow(REDIRECT_REFUSED);
     await expect(binding.client.history(0)).rejects.toThrow(REDIRECT_REFUSED);
     await expect(binding.execution!.start(target)).rejects.toThrow(REDIRECT_REFUSED);
     expect(f.requested).toHaveLength(4); expect(f.delivered).toEqual([]);
-  } finally { if (binding?.available) { binding.execution?.dispose(); binding.client.dispose(); } f.close(); }
+  } finally { if (binding?.available) { binding.execution?.dispose(); binding.client.dispose(); } held.host.view.dispose(); f.close(); }
 });
 
 test('native headless discovery never accepts a redirected project', async () => {
@@ -137,17 +158,16 @@ const credentialActions = ['reader', 'execution', 'discovery', 'headless', 'lega
  * request that got through shows up in `f.requested`.
  */
 async function runCredentialAction(action: typeof credentialActions[number], replaceCredential: boolean): Promise<Awaited<ReturnType<typeof redirectFixture>>> {
-  const f = await redirectFixture(); const host = createNativeWorkLedgerHost({ configManager: f.configManager, homeDirectory: f.home, workspace: () => f.home });
-  let binding: ReturnType<Extract<ReturnType<typeof host.readSelection>, { available: true }>['bind']> | undefined;
+  const f = await redirectFixture(); const held = heldBindingHost(f);
+  let binding: NativeWorkLedgerBinding | undefined;
   try {
     let pending: Promise<unknown>;
     if (action === 'reader' || action === 'execution') {
-      host.selectProject('project'); const selected = host.readSelection(); if (!selected.available) throw new Error('Missing fixture selection');
-      binding = selected.bind(() => {}); if (!binding.available) throw new Error('Missing fixture binding');
+      binding = held.select(); if (!binding.available) throw new Error('Missing fixture binding');
       pending = action === 'reader' ? binding.client.readSnapshot() : binding.execution!.start(target);
-    } else if (action === 'discovery') pending = host.discoverProject();
+    } else if (action === 'discovery') pending = held.host.view.intake!.status();
     else if (action === 'headless') pending = executeNativeHeadless({ mode: 'submit', prompt: source.text, signal: new AbortController().signal,
-      resolveHost: () => ({ ...f.host, credentialIdentity: host.readSelection().identity }), runTurn: async () => { throw new Error('Unexpected turn'); } });
+      resolveHost: () => ({ ...f.host, credentialIdentity: resolveNativeHostCredential({ configManager: f.configManager, homeDirectory: f.home }).identity }), runTurn: async () => { throw new Error('Unexpected turn'); } });
     else {
       const registry = new CommandRegistry(); registerTuiLegacyImportCommands(registry);
       const context = { platform: { configManager: f.configManager }, workspace: { shellPaths: createShellPathService({ workingDirectory: f.home, homeDirectory: f.home }) }, print() {} } as unknown as CommandContext;
@@ -158,7 +178,7 @@ async function runCredentialAction(action: typeof credentialActions[number], rep
     // printed line); what they share is what reached the network.
     await pending.then(() => undefined, () => undefined);
     return f;
-  } finally { if (binding?.available) { binding.execution?.dispose(); binding.client.dispose(); } }
+  } finally { if (binding?.available) { binding.execution?.dispose(); binding.client.dispose(); } held.host.view.dispose(); }
 }
 
 for (const action of credentialActions) test(`${action} reaches the native host when its credential is unchanged`, async () => {

@@ -1,4 +1,4 @@
-import { startupNoticeWriter } from './notice-stream.ts';
+import { startupNoticeWriter } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 import {
   parseNativeShellCli,
   shellMetadataResult,

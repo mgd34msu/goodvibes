@@ -13,6 +13,7 @@ import { criteriaSetIdForWork, durableKeyIdentity, durablePayloadRevision, freez
 import { checkSettings } from '../platform/src/platform/contract/check.js';
 import { CONTRACT_CONFIG_DEFAULTS } from '../platform/src/platform/contract/config.js';
 import { createWorkLedger, readWorkLedgerState, reduceWorkLedgerSettlement } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { readKnowledgeWorkLedgerImage } from '../platform/src/platform/knowledge/store-work-ledger.js';
 import { parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecord, nativeExecutionTargetRevision, type NativeWorkExecutionStorage } from '../platform/src/platform/workflow/work-ledger/native-execution-types.js';
 import { createNativeWorkExecutionHost } from '../platform/src/platform/workflow/work-ledger/native-execution.js';
 import { nativeSettlementDigest, nativeWorkSettlementSchema, nativeSettlementPublicationCommitment, captureNativeSettlementPublication, type HistoricalNativeWorkSettlementPublication, type NativeWorkSettlementPublication, type NativeWorkSettlementReceipt, type CurrentNativeWorkSettlementPublication } from '../platform/src/platform/workflow/work-ledger/native-settlement-types.js';
@@ -111,8 +112,8 @@ async function assertImage(file: string, expectedRevision: number, expectedSettl
   await inspectImage(file, db => {
     const rows = db.exec('SELECT format_version, revision, state_json FROM work_ledgers WHERE project_id = ?', ['project'])[0]!.values;
     expect(rows).toHaveLength(1);
-    const row = rows[0]!; const ledger = readWorkLedgerState(JSON.parse(String(row[2])), 'project');
-    expect(row[0]).toBe(ledger.version); expect(row[1]).toBe(expectedRevision); expect(ledger.revision).toBe(expectedRevision);
+    const row = rows[0]!; const ledger = readWorkLedgerState(readKnowledgeWorkLedgerImage(db, 'project', row[0], row[2]), 'project');
+    expect(row[1]).toBe(expectedRevision); expect(ledger.revision).toBe(expectedRevision);
     expect(ledger.history.filter(event => event.type === 'report')).toHaveLength(expectedSettlements);
     expect(ledger.history.filter(event => event.type === 'record_evidence')).toHaveLength(expectedSettlements);
     expect(ledger.evidence).toHaveLength(expectedSettlements);
@@ -442,9 +443,7 @@ for (const corruption of ['execution', 'intent', 'history'] as const) test(`sche
     if (corruption === 'execution') db.run("UPDATE native_work_executions SET state_json = '{}'");
     else if (corruption === 'intent') db.run("UPDATE native_work_execution_intents SET state_json = '{}'");
     else {
-      const row = db.exec('SELECT state_json FROM work_ledgers')[0]!.values[0]!;
-      const ledger = JSON.parse(String(row[0])) as { receipts: unknown[] };
-      ledger.receipts = []; db.run('UPDATE work_ledgers SET state_json = ?', [JSON.stringify(ledger)]);
+      db.run('DELETE FROM work_ledger_events');
     }
   });
   const bytes = readFileSync(f.file);

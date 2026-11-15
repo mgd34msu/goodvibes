@@ -30,6 +30,7 @@
 import { existsSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
 import {
+  createMemoryProjectionGit,
   diffProjectionToProposals,
   findOrphanedProjectionFiles,
   projectMemoryToFiles,
@@ -41,7 +42,6 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { requireShellPaths } from './runtime-services.ts';
 import { getMemorySpine } from './recall-query.ts';
 import { readMemoryProjectionDir } from './recall-files-config.ts';
-import { createSyncGitSeam } from './recall-files-git.ts';
 
 const PROJECTION_LIST_LIMIT = 5000;
 
@@ -73,7 +73,7 @@ export async function handleRecallFilesSync(args: string[], context: CommandCont
     // The platform's ownership gate commits only to a repository whose toplevel IS
     // the projection directory (initializing one there when needed), never
     // to a checkout the directory merely sits inside.
-    const report = projectMemoryToFiles(records, dir, { git: createSyncGitSeam() });
+    const report = projectMemoryToFiles(records, dir, { git: createMemoryProjectionGit() });
     context.print(`[recall] Projected ${report.written.length} record(s) to ${report.dir}`);
     if (report.kept && report.kept.length > 0) {
       context.print(`[recall] Kept ${report.kept.length} edited or deleted file(s) as they are: ${report.kept.join(', ')}. Run /recall files review to see them, then apply to take them into the store. A changed cls, confidence or reviewState line is read-only and has no proposal: change it back by hand so sync can refresh the file.`);

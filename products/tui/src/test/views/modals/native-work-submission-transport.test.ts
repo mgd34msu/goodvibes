@@ -44,11 +44,11 @@ async function fixture() {
   await pairNativeTestHost(home, baseUrl, 'synthetic-submission-token');
   const configManager = { get: (key: string) => key === 'daemon.enabled' ? true : key === 'controlPlane.publicBaseUrl' ? baseUrl : undefined } as unknown as ConfigManager;
   const host = createNativeWorkLedgerHost({ configManager, homeDirectory: home, daemonHomeDirectory: home, journalPath: join(home, 'tui-state', 'native-submissions.json'), workspace: () => home });
-  const printed: string[] = []; const registry = new CommandRegistry(); registerNativeWorkLedgerCommand(registry, host.selectProject, host.discoverProject, host.submission);
+  const printed: string[] = []; const registry = new CommandRegistry(); registerNativeWorkLedgerCommand(registry, host.view);
   const context = { print: (text: string) => printed.push(text) } as unknown as CommandContext;
   const run = async (action: string, path?: string) => { const parts = `/work ${action}${path ? ` ${path}` : ''}`.slice(1).split(/\s+/); await registry.execute(parts[0]!, parts.slice(1), context); };
   return { home, sourcePath, original, requests, submissions, lookups, run, printed,
-    close() { host.submission.close(); server.stop(true); rmSync(home, { recursive: true, force: true }); expect(violations).toEqual([]); } };
+    close() { host.view.dispose(); server.stop(true); rmSync(home, { recursive: true, force: true }); expect(violations).toEqual([]); } };
 }
 
 test('real product command preserves source and uses original-ID lookup after lost acknowledgement without executing', async () => {

@@ -14,7 +14,7 @@ import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { AgentLaneInfo, WorkTreeSources } from '../../core/work-tree-sources.ts';
+import type { AgentLaneInfo, WorkTreeSources } from '@goodvibes-jev/engine/terminal-shell/work-tree-sources';
 import { SessionViews } from '../../shell/session-views.ts';
 import { buildShellFooter } from '../../renderer/shell-surface.ts';
 import type { ThrobberState } from '../../renderer/throbber.ts';

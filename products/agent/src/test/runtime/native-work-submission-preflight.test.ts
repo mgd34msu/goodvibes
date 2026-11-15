@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { NativeWorkSubmissionPreflight } from '../../runtime/native-work-submission-preflight.ts';
+import { NativeWorkSubmissionPreflight } from '@goodvibes-jev/engine/terminal-shell/native';
 import { createNativeWorkLedgerView } from '../../runtime/native-work-ledger-host.ts';
 
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }

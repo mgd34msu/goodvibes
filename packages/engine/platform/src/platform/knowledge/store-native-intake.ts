@@ -9,12 +9,42 @@ import {
   NativeConversationStorageError, parseNativeConversationCapture, isValidatedNativeConversationCapture, nativeConversationProposalRevision, nativeConversationDecisionBinding,
   type NativeConversationCapture, type NativeConversationKey, type NativeConversationMutation, type NativeConversationStorage,
 } from '../workflow/work-ledger/native-intake-types.js';
-import { createKnowledgeWorkLedgerStorage, readKnowledgeWorkLedger } from './store-work-ledger.js';
+import { createKnowledgeWorkLedgerStorage, readKnowledgeWorkLedger, readKnowledgeWorkLedgerImage } from './store-work-ledger.js';
 import { NativeConversationMoveRefused, intakeMoveText } from './store-native-refusal.js';
 
 type SqlReader = Pick<SqlDatabase, 'exec'>;
+const TRANSCRIPT_TABLE = 'CREATE TABLE IF NOT EXISTS native_conversation_transcripts (project_id TEXT NOT NULL, session_id TEXT NOT NULL, revision TEXT NOT NULL, messages_json TEXT NOT NULL, PRIMARY KEY(project_id, session_id, revision))';
 export function createNativeConversationCaptureTable(db: Pick<SqlDatabase, 'run'>): void {
   db.run('CREATE TABLE IF NOT EXISTS native_conversation_captures (project_id TEXT NOT NULL, principal_id TEXT NOT NULL, input_id TEXT NOT NULL, request_id TEXT NOT NULL, format_version INTEGER NOT NULL, state_json TEXT NOT NULL, PRIMARY KEY(project_id, principal_id, input_id), UNIQUE(project_id, principal_id, request_id))');
+  db.run(TRANSCRIPT_TABLE);
+}
+
+/**
+ * The session transcript an input continues is stored once, by its session and
+ * revision, when the input is captured; the input's row names it and every later
+ * write of the row (route, proposal, decisions, association) leaves it alone.
+ * A row written by an earlier build carries its transcript inline and is read as is.
+ */
+function transcriptOf(db: SqlReader, projectId: string, stored: unknown): unknown {
+  const continuation = (stored as { continuation?: unknown } | null)?.continuation;
+  if (!continuation || typeof continuation !== 'object' || Object.hasOwn(continuation, 'messages')) return stored;
+  const { sessionId, revision } = continuation as { sessionId?: unknown; revision?: unknown };
+  const row = db.exec('SELECT messages_json FROM native_conversation_transcripts WHERE project_id = ? AND session_id = ? AND revision = ?', [projectId, String(sessionId), String(revision)])[0]?.values[0];
+  if (typeof row?.[0] !== 'string') throw new NativeConversationStorageError('invalid');
+  return { ...(stored as object), continuation: { ...continuation, messages: JSON.parse(row[0]) as unknown } };
+}
+function storedRow(db: Pick<SqlDatabase, 'exec' | 'run'>, projectId: string, current: NativeConversationCapture | null, next: NativeConversationCapture): string {
+  if (!next.continuation) return JSON.stringify(next);
+  const { messages, ...reference } = next.continuation;
+  // The continuation is part of the captured source and never changes after capture.
+  if (!current) {
+    if ((db.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name='native_conversation_transcripts'")[0]?.values.length ?? 0) === 0) db.run(TRANSCRIPT_TABLE);
+    db.run('INSERT OR IGNORE INTO native_conversation_transcripts(project_id, session_id, revision, messages_json) VALUES (?, ?, ?, ?)', [projectId, reference.sessionId, reference.revision, JSON.stringify(messages)]);
+  } else if ((db.exec('SELECT 1 FROM native_conversation_transcripts WHERE project_id = ? AND session_id = ? AND revision = ?', [projectId, reference.sessionId, reference.revision])[0]?.values.length ?? 0) === 0) {
+    // A row from an earlier build held its transcript inline: keep it inline.
+    return JSON.stringify(next);
+  }
+  return JSON.stringify({ ...next, continuation: reference });
 }
 export function validateNativeConversationCaptureTable(db: SqlReader): void {
   const expected = knowledgeSchemaColumns.conversation;
@@ -28,10 +58,10 @@ export function validateNativeConversationCaptureTable(db: SqlReader): void {
   // One pass reads one image: parse each project's ledger once, not once per capture.
   const ledgers = new Map<string, WorkLedgerState>();
   for (const row of db.exec('SELECT project_id, principal_id, input_id, request_id, format_version, state_json FROM native_conversation_captures')[0]?.values ?? []) {
-    const capture = parseRow(row); validateAssociation(db, capture, ledgers);
+    const capture = parseRow(db, row); validateAssociation(db, capture, ledgers);
   }
-  for (const row of db.exec('SELECT project_id, state_json FROM work_ledgers')[0]?.values ?? []) {
-    const raw = JSON.parse(String(row[1])) as Partial<WorkLedgerState>;
+  for (const row of db.exec('SELECT project_id, format_version, state_json FROM work_ledgers')[0]?.values ?? []) {
+    const raw = readKnowledgeWorkLedgerImage(db, String(row[0]), row[1], row[2]) as Partial<WorkLedgerState>;
     if (!Array.isArray(raw.history) || !raw.history.some(event => event?.type === 'submit_native' && event.work?.source?.version === 2)) continue;
     const ledger = readWorkLedgerState(raw, String(row[0]));
     for (const event of ledger.history) {
@@ -44,8 +74,8 @@ export function validateNativeConversationCaptureTable(db: SqlReader): void {
 /** Validate all schema-5 authorities before adding the new table and schema epoch. */
 export function migrateNativeConversationCaptureTable(db: Pick<SqlDatabase, 'exec' | 'run'>): void {
   for (const row of db.exec('SELECT project_id, format_version, revision, state_json FROM work_ledgers')[0]?.values ?? []) {
-    if (typeof row[0] !== 'string' || row[1] !== 2 || typeof row[3] !== 'string') throw new NativeConversationStorageError('invalid');
-    const ledger = readWorkLedgerState(JSON.parse(row[3]), row[0]);
+    if (typeof row[0] !== 'string' || (row[1] !== 2 && row[1] !== 3) || typeof row[3] !== 'string') throw new NativeConversationStorageError('invalid');
+    const ledger = readWorkLedgerState(readKnowledgeWorkLedgerImage(db, row[0], row[1], row[3]), row[0]);
     if (ledger.revision !== row[2] || ledger.works.some(work => work.source?.version === 2)) throw new NativeConversationStorageError('invalid');
   }
   if ((db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='native_conversation_captures'")[0]?.values.length ?? 0) > 0
@@ -53,11 +83,11 @@ export function migrateNativeConversationCaptureTable(db: Pick<SqlDatabase, 'exe
   createNativeConversationCaptureTable(db);
   validateNativeConversationCaptureTable(db);
 }
-function parseRow(row: readonly unknown[], original?: NativeConversationCapture): NativeConversationCapture {
+function parseRow(db: SqlReader, row: readonly unknown[], original?: NativeConversationCapture): NativeConversationCapture {
   try {
     if (typeof row[4] === 'number' && row[4] > 2) throw new NativeConversationStorageError('future-version');
     if ((row[4] !== 1 && row[4] !== 2) || typeof row[5] !== 'string') throw new Error();
-    const value = parseNativeConversationCapture(JSON.parse(row[5]), original);
+    const value = parseNativeConversationCapture(transcriptOf(db, String(row[0]), JSON.parse(row[5])), original);
     if (value.version !== row[4]) throw new Error();
     if (row[0] !== value.projectId || row[1] !== value.principalId || row[2] !== value.inputId || row[3] !== value.requestId) throw new Error();
     return value;
@@ -71,7 +101,7 @@ function keySnapshot(key: NativeConversationKey): NativeConversationKey {
 function read(db: SqlReader, projectId: string, key: NativeConversationKey, original?: NativeConversationCapture, ledgers?: Map<string, WorkLedgerState>): NativeConversationCapture | null {
   const row = db.exec('SELECT project_id, principal_id, input_id, request_id, format_version, state_json FROM native_conversation_captures WHERE project_id = ? AND principal_id = ? AND input_id = ?', [projectId, key.principalId, key.inputId])[0]?.values[0];
   if (!row) return null;
-  const capture = parseRow(row, original); validateAssociation(db, capture, ledgers); return capture;
+  const capture = parseRow(db, row, original); validateAssociation(db, capture, ledgers); return capture;
 }
 function assertPublication(capture: NativeConversationCapture, event: WorkLedgerSubmission): void {
   const source = event.work.source, final = capture.decisions.at(-1);
@@ -156,7 +186,7 @@ function write(db: Pick<SqlDatabase, 'exec' | 'run'>, projectId: string, key: Na
     const result: unknown = beforeSettledWrite?.();
     if (result !== undefined) { drainOwned(result); throw new NativeConversationStorageError('invalid'); }
   }
-  db.run('INSERT INTO native_conversation_captures(project_id, principal_id, input_id, request_id, format_version, state_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(project_id, principal_id, input_id) DO UPDATE SET format_version=excluded.format_version, state_json=excluded.state_json', [projectId, key.principalId, key.inputId, next.requestId, next.version, JSON.stringify(next)]);
+  db.run('INSERT INTO native_conversation_captures(project_id, principal_id, input_id, request_id, format_version, state_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(project_id, principal_id, input_id) DO UPDATE SET format_version=excluded.format_version, state_json=excluded.state_json', [projectId, key.principalId, key.inputId, next.requestId, next.version, storedRow(db, projectId, current, next)]);
 }
 function synchronous(value: unknown): void {
   if (value && typeof (value as { then?: unknown }).then === 'function') {

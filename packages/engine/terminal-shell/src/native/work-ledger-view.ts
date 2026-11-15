@@ -8,8 +8,14 @@ export interface NativeWorkLedgerView {
   submissionStatus?(): Promise<NativeWorkSubmissionState | undefined>;
   retrySubmission?(): Promise<NativeWorkSubmissionState | undefined>;
   selectProject(projectId: string): void;
+  /** Show the selected project's ledger; discovers the project when none is selected. */
   open(): void;
+  /** Notice a host, credential or workspace change now instead of at the next request. */
   sync(): void;
+  /** Stop showing the ledger. The selection and running submissions or intakes are kept. */
   close(): void;
+  /** End everything: actions in flight, the selection and the view. */
+  dispose(): void;
   execute?(action: NativeWorkExecutionAction, workId: string): Promise<NativeWorkExecutionState | undefined>;
+  observedExecutionAttempt?(workId: string): string | undefined;
 }

@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect } from 'bun:test';
-import { TerminalBuffer } from '../../renderer/buffer.ts';
+import { TerminalBuffer } from '@goodvibes-jev/engine/terminal-shell/buffer';
 import { DiffEngine } from '../../renderer/diff.ts';
 import type { TermColorCaps } from '../../renderer/term-caps.ts';
 

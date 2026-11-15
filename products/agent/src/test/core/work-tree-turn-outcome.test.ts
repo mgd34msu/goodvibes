@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import { ConversationManager } from '../../core/conversation.ts';
 import { buildTurnModel, transcriptUnits, type TurnModel } from '../../core/work-tree-model.ts';
-import { userMessageFingerprint, WorkTreeTimingStore, type TurnTiming, type WorkTreeSources } from '../../core/work-tree-sources.ts';
+import { userMessageFingerprint, WorkTreeTimingStore, type TurnTiming, type WorkTreeSources } from '@goodvibes-jev/engine/terminal-shell/work-tree-sources';
 import { loadWorkTreeTurnOutcomes, saveWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
 import { restoreWorkTreeFolds, createSessionContractViews, wireWorkTree } from '../../core/work-tree-wiring.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

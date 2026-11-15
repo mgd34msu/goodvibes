@@ -10,7 +10,7 @@ import { correctedContractScene } from './contract-correction-scene.ts';
 
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
-import type { AgentLaneInfo, CallTiming, WorkTreeSources } from '../../core/work-tree-sources.ts';
+import type { AgentLaneInfo, CallTiming, WorkTreeSources } from '@goodvibes-jev/engine/terminal-shell/work-tree-sources';
 
 type Message = ConversationMessageSnapshot;
 

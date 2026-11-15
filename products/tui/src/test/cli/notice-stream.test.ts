@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { startupNoticeWriter } from '../../cli/notice-stream.ts';
+import { startupNoticeWriter } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 
 function route(cli: Parameters<typeof startupNoticeWriter>[0]): string {
   const sent: string[] = [];

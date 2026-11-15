@@ -12,6 +12,10 @@ export type NativeWorkLedgerState =
       readonly history: readonly WorkLedgerReadEvent[];
       readonly cursor: number;
       readonly execution?: NativeWorkExecutionState | undefined;
+      /** The host binding offers start/status/cancel/resume for this project. */
+      readonly executionAvailable: boolean;
+      /** The reader cannot reach the host right now; these rows are the last ones read. */
+      readonly reason?: string | undefined;
     };
 
 /** One view owns one reader and its durable history cursor. It never owns a store. */
@@ -26,6 +30,7 @@ export class BoundWorkLedgerModel {
   private history: WorkLedgerReadEvent[] = [];
   private provenance: WorkLedgerReadSnapshot['provenance'];
   private projectionEpoch = 0;
+  private executionBound = false;
   private protect(events: readonly WorkLedgerReadEvent[]): WorkLedgerReadEvent[] {
     return projectWorkLedgerHistory(events, this.provenance);
   }
@@ -38,11 +43,15 @@ export class BoundWorkLedgerModel {
     private readonly current: () => boolean = () => true,
   ) {}
   private publish(state: NativeWorkLedgerState): void {
-    this.state = state.status === 'ready' ? { ...state, execution: this.execution.state } : state;
+    this.state = state.status === 'ready' ? { ...state, execution: this.execution.state, executionAvailable: this.executionBound } : state;
     this.changed();
   }
   execute(action: NativeWorkExecutionAction, workId: string): Promise<NativeWorkExecutionState | undefined> {
     return this.execution.run(action, workId);
+  }
+  /** The attempt status/cancel act on for this work: the one last observed, not a newer one. */
+  observedExecutionAttempt(workId: string): string | undefined {
+    return this.execution.observedAttempt(workId);
   }
   private release(): number {
     const epoch = ++this.epoch;
@@ -57,6 +66,7 @@ export class BoundWorkLedgerModel {
     this.cursor = 0;
     this.highestSnapshotCursor = -1;
     this.history = [];
+    this.executionBound = false;
     // Revoke local references before any external cleanup can reenter.
     this.execution.clear();
     // Independent cleanup: a throwing observer must not retain the reader.
@@ -104,17 +114,20 @@ export class BoundWorkLedgerModel {
     const client = binding.client;
     this.client = client;
     const epoch = this.epoch;
-    if (binding.execution)
+    if (binding.execution) {
       this.execution.bind(binding.execution, client, () => this.current() && epoch === this.epoch && this.client === client);
+      this.executionBound = true;
+    }
     this.publish({ status: 'loading', reason: 'Reading native work ledger and durable history…' });
     if (epoch !== this.epoch) return;
     try {
-      // A failed read keeps this binding: the reader keeps polling, says why, and
-      // says when it resumes, when the current snapshot is read again.
+      // A failed read keeps this binding and the rows already read: the reader keeps
+      // polling, says why, and says when it resumes, when the snapshot is read again.
       const unsubscribe = client.subscribe(
         (snapshot) => this.accept(snapshot, epoch),
         (reason) => {
-          if (epoch === this.epoch && this.client === client) this.publish({ status: 'unavailable', reason });
+          if (epoch !== this.epoch || this.client !== client) return;
+          this.publish(this.state.status === 'ready' ? { ...this.state, reason } : { status: 'unavailable', reason });
         },
         () => {
           if (epoch !== this.epoch || this.client !== client) return;
@@ -207,7 +220,7 @@ export class BoundWorkLedgerModel {
           }
         }
         this.execution.observe(snapshot);
-        this.publish({ status: 'ready', snapshot, history: [...this.history], cursor });
+        this.publish({ status: 'ready', snapshot, history: [...this.history], cursor, executionAvailable: this.executionBound });
       }
     } catch (error) {
       this.fail(error, epoch);

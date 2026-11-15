@@ -1221,9 +1221,8 @@ be opened or was replaced), and `refused:owner-changed` also when the stored
 address could not be verified because the purchase owner changed. Stopping or reconciling a
 purchase that cannot take that action is refused with its current state.
 
-`payments.checkout.fillCard` is refused while the daemon itself is running the
-purchase on that page: the daemon types the card when its purchase reaches the
-payment stage, and a second fill could race it.
+No verb types a card into a page. The daemon types it itself when the purchase
+it runs (`payments.checkout.begin`) reaches the payment stage.
 
 Payment composition shutdown stops checkout admission and aborts its original
 owners before releasing handlers. It awaits admitted card/address preflight,
@@ -2232,7 +2231,6 @@ verb.
 | `payments.purchases.list` | `read:payments` | Audit records. | yes |
 | `payments.checkout.approve` | paired admin owner, `write:payments`, explicit confirmation | Approves one merchant, item and amount in advance, for five minutes, once. Required before every purchase only when `payments.confirmEveryPurchase` is on. | yes |
 | `payments.checkout.begin` | paired admin owner, `write:payments`, explicit request | Persists one stable `requestId` and returns `accepted` with its purchase ID. The daemon owns subsequent processing. `cardId` may be omitted to pay with `payments.defaultCardId`; `merchantDiscovered` is read as sent. | yes |
-| `payments.checkout.fillCard` | admin, `write:payments` | Types the stored card into an already-open checkout page. | yes |
 | `payments.purchase.approve` / `.deny` | paired admin owner, `write:payments`, explicit confirmation | Answers the exact live window; approve acknowledges an in-budget veto too. | live windows |
 | `payments.purchase.cancel` | paired admin owner, `write:payments`, explicit confirmation | Objects to a live window, or requests stopping the exact admitted operation. Does not undo an order. | yes |
 | `payments.purchase.status` | `read:payments` | Durable operation status and live windows, optionally for one original purchase ID, and `stopped` while a payment store has stopped itself. | yes |

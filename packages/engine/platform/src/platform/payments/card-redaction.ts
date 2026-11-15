@@ -1,5 +1,5 @@
 /**
- * card-redaction.ts, closing the hole that `payments.checkout.fillCard` opens.
+ * card-redaction.ts, closing the hole that typing a card into a page opens.
  *
  * ══ The design this belongs to ════════════════════════════════════════════
  *

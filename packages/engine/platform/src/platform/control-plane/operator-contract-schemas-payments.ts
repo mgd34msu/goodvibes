@@ -9,12 +9,8 @@
  * nothing reads it back out over the control plane. `last4` is the only thing
  * about the instrument a surface ever sees. See docs/payments.md §3.1 and §9.5.
  *
- * `payments.checkout.fillCard` is the one verb that causes a card to be typed,
- * and it is the sharpest illustration of the rule rather than an exception to
- * it: its INPUT is a card id and a list of field targets, and its OUTPUT is a
- * list of field NAMES and a boolean. The daemon reads the material in-process
- * and types it. There is no property on either schema that could hold a value,
- * which is the point, the containment is a shape, not a promise.
+ * No verb types a card: the purchase the daemon runs
+ * (`payments.checkout.begin`) reads the material in-process and types it.
  *
  * Handlers: routes/payments.ts.
  */
@@ -270,59 +266,6 @@ export const PAYMENTS_PURCHASES_LIST_INPUT_SCHEMA = objectSchema(
 export const PAYMENTS_PURCHASES_LIST_OUTPUT_SCHEMA = objectSchema(
   { purchases: arraySchema(PURCHASE_RECORD_SCHEMA), total: NUMBER_SCHEMA, reconciliations: arraySchema(PAYMENT_RECONCILIATION_SCHEMA) },
   ['purchases', 'total'],
-);
-
-
-// ---------------------------------------------------------------------------
-// payments.checkout.fillCard
-// ---------------------------------------------------------------------------
-
-/**
- * Which card field goes where.
- *
- * `ref` is a snapshot ref from the page the model is looking at, so the daemon
- * needs no knowledge of any merchant's markup. The model finds the fields; the
- * daemon does the typing.
- */
-const CARD_FIELD_TARGET_SCHEMA = objectSchema(
-  {
-    field: enumSchema(['number', 'expiry', 'expiryMonth', 'expiryYear', 'cvv', 'cardholderName']),
-    ref: STRING_SCHEMA,
-  },
-  ['field', 'ref'],
-);
-
-export const PAYMENTS_CHECKOUT_FILL_CARD_INPUT_SCHEMA = objectSchema(
-  {
-    sessionId: STRING_SCHEMA,
-    pageId: STRING_SCHEMA,
-    // `minItems` is declared because the HANDLER rejects an empty list. A
-    // handler stricter than its published contract is a 400 no consumer could
-    // have predicted from the schema, and no build step can catch the gap.
-    targets: { ...arraySchema(CARD_FIELD_TARGET_SCHEMA), minItems: 1 },
-    /** Some checkouts want `07/2029`, some want `07 / 29`. The caller saw the field. */
-    expirySeparator: STRING_SCHEMA,
-    twoDigitYear: BOOLEAN_SCHEMA,
-  },
-  ['sessionId', 'pageId', 'targets'],
-);
-
-/**
- * What comes back: which fields were filled, and nothing else.
- *
- * `filled` is a list of field NAMES. `failedField` names the one that did not
- * work. There is deliberately no property here that could carry a value, a
- * length, a prefix or a masked form, an echo is a read path, and the whole
- * design rests on no read path existing.
- */
-export const PAYMENTS_CHECKOUT_FILL_CARD_OUTPUT_SCHEMA = objectSchema(
-  {
-    ok: BOOLEAN_SCHEMA,
-    filled: arraySchema(STRING_SCHEMA),
-    failedField: nullableSchema(STRING_SCHEMA),
-    reason: nullableSchema(STRING_SCHEMA),
-  },
-  ['ok', 'filled', 'failedField', 'reason'],
 );
 
 

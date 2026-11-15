@@ -29,7 +29,7 @@
  *
  * ── The checkout seam ─────────────────────────────────────────────────────
  *
- * `payments.checkout.begin` and `payments.checkout.fillCard` both need a page
+ * `payments.checkout.begin` needs a page
  * driver bound to an open page of a browser engine, and that engine has to be
  * THIS one: the model snapshots a checkout through `browser.*`, and a purchase
  * driving a second engine would be typing into a page nobody is looking at.

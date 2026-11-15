@@ -714,7 +714,7 @@ describe('a pre-click refusal never forwards the engine\'s own message text', ()
       `submit the form by activating button "${PAGE_AUTHORED_PAYLOAD}" is not available here.`,
     );
     untrustedError.name = 'UntrustedEffectError';
-    const harness = await sevenVerbComposition({ clickThrows: untrustedError });
+    const harness = await sixVerbComposition({ clickThrows: untrustedError });
 
     const response = await harness.catalog.invoke(
       'payments.checkout.begin',
@@ -863,7 +863,7 @@ describe('the daemon browser composition offers the checkout seam', () => {
   });
 });
 
-// ── A daemon-style composition, all seven verbs ─────────────────────────────
+// ── A daemon-style composition, all six verbs ───────────────────────────────
 
 const CHECKOUT_NOW = Date.parse('2026-07-01T12:00:00.000Z');
 const CHECKOUT_PURCHASE_ID = `pur-${CHECKOUT_NOW}-i`;
@@ -890,7 +890,7 @@ function expectNoCardMaterial(response: unknown, sent: readonly string[], record
   expect(everything).not.toContain(SENTINEL.cvv);
 }
 
-interface SevenVerbHarness {
+interface SixVerbHarness {
   readonly catalog: GatewayMethodCatalog;
   readonly engine: ScriptedEngine;
   readonly guard: CardMaterialRedactor;
@@ -899,7 +899,7 @@ interface SevenVerbHarness {
   readonly sent: string[];
 }
 
-interface SevenVerbCompositionOptions {
+interface SixVerbCompositionOptions {
   /** Make the submit click itself throw, to exercise pre/post-click classification end to end. */
   readonly clickThrows?: Error;
   /** Wire a describeSubmission into the driver factory, as a real daemon composition would. */
@@ -910,7 +910,7 @@ interface SevenVerbCompositionOptions {
  * The daemon's own shape: five verbs answered from stores it owns, and the two
  * checkout verbs answered by the platform service over the browser seam.
  */
-async function sevenVerbComposition(options: SevenVerbCompositionOptions = {}): Promise<SevenVerbHarness> {
+async function sixVerbComposition(options: SixVerbCompositionOptions = {}): Promise<SixVerbHarness> {
   const guard = new CardMaterialRedactor();
   const engine = new ScriptedEngine({ guard, ...(options.clickThrows ? { clickThrows: options.clickThrows } : {}) });
   const ledger = new BudgetLedger();
@@ -999,7 +999,6 @@ async function sevenVerbComposition(options: SevenVerbCompositionOptions = {}): 
     async deleteCard() { return { deleted: true, secretsCleared: 1 }; },
     async listPurchases() { return { purchases: [], total: 0 }; },
     beginCheckout: (input: never) => withFixturePurchaseRandom(() => impl.beginCheckout(input)),
-    fillCardIntoCheckout: (input: never) => impl.fillCardIntoCheckout(input),
   } as unknown as PaymentsGatewayService;
 
   const catalog = new GatewayMethodCatalog();
@@ -1047,20 +1046,19 @@ function beginParams(): Record<string, unknown> {
   };
 }
 
-describe('a daemon-style composition can now serve all seven payments verbs', () => {
-  const ALL_SEVEN = [
+describe('a daemon-style composition can now serve all six payments verbs', () => {
+  const ALL_SIX = [
     'payments.budget.status',
     'payments.cards.list',
     'payments.cards.create',
     'payments.cards.delete',
     'payments.checkout.begin',
-    'payments.checkout.fillCard',
     'payments.purchases.list',
   ] as const;
 
   test('every one of them has a handler attached, checkout included', async () => {
-    const { catalog } = await sevenVerbComposition();
-    for (const id of ALL_SEVEN) {
+    const { catalog } = await sixVerbComposition();
+    for (const id of ALL_SIX) {
       expect(catalog.get(id)).toBeDefined();
       // The two that had to answer 501 are the two this seam is for.
       expect(catalog.hasHandler(id)).toBe(true);
@@ -1068,7 +1066,7 @@ describe('a daemon-style composition can now serve all seven payments verbs', ()
   });
 
   test('checkout.begin runs a whole purchase against the browser seam', async () => {
-    const harness = await sevenVerbComposition();
+    const harness = await sixVerbComposition();
     const response = await harness.catalog.invoke(
       'payments.checkout.begin',
       { body: beginParams() } as never,
@@ -1124,7 +1122,7 @@ describe('a daemon-style composition can now serve all seven payments verbs', ()
   });
 
   test('containment still rejects card material in every outward surface, including IDs', async () => {
-    const harness = await sevenVerbComposition();
+    const harness = await sixVerbComposition();
     const response = await harness.catalog.invoke(
       'payments.checkout.begin',
       { body: beginParams() } as never,
@@ -1144,8 +1142,8 @@ describe('a daemon-style composition can now serve all seven payments verbs', ()
     // Successful submission: a composition that CAN read its own
     // merchants opts back into "purchased" by wiring describeSubmission, the
     // same one the driver-level tests above exercise, threaded here through
-    // the whole seven-verb composition instead of a bare driver factory.
-    const harness = await sevenVerbComposition({
+    // the whole six-verb composition instead of a bare driver factory.
+    const harness = await sixVerbComposition({
       async describeSubmission(submission) {
         return { orderId: submission.navigated ? 'BBY-01-556677' : null, challenge: null };
       },
@@ -1160,26 +1158,6 @@ describe('a daemon-style composition can now serve all seven payments verbs', ()
     expect(harness.recorded[0]?.outcome).toBe('purchased');
   });
 
-  test('checkout.fillCard refuses with no decision in flight, and says so without a card in it', async () => {
-    const harness = await sevenVerbComposition();
-
-    let message = '';
-    try {
-      await harness.catalog.invoke('payments.checkout.fillCard', {
-        body: {
-          sessionId: 'session-1',
-          pageId: 'page-1',
-          targets: [{ field: 'number', ref: 'ccnum' }],
-        },
-      } as never);
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
-    // Answering at all is the change: this verb used to be a cataloged 501.
-    expect(message).toContain('no purchase decision is in flight');
-    expect(message).not.toContain(SENTINEL.number);
-    expect(harness.engine.calls.length).toBe(0);
-  });
 });
 
 // ── End-to-end submission: the reservation follows which failure it was ────
@@ -1188,7 +1166,7 @@ describe('a submit failure releases or holds the reservation depending on which 
   test('a pre-click refusal is reported as not-submitted and the reservation is released', async () => {
     const staleError = new Error('the button ref no longer resolves');
     staleError.name = 'StaleElementError';
-    const harness = await sevenVerbComposition({ clickThrows: staleError });
+    const harness = await sixVerbComposition({ clickThrows: staleError });
 
     const response = await harness.catalog.invoke(
       'payments.checkout.begin',
@@ -1204,7 +1182,7 @@ describe('a submit failure releases or holds the reservation depending on which 
   });
 
   test('genuine post-click ambiguity is held, exactly as an unclassified submit failure always was', async () => {
-    const harness = await sevenVerbComposition({ clickThrows: new Error('the connection dropped mid-click') });
+    const harness = await sixVerbComposition({ clickThrows: new Error('the connection dropped mid-click') });
 
     const response = await harness.catalog.invoke(
       'payments.checkout.begin',
@@ -1239,7 +1217,7 @@ describe('the redactor stays armed on every exit where card digits may still be 
   test('a pre-click refusal (no click ever dispatched) leaves the redactor armed and still scrubbing', async () => {
     const staleError = new Error('the button ref no longer resolves');
     staleError.name = 'StaleElementError';
-    const harness = await sevenVerbComposition({ clickThrows: staleError });
+    const harness = await sixVerbComposition({ clickThrows: staleError });
 
     const response = await harness.catalog.invoke(
       'payments.checkout.begin',
@@ -1260,7 +1238,7 @@ describe('the redactor stays armed on every exit where card digits may still be 
   });
 
   test('genuine post-click ambiguity also leaves the redactor armed', async () => {
-    const harness = await sevenVerbComposition({ clickThrows: new Error('the connection dropped mid-click') });
+    const harness = await sixVerbComposition({ clickThrows: new Error('the connection dropped mid-click') });
 
     const response = await harness.catalog.invoke(
       'payments.checkout.begin',
@@ -1275,7 +1253,7 @@ describe('the redactor stays armed on every exit where card digits may still be 
   });
 
   test('a challenge response leaves the redactor armed: the owner is sent back to this very page', async () => {
-    const harness = await sevenVerbComposition({
+    const harness = await sixVerbComposition({
       async describeSubmission(submission) {
         return {
           orderId: null,
@@ -1298,7 +1276,7 @@ describe('the redactor stays armed on every exit where card digits may still be 
   });
 
   test('a completed non-navigating submission keeps protecting the card still held by its page', async () => {
-    const harness = await sevenVerbComposition();
+    const harness = await sixVerbComposition();
 
     const response = await harness.catalog.invoke(
       'payments.checkout.begin',
@@ -1322,7 +1300,7 @@ describe('the redactor stays armed on every exit where card digits may still be 
 // explicit `confirmed: true`.
 describe('verified requires evidence, not merely a describeSubmission wired', () => {
   test('describeSubmission wired but finding nothing still yields submitted-unverified', async () => {
-    const harness = await sevenVerbComposition({
+    const harness = await sixVerbComposition({
       async describeSubmission() {
         return { orderId: null, challenge: null };
       },
@@ -1340,7 +1318,7 @@ describe('verified requires evidence, not merely a describeSubmission wired', ()
   });
 
   test('an explicit confirmed:true with no order id still verifies', async () => {
-    const harness = await sevenVerbComposition({
+    const harness = await sixVerbComposition({
       async describeSubmission() {
         return { orderId: null, challenge: null, confirmed: true };
       },
@@ -1355,7 +1333,7 @@ describe('verified requires evidence, not merely a describeSubmission wired', ()
   });
 
   test('an order id alone is still sufficient evidence, unaffected by the fix', async () => {
-    const harness = await sevenVerbComposition({
+    const harness = await sixVerbComposition({
       async describeSubmission(submission) {
         return { orderId: submission.navigated ? 'BBY-01-556677' : null, challenge: null };
       },

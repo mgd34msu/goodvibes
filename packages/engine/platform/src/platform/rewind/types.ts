@@ -92,6 +92,8 @@ export interface RewindConversationOutcome extends RewindConversationAvailabilit
   readonly droppedMessages: number;
   /** Opaque handle to the captured pre-rewind conversation, for restore-the-restore. */
   readonly undoSnapshotId: string;
+  /** How long the port holding the conversation keeps that handle, in words a person reads. */
+  readonly undoExpiresAfter?: string | undefined;
 }
 
 /**
@@ -155,7 +157,8 @@ export interface RewindReceiptConversation {
 /** How to reverse a rewind (the symmetric-redo handles the apply recorded). */
 export interface RewindUndo {
   readonly files: { readonly restoreCheckpointId: string } | null;
-  readonly conversation: { readonly undoSnapshotId: string } | null;
+  /** `rewind.undo` takes the id; `expiresAfter` says how long it stays usable. */
+  readonly conversation: { readonly undoSnapshotId: string; readonly expiresAfter: string } | null;
 }
 
 /** The receipt of an applied rewind, visible, and reversible via `undo`. */

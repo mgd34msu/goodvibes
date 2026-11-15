@@ -179,7 +179,7 @@ export interface BrowserEngineOptions {
    * Keeps card material out of everything a page hands back.
    *
    * Optional here so every existing caller keeps working, and NOT optional in
-   * practice: `payments.checkout.fillCard` refuses to type into an engine that
+   * practice: the checkout flow refuses to type a card into an engine that
    * has none. A browser used for ordinary automation needs no guard; a browser
    * used to pay for something cannot be made to run without one.
    */

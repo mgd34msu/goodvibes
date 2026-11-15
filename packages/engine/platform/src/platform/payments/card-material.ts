@@ -15,8 +15,8 @@
  *
  *   - Nothing in `control-plane/routes/payments.ts` reads card material. That
  *     module still performs no I/O, holds no credential, and never touches a
- *     card number; `payments.checkout.fillCard` takes a card id and field
- *     targets and returns a boolean.
+ *     card number; no verb types a card, the purchase the daemon runs
+ *     does.
  *   - No control-plane schema carries card material outbound. Still true, and
  *     still enforced by the output schemas rather than by review.
  *   - This interface is in-process only. It is implemented by the daemon

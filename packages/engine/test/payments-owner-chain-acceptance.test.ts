@@ -218,12 +218,11 @@ async function beginParams(): Promise<Record<string, unknown>> {
 }
 
 describe('the verbs exist and are reachable', () => {
-  test('the catalog exposes a verb that BEGINS a checkout, not only one that fills a card', () => {
+  test('the catalog exposes a verb that BEGINS a checkout', () => {
     const ids = new GatewayMethodCatalog().list().map((d) => d.id).filter((id) => id.startsWith('payments.'));
     // The gap that made the owner's chain impossible: every piece worked and
     // nothing could start a purchase.
     expect(ids).toContain('payments.checkout.begin');
-    expect(ids).toContain('payments.checkout.fillCard');
   });
 
   test('begin declares every field its handler enforces', () => {

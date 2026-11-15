@@ -125,7 +125,11 @@ function readAnswer(
   // Checked first, and for either kind: a surface that cannot serve the request
   // says so, and saying so is more useful than any number it could invent.
   const unavailableReason = typeof params.unavailableReason === 'string' ? params.unavailableReason.trim() : '';
-  if (unavailableReason) return { kind: 'unavailable', reason: unavailableReason };
+  if (unavailableReason) {
+    const code = kind === 'undo' && (params.unavailableCode === 'UNDO_POINT_GONE' || params.unavailableCode === 'CONVERSATION_CHANGED')
+      ? params.unavailableCode : undefined;
+    return { kind: 'unavailable', reason: unavailableReason, ...(code ? { code } : {}) };
+  }
 
   if (kind === 'preview') {
     return {
@@ -134,10 +138,19 @@ function readAnswer(
       messagesRemaining: requireCount(params.messagesRemaining, 'messagesRemaining'),
     };
   }
+  if (kind === 'undo') {
+    // Restoring is not inferred from an empty answer: a host says it happened.
+    if (params.undone !== true) {
+      throw new GatewayVerbError('An undo answer states undone: true, or gives unavailableReason.', 'INVALID_ARGUMENT', 400, 'undone');
+    }
+    return { kind: 'undone' };
+  }
+  const undoExpiresAfter = typeof params.undoExpiresAfter === 'string' ? params.undoExpiresAfter.trim() : '';
   return {
     kind: 'rewind',
     droppedMessages: requireCount(params.droppedMessages, 'droppedMessages'),
     undoSnapshotId: requireString(params.undoSnapshotId, 'undoSnapshotId'),
+    ...(undoExpiresAfter ? { undoExpiresAfter } : {}),
   };
 }
 

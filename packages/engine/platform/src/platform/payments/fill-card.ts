@@ -20,10 +20,10 @@
  *            thing inside it that reads any is this module, which types it into
  *            a page and returns a boolean.
  *
- * `payments.checkout.fillCard` takes a session, a page, a card id and field
- * TARGETS. It returns which fields were filled and whether it worked. It does
- * not take a value, does not return a value, and there is no argument or
- * response field anywhere on its path that could carry one.
+ * `fillCard` is called only by the checkout flow the daemon runs, with a
+ * session, a page, a card id and field TARGETS. It returns which fields were
+ * filled and whether it worked. No verb reaches it, it does not take a value,
+ * and it does not return one.
  *
  * ══ Four refusals, each closing a different way this goes wrong ═══════════
  *

@@ -2,7 +2,8 @@
  * driver callbacks. The daemon passes its facts directly as host-only options;
  * bare platform callers still supply the synchronous gates() dependency. */
 import { describe, expect, test } from 'bun:test';
-import { PaymentsGatewayServiceImpl } from '../platform/src/platform/payments/payments-gateway-service.js';
+import { PaymentsGatewayServiceImpl, type PaymentsServiceDeps } from '../platform/src/platform/payments/payments-gateway-service.js';
+import { CheckoutRecovery } from '../platform/src/platform/payments/checkout-recovery.js';
 import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
 import { CheckoutRegistry, MemoryCheckoutJournal, type CheckoutPhase, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
@@ -25,7 +26,7 @@ function buildService(
     readonly deliverNever?: boolean | undefined;
   } = {},
 ) {
-  return new PaymentsGatewayServiceImpl({
+  const deps: PaymentsServiceDeps = {
     cards: {
       async metadata(id: string) {
         return {
@@ -69,8 +70,6 @@ function buildService(
       order.push('driverFor');
       return {} as never;
     },
-    ...(options.armingPageCleanup === undefined ? {} : { armingPageCleanup: options.armingPageCleanup }),
-    ...(options.recoveryIoTimeoutMs === undefined ? {} : { recoveryIoTimeoutMs: options.recoveryIoTimeoutMs }),
     gates: () => {
       order.push('gates');
       // Disabled on purpose: the flow refuses at gate zero, so the call
@@ -100,7 +99,16 @@ function buildService(
         vetoMinutes: 10,
       };
     },
-  });
+  };
+  // The boot sweep is the daemon's (CheckoutServiceHolder); it reads the same
+  // registry and stores as the service, so the cases below drive that sweeper.
+  const registry = new CheckoutRegistry(deps.journal);
+  const service = new PaymentsGatewayServiceImpl(deps, registry);
+  const recovery = new CheckoutRecovery({ registry, journal: deps.journal, ledger: deps.ledger,
+    purchases: deps.purchases, notifier: deps.notifier, isPaymentsLeader: () => options.isPaymentsLeader ?? true,
+    ...(options.armingPageCleanup === undefined ? {} : { armingPageCleanup: options.armingPageCleanup }),
+    ...(options.recoveryIoTimeoutMs === undefined ? {} : { recoveryIoTimeoutMs: options.recoveryIoTimeoutMs }) });
+  return Object.assign(service, { recoverInterruptedCheckouts: () => recovery.recoverInterruptedCheckouts() });
 }
 
 describe('beginCheckout synchronous prefix', () => {
@@ -331,7 +339,6 @@ describe('registerPaymentsGatewayMethods wiring', () => {
       async deleteCard() { return {} as never; },
       async listPurchases() { return { purchases: [], total: 0 } as never; },
       async beginCheckout() { return {} as never; },
-      async fillCardIntoCheckout() { return {} as never; },
     };
   }
 

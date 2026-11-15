@@ -42,6 +42,9 @@ export class RewindTokenError extends Error {
 /** What authorizes an apply: the confirm token the matching plan returned. */
 export const REWIND_CONFIRM_OPTIONS = ['confirmToken'] as const;
 
+/** The lifetime a receipt states when the conversation's port does not say its own. */
+const CONVERSATION_UNDO_DEFAULT_LIFETIME = 'until 32 newer conversation rewinds in the process holding the conversation, or until that process exits';
+
 export interface UnifiedRewindServiceDeps {
   /** The workspace-checkpoint store port. Absent → files rewind is honestly unavailable. */
   readonly workspace?: RewindWorkspacePort | null;
@@ -387,7 +390,8 @@ export class UnifiedRewindService {
     }
     return {
       conversation: { rewound: true, droppedMessages: outcome.droppedMessages, undoSnapshotId: outcome.undoSnapshotId },
-      undoConversation: { undoSnapshotId: outcome.undoSnapshotId },
+      undoConversation: { undoSnapshotId: outcome.undoSnapshotId,
+        expiresAfter: outcome.undoExpiresAfter?.trim() || CONVERSATION_UNDO_DEFAULT_LIFETIME },
     };
   }
 

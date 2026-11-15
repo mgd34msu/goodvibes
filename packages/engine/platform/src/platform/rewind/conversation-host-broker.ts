@@ -46,7 +46,10 @@ import type {
 } from './types.js';
 
 /** What a host is asked to do. */
-export type ConversationRewindRequestKind = 'preview' | 'rewind';
+export type ConversationRewindRequestKind = 'preview' | 'rewind' | 'undo';
+
+/** Why a host could not undo a rewind, when it is a reason the caller can act on. */
+export type ConversationUndoRefusalCode = 'UNDO_POINT_GONE' | 'CONVERSATION_CHANGED';
 
 /** A surface's live claim on one session's conversation. */
 export interface ConversationRewindHost {
@@ -64,6 +67,8 @@ export interface ConversationRewindRequest {
   readonly sessionId: string;
   readonly turnId: string | null;
   readonly kind: ConversationRewindRequestKind;
+  /** Undo requests: the snapshot the conversation is restored from. */
+  readonly undoSnapshotId?: string | undefined;
   /** When this question stops waiting; an answer after it is refused. */
   readonly expiresAt: number;
 }
@@ -71,8 +76,9 @@ export interface ConversationRewindRequest {
 /** What a host answers with. */
 export type ConversationRewindAnswer =
   | { readonly kind: 'preview'; readonly messagesToDrop: number; readonly messagesRemaining: number }
-  | { readonly kind: 'rewind'; readonly droppedMessages: number; readonly undoSnapshotId: string }
-  | { readonly kind: 'unavailable'; readonly reason: string };
+  | { readonly kind: 'rewind'; readonly droppedMessages: number; readonly undoSnapshotId: string; readonly undoExpiresAfter?: string | undefined }
+  | { readonly kind: 'undone' }
+  | { readonly kind: 'unavailable'; readonly reason: string; readonly code?: ConversationUndoRefusalCode | undefined };
 
 /** Why a host-facing call was refused. Each maps to one honest message. */
 export type ConversationRewindRefusal =
@@ -404,7 +410,7 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       if (this.fallback) return this.fallback.preview(anchor);
       return { messagesToDrop: 0, messagesRemaining: 0, ...unavailable(this.noHostReason(anchor.sessionId)) };
     }
-    const answer = await this.ask(host, anchor, 'preview');
+    const answer = await this.ask(host, anchor.sessionId, anchor.turnId ?? null, 'preview');
     if (answer.kind === 'preview') {
       return { messagesToDrop: answer.messagesToDrop, messagesRemaining: answer.messagesRemaining };
     }
@@ -421,14 +427,38 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       if (this.fallback) return this.fallback.rewind(anchor);
       return { droppedMessages: 0, undoSnapshotId: '', ...unavailable(this.noHostReason(anchor.sessionId)) };
     }
-    const answer = await this.ask(host, anchor, 'rewind');
+    const answer = await this.ask(host, anchor.sessionId, anchor.turnId ?? null, 'rewind');
     if (answer.kind === 'rewind') {
-      return { droppedMessages: answer.droppedMessages, undoSnapshotId: answer.undoSnapshotId };
+      return { droppedMessages: answer.droppedMessages, undoSnapshotId: answer.undoSnapshotId,
+        ...(answer.undoExpiresAfter ? { undoExpiresAfter: answer.undoExpiresAfter } : {}) };
     }
     return {
       droppedMessages: 0,
       undoSnapshotId: '',
       ...unavailable(answer.kind === 'unavailable' ? answer.reason : this.wrongKindReason(host, 'rewind')),
+    };
+  }
+
+  /**
+   * Ask the surface hosting a session to put its conversation back from an
+   * undo snapshot. Null when no surface hosts the session: the caller then
+   * looks in its own store. The host restores only while nothing newer was
+   * added since the rewind, and says which refusal applies otherwise.
+   */
+  async undo(sessionId: string, undoSnapshotId: string): Promise<
+    { readonly undone: true; readonly label: string }
+    | { readonly undone: false; readonly label: string; readonly reason: string; readonly code: ConversationUndoRefusalCode | null }
+    | null
+  > {
+    const host = this.findHostForSession(sessionId);
+    if (!host) return null;
+    const answer = await this.ask(host, sessionId, null, 'undo', undoSnapshotId);
+    if (answer.kind === 'undone') return { undone: true, label: host.label };
+    return {
+      undone: false,
+      label: host.label,
+      reason: answer.kind === 'unavailable' ? answer.reason : this.wrongKindReason(host, 'undo'),
+      code: answer.kind === 'unavailable' ? answer.code ?? null : null,
     };
   }
 
@@ -447,8 +477,10 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
   /** Put one question to a host and wait, bounded, for the answer. */
   private ask(
     host: ConversationRewindHost,
-    anchor: RewindAnchor,
+    sessionId: string,
+    turnId: string | null,
     kind: ConversationRewindRequestKind,
+    undoSnapshotId?: string,
   ): Promise<ConversationRewindAnswer> {
     const outstanding = [...this.pending.values()].filter((entry) => entry.hostId === host.hostId).length;
     if (outstanding >= CONVERSATION_HOST_MAX_PENDING) {
@@ -462,9 +494,10 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     const requestId = `cvr_${randomUUID().slice(0, 12)}`;
     const request: ConversationRewindRequest = {
       requestId,
-      sessionId: anchor.sessionId,
-      turnId: anchor.turnId ?? null,
+      sessionId,
+      turnId,
       kind,
+      ...(undoSnapshotId === undefined ? {} : { undoSnapshotId }),
       expiresAt: now + this.answerTimeoutMs,
     };
 
@@ -477,7 +510,9 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
             // truncated and failed to report it, and claiming otherwise would
             // put a false receipt in front of the person deciding what to do next.
             ? `${host.label} did not answer within ${Math.round(this.answerTimeoutMs / 1000)}s, so whether it truncated the conversation cannot be confirmed from here`
-            : `${host.label} did not answer within ${Math.round(this.answerTimeoutMs / 1000)}s`,
+            : kind === 'undo'
+              ? `${host.label} did not answer within ${Math.round(this.answerTimeoutMs / 1000)}s, so whether it restored the conversation cannot be confirmed from here`
+              : `${host.label} did not answer within ${Math.round(this.answerTimeoutMs / 1000)}s`,
         });
       }, this.answerTimeoutMs);
       timer.unref?.();

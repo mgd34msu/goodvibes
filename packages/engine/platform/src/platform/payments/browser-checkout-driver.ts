@@ -7,9 +7,9 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * `CheckoutPageDriver` (checkout-page.ts) is the port the whole purchase runs
  * against, and until now the only implementation of it was a test fixture. A
  * daemon that had a browser open could not begin a checkout on it, because
- * nothing turned an open page into one of these. `payments.checkout.begin` and
- * `payments.checkout.fillCard` were cataloged verbs with no implementation
- * behind them for exactly that reason.
+ * nothing turned an open page into one of these. `payments.checkout.begin`
+ * was a cataloged verb with no implementation behind it for exactly that
+ * reason.
  *
  * ══ Why the adapter lives here and not in platform/browser ════════════════
  *

@@ -3,10 +3,10 @@
  *
  * The daemon is the process that holds the card and charges it, with every
  * surface closed and across restarts. In the daemon, `payments/host/register.ts`
- * replaces `cards.create`, `purchases.list`, `checkout.begin` and
- * `checkout.fillCard` with its own handlers (which add ownership, approval and
- * admission), so for those four the code here serves only a host that composes
- * the platform groups without the daemon's payments host. A validation change
+ * replaces `cards.create`, `purchases.list` and `checkout.begin` with its own
+ * handlers (which add ownership, approval and admission), so for those three
+ * the code here serves only a host that composes the platform groups without
+ * the daemon's payments host. A validation change
  * to one of them belongs in both places. This module is deliberately thin: it maps
  * the descriptors' declared shapes onto a narrow service slice, performs no
  * I/O, holds no credential, and never touches a card number.
@@ -23,26 +23,8 @@
  *    plain reason; what was submitted is never part of a diagnostic, because
  *    an error string is a read path like any other.
  *
- * ── `payments.checkout.fillCard` and why the header above still holds ─────
- *
- * The capability has to be able to type the card into a checkout or it cannot
- * buy anything, and the original write-only wording forbade exactly that. The
- * correction keeps every property this module actually enforces:
- *
- *   - This module still performs no I/O, holds no credential, and never touches
- *     a card number. `fillCard`'s handler reads a session, a page, a card id and
- *     a list of field targets, hands them to the service, and returns the
- *     service's field names and boolean.
- *   - Nothing is echoed. The output has no property that could hold a value,
- *     and `sanitizeFillResult` rebuilds the response from an allowlist for the
- *     same reason `sanitizeCardMetadata` does, a service bug becomes a missing
- *     field rather than a leaked card.
- *   - A failure names the FIELD, never the value. The service's own error is
- *     discarded rather than forwarded.
- *
- * What changed is only who does the typing: the DAEMON reads the material in
- * its own process and puts it in the field. The model orchestrates the purchase
- * and never holds the instrument, which was the property worth having.
+ * The daemon types the card itself, inside the purchase it runs
+ * (`payments.checkout.begin`); no verb here types a card or returns one.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
@@ -129,14 +111,6 @@ export interface PaymentsGatewayService {
   }): Promise<PaymentCardView>;
   deleteCard(id: string): Promise<{ deleted: boolean; secretsCleared: number }>;
   /**
-   * Type the stored card into an open checkout page.
-   *
-   * The implementation reads the material from the daemon secret store, checks
-   * that a purchase is in flight on that page and that the page is still on the
-   * merchant it was decided against, and types. It MUST NOT return any part of
-   * the material, and MUST NOT include any of it in a thrown error.
-   */
-  /**
    * Run a purchase against an open browser page.
    *
    * The implementation owns the whole decision order; this module only shapes
@@ -144,13 +118,6 @@ export interface PaymentsGatewayService {
    * number on this path was parsed by a caller.
    */
   beginCheckout(input: PaymentBeginCheckoutInput): Promise<PaymentBeginResultView>;
-  fillCardIntoCheckout(input: {
-    readonly sessionId: string;
-    readonly pageId: string;
-    readonly targets: readonly { readonly field: string; readonly ref: string }[];
-    readonly expirySeparator: string | undefined;
-    readonly twoDigitYear: boolean | undefined;
-  }): Promise<PaymentFillCardResult>;
   listPurchases(input: { readonly limit: number; readonly dayKey: string | undefined }):
     Promise<{ purchases: readonly PaymentPurchaseView[]; total: number; reconciliations?: readonly {
       readonly purchaseId: string; readonly operationId: string; readonly outcome: 'purchased' | 'not-purchased';
@@ -200,14 +167,6 @@ export interface PaymentBeginResultView {
   readonly shippingTierUsed: string | null;
   readonly steppedDown: boolean;
   readonly challengeStep: string | null;
-}
-
-/** What a fill reports. Field names and a boolean, nothing that holds a value. */
-export interface PaymentFillCardResult {
-  readonly ok: boolean;
-  readonly filled: readonly string[];
-  readonly failedField: string | null;
-  readonly reason: string | null;
 }
 
 function readString(value: unknown, field: string): string {
@@ -347,26 +306,6 @@ export function createPaymentsCardsDeleteHandler(service: PaymentsGatewayService
   };
 }
 
-/**
- * The exact set of fill-result fields that may leave this process.
- *
- * An allowlist for the same reason `sanitizeCardMetadata` is one: a denylist
- * silently ships whatever a later change adds, and for anything on the card's
- * code path that is the wrong direction to fail. `filled` is rebuilt as strings
- * so a service that returned richer objects, with, say, the value it typed,
- * loses everything but the names.
- */
-function sanitizeFillResult(result: PaymentFillCardResult): PaymentFillCardResult {
-  return {
-    ok: result.ok === true,
-    filled: (result.filled ?? []).map((field) => String(field)),
-    failedField: result.failedField === null || result.failedField === undefined
-      ? null
-      : String(result.failedField),
-    reason: result.reason === null || result.reason === undefined ? null : String(result.reason),
-  };
-}
-
 function readStringArray(value: unknown, field: string): readonly string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new GatewayVerbError(`${field} must be an array of strings.`, 'INVALID_ARGUMENT', 400, field);
@@ -483,58 +422,6 @@ export function createPaymentsCheckoutBeginHandler(service: PaymentsGatewayServi
   };
 }
 
-export function createPaymentsCheckoutFillCardHandler(service: PaymentsGatewayService): GatewayMethodHandler {
-  return async (invocation) => {
-    const params = readInvocationParams(invocation);
-    const rawTargets = params['targets'];
-    if (!Array.isArray(rawTargets) || rawTargets.length === 0) {
-      throw new GatewayVerbError(
-        'targets is required: name each card field you found and the ref to type it into.',
-        'INVALID_ARGUMENT',
-        400,
-        'targets',
-      );
-    }
-    const targets = rawTargets.map((entry, index) => {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-        throw new GatewayVerbError(`targets[${String(index)}] must be an object.`, 'INVALID_ARGUMENT', 400, `targets[${String(index)}]`);
-      }
-      const record = entry as Record<string, unknown>;
-      return {
-        field: readString(record['field'], `targets[${String(index)}].field`),
-        ref: readString(record['ref'], `targets[${String(index)}].ref`),
-      };
-    });
-
-    const separator = params['expirySeparator'];
-    const twoDigit = params['twoDigitYear'];
-
-    let result: PaymentFillCardResult;
-    try {
-      result = await service.fillCardIntoCheckout({
-        sessionId: readString(params['sessionId'], 'sessionId'),
-        pageId: readString(params['pageId'], 'pageId'),
-        targets,
-        expirySeparator: typeof separator === 'string' ? separator : undefined,
-        twoDigitYear: typeof twoDigit === 'boolean' ? twoDigit : undefined,
-      });
-    } catch (error) {
-      // A refusal is the owner's business and carries no material, so its
-      // message is forwarded. Anything else is replaced: the failing call had
-      // the card in its stack, and an error string is a read path like any
-      // other.
-      const refusal = error instanceof Error && error.name === 'FillCardRefusal' ? error.message : null;
-      if (refusal !== null) throw new GatewayVerbError(refusal, 'INVALID_ARGUMENT', 400);
-      throw new GatewayVerbError(
-        'Filling the card into this checkout failed. Nothing was submitted.',
-        'INTERNAL_ERROR',
-        500,
-      );
-    }
-    return { ...sanitizeFillResult(result) };
-  };
-}
-
 export function createPaymentsPurchasesListHandler(service: PaymentsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
@@ -594,6 +481,5 @@ export async function registerPaymentsGatewayMethods(
   attach('payments.cards.create', createPaymentsCardsCreateHandler(service));
   attach('payments.cards.delete', createPaymentsCardsDeleteHandler(service));
   attach('payments.checkout.begin', createPaymentsCheckoutBeginHandler(service));
-  attach('payments.checkout.fillCard', createPaymentsCheckoutFillCardHandler(service));
   attach('payments.purchases.list', createPaymentsPurchasesListHandler(service));
 }

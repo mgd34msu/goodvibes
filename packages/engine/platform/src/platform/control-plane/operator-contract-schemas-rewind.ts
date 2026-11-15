@@ -97,7 +97,8 @@ const REWIND_RECEIPT_CONVERSATION_SCHEMA = objectSchema(
 const REWIND_UNDO_SCHEMA = objectSchema(
   {
     files: nullableSchema(objectSchema({ restoreCheckpointId: STRING_SCHEMA }, ['restoreCheckpointId'])),
-    conversation: nullableSchema(objectSchema({ undoSnapshotId: STRING_SCHEMA }, ['undoSnapshotId'])),
+    /** `expiresAfter`: how long the undo id stays usable, as the process holding the conversation keeps it. */
+    conversation: nullableSchema(objectSchema({ undoSnapshotId: STRING_SCHEMA, expiresAfter: STRING_SCHEMA }, ['undoSnapshotId', 'expiresAfter'])),
   },
   ['files', 'conversation'],
 );
@@ -158,7 +159,9 @@ const CONVERSATION_REQUEST_SCHEMA = objectSchema(
     requestId: STRING_SCHEMA,
     sessionId: STRING_SCHEMA,
     turnId: nullableSchema(STRING_SCHEMA),
-    kind: enumSchema(['preview', 'rewind']),
+    kind: enumSchema(['preview', 'rewind', 'undo']),
+    /** Undo requests: the snapshot to restore the conversation from. */
+    undoSnapshotId: STRING_SCHEMA,
     expiresAt: NUMBER_SCHEMA,
   },
   ['requestId', 'sessionId', 'turnId', 'kind', 'expiresAt'],
@@ -230,7 +233,7 @@ export const REWIND_CONVERSATION_REQUESTS_TAKE_OUTPUT_SCHEMA = objectSchema(
 
 /**
  * What is required beyond hostId and requestId follows from the REQUEST, not
- * from anything the caller declares: a request is a preview or a rewind, the
+ * from anything the caller declares: a request is a preview, a rewind or an undo, the
  * broker recorded which when it raised it, and an answer that restated it could
  * only ever disagree with it. So the flat required array here is the honest
  * one, there is no client-supplied discriminator a schema could branch on, and
@@ -250,8 +253,14 @@ export const REWIND_CONVERSATION_REQUESTS_ANSWER_INPUT_SCHEMA = objectSchema(
     /** Rewind answers: how many were dropped, and the handle that restores them. */
     droppedMessages: NUMBER_SCHEMA,
     undoSnapshotId: STRING_SCHEMA,
+    /** Rewind answers, optional: how long this surface keeps the undo snapshot. */
+    undoExpiresAfter: STRING_SCHEMA,
+    /** Undo answers: true once the pre-rewind conversation is back. */
+    undone: BOOLEAN_SCHEMA,
     /** Non-empty: this surface cannot serve the request, and this is why. */
     unavailableReason: STRING_SCHEMA,
+    /** Undo refusals: why, when it is one the caller can act on. */
+    unavailableCode: enumSchema(['UNDO_POINT_GONE', 'CONVERSATION_CHANGED']),
   },
   ['hostId', 'requestId'],
 );

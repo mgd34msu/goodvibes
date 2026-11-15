@@ -429,19 +429,14 @@ export const EXEMPT_VERB_CATEGORIES: Readonly<Record<string, readonly string[]>>
     'reveal',
   ],
   'payments-checkout': [
-    // Driving a real checkout on a real merchant's page. Neither word is a CRUD
-    // operation on a resource this catalog owns.
+    // Driving a real checkout on a real merchant's page. Not a CRUD operation
+    // on a resource this catalog owns.
     //
     // `begin` opens a checkout ATTEMPT, cross-process, resumable, journalled,
     // and answerable after a crash about whether money moved. It is not
     // `create`: nothing is created that a later `delete` could remove, and the
-    // thing it starts can end in a state no CRUD word describes. `fillCard`
-    // types card material into a page and is deliberately neither `set` nor
-    // `update`: it is the one operation in the catalog whose input never comes
-    // back out of any read path, and giving it a generic write verb would file
-    // it alongside calls whose values are readable. See
-    // test/payments-purchase-execution.test.ts.
-    'begin', 'fillCard',
+    // thing it starts can end in a state no CRUD word describes.
+    'begin',
   ],
 } as const;
 

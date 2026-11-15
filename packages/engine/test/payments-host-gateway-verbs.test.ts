@@ -406,32 +406,6 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
     expect(readPaymentWindowStatus(status.body).operations[0]?.outcome).toBe('refused:no-card');
   });
 
-  test('checkout.fillCard refuses honestly for a session and page that do not exist', async () => {
-    // This alone does not prove the checkout registry is shared across begin
-    // and fillCard calls: a session and page that were NEVER opened refuse
-    // here whether the registry is a fresh, empty one per call (the defect
-    // once here) or the ONE shared instance a registration now holds for its
-    // whole life, both answer "no purchase decision is in flight" for a page
-    // nothing ever began. The registry-SHARING behaviour itself needs a
-    // begin() call to have actually reached `CheckoutRegistry.open()`, which
-    // needs a real in-flight checkout, not a real browser, and is proven at
-    // the unit level instead, over a fake driver: see register.test.ts's "the
-    // checkout registry is shared across begin and fillCard, not rebuilt per
-    // call" tests.
-    const response = await readJson(await fixture.fetch('/api/payments/checkout/fill-card', {
-      method: 'POST',
-      body: JSON.stringify({
-        sessionId: 'session-that-does-not-exist',
-        pageId: 'page-that-does-not-exist',
-        targets: [{ field: 'number', ref: 'e1' }],
-      }),
-    }));
-    // Never a 501 (the verb is wired) and never a 500 (a missing session and
-    // page is an ordinary refusal, not an internal failure); the exact refusal
-    // text belongs to the browser-checkout driver, not to this test.
-    expect(response.status, `answered ${String(response.status)}: ${response.text}`).toBe(400);
-    expect(response.body['code']).toBe('INVALID_ARGUMENT');
-  });
 });
 
 describe('payments.* over the live HTTP routes', () => {

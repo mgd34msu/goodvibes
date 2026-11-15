@@ -35,26 +35,21 @@
  *    number (`optionalCount` below), so this verb also keeps its own thin
  *    wrapper, which does that reading and then calls `service.listPurchases`.
  *
- * `payments.checkout.begin` and `payments.checkout.fillCard` are now attached
- * too, over the platform 2.0.19 browser-checkout seam
- * (`platform/control-plane`'s `composeDaemonBrowser`/`onBrowserCheckout`/
- * `BrowserCheckoutSeam`). They do NOT go through
- * `registerPaymentsGatewayMethods`'s own route handlers, for the same reason
- * `payments.cards.create`/`payments.purchases.list` do not: those handlers
- * call `service.beginCheckout(input)`/`service.fillCardIntoCheckout(input)`
- * with no invocation context at all, and this composition's whole
- * "approving a purchase is a distinct act" ruling (see `registerPaymentsMethods`
- * below) needs `context.explicitUserRequest`, which only reaches a handler
- * attached through this daemon's own `registerCatalogHandlers`. So both verbs
- * are attached locally, alongside `cardsCreate`/`purchasesList`, reading and
- * shaping the SAME wire shapes `routes/payments.ts` does (ported here rather
- * than imported, since the platform does not publish those parsing functions on
- * their own), and calling into the ONE `PaymentsGatewayServiceImpl` this
- * registration's checkout pair shares for its whole life (see
- * checkout-handlers.ts's `CheckoutServiceHolder` for why one, not one per
- * call: its own `CheckoutRegistry` is in-memory, per-instance state, and
- * `begin` and `fillCard` are separate control-plane calls that both need to
- * see it).
+ * `payments.checkout.begin` is attached too, over the platform's
+ * browser-checkout seam (`platform/control-plane`'s
+ * `composeDaemonBrowser`/`onBrowserCheckout`/`BrowserCheckoutSeam`). It does
+ * NOT go through `registerPaymentsGatewayMethods`'s own route handler, for the
+ * same reason `payments.cards.create`/`payments.purchases.list` do not: that
+ * handler calls `service.beginCheckout(input)` with no invocation context at
+ * all, and this composition's whole "approving a purchase is a distinct act"
+ * ruling (see `registerPaymentsMethods` below) needs
+ * `context.explicitUserRequest`, which only reaches a handler attached through
+ * this daemon's own `registerCatalogHandlers`. So it is attached locally,
+ * alongside `cardsCreate`/`purchasesList`, reading and shaping the SAME wire
+ * shapes `routes/payments.ts` does, and calling into the ONE
+ * `PaymentsGatewayServiceImpl` this registration shares for its whole life
+ * (see checkout-handlers.ts's `CheckoutServiceHolder`). The card is typed by
+ * the purchase the daemon runs; no verb types it.
  *
  * `deps.checkout` (a `CheckoutComposition`, see below) is REQUIRED, not
  * optional: in the real daemon it is always supplied
@@ -63,9 +58,8 @@
  * browser at all (no `homeDirectory`, a narrow embed) or because
  * `onBrowserCheckout` has not fired yet (see
  * runtime/browser-checkout-seam-holder.ts for why that race is benign). Either
- * way `payments.checkout.begin`/`.fillCard` answer an honest refusal rather
- * than 501 NOT_INVOKABLE or a crash; see `checkoutBegin`/`checkoutFillCard`
- * below.
+ * way `payments.checkout.begin` answers an honest refusal rather than 501
+ * NOT_INVOKABLE or a crash; see `checkoutBegin` below.
  *
  * ── Containment ───────────────────────────────────────────────────────────
  *
@@ -90,7 +84,7 @@ import type {
 import { logger } from '../../utils/logger.js';
 import { HandlerError, registerCatalogHandlers } from './handler-plumbing.js';
 import type { TypedHandler, Unregister } from './handler-plumbing.js';
-import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler, checkoutFillCardHandler } from './checkout-handlers.js';
+import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler } from './checkout-handlers.js';
 import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler, purchaseSecurityCodeHandler } from './window-handlers.js';
 import { paymentHostStopSentence, paymentHostStopView } from '../payment-host-health.js';
 import { purchaseReconciliationHandler } from './reconciliation-handler.js';
@@ -111,7 +105,6 @@ export const ATTACHED_PAYMENTS_METHOD_IDS: readonly string[] = [
   'payments.purchases.list',
   'payments.checkout.approve',
   'payments.checkout.begin',
-  'payments.checkout.fillCard',
   'payments.purchase.status',
   'payments.purchase.approve',
   'payments.purchase.deny',
@@ -390,10 +383,6 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps, holder: Checkout
       throw checkoutNotWired('payments.checkout.begin');
     },
 
-    async fillCardIntoCheckout() {
-      throw checkoutNotWired('payments.checkout.fillCard');
-    },
-
     async listPurchases(input) {
       return overStore('Reading purchase history', async () => {
         const result = deps.purchases.list(input);
@@ -461,9 +450,9 @@ export function registerPaymentsMethods(
   const checkoutServiceHolder = new CheckoutServiceHolder(deps, deps.checkout.journal);
   const service = buildPaymentsGatewayService(deps, checkoutServiceHolder);
 
-  // Attaches all seven `payments.*` descriptors once its boot recovery sweep
+  // Attaches its six `payments.*` descriptors once its boot recovery sweep
   // finishes. budget/list/delete stay attached through this; create/purchases-
-  // list/checkout-begin/checkout-fillCard are transiently attached and then
+  // list/checkout-begin are transiently attached and then
   // replaced with this daemon's own local handlers in the chain below. The
   // hook payloads are the platform's designed audit records: the failure callback
   // never carries a notice body and the sweep envelope exists to be logged.
@@ -572,7 +561,6 @@ export function registerPaymentsMethods(
       // checkout-handlers.ts's `checkoutApproveHandler`.
       { id: 'payments.checkout.approve', handler: checkoutApproveHandler(deps) as TypedHandler<unknown, unknown>, options: { confirm: true } },
       { id: 'payments.checkout.begin', handler: checkoutBeginHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
-      { id: 'payments.checkout.fillCard', handler: checkoutFillCardHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
       { id: 'payments.budget.status', handler: budgetStatusHandler(deps, service, checkoutServiceHolder) },
       { id: 'payments.purchase.status', handler: purchaseWindowStatusHandler(deps.checkout, checkoutServiceHolder.operations,
         () => checkoutServiceHolder.hostStop({ approvals: readConfirmEveryPurchase(deps.config) })) },

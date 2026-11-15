@@ -87,12 +87,6 @@ import type { ChannelDelivery } from '../platform/src/platform/payments/windows.
 
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
 import { takeSnapshot } from '../platform/src/platform/browser/browser-snapshot.js';
-import {
-  createPaymentsCheckoutFillCardHandler,
-  type PaymentFillCardResult,
-  type PaymentsGatewayService,
-} from '../platform/src/platform/control-plane/routes/payments.js';
-import { PAYMENTS_CHECKOUT_FILL_CARD_OUTPUT_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-payments.js';
 
 import {
   startFixtureMerchant,
@@ -471,89 +465,6 @@ for (const shape of shapes()) for (const answer of ['approve', 'deny'] as const)
 // ═══ 1. The card is absent from every response, log, trace and error ════════
 
 describe('the card never comes back', () => {
-  test('the control-plane response carries field NAMES and a boolean, nothing else', async () => {
-    const harness = buildHarness({ merchant: alpha });
-    const outcome = await runOn(harness, alpha);
-    expect(outcome.kind).toBe('purchased');
-
-    // The verb, exercised through the real route handler, against a service
-    // that runs the real fill, so this is the response a surface would get.
-    const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
-    const redactor = new CardMaterialRedactor();
-    const driver = new FixtureCheckoutDriver({ merchant: alpha, pageUrl: `${RECOGNISED_ORIGIN}/checkout` });
-    await registry.open({
-      purchaseId: 'p-route', sessionId: 'session-1', pageId: 'page-1',
-      merchantDomain: 'bestbuy.com', cardId: 'card-1', item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
-      phase: 'arming-payment', startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
-      shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null,
-    });
-
-    const service = {
-      async fillCardIntoCheckout(input: Parameters<PaymentsGatewayService['fillCardIntoCheckout']>[0]): Promise<PaymentFillCardResult> {
-        return fillCard(
-          {
-            sessionId: input.sessionId,
-            pageId: input.pageId,
-            targets: input.targets.map((entry) => ({ field: entry.field as 'number', target: entry.ref })),
-            expirySeparator: input.expirySeparator,
-            twoDigitYear: input.twoDigitYear,
-          },
-          { registry, cards: new SentinelCardStore(), redactor, driver },
-        );
-      },
-    } as unknown as PaymentsGatewayService;
-
-    const handler = createPaymentsCheckoutFillCardHandler(service);
-    const response = await handler({
-      body: {
-        sessionId: 'session-1',
-        pageId: 'page-1',
-        targets: [
-          { field: 'number', ref: 'ccnum' },
-          { field: 'cvv', ref: 'cccvv' },
-        ],
-      },
-    } as unknown as Parameters<typeof handler>[0]) as Record<string, unknown>;
-
-    expect(response['ok']).toBe(true);
-    expect(response['filled']).toEqual(['number', 'cvv']);
-    expectNoCardMaterial('the fillCard response', JSON.stringify(response));
-
-    // And the card really did reach the page it was typed into, so the
-    // assertion above is about containment rather than about nothing happening.
-    expect(driver.formState.get('ccnum')).toBe(SENTINEL.number);
-  });
-
-  test('the output schema has no property that could hold a value', () => {
-    const schema = PAYMENTS_CHECKOUT_FILL_CARD_OUTPUT_SCHEMA as unknown as {
-      properties: Record<string, unknown>;
-    };
-    expect(Object.keys(schema.properties).sort()).toEqual(['failedField', 'filled', 'ok', 'reason']);
-  });
-
-  test('the route rebuilds the response from an allowlist, so a leaky service loses the leak', async () => {
-    const service = {
-      async fillCardIntoCheckout(): Promise<PaymentFillCardResult> {
-        return {
-          ok: true,
-          filled: ['number'],
-          failedField: null,
-          reason: null,
-          // A service that started echoing what it typed. The route must not
-          // pass this on, whatever the service thinks it is doing.
-          typedValue: SENTINEL.number,
-        } as unknown as PaymentFillCardResult;
-      },
-    } as unknown as PaymentsGatewayService;
-
-    const response = await createPaymentsCheckoutFillCardHandler(service)({
-      body: { sessionId: 's', pageId: 'p', targets: [{ field: 'number', ref: 'r' }] },
-    } as unknown as Parameters<ReturnType<typeof createPaymentsCheckoutFillCardHandler>>[0]) as Record<string, unknown>;
-
-    expect(Object.keys(response).sort()).toEqual(['failedField', 'filled', 'ok', 'reason']);
-    expectNoCardMaterial('the sanitized route response', JSON.stringify(response));
-  });
-
   test('a structural fill rejection names the field, exactly as the port contract documents', async () => {
     // The fixture's rejectField models the path every compliant driver takes
     // today (checkout-page.ts's fillSecrets contract): a page-level rejection
@@ -585,26 +496,6 @@ describe('the card never comes back', () => {
     expect(outcome.reason).not.toContain('cvv');
     expectNoCardMaterial('the fill failure reason', outcome.reason);
     expect(alpha.submissions.length).toBe(0);
-  });
-
-  test('a refusal thrown out of the route names the field and never the value', async () => {
-    const service = {
-      async fillCardIntoCheckout(): Promise<PaymentFillCardResult> {
-        throw new Error(`could not type "${SENTINEL.number}" into the field`);
-      },
-    } as unknown as PaymentsGatewayService;
-
-    let message = '';
-    try {
-      await createPaymentsCheckoutFillCardHandler(service)({
-        body: { sessionId: 's', pageId: 'p', targets: [{ field: 'number', ref: 'r' }] },
-      } as never);
-      throw new Error('expected the handler to throw');
-    } catch (error) {
-      message = (error as Error).message;
-    }
-    expectNoCardMaterial('the route error', message);
-    expect(message).toContain('Nothing was submitted');
   });
 
   test('the purchase record carries last4 and no more of the card', async () => {

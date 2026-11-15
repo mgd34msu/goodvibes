@@ -23,8 +23,8 @@ export interface BrowserCheckoutSeamHolder {
    * teardown runs on), so a daemon that has started shutting its browser down
    * cannot hand a checkout call a seam whose `driverFor`/`cardFieldGuard` point
    * at an engine that is being (or has been) torn down. After this, `get()`
-   * returns `undefined` again, and `payments.checkout.begin`/`.fillCard` fall
-   * back to their ordinary "checkout is not available right now" 409 refusal,
+   * returns `undefined` again, and `payments.checkout.begin` falls
+   * back to its ordinary "checkout is not available right now" 409 refusal,
    * see checkout-handlers.ts, rather than reaching into a disposed engine.
    */
   readonly clear: () => void;

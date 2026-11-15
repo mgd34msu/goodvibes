@@ -8,7 +8,7 @@ import type { OccasionProfileMutation } from '../../occasions/capture.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { normalizeContext } from '../host-handlers.js';
-import { requestsNativeAdmission, retainNativeMutationRequest, runNativeMutation, type NativeMutationHost } from '../native-mutation.js';
+import { requestsNativeAdmission, runNativeMutation, type NativeMutationHost } from '../native-mutation.js';
 import { bindProfileDelegationToInvocation, captureNativeProfileDelegation, profileDelegationForInvocation, profileMutationOptionsForInvocation, readProfileAdmittedInvocation, readProfileDelegation, type ProfileMutationOptions, type RecordedProfileDelegation, type RecordedProfileMutation } from '../../owner-profile/delegation.js';
 import type { OccasionMutationOptions } from '../../occasions/operation.js';
 import { readStoppedNativeNudge } from '../../occasions/push.js';
@@ -63,18 +63,17 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
       const delegation = profileDelegationForInvocation(invocation);
       const retained = profileMutationOptionsForInvocation(invocation);
       if (delegation && retained && target && targets.get(catalog)?.get(method) === target) {
-        const requestCurrent = retainNativeMutationRequest({ body: invocation.body ?? null, query: invocation.query ?? null });
         const targetCurrent = captureMutationDescriptors(target, ['profilePath', 'captureProfileRead', 'assertOwnerCurrent', 'projectProfileMutation']);
         const profileRead = target.captureProfileRead();
         let publishing = false;
         const current = () => {
           if (targets.get(catalog)?.get(method) !== target) throw new Error('Native profile target changed.');
-          requestCurrent(); targetCurrent(); target.assertOwnerCurrent(); retained.signal?.throwIfAborted(); retained.assertCurrent?.();
+          targetCurrent(); target.assertOwnerCurrent(); retained.signal?.throwIfAborted(); retained.assertCurrent?.();
           if (!publishing) profileRead.assertCurrent();
         };
         const lifetime: ProfileMutationOptions = { ...retained, delegation, assertCurrent: current,
           onWriteIntent: () => { current(); retained.onWriteIntent?.(); publishing = true; current(); },
-          onEffect: published => { retained.onEffect?.(published); requestCurrent(); targetCurrent(); target.assertOwnerCurrent(); },
+          onEffect: published => { retained.onEffect?.(published); targetCurrent(); target.assertOwnerCurrent(); },
         };
         const admittedMutation = captureProfileMutationAdmission(delegation, invocation, method, target, lifetime);
         mutationOptions.set(invocation, { ...lifetime, admittedMutation });
@@ -83,8 +82,6 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
       }
       return handler(invocation);
     }
-    const sourceCurrent = retainNativeMutationRequest({ body: invocation.body ?? null, query: invocation.query ?? null, context: invocation.context });
-    sourceCurrent();
     const body = invocation.body;
     if (provenance && (!body || typeof body !== 'object' || !('authority' in body) || body.authority !== 'autonomous'
       || ('said' in body && body.said !== ''))) {
@@ -101,7 +98,7 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
     let profileIntent = false, stateIntent = false;
     const assertTargetCurrent = () => {
       if (targets.get(catalog)?.get(method) !== target) throw new Error('Native profile target changed.');
-      sourceCurrent(); invocationCurrent(); ownerCurrent(); target.assertOwnerCurrent();
+      invocationCurrent(); ownerCurrent(); target.assertOwnerCurrent();
       if (catalog.get(method) !== descriptor) throw new Error('Native profile method changed.');
       if (!profileIntent) profileRead.assertCurrent();
       if (!stateIntent) stateRead?.assertCurrent();
@@ -116,12 +113,11 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
         bindProfileDelegationToInvocation(delegation, invocation);
         const lifetime: NativeProfileOptions = { assertCurrent, delegation, withPublication,
           onWriteIntent: () => { assertCurrent(); profileIntent = true; },
-          onEffect: () => { sourceCurrent(); invocationCurrent(); target.assertOwnerCurrent(); },
+          onEffect: () => { invocationCurrent(); target.assertOwnerCurrent(); },
           onStateWriteIntent: () => { assertCurrent(); stateIntent = true; },
-          onStateEffect: () => { sourceCurrent(); invocationCurrent(); target.assertOwnerCurrent(); },
+          onStateEffect: () => { invocationCurrent(); target.assertOwnerCurrent(); },
           ...(method === 'occasions.sweep' ? { withNudgeDelivery: async (request: Parameters<NativeNudgeDelivery>[0], operation: Parameters<NativeNudgeDelivery>[1]) => {
             assertCurrent();
-            const deliveryCurrent = retainNativeMutationRequest(request);
             const nudgeMeaning = { ...request.nudge, id: nativeNudgeIdentity(request.nudge.id),
               raisedAt: new Date(request.nudge.raisedAt).toISOString(),
               subjects: request.nudge.subjects.map(subject => ({ ...subject, occasionId: nativeNudgeIdentity(subject.occasionId) })) };
@@ -131,7 +127,7 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
               context: { ...normalizeContext(invocation.context), signal: invocation.signal,
                 nativeExecutionAuthority: invocation.nativeExecutionAuthority, isAuthorized: invocation.isAuthorized },
               target: { domain: 'occasion-nudge', channel: request.channel, nudge: nudgeMeaning },
-              assertTargetCurrent: () => { assertCurrent(); deliveryCurrent(); }, scopes: descriptor?.scopes ?? [],
+              assertTargetCurrent: () => { assertCurrent(); }, scopes: descriptor?.scopes ?? [],
               confirmation: 'none', effect: 'send', mutate: async (sendCurrent, _sendAdmission, withDeliveryPublication) => operation({
                 signal: AbortSignal.any([...(host ? [host.signal] : []), ...(invocation.signal ? [invocation.signal] : [])]),
                 assertCurrent: () => { assertCurrent(); sendCurrent(); },

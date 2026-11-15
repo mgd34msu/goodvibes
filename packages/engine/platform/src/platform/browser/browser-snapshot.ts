@@ -741,8 +741,8 @@ async function frameChainFor(frame: Frame, work: BrowserControlIdentityWork): Pr
 /**
  * Snapshots are a read path back to a card number, and this is where it closes.
  *
- * `payments.checkout.fillCard` has the daemon type the owner's card into a
- * page so the model never holds it. Ten seconds later the model can call
+ * A purchase the daemon runs types the owner's card into a page so the
+ * model never holds it. Ten seconds later the model can call
  * `action:"snapshot"` and read `value` off every form control on that page,
  * including the one just filled. Without the two steps below, the containment
  * is theatre.

@@ -11,6 +11,7 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { logger } from '../../utils/logger.js';
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.length === 0) {
@@ -40,7 +41,17 @@ export function createPermissionRulesDeleteHandler(store: PermissionRulesGateway
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const ruleId = requireString(params.ruleId, 'ruleId');
-    return { deleted: await store.delete(ruleId) };
+    const deleted = await store.delete(ruleId);
+    // A standing grant or denial is security policy: who removed it is kept,
+    // the rule's content is not.
+    if (deleted) {
+      logger.info('permission rule deleted', {
+        ruleId,
+        principalId: invocation.context?.principalId ?? 'unknown',
+        principalKind: invocation.context?.principalKind ?? 'unknown',
+      });
+    }
+    return { deleted };
   };
 }
 

@@ -3,14 +3,28 @@
  * I/O remains owned after a reporting timeout and is drained by close(). */
 import { describeInterruption, type CheckoutRegistry, type InFlightCheckout, type InterruptedVerdict } from './checkout-registry.js';
 import { recoverInterruptedWindow, type WindowRecovery } from './windows.js';
-import { CheckoutOwnershipError } from './checkout-ownership.js';
+import { CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { OwnedWork } from '../utils/owned-work.js';
 import { logger } from '../utils/logger.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { PaymentsServiceDeps } from './payments-gateway-service.js';
 
 export type CheckoutRecoveryDeps = Pick<PaymentsServiceDeps,
-  'ledger' | 'purchases' | 'notifier' | 'journal' | 'now' | 'armingPageCleanup' | 'recoveryIoTimeoutMs'> & {
+  'ledger' | 'purchases' | 'notifier' | 'journal' | 'now'> & {
+  /**
+   * Composition-supplied cleanup for a page that outlived the process while a
+   * checkout was arming the payment. Receives record identity only, never a
+   * driver: the composition holds the browser authority and decides whether
+   * it can still reach the page. Resolves true when the card fields were
+   * cleared. Absent, recovery refuses to claim a cleanup it cannot perform.
+   */
+  readonly armingPageCleanup?: ((record: {
+    readonly purchaseId: string;
+    readonly sessionId: string;
+    readonly pageId: string;
+  }, options?: CheckoutOperationOwnership) => Promise<boolean>) | undefined;
+  /** Override for `RECOVERY_IO_TIMEOUT_MS`; tests use it, compositions normally do not. */
+  readonly recoveryIoTimeoutMs?: number | undefined;
   readonly registry: CheckoutRegistry;
   readonly isPaymentsLeader: () => boolean;
   /** Actual host execution lease; null means another process still owns it. */

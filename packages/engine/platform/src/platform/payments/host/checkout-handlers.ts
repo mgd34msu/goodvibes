@@ -18,7 +18,7 @@ import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.
 import { BrowserPageConnectionError } from '../../browser/browser-page-connection-data.js';
 import { PurchaseReconciliations } from './purchase-reconciliation.js';
 /**
- * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
+ * checkout-handlers.ts, `payments.checkout.begin` and `payments.checkout.approve`.
  *
  * Split out of register.ts for the 800-line file cap, the same reason
  * daemon-handler-composition.ts/ci-watch-composition.ts exist as their own
@@ -26,9 +26,8 @@ import { PurchaseReconciliations } from './purchase-reconciliation.js';
  *
  * ── Why these verbs are local wrappers, not the platform's own route ────────
  *
- * `registerPaymentsGatewayMethods`'s own `createPaymentsCheckoutBeginHandler`/
- * `createPaymentsCheckoutFillCardHandler` call
- * `service.beginCheckout(input)`/`service.fillCardIntoCheckout(input)` with no
+ * `registerPaymentsGatewayMethods`'s own `createPaymentsCheckoutBeginHandler`
+ * calls `service.beginCheckout(input)` with no
  * invocation context at all. Admission here needs `context.explicitUserRequest`
  * and the paired principal, which only reach a handler attached through this
  * daemon's own `registerCatalogHandlers` (register.ts). So the verbs are
@@ -283,55 +282,6 @@ function plainAmountExample(currency: CurrencyCode): string {
   return exponent === 0 ? '2500' : `25 or 25.${'0'.repeat(exponent)}`;
 }
 
-/** The exact shape `PaymentsGatewayServiceImpl.fillCardIntoCheckout` wants, read off the wire. */
-function parseFillCardInput(params: Record<string, unknown>): Parameters<PaymentsGatewayServiceImpl['fillCardIntoCheckout']>[0] {
-  const rawTargets = params['targets'];
-  if (!Array.isArray(rawTargets) || rawTargets.length === 0) {
-    throw invalid('targets', 'is required: name each card field you found and the ref to type it into.');
-  }
-  const targets = rawTargets.map((entry, index) => {
-    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-      throw invalid(`targets[${String(index)}]`, 'must be an object.');
-    }
-    const record = entry as Record<string, unknown>;
-    return {
-      field: requireString(record['field'], `targets[${String(index)}].field`),
-      ref: requireString(record['ref'], `targets[${String(index)}].ref`),
-    };
-  });
-  // Deliberately a plain `typeof` check, not `optionalNonEmptyString`: the
-  // platform's own fillCard route (routes/payments.ts) keeps an EMPTY separator
-  // distinct from an ABSENT one (a caller that says "" is asking for the
-  // digits run together, `0729`, and one that says nothing gets the default
-  // `/`), and `optionalNonEmptyString` would collapse both to `undefined`.
-  // `parseBeginCheckoutInput`'s own `expirySeparator` field stays on
-  // `optionalNonEmptyString`, matching the platform's begin route instead, which
-  // does the same collapse there.
-  const separator = params['expirySeparator'];
-  return {
-    sessionId: requireString(params['sessionId'], 'sessionId'),
-    pageId: requireString(params['pageId'], 'pageId'),
-    targets,
-    expirySeparator: typeof separator === 'string' ? separator : undefined,
-    twoDigitYear: typeof params['twoDigitYear'] === 'boolean' ? params['twoDigitYear'] : undefined,
-  };
-}
-
-/**
- * Allowlisted, the same reason `sanitizeFillResult` exists in the platform's own
- * route module: a service bug becomes a missing field here, never a leaked
- * one, and this wrapper bypasses that route entirely, so it is this file's job
- * to keep the property.
- */
-function fillCardResultView(result: Awaited<ReturnType<PaymentsGatewayServiceImpl['fillCardIntoCheckout']>>): Record<string, unknown> {
-  return {
-    ok: result.ok === true,
-    filled: (result.filled ?? []).map((field) => String(field)),
-    failedField: result.failedField === null || result.failedField === undefined ? null : String(result.failedField),
-    reason: result.reason === null || result.reason === undefined ? null : String(result.reason),
-  };
-}
-
 /**
  * Whether the named card can actually be charged: configured, and its
  * material present in the secret store. Computed here, outside
@@ -550,13 +500,6 @@ export class CheckoutServiceHolder {
       ...(options.approvals ? [() => deps.checkout.approvals.stopped()] : []),
     ];
     return paymentHostStop(stores);
-  }
-
-  /** The daemon types the card itself when its own purchase reaches payment.
-   * A second fill through the verb could race that typing on the same fields. */
-  daemonOwnsPage(sessionId: string, pageId: string): { readonly purchaseId: string; readonly phase: string } | null {
-    const record = this.registry.current(sessionId, pageId);
-    return record !== null && this.operations.isActive(record.purchaseId) ? { purchaseId: record.purchaseId, phase: record.phase } : null;
   }
 
   run<T>(callback: () => Promise<T>): Promise<T> {
@@ -815,49 +758,6 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
         throw new HandlerError(spentNote(error.message), error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);
       }
       throw new HandlerError(spentNote('This checkout could not be admitted. Read the original purchase status before trying again.'), 'INTERNAL_ERROR', 500);
-    }
-  });
-}
-
-/** Fill is restricted by the original invocation and registration lifetime.
- * It uses the registry shared with begin; it does not grant submit authority. */
-export function checkoutFillCardHandler(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): TypedHandler<unknown, Record<string, unknown>> {
-  return async ({ body, context }) => holder.run(async () => {
-    const params = asRecord(body);
-    const input = parseFillCardInput(params);
-
-    const seam = deps.checkout.seam();
-    if (seam === undefined) {
-      throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
-    }
-
-    const refuseDaemonOwned = (owned: { readonly purchaseId: string; readonly phase: string }): HandlerError => new HandlerError(
-      `Refused: purchase ${owned.purchaseId} on this page is at the "${owned.phase}" stage and is being run by the daemon, which types `
-      + 'the card itself when the purchase reaches payment. Do not fill it from here; read payments.purchase.status for its progress.', 'INVALID_ARGUMENT', 400);
-    const owned = holder.daemonOwnsPage(input.sessionId, input.pageId);
-    if (owned !== null) throw refuseDaemonOwned(owned);
-    const invocation = holder.ownership(retainCheckoutInvocation(deps, seam, context));
-    // Held through every await of the fill, not only checked once before it.
-    const owner = { signal: invocation.signal, assertCurrent: () => {
-      invocation.assertCurrent();
-      const current = holder.daemonOwnsPage(input.sessionId, input.pageId);
-      if (current !== null) throw refuseDaemonOwned(current);
-    } };
-    const service = holder.serviceFor(seam);
-
-    try {
-      const result = await service.fillCardIntoCheckout(input, owner);
-      return fillCardResultView(result);
-    } catch (error) {
-      // A `FillCardRefusal` is the owner's business and carries no material
-      // (fill-card.ts's own contract), so it is forwarded; anything else is
-      // discarded, the failing call had the card in its stack, and an error
-      // string is a read path like any other.
-      if (error instanceof Error && error.name === 'FillCardRefusal') {
-        throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
-      }
-      void error;
-      throw new HandlerError('Filling the card into this checkout failed. Nothing was submitted.', 'INTERNAL_ERROR', 500);
     }
   });
 }

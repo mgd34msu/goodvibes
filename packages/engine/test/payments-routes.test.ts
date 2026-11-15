@@ -44,7 +44,6 @@ function serviceThatMustNotStore(): PaymentsGatewayService {
     deleteCard: async () => ({ deleted: false, secretsCleared: 0 }),
     listPurchases: async () => ({ purchases: [], total: 0 }),
     beginCheckout: async () => { throw new Error('unused'); },
-    fillCardIntoCheckout: async () => { throw new Error('unused'); },
   };
 }
 
@@ -57,7 +56,6 @@ describe('card material cannot come back out', () => {
       deleteCard: async () => ({ deleted: true, secretsCleared: 4 }),
       listPurchases: async () => ({ purchases: [], total: 0 }),
       beginCheckout: async () => { throw new Error('unused'); },
-      fillCardIntoCheckout: async () => { throw new Error('unused'); },
     };
     const result = await createPaymentsCardsCreateHandler(service)(invocation({
       label: 'shopping', kind: 'virtual', number: FIXTURE_NUMBER,
@@ -80,7 +78,6 @@ describe('card material cannot come back out', () => {
       deleteCard: async () => ({ deleted: true, secretsCleared: 0 }),
       listPurchases: async () => ({ purchases: [], total: 0 }),
       beginCheckout: async () => { throw new Error('unused'); },
-      fillCardIntoCheckout: async () => { throw new Error('unused'); },
     };
     const listed = JSON.stringify(await createPaymentsCardsListHandler(service)(invocation({})));
     expect(listed).not.toContain(FIXTURE_CVV);
@@ -103,7 +100,6 @@ describe('card material cannot come back out', () => {
       deleteCard: async () => ({ deleted: false, secretsCleared: 0 }),
       listPurchases: async () => ({ purchases: [], total: 0 }),
       beginCheckout: async () => { throw new Error('unused'); },
-      fillCardIntoCheckout: async () => { throw new Error('unused'); },
     };
     let message = '';
     try {
@@ -141,7 +137,6 @@ describe('budget status reports the day it was computed for', () => {
       deleteCard: async () => ({ deleted: true, secretsCleared: 0 }),
       listPurchases: async () => ({ purchases: [], total: 0 }),
       beginCheckout: async () => { throw new Error('unused'); },
-      fillCardIntoCheckout: async () => { throw new Error('unused'); },
     };
     const result = await createPaymentsBudgetStatusHandler(service)(invocation({})) as Record<string, unknown>;
     expect(result['dayKey']).toBe('2026-07-27');
@@ -162,7 +157,6 @@ describe('purchases.list `limit` tolerates the query string a GET actually sends
       deleteCard: async () => ({ deleted: false, secretsCleared: 0 }),
       listPurchases: async (input) => { seen.push(input); return { purchases: [], total: 0 }; },
       beginCheckout: async () => { throw new Error('unused'); },
-      fillCardIntoCheckout: async () => { throw new Error('unused'); },
     };
     return { service, seen };
   }
@@ -232,7 +226,6 @@ describe('cards.create validation failures surface as field-named 400s, not the 
       deleteCard: async () => ({ deleted: false, secretsCleared: 0 }),
       listPurchases: async () => ({ purchases: [], total: 0 }),
       beginCheckout: async () => { throw new Error('unused'); },
-      fillCardIntoCheckout: async () => { throw new Error('unused'); },
     };
     let caught: unknown;
     try {

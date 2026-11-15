@@ -87,10 +87,16 @@ export interface RewindConversationUndoPort {
   messagesSinceRewind(undoSnapshotId: string): number | null;
 }
 
+/** What the surface hosting a session answered to an undo; null when no surface hosts it. */
+export type RewindHostedUndoAnswer =
+  | { readonly undone: true; readonly label: string }
+  | { readonly undone: false; readonly label: string; readonly reason: string; readonly code: 'UNDO_POINT_GONE' | 'CONVERSATION_CHANGED' | null }
+  | null;
+
 /** Where rewind.undo finds a session's conversation. */
 export interface RewindUndoDeps {
-  /** Sessions a surface is hosting: their messages and undo snapshots live in that surface's process. */
-  readonly hosts?: { listHosts(): readonly { readonly sessionId: string; readonly label: string }[] } | null | undefined;
+  /** Sessions a surface is hosting: their messages and undo snapshots live in that surface's process, which is asked. */
+  readonly hosts?: { undo(sessionId: string, undoSnapshotId: string): Promise<RewindHostedUndoAnswer> } | null | undefined;
   /** The port of conversations this process holds itself; a port without the reversal half is ignored. */
   readonly local?: object | null | undefined;
 }
@@ -121,11 +127,25 @@ export function createRewindUndoHandler(
     const refused = (code: string, state: string, reason: string, next: readonly string[]): RewindUndoResult =>
       ({ undone: false, sessionId, undoSnapshotId, refusal: { code, state, reason, next } });
 
-    const host = deps.hosts?.listHosts().find((entry) => entry.sessionId === sessionId);
-    if (host) {
-      return refused('CONVERSATION_HOSTED_ELSEWHERE', `the conversation is held by ${host.label}`,
-        `Only ${host.label} holds this conversation and its undo snapshot, and it does not take undo requests from the daemon; nothing was changed`,
-        [`Undo a rewind applied in ${host.label} with /undo rewind there`, 'Reverse the file half of the rewind with checkpoints.restore and the receipt\'s undo.files.restoreCheckpointId']);
+    const hosted = deps.hosts ? await deps.hosts.undo(sessionId, undoSnapshotId) : null;
+    if (hosted && hosted.undone) {
+      service.anchorsRestored(undoSnapshotId);
+      return { undone: true, sessionId, undoSnapshotId, refusal: null };
+    }
+    if (hosted && !hosted.undone) {
+      if (hosted.code === 'UNDO_POINT_GONE') {
+        return refused('UNDO_POINT_GONE', 'the undo snapshot is gone',
+          `${hosted.label} no longer holds that rewind's snapshot (${hosted.reason}); the conversation itself is unchanged`,
+          ['Use rewind.plan and rewind.apply to move the conversation to the point you want']);
+      }
+      if (hosted.code === 'CONVERSATION_CHANGED') {
+        return refused('CONVERSATION_CHANGED', hosted.reason,
+          'Restoring the pre-rewind copy would discard what was added since, so nothing was changed',
+          ['Fork the session to keep the current conversation, then rewind or undo in the fork']);
+      }
+      return refused('CONVERSATION_HOST_UNAVAILABLE', `the conversation is held by ${hosted.label}, which did not undo it`,
+        hosted.reason,
+        ['Read the conversation with sessions.messages.list, then retry if it was not restored', `Or undo it in ${hosted.label} with /undo rewind`]);
     }
     if (!local) {
       return refused('CONVERSATION_UNAVAILABLE', 'no conversation store is wired on this daemon',

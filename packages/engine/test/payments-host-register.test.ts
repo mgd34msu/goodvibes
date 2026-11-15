@@ -177,7 +177,7 @@ let requestSequence = 0;
 const config: PaymentsConfigReader = { get: (key: string) => settings.get(key) };
 
 async function invoke(id: string, invocation: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-  if (id === 'payments.checkout.begin' || id === 'payments.checkout.fillCard') {
+  if (id === 'payments.checkout.begin') {
     // Native admission authority comes from the actual transport's pairing
     // owner, never from a fabricated context field in this handler fixture.
     const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, pairingTokens: pairing, authToken: () => 'synthetic-shared',
@@ -279,12 +279,12 @@ describe('registerPaymentsMethods: what it attaches', () => {
 
   test('a second registration on the same catalog, after teardown, attaches cleanly', async () => {
     // The defect this pins: `registerCatalogHandlers`' own teardown removes
-    // FOUR of the seven descriptors (`cards.create`, `purchases.list`,
-    // `checkout.begin`, `checkout.fillCard`) from the catalog entirely, not
-    // merely their handler. Without restoring all seven, handler-less, in
+    // THREE of the six descriptors (`cards.create`, `purchases.list`,
+    // `checkout.begin`) from the catalog entirely, not merely their handler.
+    // Without restoring all six, handler-less, in
     // `registerPaymentsMethods`' own teardown, a second registration on this
     // SAME catalog (a recompose without a fresh catalog, the daemon's own
-    // restart-without-recreating-the-catalog shape) would find those four ids
+    // restart-without-recreating-the-catalog shape) would find those three ids
     // gone and reject `ready` with `Unknown gateway method` trying to attach
     // to them.
     unregister();
@@ -557,13 +557,11 @@ describe('payments.checkout.approve: the distinct act that authorizes one begin'
   });
 });
 
-describe('the checkout registry is shared across begin and fillCard, not rebuilt per call', () => {
+describe('the checkout registry is shared across begin calls, not rebuilt per call', () => {
   /**
-   * The defect this pins: `checkoutBeginHandler`/`checkoutFillCardHandler`
-   * used to build a fresh `PaymentsGatewayServiceImpl`, and therefore a fresh,
-   * empty `CheckoutRegistry`, on EVERY call. A `fillCard` call could then never
-   * find a checkout a prior `begin` opened (always "no purchase decision is in
-   * flight", real or not), and two concurrent `begin` calls on the same page
+   * The defect this pins: `checkoutBeginHandler` used to build a fresh
+   * `PaymentsGatewayServiceImpl`, and therefore a fresh, empty
+   * `CheckoutRegistry`, on EVERY call, so two concurrent `begin` calls on the same page
    * never collided (each got its own empty registry), silently bypassing the
    * registry's one-checkout-per-page guarantee. Both tests below need a `begin`
    * call to reach `CheckoutRegistry.open()` (checkout-flow.ts, after GATES,
@@ -672,27 +670,6 @@ describe('the checkout registry is shared across begin and fillCard, not rebuilt
       body: { confirm: true, merchantDomain: 'example.invalid', item: 'a test item', amount: '20.00' },
     });
   }
-
-  test('a fillCard for the SAME page a begin opened finds it, refusing on phase rather than "no purchase in flight"', async () => {
-    const accepted = await invoke('payments.checkout.begin', {
-      context: { principalId: 'test-operator', metadata: { explicitUserRequest: true } },
-      body: checkoutBeginBody(sharedCardId),
-    });
-    expect(accepted['outcome']).toBe('accepted'); await windowEntered;
-
-    const refusal = await refusalOf('payments.checkout.fillCard', {
-      body: { sessionId: 'session-shared', pageId: 'page-shared', targets: [{ field: 'number', ref: 'e1' }] },
-    });
-    // THE FIX: the record was found (never the old blanket "no purchase
-    // decision is in flight", which every session and page got under a fresh
-    // registry per call, real or not) and refused on the next thing that is
-    // honestly true right now: the decision window has not settled, so the
-    // purchase has not reached the payment stage.
-    expect(refusal.status).toBe(400);
-    expect(refusal.code).toBe('INVALID_ARGUMENT');
-    expect(refusal.message).not.toContain('no purchase decision is in flight');
-    expect(refusal.message).toContain('stage');
-  });
 
   test('a second begin for the same session and page while one is in flight refuses, rather than starting a second purchase', async () => {
     const first = await invoke('payments.checkout.begin', {

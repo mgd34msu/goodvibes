@@ -23,11 +23,10 @@
  *
  * ══ The service holds the registry, not the caller ════════════════════════
  *
- * `begin` opens a checkout and `fillCard` completes one, and they are separate
- * verbs arriving as separate control-plane calls. The in-flight registry has to
- * outlive both, so it lives here for the life of the service rather than being
- * constructed per call, which is also what makes "refuse a fill with no
- * decision in flight" enforceable across two independent invocations.
+ * The in-flight registry outlives every `begin` call, so it lives here for the
+ * life of the service rather than being constructed per call; the boot sweeper
+ * that settles interrupted checkouts (`CheckoutServiceHolder`,
+ * host/checkout-handlers.ts) reads the same registry.
  */
 import type { SecurityCodeRequests } from './security-code-requests.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
@@ -38,7 +37,7 @@ import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperatio
 import { OwnedWork } from '../utils/owned-work.js';
 import { CheckoutRegistry, type CheckoutJournal } from './checkout-registry.js';
 import { CardMaterialRedactor } from './card-redaction.js';
-import { fillCard, FillCardRefusal, type CardFieldTarget } from './fill-card.js';
+import type { CardFieldTarget } from './fill-card.js';
 import { runCheckout, type CheckoutFlowDeps, type CheckoutControls, type CheckoutOutcome, type PurchaseLedger, type PurchaseRequest } from './checkout-flow.js';
 import type { RawCheckoutReading } from './checkout-extraction.js';
 import { parseRequestedMaximum } from './money-parsing.js';
@@ -62,15 +61,6 @@ import type { ExceededLimit } from './decide.js';
 
 export { RECOVERY_IO_TIMEOUT_MS } from './checkout-recovery.js';
 export type { CheckoutRecoverySweep, InterruptedCheckoutRecovery } from './checkout-recovery.js';
-import { CheckoutRecovery, type CheckoutRecoverySweep } from './checkout-recovery.js';
-
-/** What a `payments.checkout.fillCard` call reports. Field names and a boolean. */
-export interface PaymentFillCardResult {
-  readonly ok: boolean;
-  readonly filled: readonly string[];
-  readonly failedField: string | null;
-  readonly reason: string | null;
-}
 
 /** What a `payments.checkout.begin` call reports. */
 export interface PaymentBeginResult {
@@ -119,29 +109,10 @@ export interface PaymentsServiceDeps {
   readonly securityCodes?: SecurityCodeRequests | undefined;
   /** Resolves the driver for an open browser session and page. */
   readonly driverFor: (sessionId: string, pageId: string) => CheckoutPageDriver;
-  /**
-   * Composition-supplied cleanup for a page that outlived the process while a
-   * checkout was arming the payment. Receives record identity only, never a
-   * driver: the composition holds the browser authority and decides whether
-   * it can still reach the page (same discipline as the checkout seam, so
-   * payments code cannot mint browser access recovery was not given).
-   * Resolves true when the card fields were cleared. Absent, recovery keeps
-   * the documented posture of refusing to claim a cleanup it cannot perform.
-   */
-  readonly armingPageCleanup?: ((record: {
-    readonly purchaseId: string;
-    readonly sessionId: string;
-    readonly pageId: string;
-  }, options?: CheckoutOperationOwnership) => Promise<boolean>) | undefined;
   /** The gate inputs the daemon alone can answer, leadership most of all. */
   readonly gates: () => GateInput;
   readonly config: () => PaymentsServiceConfig;
   readonly now?: (() => number) | undefined;
-  /**
-   * Override for `RECOVERY_IO_TIMEOUT_MS`, the per-call ceiling on the
-   * sweep's composition I/O. Tests use it; compositions normally do not.
-   */
-  readonly recoveryIoTimeoutMs?: number | undefined;
   /**
    * The redactor this service arms, supplied rather than minted.
    *
@@ -206,7 +177,6 @@ export interface CheckoutBeginOptions extends CheckoutOperationOwnership {
 export class PaymentsGatewayServiceImpl {
   private readonly registry: CheckoutRegistry;
   private readonly redactor: CardMaterialRedactor;
-  private readonly recovery: CheckoutRecovery;
   private readonly work = new OwnedWork();
   private readonly abort = new AbortController();
   private closed = false;
@@ -216,10 +186,6 @@ export class PaymentsGatewayServiceImpl {
     this.deps = { ...deps };
     this.registry = registry ?? new CheckoutRegistry(deps.journal);
     this.redactor = deps.cardFieldGuard ?? new CardMaterialRedactor();
-    this.recovery = new CheckoutRecovery({ registry: this.registry, journal: deps.journal,
-      ledger: deps.ledger, purchases: deps.purchases, notifier: deps.notifier,
-      isPaymentsLeader: () => this.deps.gates().isPaymentsLeader, now: deps.now,
-      armingPageCleanup: deps.armingPageCleanup, recoveryIoTimeoutMs: deps.recoveryIoTimeoutMs });
   }
 
   close(): Promise<void> {
@@ -228,7 +194,7 @@ export class PaymentsGatewayServiceImpl {
     this.closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     this.closed = true;
     this.abort.abort(new CheckoutOwnershipError());
-    void Promise.all([this.work.join(), this.recovery.close()]).then(() => resolve(), reject);
+    void this.work.join().then(() => resolve(), reject);
     return this.closing;
   }
 
@@ -391,68 +357,6 @@ export class PaymentsGatewayServiceImpl {
     });
 
     return this.describe(outcome, request.purchaseId);
-  }
-
-  recoverInterruptedCheckouts(): Promise<CheckoutRecoverySweep> {
-    return this.recovery.recoverInterruptedCheckouts();
-  }
-
-  /**
-   * Type the stored card into an open checkout.
-   *
-   * The refusals live in `fillCard`; this only adapts the shapes. A
-   * `FillCardRefusal` is rethrown so the route can forward its message, it
-   * carries no card material and it is the owner's business why the fill was
-   * refused.
-   */
-  async fillCardIntoCheckout(input: {
-    readonly sessionId: string;
-    readonly pageId: string;
-    readonly targets: readonly { readonly field: string; readonly ref: string }[];
-    readonly expirySeparator: string | undefined;
-    readonly twoDigitYear: boolean | undefined;
-  }, options: CheckoutOperationOwnership = {}): Promise<PaymentFillCardResult> {
-    const owner = this.ownership(options);
-    return this.work.run(() => this.runFillCard(input, owner));
-  }
-
-  private async runFillCard(input: Parameters<PaymentsGatewayServiceImpl['fillCardIntoCheckout']>[0],
-    owner: ReturnType<PaymentsGatewayServiceImpl['ownership']>): Promise<PaymentFillCardResult> {
-    const signal = owner.signal;
-    const targets: CardFieldTarget[] = [];
-    for (const entry of input.targets) {
-      if (!isCardFieldName(entry.field)) {
-        throw new FillCardRefusal(
-          `"${entry.field}" is not a card field I can fill.`,
-          'Name one of: number, expiry, expiryMonth, expiryYear, cvv, cardholderName.',
-        );
-      }
-      targets.push({ field: entry.field, target: entry.ref });
-    }
-
-    const result = await fillCard(
-      {
-        sessionId: input.sessionId,
-        pageId: input.pageId,
-        targets,
-        expirySeparator: input.expirySeparator,
-        twoDigitYear: input.twoDigitYear,
-      },
-      {
-        registry: this.registry,
-        cards: this.deps.cards,
-        redactor: this.redactor,
-        driver: this.deps.driverFor(input.sessionId, input.pageId),
-        signal,
-        assertCurrent: owner.assertCurrent,
-      },
-    );
-    return {
-      ok: result.ok,
-      filled: [...result.filled],
-      failedField: result.failedField,
-      reason: result.reason,
-    };
   }
 
   private refused(reason: string): PaymentBeginResult {

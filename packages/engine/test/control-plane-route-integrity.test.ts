@@ -143,7 +143,6 @@ describe('payments.cards.create field validation', () => {
     deleteCard: async () => ({ deleted: false, secretsCleared: 0 }),
     listPurchases: async () => ({ purchases: [], total: 0 }),
     beginCheckout: async () => { throw new Error('unused'); },
-    fillCardIntoCheckout: async () => { throw new Error('unused'); },
   };
   const card = { label: 'shopping', kind: 'virtual', number: '4242424242424242', expiryMonth: 12, expiryYear: 2034, cvv: '123', cardholderName: 'A Person' };
   const create = (body: Record<string, unknown>) => createPaymentsCardsCreateHandler(service)({ body, context: {} } as unknown as GatewayMethodInvocation);

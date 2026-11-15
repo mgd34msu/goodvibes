@@ -120,6 +120,9 @@ export function createConversationRewindPort(
 ): ConversationRewindPort {
   const snapshots = new Map<string, SnapshotPair>();
   const undoDir = options.undoDir;
+  const undoLifetime = undoDir
+    ? `until ${MAX_UNDOABLE_REWINDS} newer conversation rewinds on this machine; it survives a restart and works while the session is open`
+    : `until ${MAX_UNDOABLE_REWINDS} newer conversation rewinds in this process, or until the process exits`;
 
   /** Each snapshot holds a whole conversation, so only the newest reversals stay undoable. */
   function remember(id: string, sessionId: string, pair: SnapshotPair): void {
@@ -207,7 +210,7 @@ export function createConversationRewindPort(
       conv.rebuildHistory();
       const after = conv.toJSON() as ConversationJson;
       remember(undoSnapshotId, anchor.sessionId, { conv, before, after, afterCount: conv.getMessageCount(), afterSerialized: JSON.stringify(after) });
-      return { droppedMessages: Math.max(0, cut.total - cut.keep), undoSnapshotId };
+      return { droppedMessages: Math.max(0, cut.total - cut.keep), undoSnapshotId, undoExpiresAfter: undoLifetime };
     },
 
     restoreBefore(undoSnapshotId: string): boolean {

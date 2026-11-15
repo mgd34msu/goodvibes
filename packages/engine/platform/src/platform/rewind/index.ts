@@ -26,6 +26,7 @@ export type {
   ConversationRewindRefusal,
   ConversationRewindRequest,
   ConversationRewindRequestKind,
+  ConversationUndoRefusalCode,
 } from './conversation-host-broker.js';
 export type {
   RewindScope,

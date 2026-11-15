@@ -34,15 +34,6 @@ export function requestsNativeAdmission(body: unknown): boolean {
   return field !== undefined && 'value' in field && field.value === 'autonomous';
 }
 
-/**
- * The request body is the handler's own parsed object and is read once, where
- * the mutation is judged; nothing re-reads it to prove it did not change.
- * Kept as a no-op for callers that still take the check.
- */
-export function retainNativeMutationRequest(_body: unknown): () => void {
-  return () => undefined;
-}
-
 /** Native path identity stays local, including replacement with equal database bytes. */
 export function retainMutationStorage(path: string, workspace: string): () => void {
   const root = realpathSync(workspace);

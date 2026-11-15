@@ -226,9 +226,6 @@ test('a daemon stop during a saved window leaves it as a crash would, and boot r
   const purchaseId = await h.begin(), operationId = await savedWindow(h, purchaseId);
   const saved = await new ProtectedPaymentRequests(join(h.root, 'requests')).read(purchaseId, operationId, () => {});
   if (!saved.host.continuation || !saved.window) throw new Error('Missing continuation or window');
-  // The daemon fills the card itself; a concurrent fill through the verb is refused.
-  const fill = await h.call('payments.checkout.fillCard', { sessionId: 'session', pageId: 'page', targets: [{ field: 'number', ref: 'card' }] });
-  expect(fill.status).toBe(400); expect(JSON.stringify(fill.body)).toContain('types the card itself');
   await f.close();
   const operations = new DurablePaymentOperations(join(h.root, 'operations'));
   // Nothing is settled: the operation, journal record, hold, request and continuation are what a kill -9 leaves.

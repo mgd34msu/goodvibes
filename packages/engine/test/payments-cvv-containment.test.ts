@@ -145,8 +145,7 @@ describe('the payments module never emits card material', () => {
       // keeps this rule meaningful for every other module rather than widening
       // the pattern until it stops catching anything.
       if (file === 'entry-surface.ts') continue;
-      // The three modules that exist to HANDLE card material, added with
-      // `payments.checkout.fillCard`. The capability has to type the card into a
+      // The three modules that exist to HANDLE card material. The capability has to type the card into a
       // checkout or it cannot buy anything, so exactly these three name the
       // fields, and each is held to a stricter rule in the test below, which
       // asserts none of them can log, serialize or echo what it holds. The

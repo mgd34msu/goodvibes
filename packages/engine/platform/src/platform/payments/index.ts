@@ -287,7 +287,6 @@ export type {
   PaymentBeginResult,
   InterruptedCheckoutRecovery,
   CheckoutRecoverySweep,
-  PaymentFillCardResult,
 } from './payments-gateway-service.js';
 
 export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, purchaseDisposition, readPurchaseOutcome, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';

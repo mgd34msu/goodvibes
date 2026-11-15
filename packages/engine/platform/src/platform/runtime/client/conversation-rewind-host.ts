@@ -48,6 +48,11 @@
  * and the retry was refused as already settled), it is left as it is and the
  * undo id is logged, because putting it back could contradict a receipt that
  * says it was rewound.
+ *
+ * An undo request puts the conversation back from the snapshot a rewind
+ * applied here kept, only while nothing was added since; otherwise it is
+ * answered with the reason (snapshot gone, conversation changed) and nothing
+ * changes.
  */
 import { logger, summarizeError } from '../../utils/index.js';
 import type { RewindAnchor, RewindConversationPort } from '../../rewind/types.js';
@@ -72,7 +77,8 @@ interface HostRequest {
   readonly requestId: string;
   readonly sessionId: string;
   readonly turnId: string | null;
-  readonly kind: 'preview' | 'rewind';
+  readonly kind: 'preview' | 'rewind' | 'undo';
+  readonly undoSnapshotId?: string;
   readonly expiresAt: number;
 }
 
@@ -231,6 +237,7 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
     const unavailable = (reason: string | undefined) => ({
       unavailableReason: reason?.trim() || `this surface could not rewind the conversation for session ${request.sessionId}`,
     });
+    if (request.kind === 'undo') return undoHere(request);
     if (request.kind === 'preview') {
       const preview = await options.port.preview(anchor);
       if (!isCurrent(offer)) return undefined;
@@ -245,7 +252,30 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
     state.applied = true;
     // Kept under the undo id, so putting the rewind back also puts the anchors back.
     if (anchor.turnId !== undefined) discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, options.surface, outcome.undoSnapshotId);
-    return { droppedMessages: outcome.droppedMessages, undoSnapshotId: outcome.undoSnapshotId };
+    return { droppedMessages: outcome.droppedMessages, undoSnapshotId: outcome.undoSnapshotId,
+      ...(outcome.undoExpiresAfter ? { undoExpiresAfter: outcome.undoExpiresAfter } : {}) };
+  };
+
+  /** Restore the pre-rewind conversation, only while nothing newer was added since the rewind. */
+  const undoHere = (request: HostRequest): Record<string, unknown> => {
+    const id = request.undoSnapshotId ?? '';
+    const port = options.port;
+    if (!port.restoreBefore || !port.messagesSinceRewind) {
+      return { unavailableReason: 'this surface keeps no undo snapshots for its conversation' };
+    }
+    const since = id ? port.messagesSinceRewind(id) : null;
+    if (since === null) {
+      return { unavailableReason: 'the undo snapshot is gone from this surface (only the newest 32 rewinds keep one)', unavailableCode: 'UNDO_POINT_GONE' };
+    }
+    if (since !== 0) {
+      const what = since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'been edited';
+      return { unavailableReason: `the conversation has ${what} since the rewind`, unavailableCode: 'CONVERSATION_CHANGED' };
+    }
+    if (!port.restoreBefore(id)) {
+      return { unavailableReason: 'the undo snapshot is gone from this surface', unavailableCode: 'UNDO_POINT_GONE' };
+    }
+    restoreAnchorsDroppedBy(id, options.surface);
+    return { undone: true };
   };
 
   /** A rewind applied here that the daemon has no record of: put it back when that is certain. */
@@ -267,7 +297,7 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
   const answer = async (offer: Offer, hostId: string, request: HostRequest): Promise<void> => {
     const state = { applied: false };
     let finished: () => void = () => {};
-    if (request.kind === 'rewind') offer.applying = new Promise<void>((resolve) => { finished = resolve; });
+    if (request.kind !== 'preview') offer.applying = new Promise<void>((resolve) => { finished = resolve; });
     try {
       let payload: Record<string, unknown> | undefined;
       try {
@@ -276,6 +306,7 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
         if (!isCurrent(offer)) return;
         payload = { unavailableReason: `the surface hosting this conversation could not answer: ${summarizeError(error)}` };
       }
+      if (payload?.['undone'] === true) state.applied = true;
       if (!payload || (!isCurrent(offer) && !state.applied)) return;
       // An applied rewind whose report got no answer is worth one more try: the
       // undo handle exists nowhere else. A report the daemon refused is not.
@@ -290,7 +321,11 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
           const refused = isDefiniteRefusal(error);
           if (!refused) mayHaveLanded = true;
           if (state.applied && attempt === 1 && !refused) continue;
-          if (state.applied) {
+          if (state.applied && request.kind === 'undo') {
+            log.warn('[rewind] the conversation was restored here but the daemon has no confirmed record of it', {
+              requestId: request.requestId, sessionId: request.sessionId, error: summarizeError(error),
+            });
+          } else if (state.applied) {
             settleUnreported(request, payload['undoSnapshotId'], mayHaveLanded, error);
           } else if (isCurrent(offer)) {
             log.debug('[rewind] the daemon would not accept this answer', {

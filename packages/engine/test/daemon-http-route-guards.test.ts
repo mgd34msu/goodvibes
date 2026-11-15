@@ -283,6 +283,6 @@ describe('cloudflare routes', () => {
       parseOptionalJsonBody: parseOptionalDaemonJsonBody,
     });
     expect(response?.status).toBe(400);
-    expect(await response!.json()).toMatchObject({ error: 'Request body must be a JSON object' });
+    expect(await response!.json()).toMatchObject({ code: 'INVALID_JSON' });
   });
 });

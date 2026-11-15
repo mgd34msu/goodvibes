@@ -236,40 +236,45 @@ describe('channel optional JSON bodies', () => {
 });
 
 describe('PATCH /api/channels/policies/:surface: field filter', () => {
-  test('handler strips untyped fields: only known typed fields reach upsertPolicy', async () => {
-    let capturedPatch: Record<string, unknown> = {};
+  test('an unknown field is refused by name and nothing reaches upsertPolicy', async () => {
+    let called = false;
     const channelPolicy: DaemonChannelRouteContext['channelPolicy'] = {
       listPolicies: () => [],
       upsertPolicy: async (_surface, patch) => {
-        capturedPatch = patch as Record<string, unknown>;
+        called = true;
         return patch as Record<string, unknown>;
       },
       listAudit: () => [],
     };
-    const ctx = makeContext(channelPolicy);
-    const handlers = createDaemonChannelRouteHandlers(ctx);
+    const handlers = createDaemonChannelRouteHandlers(makeContext(channelPolicy));
 
     const res = await handlers.patchChannelPolicy(
       'slack',
-      makePatchRequest('slack', {
-        enabled: true,
-        requireMention: false,
-        rate_limit: 999,
-        bogusField: 'x',
-      }),
+      makePatchRequest('slack', { enabled: true, dmPolcy: 'deny' }),
     );
-    expect(res.status).toBe(200);
-    const body = await res.json() as Record<string, unknown>;
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(called).toBe(false);
+  });
+});
 
-    // Typed fields forwarded, present in response
-    expect(body['enabled']).toBe(true);
-    expect(body['requireMention']).toBe(false);
-
-    // Untyped fields must not reach upsertPolicy or appear in response
-    expect('rate_limit' in capturedPatch).toBe(false);
-    expect('bogusField' in capturedPatch).toBe(false);
-    expect('rate_limit' in body).toBe(false);
-    expect('bogusField' in body).toBe(false);
+describe('POST /api/channels/allowlist/:surface/edit: an access list change is never half-read', () => {
+  test('a wrongly typed field or an unknown key is refused by name and the allowlist is not touched', async () => {
+    const edits: unknown[] = [];
+    const ctx = makeContext(makePolicyStore().service);
+    ctx.channelPlugins.editAllowlist = async (_surface, input) => { edits.push(input); return { ok: true } as never; };
+    const handlers = createDaemonChannelRouteHandlers(ctx);
+    const edit = (body: unknown) => handlers.postChannelAllowlistEdit('slack', new Request('http://localhost/api/channels/allowlist/slack/edit', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    }));
+    for (const body of [{ remove: 'U123' }, { add: [123] }, { kind: 'users' }, { remov: ['U123'] }]) {
+      const res = await edit(body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    }
+    expect(edits).toHaveLength(0);
+    expect((await edit({ remove: ['U123'], kind: 'user' })).status).toBe(200);
+    expect(edits).toEqual([{ remove: ['U123'], kind: 'user' }]);
   });
 });
 

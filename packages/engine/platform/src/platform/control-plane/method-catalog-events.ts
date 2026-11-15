@@ -112,8 +112,100 @@ const RUNTIME_DOMAIN_DESCRIPTIONS = {
   config: 'Key-level settings-change notices (CONFIG_KEY_CHANGED), carrying the dotted key, its ownership scope (daemon/client/user) and the new value, EXCEPT for a secret-bearing key, which travels by name only with secret:true and no value field at all. The poll-free counterpart to config.get for a client whose settings live in the daemon: an in-process ConfigManager.subscribe cannot see a write that happened on another machine, so a client without this stream keeps running on whatever it read at startup.',
 } satisfies Record<RuntimeEventDomain, string>;
 
+/**
+ * Who may receive an event stream entry: any authenticated principal holding
+ * the descriptor's scopes, or only an admin. A domain is admin-only when its
+ * events carry setting values, approvals and tool arguments, conversation or
+ * tool output, or other principals' credentials and connections; the rest
+ * describe state a non-admin can already read through the request path.
+ */
+export type GatewayEventAccess = 'authenticated' | 'admin';
+
+const RUNTIME_DOMAIN_ACCESS = {
+  session: 'admin',
+  turn: 'admin',
+  providers: 'authenticated',
+  tools: 'admin',
+  tasks: 'authenticated',
+  agents: 'admin',
+  contracts: 'admin',
+  communication: 'admin',
+  planner: 'authenticated',
+  gate: 'admin',
+  plugins: 'authenticated',
+  mcp: 'authenticated',
+  transport: 'authenticated',
+  compaction: 'authenticated',
+  ui: 'authenticated',
+  ops: 'authenticated',
+  forensics: 'admin',
+  security: 'admin',
+  automation: 'authenticated',
+  routes: 'authenticated',
+  'control-plane': 'admin',
+  deliveries: 'authenticated',
+  watchers: 'authenticated',
+  surfaces: 'authenticated',
+  knowledge: 'authenticated',
+  workspace: 'authenticated',
+  fleet: 'authenticated',
+  config: 'admin',
+} satisfies Record<RuntimeEventDomain, GatewayEventAccess>;
+
+/** The wire events the distributed runtime publishes about paired peers and the work they run. */
+export const REMOTE_RUNTIME_WIRE_EVENTS = [
+  'remote-pair-requested',
+  'remote-pair-approved',
+  'remote-pair-rejected',
+  'remote-pair-verified',
+  'remote-peer',
+  'remote-peer-heartbeat',
+  'remote-peer-disconnected',
+  'remote-token-rotated',
+  'remote-token-revoked',
+  'remote-work-queued',
+  'remote-work-claimed',
+  'remote-work-settled',
+  'remote-work-cancelled',
+] as const;
+
+/** Access of the builtin broadcast (non-domain) event descriptors, by descriptor id. */
+const BROADCAST_EVENT_ACCESS: Readonly<Record<string, GatewayEventAccess>> = {
+  'control.ready': 'authenticated',
+  'control.heartbeat': 'authenticated',
+  'control.surface_message': 'authenticated',
+  'control.remote_update': 'authenticated',
+  'control.approval_update': 'admin',
+  'control.hosted_session_update': 'admin',
+  'control.session_update': 'admin',
+};
+
+/** The access an event descriptor requires. A descriptor this table does not know (a plugin's) is admin-only. */
+export function gatewayEventAccess(descriptor: Pick<GatewayEventDescriptor, 'id' | 'category' | 'domains'>): GatewayEventAccess {
+  if (descriptor.category === 'runtime-domain') {
+    const domain = descriptor.domains?.[0];
+    return domain !== undefined && Object.hasOwn(RUNTIME_DOMAIN_ACCESS, domain) ? RUNTIME_DOMAIN_ACCESS[domain] : 'admin';
+  }
+  return BROADCAST_EVENT_ACCESS[descriptor.id] ?? 'admin';
+}
+
 export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] = [
   ...RUNTIME_EVENT_DOMAINS.map((domain) => runtimeDomainEvent(domain, RUNTIME_DOMAIN_DESCRIPTIONS[domain])),
+  eventDescriptor({
+    id: 'control.remote_update',
+    title: 'Remote Peer and Work Update',
+    description:
+      'Distributed-runtime notices about paired peers and the work they run: a pair request and its '
+      + 'approval, rejection or verification, a peer connecting, its heartbeat and disconnect, a peer '
+      + 'token rotated or revoked, and remote work queued, claimed, settled or cancelled. The wire event '
+      + 'name is the notice; the payload carries the sanitized peer and, for work, the work record. '
+      + 'Requires read:remote, the scope remote.peers.list and remote.work.list require.',
+    category: 'transport',
+    transport: ['sse', 'ws'],
+    scopes: ['read:events', 'read:remote'],
+    wireEvents: [...REMOTE_RUNTIME_WIRE_EVENTS],
+    outputSchema: JSON_OBJECT_SCHEMA,
+  }),
   eventDescriptor({
     id: 'control.ready',
     title: 'Ready Handshake',

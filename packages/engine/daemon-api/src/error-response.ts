@@ -13,6 +13,7 @@ import {
   settleCategory,
   type StructuredDaemonErrorBody,
 } from '@goodvibes-jev/engine/errors';
+import { missingScopes } from './route-helpers.js';
 
 /** Options for `jsonErrorResponse` and `buildErrorResponseBody`. */
 export interface JsonErrorResponseOptions {
@@ -157,16 +158,12 @@ function refusalFields(error: { readonly state?: unknown; readonly next?: unknow
 }
 
 /**
- * Whether an inferred hint may talk about model ids and tool schemas.
- *
- * The `bad_request` and `not_found` hints below describe an LLM request and
- * nothing else. They used to be attached to every 400/404 that reached this
- * module, so a calendar verb refusing a malformed range told the caller to
- * "check model id, parameters, message format, and tool schema". Hints for
- * those two categories are now only inferred when the error itself says it
- * came from a provider; other errors keep their own message (which for
- * gateway verbs already carries the problem and the fix) and get no
- * borrowed hint.
+ * Whether the error says a model provider produced it. The inferred hints
+ * below describe a provider (its credentials, its model ids, its outages),
+ * so only such an error gets one; the daemon's own 401, 403 or 500 keeps its
+ * own message and hint and is never told to switch providers. A network or
+ * protocol failure gets its hint whoever raised it: it is about the
+ * connection, not about a provider.
  */
 function isProviderAttributed(fields: {
   readonly source?: string | undefined;
@@ -185,9 +182,7 @@ function inferHint(
   status: number | undefined,
   providerAttributed: boolean,
 ): string | undefined {
-  if (!providerAttributed && (category === 'bad_request' || category === 'not_found')) {
-    return undefined;
-  }
+  if (!providerAttributed && category !== 'network' && category !== 'protocol') return undefined;
   switch (category) {
     case 'rate_limit':
       return 'The caller may retry automatically. If this persists, wait, lower request volume, or switch models/providers.';
@@ -316,7 +311,54 @@ function captureErrorBodyFields(input: StructuredDaemonErrorBody): StructuredDae
   const recoverable = value('recoverable'); if (typeof recoverable === 'boolean') out.recoverable = recoverable;
   const status = value('status'); if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) out.status = status;
   const retry = value('retryAfterMs'); if (typeof retry === 'number' && Number.isFinite(retry) && retry >= 0) out.retryAfterMs = retry;
+  for (const key of SCOPE_LIST_FIELDS) {
+    const list = value(key);
+    if (Array.isArray(list) && list.every((entry) => typeof entry === 'string')) out[key] = Object.freeze([...list]);
+  }
   return out as unknown as StructuredDaemonErrorBody;
+}
+
+/** The scope lists a missing-scope refusal names; carried on every copy of the body, privileged or not. */
+const SCOPE_LIST_FIELDS = ['requiredScopes', 'grantedScopes', 'missingScopes'] as const;
+
+/** A missing-scope refusal: the one body every route answers with when the caller lacks a scope. */
+export interface MissingScopeErrorBody extends StructuredDaemonErrorBody {
+  readonly code: 'MISSING_SCOPE';
+  readonly category: 'authorization';
+  readonly status: 403;
+  readonly requiredScopes: readonly string[];
+  readonly grantedScopes: readonly string[];
+  readonly missingScopes: readonly string[];
+}
+
+/**
+ * The missing-scope refusal for `target`, or null when `granted` covers every
+ * scope in `required` (`anyOf: true` when one of them is enough). Answer it
+ * with {@link jsonErrorResponse}; the scope lists survive serialization.
+ */
+export function missingScopeRefusal(
+  target: string,
+  required: readonly string[],
+  granted: readonly string[] | undefined,
+  options: { readonly anyOf?: boolean; readonly hint?: string } = {},
+): MissingScopeErrorBody | null {
+  const held = granted ?? [];
+  const missing = missingScopes(held, required);
+  if (missing.length === 0 || (options.anyOf === true && missing.length < required.length)) return null;
+  const named = options.anyOf === true ? required.join(' or ') : missing.join(', ');
+  return {
+    error: `Missing required scope${options.anyOf === true || missing.length === 1 ? '' : 's'} for ${target}: ${named}`,
+    code: 'MISSING_SCOPE',
+    category: 'authorization',
+    source: 'permission',
+    recoverable: false,
+    status: 403,
+    state: `the credential does not hold ${named}`,
+    next: [options.hint ?? `Use a credential that holds ${named}, or an admin session.`],
+    requiredScopes: [...required],
+    grantedScopes: [...held],
+    missingScopes: missing,
+  };
 }
 
 function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorResponseOptions, isPrivileged: boolean): StructuredDaemonErrorBody {
@@ -339,6 +381,10 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
       ...(captured.retryAfterMs !== undefined ? { retryAfterMs: captured.retryAfterMs } : {}),
       ...(captured.requestId !== undefined ? { requestId: captured.requestId } : {}),
     };
+    const lists = captured as unknown as Readonly<Record<string, unknown>>;
+    for (const key of SCOPE_LIST_FIELDS) {
+      if (lists[key] !== undefined) Object.assign(safe, { [key]: lists[key] });
+    }
     return safe;
   }
   if (error instanceof GoodVibesError || isStructuredErrorLike(error)) {
@@ -455,12 +501,15 @@ interface Wording {
 }
 
 /**
- * Whether the wording can change the body: only when the error carries no
- * category, status, errno code or timeout class at all ({@link classifyFailure}
- * is the first step), or when it is a provider's 400 or 429 that may be a spent
- * account. A daemon's own error that says what it is costs no model request.
+ * Whether the wording can change the body: only for a provider's failure,
+ * when it carries no category, status, errno code or timeout class at all
+ * ({@link classifyFailure} is the first step), or when it is a provider's 400
+ * or 429 that may be a spent account. The daemon's own errors (a conflict, a
+ * body too large, an unsupported type, an unprocessable request) take their
+ * category from their status and are answered at once.
  */
 function wordingDecides(fixed: DaemonErrorCategory | undefined, status: number | undefined, fromProvider: boolean): boolean {
+  if (!fromProvider) return false;
   if (fixed !== undefined && fixed !== 'unknown') return categoryDependsOnWording(fixed, status, fromProvider);
   return status === undefined;
 }
@@ -592,6 +641,9 @@ export function serviceFailureStatus(error: unknown, fallback = 500): number {
   if (own !== undefined) return own;
   if (error !== null && typeof error === 'object') {
     if ((error as { readonly retryable?: unknown }).retryable === true) return 503;
+    // A failed system call (a full disk, a lost file, a refused connection) is
+    // the daemon's failure, never a mistake in the request.
+    if (typeof (error as { readonly syscall?: unknown }).syscall === 'string') return classifyFailure(error)?.retryable === true ? 503 : 500;
     const category = (error as { readonly category?: unknown }).category;
     if (typeof category === 'string' && Object.hasOwn(CLIENT_STATUS_BY_CATEGORY, category)) return CLIENT_STATUS_BY_CATEGORY[category]!;
   }

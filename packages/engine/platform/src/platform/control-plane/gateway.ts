@@ -17,7 +17,14 @@ import { renderControlPlaneGatewayWebUi } from './gateway-web-ui.js';
 import { AppError } from '../types/errors.js';
 import { buildGatewayDisabledResponseBody } from './gateway-disabled-response.js';
 import { SSE_HEARTBEAT_INTERVAL_MS } from './sse-timing.js';
-import { CHANNEL_REQUIRED_SCOPE, clientMayReceiveEventDomain, clientMaySeeScopedChannel } from './gateway-scope-enforcement.js';
+import {
+  clientMayReceiveEventDomain,
+  grantAllowsDomain,
+  grantAllowsEvent,
+  isEmptyEventGrant,
+  resolveEventGrant,
+  type EventGrant,
+} from './gateway-scope-enforcement.js';
 import type {
   ControlPlaneClientDescriptor,
   ControlPlaneServerConfig,
@@ -89,9 +96,8 @@ interface LiveControlPlaneClient {
   readonly kind: ControlPlaneStreamClientKind;
   readonly surfaceId?: string | undefined;
   readonly routeId?: string | undefined;
-  /** Principal scopes (SSE/WS); `admin` collapses scopes (sees every channel). */
-  scopes?: readonly string[] | undefined;
-  admin?: boolean | undefined;
+  /** What this client may receive, resolved when it subscribed or last authenticated. */
+  grant: EventGrant;
   /**
    * Subscribed domains for the broadcast (`publishEvent`) fan-out. `null` =
    * deliver-all (client did not opt into narrowing); a non-null set narrows to
@@ -283,6 +289,7 @@ export class ControlPlaneGateway {
       if (message.clientId && client.clientId !== message.clientId) continue;
       if (message.routeId && client.routeId !== message.routeId) continue;
       if (message.surfaceId && client.surfaceId !== message.surfaceId) continue;
+      if (!grantAllowsEvent(client.grant, 'surface-message', Boolean(message.clientId))) continue;
       client.send('surface-message', message, record.id);
     }
     return message;
@@ -297,15 +304,15 @@ export class ControlPlaneGateway {
   }): void {
     if (!this.isEnabled()) return;
     const record = this.rememberEvent(event, payload, filter);
-    const requiredScope = CHANNEL_REQUIRED_SCOPE[event];
+    const addressed = Boolean(filter?.clientId || filter?.clientIdPrefix);
     for (const client of this.liveClients.values()) {
       if (filter?.clientKind && client.kind !== filter.clientKind) continue;
       if (filter?.clientId && client.clientId !== filter.clientId) continue;
       if (filter?.clientIdPrefix && !client.clientId.startsWith(filter.clientIdPrefix)) continue;
       if (filter?.routeId && client.routeId !== filter.routeId) continue;
       if (filter?.surfaceId && client.surfaceId !== filter.surfaceId) continue;
-      if (requiredScope && !clientMaySeeScopedChannel(client, requiredScope)) continue;
-      // Domain filter, AND-ed with scope (null = deliver-all; untagged = delivered).
+      if (!grantAllowsEvent(client.grant, event, addressed)) continue;
+      // Domain filter, AND-ed with the grant (null = deliver-all; untagged = delivered).
       if (!clientMayReceiveEventDomain(client.domains, event)) continue;
       client.send(event, payload, record.id);
     }
@@ -415,7 +422,8 @@ export class ControlPlaneGateway {
       throw new Error('Runtime event bus unavailable');
     }
 
-    const selectedDomains = normalizeRuntimeDomains(options.domains);
+    const grant = resolveEventGrant({ admin: options.admin, scopes: options.scopes });
+    const selectedDomains = normalizeRuntimeDomains(options.domains).filter((domain) => grantAllowsDomain(grant, domain));
     const clientId = options.clientId ?? `cp-${randomUUID().slice(0, 8)}`;
     const label = options.label ?? `${options.clientKind ?? 'web'}:${clientId}`;
     const now = Date.now();
@@ -448,8 +456,7 @@ export class ControlPlaneGateway {
       kind: options.clientKind ?? 'web',
       surfaceId: options.surfaceId,
       routeId: options.routeId,
-      scopes: options.scopes,
-      admin: options.admin,
+      grant,
       domains: explicitDomains ? wsDomains : null,
       send,
       principalId: options.principalId,
@@ -505,7 +512,7 @@ export class ControlPlaneGateway {
     // Later explicit subscription changes narrow to the live subscription set.
     if (!explicitDomains) this.liveClients.get(clientId)!.domains = null;
     send('ready', { clientId, domains: selectedDomains, transport: 'websocket' });
-    replayRecentTraffic(this.recentEvents, send, { ...options, clientId, domains: selectedDomains }, explicitDomains ? wsDomains : null);
+    replayRecentTraffic(this.recentEventsFor(grant), send, { ...options, clientId, domains: selectedDomains }, explicitDomains ? wsDomains : null);
     return { clientId, domains: selectedDomains };
   }
 
@@ -536,11 +543,7 @@ export class ControlPlaneGateway {
     if (!this.isEnabled()) return;
     const existing = this.clients.get(clientId);
     if (!existing || !this.runtimeBus) return;
-    const liveClient = this.liveClients.get(clientId);
-    if (liveClient) {
-      liveClient.scopes = input.scopes ?? [];
-      liveClient.admin = input.admin === true;
-    }
+    this.regrantClient(clientId, { admin: input.admin === true, scopes: input.scopes ?? [] });
     const updated: ControlPlaneClientRecord = {
       ...existing,
       label: input.label ?? existing.label,
@@ -573,7 +576,7 @@ export class ControlPlaneGateway {
     const liveClient = this.liveClients.get(clientId);
     if (!liveClient) return;
     liveClient.domains = wsClient.domains;
-    const nextDomains = [...new Set(domains)];
+    const nextDomains = [...new Set(domains)].filter((domain) => grantAllowsDomain(liveClient.grant, domain));
     for (const domain of nextDomains) {
       if (wsClient.unsubscribers.has(domain)) continue;
       const unsubscribe = this.runtimeBus.onDomain(domain, (envelope) => {
@@ -660,8 +663,24 @@ export class ControlPlaneGateway {
       return Response.json({ error: 'Runtime event bus unavailable' }, { status: 503 });
     }
 
+    const grant = resolveEventGrant({ admin: options.admin, scopes: options.scopes });
+    const requestedDomains = normalizeRuntimeDomains(options.domains);
+    const selectedDomains = requestedDomains.filter((domain) => grantAllowsDomain(grant, domain));
+    const withheld = requestedDomains.filter((domain) => !grantAllowsDomain(grant, domain));
+    if (isEmptyEventGrant(grant) || ((options.domains?.length ?? 0) > 0 && selectedDomains.length === 0)) {
+      return Response.json({
+        error: isEmptyEventGrant(grant)
+          ? 'This credential may not receive any control-plane events.'
+          : `This credential may not receive the requested event domains: ${withheld.join(', ')}.`,
+        code: 'EVENT_ACCESS_DENIED',
+        category: 'authorization',
+        status: 403,
+        state: 'the event stream was not opened',
+        next: ['Sign in as an admin, or open the stream with domains this credential may read.'],
+        ...(withheld.length > 0 ? { withheldDomains: withheld } : {}),
+      }, { status: 403 });
+    }
     const encoder = new TextEncoder();
-    const selectedDomains = normalizeRuntimeDomains(options.domains);
     const lastEventId = request.headers.get('last-event-id')?.trim() || undefined;
     const clientId = options.clientId ?? `cp-${randomUUID().slice(0, 8)}`;
     const label = options.label ?? `${options.clientKind ?? 'web'}:${clientId}`;
@@ -776,8 +795,7 @@ export class ControlPlaneGateway {
           kind: options.clientKind ?? 'web',
           surfaceId: options.surfaceId,
           routeId: options.routeId,
-          scopes: options.scopes,
-          admin: options.admin,
+          grant,
           domains: sseLiveDomains,
           send,
           principalId: options.principalId,
@@ -856,12 +874,14 @@ export class ControlPlaneGateway {
         // A resuming client is told what its position turned into BEFORE any
         // replay lands, so "I asked to resume and received nothing" is a stated
         // outcome rather than something it has to infer from silence.
+        const replayable = this.recentEventsFor(grant);
         rawSend('ready', {
           clientId,
           domains: selectedDomains,
-          resume: resolveReplayResume(this.recentEvents, lastEventId),
+          ...(withheld.length > 0 ? { withheldDomains: withheld } : {}),
+          resume: resolveReplayResume(replayable, lastEventId),
         });
-        replayRecentTraffic(this.recentEvents, send, { ...options, clientId, domains: selectedDomains }, sseLiveDomains, lastEventId, scoped.mayDeliverPayload);
+        replayRecentTraffic(replayable, send, { ...options, clientId, domains: selectedDomains }, sseLiveDomains, lastEventId, scoped.mayDeliverPayload);
         // First keep-alive immediately on open (not one interval later), so the
         // window before the first interval can't strand a quiet stream.
         emitHeartbeat();
@@ -878,6 +898,28 @@ export class ControlPlaneGateway {
         connection: 'keep-alive',
       },
     });
+  }
+
+  /**
+   * Re-resolve what a live client may receive after its credential changed
+   * (an in-band auth frame, or the same principal re-authenticated with
+   * narrower rights), and drop the runtime domains it may no longer receive.
+   */
+  regrantClient(clientId: string, input: { readonly admin: boolean; readonly scopes: readonly string[] }): void {
+    const liveClient = this.liveClients.get(clientId);
+    if (!liveClient) return;
+    liveClient.grant = resolveEventGrant({ admin: input.admin, scopes: input.scopes });
+    const wsClient = this.websocketClients.get(clientId);
+    if (!wsClient) return;
+    const revoked = [...wsClient.domains].filter((domain) => !grantAllowsDomain(liveClient.grant, domain));
+    if (revoked.length > 0) this.unsubscribeWebSocketClient(clientId, revoked);
+  }
+
+  /** The replay ring cut to what `grant` covers; an event addressed to one client keeps its own replay scope check. */
+  private recentEventsFor(grant: EventGrant): ScopedControlPlaneRecentEvent[] {
+    const events = this.recentEvents;
+    if (grant.all) return events;
+    return events.filter((entry) => grantAllowsEvent(grant, entry.event, Boolean(entry.replayScope?.clientId || entry.replayScope?.clientIdPrefix)));
   }
 
   renderWebUi(authTokenHint = ''): Response {

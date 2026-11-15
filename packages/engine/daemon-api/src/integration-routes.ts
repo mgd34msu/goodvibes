@@ -1,7 +1,7 @@
 import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes-jev/engine/errors';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import type { DaemonIntegrationRouteHandlers } from './context.js';
-import { jsonErrorResponse, readJsonErrorResponse, readServiceErrorResponse } from './error-response.js';
+import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
 import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput, RuntimeEventDomain } from './integration-route-types.js';
 import {
   createRouteBodySchema,
@@ -363,7 +363,7 @@ export function createDaemonIntegrationRouteHandlers(
       try {
         return Response.json({ user: context.userAuth.addUser(input.username, input.password, input.roles) }, { status: 201 });
       } catch (error) {
-        return readJsonErrorResponse(error, { status: 400 });
+        return readServiceErrorResponse(error, { fallbackStatus: 400 });
       }
     },
     deleteLocalAuthUser: (username, req) => {
@@ -375,7 +375,7 @@ export function createDaemonIntegrationRouteHandlers(
           ? Response.json({ deleted: true })
           : jsonErrorResponse({ error: 'Unknown user' }, { status: 404 });
       } catch (error) {
-        return readJsonErrorResponse(error, { status: 400 });
+        return readServiceErrorResponse(error, { fallbackStatus: 400 });
       }
     },
     postLocalAuthPassword: async (username, req) => {
@@ -389,7 +389,7 @@ export function createDaemonIntegrationRouteHandlers(
         context.userAuth.rotatePassword(username, input.password);
         return Response.json({ rotated: true });
       } catch (error) {
-        return readJsonErrorResponse(error, { status: 400 });
+        return readServiceErrorResponse(error, { fallbackStatus: 400 });
       }
     },
     deleteLocalAuthSession: (sessionId, req) => {
@@ -417,7 +417,12 @@ export function createDaemonIntegrationRouteHandlers(
         ? Response.json({ opened: true, id: input.panelId, pane: input.pane })
         : jsonErrorResponse({ error: `Unknown panel: ${input.panelId}` }, { status: 404 });
     },
+    // The raw runtime bus, every domain unfiltered (settings values, approvals,
+    // transcripts): admin only. /api/control-plane/events serves every other
+    // principal the domains it may read.
     getEvents: (req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const url = new URL(req.url);
       const rawDomains = url.searchParams.get('domains');
       // Unknown domains are dropped here, as the control-plane stream does, instead of cast through.

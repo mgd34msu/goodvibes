@@ -11,7 +11,8 @@ import { InvalidPathEncodingError, invalidPathEncodingResponse, safeDecodeURICom
  * relay step-up ceremony), runtime.metrics.get, and contracts.*). Those verbs are
  * served in-process through `invokeGatewayMethodCall`'s registered-handler
  * branch, reachable over the wire via the generic
- * `POST /api/control/gateway-methods/:methodId/invoke` endpoint. But each one
+ * `POST /api/control-plane/methods/{methodId}/invoke` endpoint
+ * (`GATEWAY_METHOD_INVOKE_PATH` in operator.ts). But each one
  * also promises a plain-REST path (`GET /api/skills`, …) in its descriptor's
  * http binding, and no route ever served those paths, a caller trusting the
  * advertisement and hitting `GET /api/skills` got a bare 404. That is the exact

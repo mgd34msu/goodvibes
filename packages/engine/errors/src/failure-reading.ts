@@ -359,6 +359,9 @@ async function readDecisionFailure(evidence: FailureEvidence, site: string, opti
   return memo ? remember(memo, state, reading) : reading;
 }
 
+/** Statuses that refuse the request as sent: a conflict with current state, a failed precondition, a body too large, an unsupported type, an unprocessable request. */
+const REQUEST_REFUSED_STATUSES: ReadonlySet<number> = new Set([409, 412, 413, 415, 422]);
+
 /**
  * The category an HTTP status fixes on its own. 400 and 429 are provisional:
  * providers report a spent account under both (Anthropic a 400 "credit
@@ -367,6 +370,7 @@ async function readDecisionFailure(evidence: FailureEvidence, site: string, opti
  */
 export function categoryForStatus(status: number | undefined): DaemonErrorCategory | undefined {
   if (status === undefined) return undefined;
+  if (REQUEST_REFUSED_STATUSES.has(status)) return 'bad_request';
   if (status === 401) return 'authentication';
   if (status === 402) return 'billing';
   if (status === 403) return 'authorization';

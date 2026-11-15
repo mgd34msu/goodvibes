@@ -6,6 +6,7 @@ import {
   categoryForStatus,
   forgetFailureReadings,
   bindJudgmentPortAuthority,
+  GoodVibesError,
   installJudgmentPort,
   JudgmentAuthorityRetiredError,
   JudgmentPortMissingError,
@@ -154,12 +155,22 @@ describe('call sites', () => {
     expect(semantic[0]!.state).toBe(semantic[1]!.state);
   });
 
-  test('the daemon body reads a bare message', async () => {
+  test('the daemon body reads a provider\'s bare message', async () => {
     const { port, requests } = billingPort();
     installJudgmentPort(port);
-    const body = await readErrorResponseBody(new Error('out of credits'));
+    const body = await readErrorResponseBody(Object.assign(new Error('out of credits'), { source: 'provider' }));
     expect(body.category).toBe('billing');
     expect(requests).toHaveLength(1);
+  });
+
+  test('the daemon\'s own error is answered from its status with no reading', async () => {
+    const { port, requests } = billingPort();
+    installJudgmentPort(port);
+    const conflict = await readErrorResponseBody(new GoodVibesError('the session is busy', { status: 409 }));
+    const bare = await readErrorResponseBody(new Error('out of credits'), { status: 500 });
+    expect(conflict.category).toBe('bad_request');
+    expect(bare.category).toBe('service');
+    expect(requests).toHaveLength(0);
   });
 });
 

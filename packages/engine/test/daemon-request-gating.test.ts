@@ -25,10 +25,6 @@ function gate(found: Descriptor | null, principal: { admin: boolean; scopes: rea
   return gateGatewayBinding(new Request('http://daemon.local/api/sessions', { method: 'POST' }), {
     gatewayMethods: { findByHttpBinding: () => found },
     authenticateRequest: () => principal ? { principal: { principalId: 'u', principalKind: 'user', ...principal } } : null,
-    validateGatewayInvocation: (d, context) => {
-      const missing = d.scopes.filter((scope) => !context?.scopes?.includes(scope));
-      return missing.length === 0 ? null : { status: 403, ok: false, body: { error: `Missing required scope: ${missing.join(', ')}`, missingScopes: missing } };
-    },
   });
 }
 
@@ -44,9 +40,17 @@ describe('REST calls are held to the catalog entry for their URL', () => {
     expect(gate(null, { admin: false, scopes: [] })).toBeNull();
   });
 
-  test('remote-peer methods and methods not invokable through dispatch are left to their own routes', () => {
+  test('remote-peer methods are left to their own routes', () => {
     expect(gate(descriptor({ access: 'remote-peer' }), { admin: false, scopes: [] })).toBeNull();
-    expect(gate(descriptor({ invokable: false }), { admin: false, scopes: [] })).toBeNull();
+  });
+
+  test('a route not invokable through dispatch is still held to its access and scopes', async () => {
+    const admin = gate(descriptor({ invokable: false, access: 'admin' }), { admin: false, scopes: ['write:sessions'] });
+    expect(admin?.status).toBe(403);
+    expect(await admin!.json()).toMatchObject({ code: 'ADMIN_REQUIRED' });
+    const scoped = gate(descriptor({ invokable: false }), { admin: false, scopes: [] });
+    expect(await scoped!.json()).toMatchObject({ code: 'MISSING_SCOPE', missingScopes: ['write:sessions'] });
+    expect(gate(descriptor({ invokable: false }), { admin: false, scopes: ['write:sessions'] })).toBeNull();
   });
 });
 

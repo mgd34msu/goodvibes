@@ -23,12 +23,12 @@ import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../control-plane/index.js';
 import type { GatewayMethodInvocationContext } from '../control-plane/method-catalog-shared.js';
 import { grantedGatewayScopes } from '../control-plane/method-catalog.js';
-import { CHANNEL_REQUIRED_SCOPE } from '../control-plane/gateway-scope-enforcement.js';
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import { isRuntimeEventDomain } from '../runtime/events/index.js';
 import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
+import { refuseGatewayAccess } from './http/gateway-binding-gate.js';
 import { SYNTHESIZED_DISPATCH_HEADER, guardSelfDispatch, guardSynthesizedDepth } from './gateway-self-dispatch.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from './auth-failure-audit.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -39,7 +39,6 @@ import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-err
 import { buildErrorResponseBody } from './http/error-response.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
-  buildMissingScopeBody,
   type AuthenticatedPrincipal,
   type RequestContext,
   type RequestPrincipal,
@@ -576,32 +575,7 @@ export class DaemonControlPlaneHelper {
         },
       };
     }
-    if (descriptor.access === 'public') {
-      return null;
-    }
-    if (descriptor.access === 'admin' && !context?.admin) {
-      return {
-        status: 403,
-        ok: false,
-        body: { error: `Gateway method requires admin access: ${descriptor.id}` },
-      };
-    }
-    if (descriptor.access === 'remote-peer' && context?.principalKind !== 'remote-peer') {
-      return {
-        status: 403,
-        ok: false,
-        body: { error: `Gateway method requires a remote-peer principal: ${descriptor.id}` },
-      };
-    }
-    const body = buildMissingScopeBody(descriptor.id, descriptor.scopes, context?.scopes);
-    if (body) {
-      return {
-        status: 403,
-        ok: false,
-        body,
-      };
-    }
-    return null;
+    return refuseGatewayAccess(descriptor, context);
   }
 
   tryUpgradeControlPlaneWebSocket(
@@ -682,8 +656,7 @@ export class DaemonControlPlaneHelper {
         this.closeRevokedSocket(ws);
         return;
       }
-      const requiredScope = CHANNEL_REQUIRED_SCOPE[event];
-      if (requiredScope && !(ws.data.scopes.includes('*') || ws.data.scopes.includes(requiredScope))) return;
+      // What the socket may receive was decided by the gateway when it subscribed.
       this.sendFrame(ws, JSON.stringify({ type: 'event', event, payload }));
     }, () => this.closeRevokedSocket(ws));
     ws.data.clientId = connection.clientId;
@@ -702,10 +675,16 @@ export class DaemonControlPlaneHelper {
     const fresh = this.describeRequestPrincipal(data.authToken);
     if (!fresh || fresh.principalId !== data.principalId || fresh.principalKind !== data.principalKind) return false;
     const held = new Set(data.scopes);
+    const wasAdmin = data.admin;
+    const heldCount = data.scopes.length;
     data.scopes = held.has('*') ? fresh.scopes : fresh.scopeSet.has('*') ? [...held] : fresh.scopes.filter(scope => held.has(scope));
     data.admin = data.admin && fresh.admin;
     data.authRevision = fresh.authRevision;
     data.expiresAt = fresh.expiresAt;
+    // Narrower rights narrow what the socket is sent from now on.
+    if (data.clientId && (data.admin !== wasAdmin || data.scopes.length !== heldCount)) {
+      this.context.controlPlaneGateway.regrantClient(data.clientId, { admin: data.admin, scopes: data.scopes });
+    }
     return true;
   }
 

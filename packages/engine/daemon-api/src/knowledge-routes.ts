@@ -1,10 +1,7 @@
 import type { DaemonKnowledgeRouteHandlers } from './context.js';
-import {
-  buildMissingScopeBody,
-  resolvePrivateHostFetchOptions,
-} from './http-policy.js';
+import { resolvePrivateHostFetchOptions } from './http-policy.js';
 import { GoodVibesError, DaemonErrorCategory } from '@goodvibes-jev/engine/errors';
-import { jsonErrorResponse, readJsonErrorResponse, readServiceErrorResponse } from './error-response.js';
+import { jsonErrorResponse, missingScopeRefusal, readServiceErrorResponse } from './error-response.js';
 import { paginateItems, hasPaginationParams } from './pagination.js';
 import { createArtifactFromUploadRequest, isArtifactUploadRequest } from './artifact-upload.js';
 import {
@@ -499,7 +496,9 @@ function readKnowledgeSchedule(
         throw new GoodVibesError('Invalid schedule kind. Expected schedule.kind to be one of: "at", "every", or "cron".', { category: DaemonErrorCategory.BAD_REQUEST, source: 'contract', recoverable: false });
     }
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    // Answered at once: every refusal above names its own category, and a
+    // normaliser that throws is refusing the caller's schedule.
+    return jsonErrorResponse(error, { status: 400 });
   }
 }
 
@@ -587,7 +586,7 @@ async function handleKnowledgeGraphql(context: DaemonKnowledgeRouteContext, req:
   try {
     access = context.inspectGraphqlAccess(parsed.query, parsed.operationName);
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return jsonErrorResponse(error, { status: 400 });
   }
   // The operation that runs is the parsed one (operationName picks it), so a
   // GET is refused on that, not on how the document starts.
@@ -595,10 +594,8 @@ async function handleKnowledgeGraphql(context: DaemonKnowledgeRouteContext, req:
     return jsonErrorResponse({ error: 'GraphQL mutations must use POST.' }, { status: 405 });
   }
 
-  const scopeDenied = buildMissingScopeBody('knowledge GraphQL operation', access.requiredScopes, principal.scopes);
-  if (scopeDenied) {
-    return Response.json(scopeDenied, { status: 403 });
-  }
+  const scopeDenied = missingScopeRefusal('knowledge GraphQL operation', access.requiredScopes, principal.scopes);
+  if (scopeDenied) return jsonErrorResponse(scopeDenied, { status: 403 });
   if (access.adminRequired && !principal.admin) {
     return jsonErrorResponse({ error: 'Knowledge GraphQL mutation requires admin access.' }, { status: 403 });
   }
@@ -878,7 +875,9 @@ async function handleKnowledgeReviewIssue(context: DaemonKnowledgeRouteContext, 
       ...(body?.value && typeof body.value === 'object' && !Array.isArray(body.value) ? { value: body.value as Record<string, unknown> } : {}),
     }));
   } catch (error) {
-    return readJsonErrorResponse(error, { status: isKnowledgeNotFound(error, 'KNOWLEDGE_ISSUE_NOT_FOUND') ? 404 : 400 });
+    return isKnowledgeNotFound(error, 'KNOWLEDGE_ISSUE_NOT_FOUND')
+      ? jsonErrorResponse(error, { status: 404 })
+      : readServiceErrorResponse(error, { fallbackStatus: 400 });
   }
 }
 
@@ -902,7 +901,9 @@ async function handleKnowledgeDecideCandidate(context: DaemonKnowledgeRouteConte
       }),
     });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: isKnowledgeNotFound(error, 'KNOWLEDGE_CANDIDATE_NOT_FOUND') ? 404 : 400 });
+    return isKnowledgeNotFound(error, 'KNOWLEDGE_CANDIDATE_NOT_FOUND')
+      ? jsonErrorResponse(error, { status: 404 })
+      : readServiceErrorResponse(error, { fallbackStatus: 400 });
   }
 }
 
@@ -918,7 +919,9 @@ async function handleKnowledgeRunJob(context: DaemonKnowledgeRouteContext, jobId
       run: await context.knowledgeService.runJob(jobId, input),
     });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: isKnowledgeNotFound(error, 'KNOWLEDGE_JOB_NOT_FOUND') ? 404 : 400 });
+    return isKnowledgeNotFound(error, 'KNOWLEDGE_JOB_NOT_FOUND')
+      ? jsonErrorResponse(error, { status: 404 })
+      : readServiceErrorResponse(error, { fallbackStatus: 400 });
   }
 }
 

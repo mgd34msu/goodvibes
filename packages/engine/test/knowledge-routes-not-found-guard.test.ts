@@ -87,10 +87,15 @@ describe.each(['review issue', 'decide candidate', 'run job'] as const)('knowled
     expect(await statusFor(route, new GoodVibesError('upstream 404', { category: 'not_found', status: 404 }))).toBe(404);
   });
 
-  test('a category-only not-found error stays a 400', async () => {
+  test('a category-only not-found error keeps the status its category names', async () => {
     const err = new GoodVibesError('resource unavailable', { category: 'not_found' });
     expect(err.code).toBe('NOT_FOUND');
-    expect(await statusFor(route, err)).toBe(400);
+    expect(await statusFor(route, err)).toBe(404);
+  });
+
+  test('a store or provider failure keeps its own status instead of a 400', async () => {
+    expect(await statusFor(route, Object.assign(new Error('provider down'), { status: 503 }))).toBe(503);
+    expect(await statusFor(route, Object.assign(new Error('no space left'), { code: 'ENOSPC', syscall: 'write' }))).toBe(500);
   });
 
   test('NOT_FOUND with a non-404 status stays a 400', async () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { getNextAutomationOccurrence, ensureAutomationCronPhase, normalizeCronSchedule, normalizeEverySchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
+import { getNextAutomationOccurrence, ensureAutomationCronPhase, normalizeCronSchedule, normalizeEverySchedule, validateSchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeStore } from './store.js';
 import { KnowledgeStoreConflictError } from './store-conflict.js';
 import { knowledgeJobRunLifecycle, type KnowledgeJobMode, type KnowledgeJobRecord, type KnowledgeJobRunRecord, type KnowledgeJobStatus, type KnowledgeScheduleRecord } from './types.js';
@@ -10,6 +11,13 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { isPidAlive } from '../runtime/session-liveness-marker.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+
+/** The refusal for a job id the scheduler does not know; the daemon answers it 404. */
+function unknownKnowledgeJob(id: string): GoodVibesError {
+  return new GoodVibesError(`Unknown knowledge job: ${id}`, {
+    category: 'not_found', code: 'KNOWLEDGE_JOB_NOT_FOUND', status: 404, source: 'runtime', recoverable: false,
+  });
+}
 
 /** How long a job run with no live recorded owner must have been outstanding before it is treated as abandoned. */
 const INTERRUPTED_RUN_MIN_AGE_MS = 6 * 60 * 60 * 1000;
@@ -127,10 +135,18 @@ export class KnowledgeScheduleService {
   }): Promise<KnowledgeScheduleRecord> {
     await this.readyForMutation();
     const job = this.getJob(input.jobId);
-    if (!job) throw new Error(`Unknown knowledge job: ${input.jobId}`);
+    if (!job) throw unknownKnowledgeJob(input.jobId);
     if (input.enabled ?? true) assertJobPolicy(job);
     const previous = input.id ? this.context.store.getSchedule(input.id) : null;
     const schedule = ensureAutomationCronPhase(input.schedule, previous?.schedule);
+    // Checked whether or not it is enabled now: a disabled schedule is stored to be enabled later.
+    try {
+      validateSchedule(schedule);
+    } catch (error) {
+      throw new GoodVibesError(`Invalid schedule: ${error instanceof Error ? error.message : String(error)}`, {
+        category: 'bad_request', code: 'INVALID_SCHEDULE', status: 400, source: 'contract', recoverable: false,
+      });
+    }
     const nextRunAt = (input.enabled ?? true)
       ? getNextAutomationOccurrence(schedule, Date.now())
       : undefined;
@@ -198,7 +214,7 @@ export class KnowledgeScheduleService {
   }): Promise<KnowledgeJobRunRecord> {
     if (this.disposed) throw new Error('Knowledge scheduler is closed');
     const job = this.getJob(id);
-    if (!job) throw new Error(`Unknown knowledge job: ${id}`);
+    if (!job) throw unknownKnowledgeJob(id);
     assertJobPolicy(job);
     const mode = input.mode ?? job.defaultMode;
     const flightKey = JSON.stringify([job.id, [...(input.sourceIds ?? [])].sort(), input.limit ?? null]);

@@ -2,8 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { DaemonChannelRouteHandlers } from './context.js';
 import { jsonErrorResponse } from './error-response.js';
 import {
-  createRouteBodySchema,
-  createRouteBodySchemaRegistry,
   readBoundedPositiveInteger,
   readChannelConversationKind,
   readChannelLifecycleAction,
@@ -11,20 +9,14 @@ import {
 } from './route-helpers.js';
 import type { ChannelDirectoryScope, ChannelSurface, DaemonChannelRouteContext } from './channel-route-types.js';
 
-type OptionalChannelBody = JsonRecord | undefined;
-
-const channelBodySchemas = createRouteBodySchemaRegistry({
-  optional: createRouteBodySchema<OptionalChannelBody>('POST /api/channels/* optional body', (body) => body),
-});
-
+/** The free-form input a channel plugin's tool, action or account action reads; the plugin owns its shape. */
 async function readOptionalChannelBody(
   context: DaemonChannelRouteContext,
   req: Request,
-): Promise<OptionalChannelBody | Response> {
+): Promise<JsonRecord | undefined | Response> {
   const body = await context.parseOptionalJsonBody(req);
   if (body instanceof Response) return body;
-  if (body === null) return undefined;
-  return channelBodySchemas.optional.parse(body);
+  return body ?? undefined;
 }
 
 const POLICY_BOOLEAN_FIELDS = [
@@ -43,6 +35,74 @@ function invalidPolicyField(field: string, expected: string): Response {
     { error: `Channel policy field ${field} must be ${expected}; nothing was changed.`, code: 'INVALID_ARGUMENT' },
     { status: 400 },
   );
+}
+
+function invalidChannelField(field: string, expected: string): Response {
+  return jsonErrorResponse(
+    { error: `Field ${field} must be ${expected}; nothing was changed.`, code: 'INVALID_ARGUMENT', category: 'bad_request', status: 400 },
+    { status: 400 },
+  );
+}
+
+/**
+ * Refuse a key the route does not read. A misspelled field on an access-control
+ * write would otherwise be dropped while the route answered success, and the
+ * caller would report a change that was never made. `surface` is the path
+ * parameter a gateway invocation folds into the body.
+ */
+function refuseUnknownKeys(source: JsonRecord, label: string, known: ReadonlySet<string>): Response | null {
+  for (const key of Object.keys(source)) {
+    if (!known.has(key)) {
+      return jsonErrorResponse({
+        error: `Unknown field ${label ? `${label}.${key}` : key}; nothing was changed. Known fields: ${[...known].sort().join(', ')}.`,
+        code: 'INVALID_ARGUMENT',
+        category: 'bad_request',
+        status: 400,
+      }, { status: 400 });
+    }
+  }
+  return null;
+}
+
+const ALLOWLIST_KINDS = new Set(['user', 'channel', 'group']);
+const ALLOWLIST_KEYS = new Set(['surface', 'add', 'remove', 'groupId', 'channelId', 'workspaceId', 'kind', 'metadata']);
+
+interface AllowlistInput {
+  readonly add?: string[];
+  readonly remove?: string[];
+  readonly groupId?: string;
+  readonly channelId?: string;
+  readonly workspaceId?: string;
+  readonly kind?: 'user' | 'channel' | 'group';
+  readonly metadata?: Record<string, unknown>;
+}
+
+/** Read an allowlist resolve or edit body, refusing a wrongly typed field or an unknown key by name. */
+function readAllowlistBody(body: JsonRecord): AllowlistInput | Response {
+  const unknown = refuseUnknownKeys(body, '', ALLOWLIST_KEYS);
+  if (unknown) return unknown;
+  const input: Record<string, unknown> = {};
+  for (const key of ['add', 'remove'] as const) {
+    const value = body[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) return invalidChannelField(key, 'an array of strings');
+    input[key] = value;
+  }
+  for (const key of ['groupId', 'channelId', 'workspaceId'] as const) {
+    const value = body[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'string') return invalidChannelField(key, 'a string');
+    input[key] = value;
+  }
+  if (body.kind !== undefined) {
+    if (typeof body.kind !== 'string' || !ALLOWLIST_KINDS.has(body.kind)) return invalidChannelField('kind', 'one of user, channel or group');
+    input.kind = body.kind;
+  }
+  if (body.metadata !== undefined) {
+    if (typeof body.metadata !== 'object' || body.metadata === null || Array.isArray(body.metadata)) return invalidChannelField('metadata', 'an object');
+    input.metadata = body.metadata;
+  }
+  return input as AllowlistInput;
 }
 
 /**
@@ -82,11 +142,19 @@ function readPolicyFields(source: JsonRecord, label: string, keys: {
 // Shared by patchChannelPolicy and postChannelPolicy. Excludes `metadata` so
 // each caller can place it after its own extra fields (postChannelPolicy
 // inserts `groupPolicies` between the fields below and `metadata`).
-function buildChannelPolicyPatchFields(body: JsonRecord): Record<string, unknown> | Response {
+function buildChannelPolicyPatchFields(body: JsonRecord, extraKeys: readonly string[] = []): Record<string, unknown> | Response {
+  const unknown = refuseUnknownKeys(body, '', new Set([...POLICY_KEYS, ...extraKeys]));
+  if (unknown) return unknown;
+  if (body.metadata !== undefined && (typeof body.metadata !== 'object' || body.metadata === null || Array.isArray(body.metadata))) {
+    return invalidPolicyField('metadata', 'an object');
+  }
   return readPolicyFields(body, '', { booleans: POLICY_BOOLEAN_FIELDS, modes: POLICY_MODE_FIELDS, lists: POLICY_LIST_FIELDS });
 }
 
+const POLICY_KEYS: readonly string[] = ['surface', 'metadata', ...POLICY_BOOLEAN_FIELDS, ...POLICY_MODE_FIELDS, ...POLICY_LIST_FIELDS];
 const GROUP_POLICY_BOOLEAN_FIELDS = ['requireMention', 'allowGroupMessages', 'allowThreadMessages', 'allowTextCommandsWithoutMention'] as const;
+const GROUP_POLICY_STRING_FIELDS = ['id', 'label', 'groupId', 'channelId', 'workspaceId'] as const;
+const GROUP_POLICY_KEYS = new Set<string>(['metadata', ...GROUP_POLICY_STRING_FIELDS, ...GROUP_POLICY_BOOLEAN_FIELDS, ...POLICY_LIST_FIELDS]);
 
 export function createDaemonChannelRouteHandlers(
   context: DaemonChannelRouteContext,
@@ -287,18 +355,9 @@ export function createDaemonChannelRouteHandlers(
       if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const result = await context.channelPlugins.resolveAllowlist(
-        surface as ChannelSurface,
-        {
-          ...(Array.isArray(body.add) ? { add: body.add.filter((value): value is string => typeof value === 'string') } : {}),
-          ...(Array.isArray(body.remove) ? { remove: body.remove.filter((value): value is string => typeof value === 'string') } : {}),
-          ...(typeof body.groupId === 'string' ? { groupId: body.groupId } : {}),
-          ...(typeof body.channelId === 'string' ? { channelId: body.channelId } : {}),
-          ...(typeof body.workspaceId === 'string' ? { workspaceId: body.workspaceId } : {}),
-          ...(body.kind === 'user' || body.kind === 'channel' || body.kind === 'group' ? { kind: body.kind } : {}),
-          ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
-        },
-      );
+      const input = readAllowlistBody(body);
+      if (input instanceof Response) return input;
+      const result = await context.channelPlugins.resolveAllowlist(surface as ChannelSurface, input);
       return result
         ? Response.json(result)
         : jsonErrorResponse({ error: 'Unknown channel allowlist surface' }, { status: 404 });
@@ -308,18 +367,9 @@ export function createDaemonChannelRouteHandlers(
       if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const result = await context.channelPlugins.editAllowlist(
-        surface as ChannelSurface,
-        {
-          ...(Array.isArray(body.add) ? { add: body.add.filter((value): value is string => typeof value === 'string') } : {}),
-          ...(Array.isArray(body.remove) ? { remove: body.remove.filter((value): value is string => typeof value === 'string') } : {}),
-          ...(typeof body.groupId === 'string' ? { groupId: body.groupId } : {}),
-          ...(typeof body.channelId === 'string' ? { channelId: body.channelId } : {}),
-          ...(typeof body.workspaceId === 'string' ? { workspaceId: body.workspaceId } : {}),
-          ...(body.kind === 'user' || body.kind === 'channel' || body.kind === 'group' ? { kind: body.kind } : {}),
-          ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
-        },
-      );
+      const input = readAllowlistBody(body);
+      if (input instanceof Response) return input;
+      const result = await context.channelPlugins.editAllowlist(surface as ChannelSurface, input);
       return result
         ? Response.json(result)
         : jsonErrorResponse({ error: 'Unknown channel allowlist surface' }, { status: 404 });
@@ -334,7 +384,7 @@ export function createDaemonChannelRouteHandlers(
       if (fields instanceof Response) return fields;
       const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
         ...fields,
-        ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
+        ...(body.metadata !== undefined ? { metadata: body.metadata as Record<string, unknown> } : {}),
       });
       return Response.json(updated);
     },
@@ -343,31 +393,42 @@ export function createDaemonChannelRouteHandlers(
       if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const fields = buildChannelPolicyPatchFields(body);
+      const fields = buildChannelPolicyPatchFields(body, ['groupPolicies']);
       if (fields instanceof Response) return fields;
       let groupPolicies: Record<string, unknown>[] | undefined;
-      if (Array.isArray(body.groupPolicies)) {
+      if (body.groupPolicies !== undefined) {
+        if (!Array.isArray(body.groupPolicies)) return invalidPolicyField('groupPolicies', 'an array of group policy objects');
         groupPolicies = [];
         for (const [index, value] of body.groupPolicies.entries()) {
-          if (typeof value !== 'object' || value === null) continue;
-          const checked = readPolicyFields(value as JsonRecord, `groupPolicies[${index}]`, { booleans: GROUP_POLICY_BOOLEAN_FIELDS, modes: [], lists: POLICY_LIST_FIELDS });
+          const label = `groupPolicies[${index}]`;
+          if (typeof value !== 'object' || value === null || Array.isArray(value)) return invalidPolicyField(label, 'an object');
+          const entry = value as JsonRecord;
+          const unknown = refuseUnknownKeys(entry, label, GROUP_POLICY_KEYS);
+          if (unknown) return unknown;
+          for (const key of GROUP_POLICY_STRING_FIELDS) {
+            if (entry[key] !== undefined && typeof entry[key] !== 'string') return invalidPolicyField(`${label}.${key}`, 'a string');
+          }
+          if (entry.metadata !== undefined && (typeof entry.metadata !== 'object' || entry.metadata === null || Array.isArray(entry.metadata))) {
+            return invalidPolicyField(`${label}.metadata`, 'an object');
+          }
+          const checked = readPolicyFields(entry, label, { booleans: GROUP_POLICY_BOOLEAN_FIELDS, modes: [], lists: POLICY_LIST_FIELDS });
           if (checked instanceof Response) return checked;
           groupPolicies.push({
-              // use the full UUID to avoid birthday-paradox collisions at scale.
-              id: typeof value.id === 'string' ? value.id : `group-policy-${randomUUID()}`,
-              ...(typeof value.label === 'string' ? { label: value.label } : {}),
-              ...(typeof value.groupId === 'string' ? { groupId: value.groupId } : {}),
-              ...(typeof value.channelId === 'string' ? { channelId: value.channelId } : {}),
-              ...(typeof value.workspaceId === 'string' ? { workspaceId: value.workspaceId } : {}),
-              ...checked,
-              ...(typeof value.metadata === 'object' && value.metadata !== null ? { metadata: value.metadata as Record<string, unknown> } : {}),
+            // use the full UUID to avoid birthday-paradox collisions at scale.
+            id: typeof entry.id === 'string' ? entry.id : `group-policy-${randomUUID()}`,
+            ...(typeof entry.label === 'string' ? { label: entry.label } : {}),
+            ...(typeof entry.groupId === 'string' ? { groupId: entry.groupId } : {}),
+            ...(typeof entry.channelId === 'string' ? { channelId: entry.channelId } : {}),
+            ...(typeof entry.workspaceId === 'string' ? { workspaceId: entry.workspaceId } : {}),
+            ...checked,
+            ...(entry.metadata !== undefined ? { metadata: entry.metadata as Record<string, unknown> } : {}),
           });
         }
       }
       const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
         ...fields,
         ...(groupPolicies ? { groupPolicies } : {}),
-        ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
+        ...(body.metadata !== undefined ? { metadata: body.metadata as Record<string, unknown> } : {}),
       });
       return Response.json(updated);
     },

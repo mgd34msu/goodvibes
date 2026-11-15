@@ -327,6 +327,11 @@ describe('error-response, buildErrorResponseBody, generic Error', () => {
   });
 });
 
+/** A failure a provider produced; only those have their wording read. */
+function fromProvider(message: string): Error {
+  return Object.assign(new Error(message), { source: 'provider' });
+}
+
 describe('error-response, connection failures read by Jev', () => {
   const log = useFailureReadings([
     ['127.0.0.1:3210', { category: 'network', connection: 'refused' }],
@@ -343,25 +348,25 @@ describe('error-response, connection failures read by Jev', () => {
   });
 
   test('refused: network, with the cannot-connect summary', async () => {
-    const body = await readErrorResponseBody(new Error('connect ECONNREFUSED 127.0.0.1:3210'));
+    const body = await readErrorResponseBody(fromProvider('connect ECONNREFUSED 127.0.0.1:3210'));
     expect(body.category).toBe('network');
     expect(body.error).toBe('connect ECONNREFUSED 127.0.0.1:3210');
   });
 
   test('timed out: timeout, with the timed-out summary', async () => {
-    const body = await readErrorResponseBody(new Error('companion handshake stalled'));
+    const body = await readErrorResponseBody(fromProvider('companion handshake stalled'));
     expect(body.category).toBe('timeout');
     expect(body.error).toBe('companion handshake stalled');
   });
 
   test('DNS failure: network, with the DNS summary', async () => {
-    const body = await readErrorResponseBody(new Error('lookup of api.example.com gave nothing'));
+    const body = await readErrorResponseBody(fromProvider('lookup of api.example.com gave nothing'));
     expect(body.category).toBe('network');
     expect(body.error).toBe('lookup of api.example.com gave nothing');
   });
 
   test('none: the error\'s own message stays the summary', async () => {
-    const body = await readErrorResponseBody(new Error('upstream said no'));
+    const body = await readErrorResponseBody(fromProvider('upstream said no'));
     expect(body.category).toBe('service');
     expect(body.error).toBe('upstream said no');
   });
@@ -381,6 +386,12 @@ describe('error-response, connection failures read by Jev', () => {
     const body = await readErrorResponseBody({ message: 'ECONNREFUSED 127.0.0.1:3210', category: 'config' });
     expect(body.category).toBe('config');
     expect(body.error).toBe('ECONNREFUSED 127.0.0.1:3210');
+  });
+
+  test('the daemon\'s own error is never read, with or without a status', async () => {
+    const body = await readErrorResponseBody(new Error('connect ECONNREFUSED 127.0.0.1:3210'));
+    expect(body.category).toBe('unknown');
+    expect(log.requests).toHaveLength(0);
   });
 
   test('an error with an HTTP status is not a connection failure and is not read for one', async () => {
@@ -522,8 +533,8 @@ describe('error-response, buildErrorResponseBody, structured body passthrough', 
 });
 
 describe('error-response, readErrorResponseBody, message-inferred categories', () => {
-  // A bare message leaves the category open, so its wording is read by the
-  // failure-reading battery; the fake port answers with each message's reading.
+  // A provider's bare message leaves the category open, so its wording is read
+  // by the failure-reading battery; the fake port answers with each message's reading.
   const cases: Array<[string, FailureCategory]> = [
     ['invalid api_key provided', 'authentication'],
     ['access denied by policy', 'authorization'],
@@ -540,7 +551,7 @@ describe('error-response, readErrorResponseBody, message-inferred categories', (
 
   for (const [message, expectedCategory] of cases) {
     test(`"${message.slice(0, 30)}..." → category ${expectedCategory}`, async () => {
-      const body = await readErrorResponseBody(new Error(message));
+      const body = await readErrorResponseBody(fromProvider(message));
       expect(body.category).toBe(expectedCategory);
     });
   }

@@ -1,7 +1,17 @@
 import type { ArtifactStoreUploadLike } from './artifact-upload.js';
 import type { JsonRecord } from './route-helpers.js';
 
-export type AutomationScheduleDefinition = unknown;
+/** A schedule the knowledge scheduler can store: one of the three kinds the automation scheduler runs. */
+export type AutomationScheduleDefinition =
+  | { readonly kind: 'at'; readonly at: number }
+  | { readonly kind: 'every'; readonly intervalMs: number; readonly anchorAt?: number | undefined }
+  | {
+    readonly kind: 'cron';
+    readonly expression: string;
+    readonly timezone?: string | undefined;
+    readonly staggerMs?: number | undefined;
+    readonly staggerPhase?: number | undefined;
+  };
 export type KnowledgeProjectionTargetKind = 'overview' | 'bundle' | 'source' | 'node' | 'issue' | 'dashboard' | 'rollup';
 export type KnowledgeUsageKind = string;
 export type KnowledgeCandidateStatus = string;

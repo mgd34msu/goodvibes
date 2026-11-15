@@ -293,9 +293,23 @@ describe('createDaemonIntegrationRouteHandlers per-request auth', () => {
       },
     });
 
-    await handlers.getEvents(new Request('http://daemon.local/api/events?domains=session,not-a-domain,%20turn'));
+    await handlers.getEvents(new Request('http://daemon.local/api/events?domains=session,not-a-domain,%20turn', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    }));
 
     expect(seen).toEqual([['session', 'turn']]);
+  });
+
+  test('getEvents, the unfiltered runtime bus, is refused to a caller that is not an admin', async () => {
+    const ctx = makeContext();
+    let opened = false;
+    const handlers = createDaemonIntegrationRouteHandlers({
+      ...ctx,
+      integrationHelpers: { ...ctx.integrationHelpers!, createEventStream: () => { opened = true; return new Response(''); } },
+    });
+    const res = await handlers.getEvents(new Request('http://daemon.local/api/events?domains=config'));
+    expect(res.status).not.toBe(200);
+    expect(opened).toBe(false);
   });
 });
 

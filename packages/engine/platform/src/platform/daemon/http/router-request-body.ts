@@ -9,7 +9,7 @@ export async function parseDaemonJsonBody(req: Request): Promise<JsonRecord | Re
     if (text instanceof Response) return text;
     return parseDaemonJsonText(text);
   } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return Response.json({ error: 'Invalid JSON body', code: 'INVALID_JSON', category: 'bad_request', status: 400 }, { status: 400 });
   }
 }
 
@@ -21,9 +21,20 @@ export async function parseOptionalDaemonJsonBody(req: Request): Promise<JsonRec
 }
 
 export function parseDaemonJsonText(rawBody: string): JsonRecord | Response {
+  let parsed: unknown;
   try {
-    return JSON.parse(rawBody) as JsonRecord;
+    parsed = JSON.parse(rawBody);
   } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return Response.json({ error: 'Invalid JSON body', code: 'INVALID_JSON', category: 'bad_request', status: 400 }, { status: 400 });
   }
+  // Every handler reads the body as a record; null, an array, a string or a number would fail inside it as a 500.
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return Response.json({
+      error: `The JSON body must be an object, not ${parsed === null ? 'null' : Array.isArray(parsed) ? 'an array' : `a ${typeof parsed}`}.`,
+      code: 'INVALID_JSON',
+      category: 'bad_request',
+      status: 400,
+    }, { status: 400 });
+  }
+  return parsed as JsonRecord;
 }

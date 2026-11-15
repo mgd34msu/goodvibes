@@ -159,6 +159,18 @@ Filter to specific domains to reduce server-side event fan-out:
 GET /api/control-plane/events?domains=turn,tools,forensics
 ```
 
+What a stream may carry is decided once, when it opens, from the credential.
+An admin (the operator token, a paired device, an admin user) receives every
+domain. A local user without the admin role receives only the domains and
+events that carry no setting values, approvals, tool arguments or output,
+conversation text, or other people's sign-ins: `providers`, `tasks`,
+`planner`, `plugins`, `mcp`, `transport`, `compaction`, `ui`, `ops`,
+`automation`, `routes`, `deliveries`, `watchers`, `surfaces`, `knowledge`,
+`workspace` and `fleet`, plus the remote peer notices. The `ready` frame lists
+the domains the stream got and any it withheld; a stream that asks only for
+withheld domains is refused with `403 EVENT_ACCESS_DENIED`. `GET /api/events`,
+the unfiltered runtime bus, is admin only.
+
 ### Subscribing via WebSocket
 
 ```ts

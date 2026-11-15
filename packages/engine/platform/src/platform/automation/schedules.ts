@@ -181,6 +181,12 @@ export function validateSchedule(schedule: AutomationScheduleDefinition): void {
       }
       createCronHelper().getNextRun(schedule.expression, new Date(), schedule.timezone);
       break;
+    default: {
+      // A stored or posted object is not checked by the compiler: one without a
+      // known kind would pass every switch below and be kept as a schedule that never runs.
+      const kind: unknown = (schedule as { readonly kind?: unknown }).kind;
+      throw new Error(`schedule.kind must be "at", "every" or "cron"; got ${kind === undefined ? 'none' : JSON.stringify(kind)}`);
+    }
   }
 }
 

@@ -319,6 +319,8 @@ describe('SSE client sees each lifecycle event end-to-end', () => {
     const stream = gateway.createEventStream(new Request('http://localhost/stream'), {
       clientKind: 'web',
       principalId: 'shared-token',
+      // The shared operator token is an admin; session lifecycle is admin-only on the stream.
+      admin: true,
       scopes: ['read:sessions'],
     });
     expect(stream.status).toBe(200);
@@ -333,6 +335,8 @@ describe('SSE client sees each lifecycle event end-to-end', () => {
     const closeStream = gateway.createEventStream(new Request('http://localhost/stream'), {
       clientKind: 'web',
       principalId: 'shared-token',
+      // The shared operator token is an admin; session lifecycle is admin-only on the stream.
+      admin: true,
       scopes: ['read:sessions'],
     });
     const closedPromise = readUntil(closeStream, isSessionUpdate('session-closed'));
@@ -353,6 +357,8 @@ describe('SSE client sees each lifecycle event end-to-end', () => {
     const stream = gateway.createEventStream(new Request('http://localhost/stream'), {
       clientKind: 'web',
       principalId: 'shared-token',
+      // The shared operator token is an admin; session lifecycle is admin-only on the stream.
+      admin: true,
       scopes: ['read:sessions'],
     });
     const deletedPromise = readUntil(stream, isSessionUpdate('session-deleted'));
@@ -383,6 +389,8 @@ describe('SSE client sees each lifecycle event end-to-end', () => {
     const stream = gateway.createEventStream(new Request('http://localhost/stream'), {
       clientKind: 'web',
       principalId: 'shared-token',
+      // The shared operator token is an admin; session lifecycle is admin-only on the stream.
+      admin: true,
       scopes: ['read:sessions'],
     });
     const framePromise = readUntil(stream, isSessionUpdate('session-input-delivered'));
@@ -405,6 +413,8 @@ describe('broadcast reach and honest failure modes', () => {
       clientKind: 'web',
       domains: [], // subscribe to nothing
       principalId: 'shared-token',
+      // The shared operator token is an admin; session lifecycle is admin-only on the stream.
+      admin: true,
       scopes: ['read:sessions'],
     });
     const framePromise = readUntil(stream, isSessionUpdate('session-created'));

@@ -3,9 +3,10 @@
  *
  * Per-client delivery enforcement for the control-plane event fan-out. Two
  * orthogonal, AND-ed filters live here:
- *   1. Scope: some wire channels declare a read scope (e.g. `session-update` ⇒
- *      `read:sessions`); a scoped-down token cannot receive a channel it was not
- *      granted.
+ *   1. Grant: what a principal may receive at all, resolved once when the
+ *      stream or socket subscribes (and again only when its credential
+ *      changes) from the event descriptors' access and scopes. Delivery is a
+ *      set lookup.
  *   2. Domain: a broadcast event (published via `ControlPlaneGateway.publishEvent`,
  *      i.e. NOT flowing through a runtime-bus `onDomain` subscription) carries a
  *      `RuntimeEventDomain` tag; a client that opted into a narrower set of
@@ -13,31 +14,7 @@
  */
 
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
-
-/**
- * Wire events whose descriptor declares a read scope. Enforced per-client on the
- * web SSE/WS fan-out so a scoped-down token cannot receive a channel it was not
- * granted. In-process/local/service clients and admin tokens bypass (the
- * single-admin-token model collapses scopes, see method-catalog-events.ts).
- */
-export const CHANNEL_REQUIRED_SCOPE: Readonly<Record<string, string>> = {
-  'session-update': 'read:sessions',
-  'hosted-session-update': 'read:sessions',
-  // Remote runtime events carry peer identity, addresses, and device results (location, clipboard).
-  'remote-pair-requested': 'read:remote',
-  'remote-pair-approved': 'read:remote',
-  'remote-pair-rejected': 'read:remote',
-  'remote-pair-verified': 'read:remote',
-  'remote-peer': 'read:remote',
-  'remote-peer-heartbeat': 'read:remote',
-  'remote-peer-disconnected': 'read:remote',
-  'remote-token-rotated': 'read:remote',
-  'remote-token-revoked': 'read:remote',
-  'remote-work-queued': 'read:remote',
-  'remote-work-claimed': 'read:remote',
-  'remote-work-settled': 'read:remote',
-  'remote-work-cancelled': 'read:remote',
-};
+import { builtinGatewayEventDescriptors, gatewayEventAccess } from './method-catalog-events.js';
 
 /** The subset of a live client this decision needs. */
 export interface ScopedClientView {
@@ -47,12 +24,94 @@ export interface ScopedClientView {
 }
 
 /**
+ * What one client may receive. `all` is true for a client nothing restricts:
+ * an in-process or internal stream that carries no principal scopes, an
+ * admin, or a `*` grant.
+ */
+export interface EventGrant {
+  readonly all: boolean;
+  /** Runtime domains the client may subscribe to. */
+  readonly domains: ReadonlySet<RuntimeEventDomain>;
+  /** Broadcast wire events the client may receive. */
+  readonly wireEvents: ReadonlySet<string>;
+}
+
+export const FULL_EVENT_GRANT: EventGrant = Object.freeze({
+  all: true,
+  domains: new Set<RuntimeEventDomain>(),
+  wireEvents: new Set<string>(),
+});
+
+/** Every wire event a builtin descriptor declares (runtime domains included, their wire event is the domain name). */
+const DECLARED_WIRE_EVENTS: ReadonlySet<string> = new Set(
+  builtinGatewayEventDescriptors.flatMap((descriptor) => descriptor.wireEvents ?? []),
+);
+
+/**
+ * The read scope a declared broadcast wire event needs beyond `read:events`,
+ * derived from the event descriptors (the one owner of that fact).
+ */
+export const CHANNEL_REQUIRED_SCOPE: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries(
+  builtinGatewayEventDescriptors
+    .filter((descriptor) => descriptor.category !== 'runtime-domain')
+    .flatMap((descriptor) => {
+      const scope = descriptor.scopes.find((entry) => entry !== 'read:events');
+      return scope === undefined ? [] : (descriptor.wireEvents ?? []).map((event) => [event, scope] as const);
+    }),
+));
+
+/**
+ * Resolve, once, what a client may receive. A client that carries a
+ * principal's scopes and is not an admin is restricted, whatever kind it calls
+ * itself (a socket names its own kind); for it an event is granted when its
+ * descriptor's access is open to a non-admin and it holds every scope the
+ * descriptor lists. In-process and internal streams carry no scopes.
+ */
+export function resolveEventGrant(client: Omit<ScopedClientView, 'kind'>): EventGrant {
+  if (client.admin || client.scopes === undefined || client.scopes.includes('*')) return FULL_EVENT_GRANT;
+  const held = new Set(client.scopes);
+  const domains = new Set<RuntimeEventDomain>();
+  const wireEvents = new Set<string>();
+  for (const descriptor of builtinGatewayEventDescriptors) {
+    if (gatewayEventAccess(descriptor) === 'admin') continue;
+    if (!descriptor.scopes.every((scope) => held.has(scope))) continue;
+    if (descriptor.category === 'runtime-domain') {
+      for (const domain of descriptor.domains ?? []) domains.add(domain);
+    } else {
+      for (const event of descriptor.wireEvents ?? []) wireEvents.add(event);
+    }
+  }
+  return { all: false, domains, wireEvents };
+}
+
+/** Whether the grant lets the client receive anything at all. */
+export function isEmptyEventGrant(grant: EventGrant): boolean {
+  return !grant.all && grant.domains.size === 0 && grant.wireEvents.size === 0;
+}
+
+/** Whether the grant covers a runtime domain subscription. */
+export function grantAllowsDomain(grant: EventGrant, domain: RuntimeEventDomain): boolean {
+  return grant.all || grant.domains.has(domain);
+}
+
+/**
+ * Whether the grant covers one delivered event (a broadcast wire event, or a
+ * runtime domain frame named by its domain). An event no builtin descriptor
+ * declares (a companion chat chunk, a plugin's event) reaches a restricted
+ * client only when it was addressed to that client by id.
+ */
+export function grantAllowsEvent(grant: EventGrant, event: string, addressedToClient: boolean): boolean {
+  if (grant.all || grant.wireEvents.has(event) || grant.domains.has(event as RuntimeEventDomain)) return true;
+  return addressedToClient && !DECLARED_WIRE_EVENTS.has(event);
+}
+
+/**
  * Whether a live client may receive a scope-gated channel. Only web SSE/WS
  * clients (which carry a principal's scopes) are filtered; in-process/local and
  * service ('daemon') clients are trusted and always pass, and an admin token
- * bypasses (single-admin-token model, scopes collapse). A `*` scope is a
- * wildcard grant. A principal-scoped client is filtered only when it carries an
- * explicit scopes array; internal streams with no scopes stay trusted.
+ * bypasses. A `*` scope is a wildcard grant. A principal-scoped client is
+ * filtered only when it carries an explicit scopes array; internal streams with
+ * no scopes stay trusted.
  */
 export function clientMaySeeScopedChannel(client: ScopedClientView, requiredScope: string): boolean {
   if (client.kind !== 'web') return true;
@@ -71,28 +130,20 @@ export function clientMaySeeScopedChannel(client: ScopedClientView, requiredScop
  * which declares no `session` domain and dropped it as inert).
  *
  * An event ABSENT from this map carries no domain tag and is delivered to every
- * scope-permitted client regardless of its subscribed domains (deliver-all). That
+ * permitted client regardless of its subscribed domains (deliver-all). That
  * keeps domain scoping strictly opt-in narrowing: a newly-added broadcast event
- * cannot be silently dropped just because it is not yet tagged here. New verbs
- * (later waves) should register their broadcast events in this map.
+ * cannot be silently dropped just because it is not yet tagged here.
  */
 export const EVENT_DOMAIN: Readonly<Record<string, RuntimeEventDomain>> = {
   'session-update': 'session',
   'approval-update': 'gate',
-  // sessions.detach (see CHANGELOG 1.0.0): `session-detached` is TODAY a payload discriminant
-  // inside the `session-update` channel (session-broker.ts publishUpdate wraps
-  // it), so it is already domain-scoped by the entry above. This tag is
-  // defense-in-depth: if the discriminant is ever promoted to a top-level
-  // broadcast, it stays in the session domain instead of silently deliver-all.
+  // `session-detached` and `session-deleted` are payload discriminants inside
+  // `session-update` today; tagged here so a promotion to a top-level broadcast
+  // stays in the session domain.
   'session-detached': 'session',
-  // sessions.delete (see CHANGELOG 1.0.0): `session-deleted` is likewise a payload discriminant
-  // inside `session-update` today (already domain-scoped by the entry above); this
-  // tag is the same defense-in-depth as `session-detached` if it is ever promoted
-  // to a top-level broadcast.
   'session-deleted': 'session',
-  // The hosted-session engine's lifecycle channel: which sessions the daemon
-  // hosts and what happened to them. Turn content is NOT here, it rides the
-  // `turn`/`tools` runtime domains (see method-catalog-hosted-sessions.ts).
+  // The hosted-session engine's lifecycle channel. Turn content is NOT here, it
+  // rides the `turn`/`tools` runtime domains (see method-catalog-hosted-sessions.ts).
   'hosted-session-update': 'session',
 };
 
@@ -101,14 +152,9 @@ export const EVENT_DOMAIN: Readonly<Record<string, RuntimeEventDomain>> = {
  * `event` under the domain filter.
  *
  * `clientDomains === null` means the client did NOT opt into domain narrowing
- * (it connected with no `?domains=` param) and receives everything it is
- * scope-permitted to see, today's behavior, preserved. This null=deliver-all
- * default is the only migration-safe choice: an empty-set-means-nothing default
- * would silently black out every consumer that did not opt in.
- *
- * An event with no `EVENT_DOMAIN` tag is always delivered (untagged ⇒ inert to
- * the domain filter), so narrowing can only ever remove events we can positively
- * attribute to a domain the client did not subscribe to.
+ * (it connected with no `?domains=` param) and receives everything its grant
+ * allows. An event with no `EVENT_DOMAIN` tag is always delivered, so narrowing
+ * can only remove events attributed to a domain the client did not subscribe to.
  */
 export function clientMayReceiveEventDomain(
   clientDomains: ReadonlySet<RuntimeEventDomain> | null,

@@ -1,11 +1,12 @@
 /**
  * session-update-scope-enforcement.test.ts
  *
- * The `control.session_update` channel declares `scopes: ['read:sessions']`.
- * The gateway must ENFORCE that on the per-client SSE fan-out: a principal-scoped
- * web client without read:sessions does not receive session-update frames, while
- * one that has it (or an admin token, single-admin-token collapse) does. Internal
- * streams that carry no scopes stay trusted so nothing existing regresses.
+ * What a principal may receive on the control-plane event stream is decided
+ * once, when it subscribes, from the event descriptors' access and scopes. A
+ * non-admin principal never receives setting values, approvals, session
+ * lifecycle or transcripts, live or replayed, whatever scopes it holds and
+ * whatever kind its socket names; an admin and an internal stream that carries
+ * no principal scopes receive everything.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -13,101 +14,85 @@ import { createFeatureFlagManager } from '../platform/src/platform/runtime/featu
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 
-function makeGateway(): ControlPlaneGateway {
-  return new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus(), featureFlags: createFeatureFlagManager() });
+/** Every read scope a non-admin user is granted. */
+const NON_ADMIN_SCOPES = ['read:events', 'read:sessions', 'read:remote', 'read:tasks', 'read:config'] as const;
+const ADMIN_ONLY_BROADCASTS = ['session-update', 'hosted-session-update', 'approval-update'] as const;
+
+function makeGateway(): { gateway: ControlPlaneGateway; bus: RuntimeEventBus } {
+  const bus = new RuntimeEventBus();
+  return { gateway: new ControlPlaneGateway({ runtimeBus: bus, featureFlags: createFeatureFlagManager() }), bus };
 }
 
-const SENTINEL_EVENT = 'scope-test-sentinel';
-
-/**
- * Read from an SSE stream until the sentinel frame arrives, then report whether a
- * `session-update` frame came before it. The sentinel is an untagged event every client
- * receives and the caller publishes it AFTER the event under test, so frames arrive in
- * publish order and a session-update that was going to be delivered is already in the
- * buffer. No wall-clock budget decides the verdict; the timer only bounds a hang.
- */
-async function sawSessionUpdate(res: Response): Promise<boolean> {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let ceiling: ReturnType<typeof setTimeout> | undefined;
-  const hung = new Promise<never>((_, reject) => {
-    ceiling = setTimeout(() => reject(new Error('sentinel frame never arrived on the stream')), 10_000);
-  });
-  try {
-    while (!buffer.includes(`event: ${SENTINEL_EVENT}`)) {
-      const chunk = await Promise.race([reader.read(), hung]);
-      if (chunk.done) throw new Error('stream ended before the sentinel frame');
-      buffer += decoder.decode(chunk.value, { stream: true });
-    }
-  } finally {
-    clearTimeout(ceiling);
-    await reader.cancel().catch(() => {});
-  }
-  return buffer.includes('event: session-update');
+function publishAdminOnly(gateway: ControlPlaneGateway): void {
+  for (const event of ADMIN_ONLY_BROADCASTS) gateway.publishEvent(event, { secret: event });
+  // An undeclared broadcast nobody addressed (a companion follow-up, a plugin's event).
+  gateway.publishEvent('conversation.followup.companion', { secret: 'transcript' });
 }
 
-function openWebStream(gateway: ControlPlaneGateway, opts: { scopes?: readonly string[]; admin?: boolean }): Response {
-  return gateway.createEventStream(new Request('http://localhost/api/control-plane/events'), {
-    clientKind: 'web',
-    transport: 'sse',
-    principalId: 'p',
-    principalKind: 'token',
-    ...(opts.scopes !== undefined ? { scopes: opts.scopes } : {}),
-    ...(opts.admin !== undefined ? { admin: opts.admin } : {}),
-  });
-}
-
-describe('session-update honors the declared read:sessions scope', () => {
-  test('SSE replay uses the same authorization as live delivery', async () => {
-    const gateway = makeGateway();
-    gateway.publishEvent('session-update', { event: 'session-created' });
-    gateway.publishEvent(SENTINEL_EVENT, {});
-    expect(await sawSessionUpdate(openWebStream(gateway, { scopes: ['read:events'] }))).toBe(false);
-    expect(await sawSessionUpdate(openWebStream(gateway, { scopes: ['read:sessions'] }))).toBe(true);
-  });
-
-  test('WebSocket replay protects both session channels', () => {
-    const gateway = makeGateway();
-    gateway.publishEvent('session-update', { secret: 'session' });
-    gateway.publishEvent('hosted-session-update', { secret: 'hosted' });
-    for (const allowed of [false, true]) {
+describe('the event stream grant is decided once, from the descriptors', () => {
+  test('a non-admin principal receives no admin-only event live or replayed, even naming itself a tui', () => {
+    const { gateway } = makeGateway();
+    publishAdminOnly(gateway);
+    for (const clientKind of ['web', 'tui'] as const) {
       const events: string[] = [];
-      const { clientId } = gateway.openWebSocketClient({ clientKind: 'web', scopes: allowed ? ['read:sessions'] : ['read:events'] }, event => events.push(event));
-      expect(events.includes('session-update')).toBe(allowed);
-      expect(events.includes('hosted-session-update')).toBe(allowed);
+      const { clientId, domains } = gateway.openWebSocketClient({
+        clientKind, scopes: NON_ADMIN_SCOPES, admin: false, domains: ['config', 'turn', 'tools', 'tasks'],
+      }, (event) => events.push(event));
+      publishAdminOnly(gateway);
+      gateway.publishEvent('remote-peer', { peer: 'p' });
+      expect(domains).toEqual(['tasks']);
+      for (const event of ADMIN_ONLY_BROADCASTS) expect(events).not.toContain(event);
+      expect(events).not.toContain('conversation.followup.companion');
+      expect(events).toContain('remote-peer');
       gateway.closeWebSocketClient(clientId);
     }
   });
-  test('a web client WITHOUT read:sessions does not receive session-update', async () => {
-    const gateway = makeGateway();
-    const res = openWebStream(gateway, { scopes: ['read:events'] });
-    gateway.publishEvent('session-update', { event: 'session-created', payload: {}, createdAt: Date.now() });
-    gateway.publishEvent(SENTINEL_EVENT, {});
-    expect(await sawSessionUpdate(res)).toBe(false);
+
+  test('an event addressed to the client by id still reaches it', () => {
+    const { gateway } = makeGateway();
+    const events: string[] = [];
+    const { clientId } = gateway.openWebSocketClient({ clientKind: 'web', scopes: NON_ADMIN_SCOPES, admin: false }, (event) => events.push(event));
+    gateway.publishEvent('companion-chat.chunk', { text: 'hi' }, { clientId });
+    expect(events).toContain('companion-chat.chunk');
+    gateway.closeWebSocketClient(clientId);
   });
 
-  test('a web client WITH read:sessions receives session-update', async () => {
-    const gateway = makeGateway();
-    const res = openWebStream(gateway, { scopes: ['read:sessions'] });
-    gateway.publishEvent('session-update', { event: 'session-created', payload: {}, createdAt: Date.now() });
-    gateway.publishEvent(SENTINEL_EVENT, {});
-    expect(await sawSessionUpdate(res)).toBe(true);
+  test('an admin and an internal stream with no scopes receive everything', () => {
+    const { gateway } = makeGateway();
+    publishAdminOnly(gateway);
+    for (const options of [{ clientKind: 'web' as const, scopes: ['read:events'], admin: true }, { clientKind: 'web' as const }]) {
+      const events: string[] = [];
+      const { clientId } = gateway.openWebSocketClient(options, (event) => events.push(event));
+      for (const event of ADMIN_ONLY_BROADCASTS) expect(events).toContain(event);
+      gateway.closeWebSocketClient(clientId);
+    }
   });
 
-  test('an admin token receives session-update even with only read:events (single-token collapse)', async () => {
-    const gateway = makeGateway();
-    const res = openWebStream(gateway, { scopes: ['read:events'], admin: true });
-    gateway.publishEvent('session-update', { event: 'session-created', payload: {}, createdAt: Date.now() });
-    gateway.publishEvent(SENTINEL_EVENT, {});
-    expect(await sawSessionUpdate(res)).toBe(true);
+  test('a principal that loses admin stops receiving admin-only domains and events', () => {
+    const { gateway } = makeGateway();
+    const events: string[] = [];
+    const { clientId } = gateway.openWebSocketClient({ clientKind: 'web', scopes: NON_ADMIN_SCOPES, admin: true, domains: ['config', 'tasks'] }, (event) => events.push(event));
+    gateway.regrantClient(clientId, { admin: false, scopes: NON_ADMIN_SCOPES });
+    events.length = 0;
+    publishAdminOnly(gateway);
+    for (const event of ADMIN_ONLY_BROADCASTS) expect(events).not.toContain(event);
+    gateway.closeWebSocketClient(clientId);
   });
 
-  test('an internal stream with NO scopes stays trusted (no regression for session-scoped streams)', async () => {
-    const gateway = makeGateway();
-    const res = gateway.createEventStream(new Request('http://localhost/stream'), { clientKind: 'web' });
-    gateway.publishEvent('session-update', { event: 'session-created', payload: {}, createdAt: Date.now() });
-    gateway.publishEvent(SENTINEL_EVENT, {});
-    expect(await sawSessionUpdate(res)).toBe(true);
+  test('an SSE stream that asks only for domains the credential may not read is refused, and says which', async () => {
+    const { gateway } = makeGateway();
+    const res = gateway.createEventStream(new Request('http://localhost/api/control-plane/events'), {
+      clientKind: 'web', transport: 'sse', principalId: 'u', principalKind: 'user', scopes: NON_ADMIN_SCOPES, admin: false, domains: ['config', 'gate'],
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'EVENT_ACCESS_DENIED', withheldDomains: ['config', 'gate'] });
+  });
+
+  test('a credential holding no event scope is refused the stream', async () => {
+    const { gateway } = makeGateway();
+    const res = gateway.createEventStream(new Request('http://localhost/api/control-plane/events'), {
+      clientKind: 'web', transport: 'sse', principalId: 'u', principalKind: 'user', scopes: [], admin: false,
+    });
+    expect(res.status).toBe(403);
   });
 });

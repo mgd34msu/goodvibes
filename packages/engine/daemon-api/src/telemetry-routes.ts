@@ -1,10 +1,10 @@
 import type { DaemonTelemetryRouteHandlers } from './context.js';
-import { jsonErrorResponse } from './error-response.js';
-import { buildMissingScopeBody, type AuthenticatedPrincipal } from './http-policy.js';
+import { jsonErrorResponse, missingScopeRefusal } from './error-response.js';
+import type { AuthenticatedPrincipal } from './http-policy.js';
 import { decodeOtlpProtobuf } from './otlp-protobuf.js';
 import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { DaemonErrorCategory } from '@goodvibes-jev/engine/errors';
-import { hasAnyScope, readBoundedPositiveInteger, readOptionalBoundedInteger, type JsonRecord } from './route-helpers.js';
+import { readBoundedPositiveInteger, readOptionalBoundedInteger, type JsonRecord } from './route-helpers.js';
 
 type TelemetrySeverity = 'debug' | 'info' | 'warn' | 'error';
 type TelemetryViewMode = 'safe' | 'raw';
@@ -237,21 +237,8 @@ function authenticateTelemetryIngest(context: TelemetryRouteContext, req: Reques
       { status: 401 },
     );
   }
-  if (!principal.admin && !hasAnyScope(principal.scopes, OTLP_INGEST_SCOPES)) {
-    return jsonErrorResponse(
-      {
-        error: `Missing required telemetry ingest scope: ${OTLP_INGEST_SCOPES.join(' or ')}`,
-        code: 'MISSING_SCOPE',
-        category: DaemonErrorCategory.AUTHORIZATION,
-        source: 'permission',
-        recoverable: false,
-        requiredScopes: [...OTLP_INGEST_SCOPES],
-        grantedScopes: [...principal.scopes],
-        status: 403,
-      },
-      { status: 403 },
-    );
-  }
+  const missingIngest = principal.admin ? null : missingScopeRefusal('telemetry ingest', OTLP_INGEST_SCOPES, principal.scopes, { anyOf: true });
+  if (missingIngest) return jsonErrorResponse(missingIngest, { status: 403 });
   return principal;
 }
 
@@ -323,31 +310,17 @@ function authenticateTelemetryRequest(
     }, { status: 401 });
   }
 
-  const missingRead = buildMissingScopeBody('telemetry access', ['read:telemetry'], principal.scopes);
-  if (missingRead) {
-    return jsonErrorResponse({
-      error: missingRead.error,
-      code: 'MISSING_SCOPE',
-      category: DaemonErrorCategory.AUTHORIZATION,
-      source: 'permission',
-      recoverable: false,
-      hint: 'Use a token or session with the read:telemetry scope, or elevate to an admin/shared-token session.',
-      status: 403,
-      detail: missingRead,
-    }, { status: 403 });
-  }
+  const missingRead = missingScopeRefusal('telemetry access', ['read:telemetry'], principal.scopes, {
+    hint: 'Use a token or session with the read:telemetry scope, or elevate to an admin/shared-token session.',
+  });
+  if (missingRead) return jsonErrorResponse(missingRead, { status: 403 });
 
   const rawAuthorized = principal.admin || principal.scopes.includes('read:telemetry-sensitive');
   if (requestedView === 'raw' && !rawAuthorized) {
-    return jsonErrorResponse({
-      error: 'Raw telemetry view requires elevated telemetry scope',
-      code: 'MISSING_SCOPE',
-      category: DaemonErrorCategory.AUTHORIZATION,
-      source: 'permission',
-      recoverable: false,
+    const missingRaw = missingScopeRefusal('the raw telemetry view', ['read:telemetry-sensitive'], principal.scopes, {
       hint: 'Use an admin/shared-token session or a token granted read:telemetry-sensitive to access raw telemetry payloads.',
-      status: 403,
-    }, { status: 403 });
+    });
+    if (missingRaw) return jsonErrorResponse(missingRaw, { status: 403 });
   }
 
   const rawAccessible = rawAuthorized && context.telemetryApi?.isRawEnabled() === true;

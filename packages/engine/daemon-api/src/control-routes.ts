@@ -3,6 +3,7 @@ import { isRuntimeEventDomain, type RuntimeEventDomain } from '@goodvibes-jev/en
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import { jsonErrorResponse } from './error-response.js';
 import { readSynthesizedDispatchDepth } from './gateway-rest-routes.js';
+import { GATEWAY_METHOD_INVOKE_PATH } from './operator.js';
 import type { AuthenticatedPrincipal } from './http-policy.js';
 import {
   createRouteBodySchema,
@@ -133,7 +134,7 @@ type GatewayInvokeBody = {
 };
 
 const controlBodySchemas = createRouteBodySchemaRegistry({
-  gatewayInvoke: createRouteBodySchema<GatewayInvokeBody>('POST /api/control/gateway-methods/:methodId/invoke', (body) => {
+  gatewayInvoke: createRouteBodySchema<GatewayInvokeBody>(`POST ${GATEWAY_METHOD_INVOKE_PATH}`, (body) => {
     const query = body.query && typeof body.query === 'object' && !Array.isArray(body.query)
       ? body.query as Record<string, unknown>
       : undefined;
@@ -454,7 +455,11 @@ export function createDaemonControlRouteHandlers(
         // session-update) honors the single-admin-token collapse.
         admin: principal.admin,
         // Asked before each frame; the request's principal is bound, so this is an integer compare until a credential changes.
-        isAuthorized: () => context.resolveAuthenticatedPrincipal(req)?.principalId === principal.principalId,
+        // A principal that lost admin is closed so it reconnects under the narrower grant.
+        isAuthorized: () => {
+          const current = context.resolveAuthenticatedPrincipal(req);
+          return current?.principalId === principal.principalId && (current.admin || !principal.admin);
+        },
       });
     },
   };

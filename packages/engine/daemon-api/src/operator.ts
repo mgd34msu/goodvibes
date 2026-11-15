@@ -32,6 +32,14 @@ export function invalidPathEncodingResponse(): Response {
 }
 
 /**
+ * The served path of the generic method invoke endpoint. Labels, comments and
+ * generated documents name it from here so they cannot point at a path no
+ * route serves.
+ */
+export const GATEWAY_METHOD_INVOKE_PATH = '/api/control-plane/methods/{methodId}/invoke';
+const GATEWAY_METHOD_INVOKE_PATTERN = new RegExp(`^${GATEWAY_METHOD_INVOKE_PATH.replace('{methodId}', '([^/]+)')}$`);
+
+/**
  * Route-level authorization is enforced inside each handler, not at the
  * dispatcher level. The daemon gate in front of this dispatcher only proves
  * the caller is SOME authenticated principal (a local-auth session, a scoped
@@ -97,7 +105,7 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/api/v1/telemetry/otlp/v1/traces' && method === 'POST') return handlers.postTelemetryOtlpTraces(req);
   if (pathname === '/api/v1/telemetry/otlp/v1/metrics' && method === 'POST') return handlers.postTelemetryOtlpMetrics(req);
   if (pathname === '/api/control-plane/methods' && method === 'GET') return handlers.getGatewayMethods(url);
-  const gatewayMethodInvokeMatch = pathname.match(/^\/api\/control-plane\/methods\/([^/]+)\/invoke$/);
+  const gatewayMethodInvokeMatch = pathname.match(GATEWAY_METHOD_INVOKE_PATTERN);
   if (gatewayMethodInvokeMatch && method === 'POST') return handlers.invokeGatewayMethod(safeDecodeURIComponent(gatewayMethodInvokeMatch[1]!), req);
   const gatewayMethodMatch = pathname.match(/^\/api\/control-plane\/methods\/([^/]+)$/);
   if (gatewayMethodMatch && method === 'GET') return handlers.getGatewayMethod(safeDecodeURIComponent(gatewayMethodMatch[1]!) );

@@ -1,6 +1,5 @@
 import { assertHomeGraphNodeIdentityWrite } from './store-homegraph-node-selector.js';
 import { knowledgeClockIso, knowledgeRawRepresentation, retainKnowledgeRepresentation } from './store-record-representation.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 import { preparedNodeWrite, stagePreparedNodeWrites } from './store-node-activation.js';
 import { retainKnowledgeNodeObservation } from './store-node-observation.js';
@@ -107,7 +106,7 @@ function appendNodeRevision(
   const rev: KnowledgeNodeRevisionRecord = {
     // The first saved history row also distinguishes this actual incarnation
     // after hard deletion. Existing IDs remain valid opaque references.
-    id: `noderev-${opaqueUuid()}`,
+    id: `noderev-${crypto.randomUUID()}`,
     nodeId: snapshot.id,
     revision,
     changeKind,
@@ -284,7 +283,7 @@ function planMergedEdges(original: readonly KnowledgeEdgeRecord[], loserId: stri
     const existing = [...edges.values()].find((edge) => edge.fromKind === input.fromKind && edge.fromId === input.fromId
       && edge.toKind === input.toKind && edge.toId === input.toId && edge.relation === input.relation);
     const record: KnowledgeEdgeRecord = {
-      ...input, id: existing?.id ?? `edge-${opaqueUuid()}`,
+      ...input, id: existing?.id ?? `edge-${crypto.randomUUID()}`,
       weight: Number.isFinite(input.weight) ? Number(input.weight) : existing?.weight ?? 1,
       metadata: { ...existing?.metadata, ...input.metadata },
       createdAt: existing?.createdAt ?? mergedAt, updatedAt: mergedAt,

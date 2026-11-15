@@ -224,12 +224,12 @@ test('actual GraphQL materialization and rebuild job preserve unknown-scope diag
     admin: true, scopes: ['read:knowledge', 'write:knowledge'],
   });
   expect(result.errors).toBeUndefined();
-  expect(result.data).toMatchObject({ materializeProjection: { source: { id: expect.stringMatching(/^kg-gen-[a-p-]+$/) },
+  expect(result.data).toMatchObject({ materializeProjection: { source: { id: expect.stringMatching(/^kg-gen-[0-9a-f-]+$/) },
     artifactCreated: true, preservedUnscopedSourceIds: [old.id], note: expect.stringContaining('preserved') } });
   const job = await service.runJob('knowledge-rebuild-projections', { mode: 'inline' });
   expect(await firstJsonSchemaFailureAsync(KNOWLEDGE_JOB_RUN_RESULT_SCHEMA, job.result)).toBeUndefined();
   expect(job.result.preservedUnscopedSourceIds).toEqual([old.id]);
   expect(job.result.note).toEqual(expect.stringContaining('preserved'));
-  expect(job.result.projections).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: expect.stringMatching(/^kg-gen-[a-p-]+$/) })]));
+  expect(job.result.projections).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: expect.stringMatching(/^kg-gen-[0-9a-f-]+$/) })]));
   expect(store.getSource(old.id)?.title).toBe(old.title);
 });

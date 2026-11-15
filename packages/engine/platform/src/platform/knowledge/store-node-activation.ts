@@ -1,7 +1,6 @@
 import { KnowledgeActivationReadset } from './store-node-activation-readset.js';
 import { isDeepStrictEqual } from 'node:util';
 import { knowledgeDecisionStamp, knowledgeRawRepresentation } from './store-record-representation.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { SqlDatabase, SQLiteStore } from '../state/sqlite-store.js';
 import { readKnowledgeActivationDependencies, writeKnowledgeActivationCache } from './store-node-activation-cache.js';
 import { sameKnowledgeRecord } from './store-record-representation.js';
@@ -48,7 +47,7 @@ const observationReferences = new WeakMap<ObservedEvidence, string>();
 function observationReference(observation: ObservedEvidence | undefined): string | null {
   if (!observation) return null;
   let reference = observationReferences.get(observation);
-  if (!reference) { reference = opaqueUuid(); observationReferences.set(observation, reference); }
+  if (!reference) { reference = crypto.randomUUID(); observationReferences.set(observation, reference); }
   return reference;
 }
 const prepared = new WeakMap<KnowledgePreparedNodeWrites, PreparedPass>();
@@ -73,7 +72,7 @@ function assertSupportedActivationFormat(draft: NodeMutationDraft): void {
   if (isRecord(receipt)) {
     if (Object.hasOwn(receipt, 'dependencyVersion') || Object.hasOwn(receipt, 'dependencyReference')) {
       if (receipt.dependencyVersion !== 1 || typeof receipt.dependencyReference !== 'string'
-        || !/^[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/.test(receipt.dependencyReference)
+        || !/^[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}$/.test(receipt.dependencyReference)
         || Object.hasOwn(receipt, 'evidenceHash')) throw new Held('malformed');
     } else if (Object.hasOwn(receipt, 'evidenceHash')
       && (typeof receipt.evidenceHash !== 'string' || !/^[a-p]{64}$/.test(receipt.evidenceHash))) throw new Held('malformed');
@@ -212,7 +211,7 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
         ? { ...measured, outcome: 'pending-review' as const, reason: 'owner-confidence-floor' as const } : measured;
       if (reading.outcome !== 'accepted' && (draft.existing?.status === 'active' || options.requireAccepted)) throw new Held(reading.reason === 'missing-evidence' && draft.existing?.metadata.nodeObservation !== undefined ? 'observation-revalidation' : reading.reason ?? 'uncertain');
       const accepted = reading.outcome === 'accepted';
-      const activationCache = accepted ? { reference: opaqueUuid(), observation: observationReference(draft.observed) } : undefined;
+      const activationCache = accepted ? { reference: crypto.randomUUID(), observation: observationReference(draft.observed) } : undefined;
       const record = retainKnowledgeNodeRecord({ ...draft.record, status: accepted ? 'active' : 'draft', metadata: { ...knowledgeRawRepresentation(draft.record.metadata),
         ...(!draft.preserveObservation ? { nodeObservation: undefined } : {}),
         reviewProvenance: knowledgeDecisionStamp(draft.now, { state: accepted ? 'auto-accepted' : 'pending-review',

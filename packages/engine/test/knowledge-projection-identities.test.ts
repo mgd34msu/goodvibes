@@ -43,7 +43,7 @@ describe('native generated projection scope and saved identity', () => {
     expect(new Set(materialized.map(result => result.source?.id)).size).toBe(3);
     expect(new Set(materialized.map(result => result.source?.canonicalUri)).size).toBe(3);
     for (const result of materialized) {
-      expect(result.source?.id).toMatch(/^kg-gen-[a-p-]+$/);
+      expect(result.source?.id).toMatch(/^kg-gen-[0-9a-f-]+$/);
       expect(result.source?.metadata.knowledgeSpaceId).toBe(result.artifact.metadata?.knowledgeSpaceId);
     }
     expect(materialized[2]?.source?.metadata.knowledgeSpaceId).toBe(ALL_SPACES_PROJECTION_NAMESPACE);

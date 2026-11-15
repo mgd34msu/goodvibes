@@ -47,7 +47,7 @@ export function savedGeneratedProjectionIdentity(source: KnowledgeSourceRecord):
   projectionIdentityParams(identity);
   if (metadata.knowledgeSpaceId !== spaceId || metadata.namespace !== spaceId
     || metadata.includeAllSpaces !== (scopeKind === 'all') || metadata.projectionKind !== `knowledge-${targetKind}`) throw new KnowledgeProjectionIdentityHeldError('malformed');
-  const suffix = /^kg-gen-([a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$/.exec(source.id)?.[1];
+  const suffix = /^kg-gen-([0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$/.exec(source.id)?.[1];
   if (!suffix || source.canonicalUri !== `knowledge://generated/${suffix}` || source.sourceUri !== source.canonicalUri) throw new KnowledgeProjectionIdentityHeldError('malformed');
   return identity;
 }

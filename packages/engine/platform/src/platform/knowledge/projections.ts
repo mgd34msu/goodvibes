@@ -1,4 +1,3 @@
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { generatedProjectionIdentity, generatedProjectionIdentityMetadata, KnowledgeProjectionIdentityHeldError, preservedUnscopedProjectionIds } from './store-generated-projection-selector.js';
 import { sameKnowledgeRecord } from './store-record-representation.js';
 import { SQLitePublicationError } from '../state/sqlite-store-persistence.js';
@@ -165,7 +164,7 @@ export class KnowledgeProjectionService {
       if (!selected.source.canonicalUri) throw new KnowledgeProjectionIdentityHeldError('malformed');
       canonicalUri = selected.source.canonicalUri;
     } else {
-      const allocated = opaqueUuid(); sourceId = `kg-gen-${allocated}`; canonicalUri = `knowledge://generated/${allocated}`;
+      const allocated = crypto.randomUUID(); sourceId = `kg-gen-${allocated}`; canonicalUri = `knowledge://generated/${allocated}`;
     }
     const originalPublication = this.store.captureSourcePublication();
     const assertIdentityCurrent = () => this.store.assertRecordSnapshotFrame(() => {

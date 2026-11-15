@@ -87,7 +87,7 @@ test('actual refinement producer keeps one saved gap task and respects its termi
   const gap = await store.upsertNode({ id: 'gap', kind: 'knowledge_gap', slug: 'gap', title: 'What remains unknown?', status: 'draft', metadata: { knowledgeSpaceId: 'house', semanticKind: 'gap' } });
   const context = { gap, sources: [], linkedObjects: [] };
   const task = await upsertRefinementTaskForGap(store, 'house', context, 'manual', 'detected', 'Original gap');
-  expect(task.id).toMatch(/^kref-[0-9a-p-]+$/);
+  expect(task.id).toMatch(/^kref-[0-9a-f-]+$/);
   await store.upsertRefinementTask({ ...task, state: 'closed' });
   await store.close(); stores.splice(stores.indexOf(store), 1); const reopened = (await open(dbPath)).store;
   const repeated = await upsertRefinementTaskForGap(reopened, 'house', { ...context, gap: reopened.getNode(gap.id)! }, 'manual', 'queued', 'Retry');

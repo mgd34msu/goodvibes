@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { opaqueUuid, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeSchemaColumns, executionAttemptColumns } from './store-schema-validation-data.js';
 import { NativeExecutionMoveRefused, executionIntentMoveText, executionRecordMoveText } from './store-native-refusal.js';
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';
@@ -201,7 +201,7 @@ function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeEx
       settlement = retainSettlement(record, legacy, { report: reportedAttempt.report, attestation: legacy.attestation, receiptDigest: legacy.receiptDigest, contractDigest: legacy.contractDigest, actorId: report.actorId }, candidate);
     } else {
       const current = settlement;
-      if (!/^native-report-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(report.requestId) || !/^native-evidence-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(evidence.requestId) || current.evidenceId !== evidence.requestId
+      if (!/^native-report-v2:[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/.test(report.requestId) || !/^native-evidence-v2:[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/.test(evidence.requestId) || current.evidenceId !== evidence.requestId
         || !current.attestation.references.some(item => item.ref === `execution:${current.contractId}`)
         || !current.attestation.references.some(item => item.ref === `receipt:${current.contractId}`)
         || (record.owner && record.owner.principalId !== report.actorId)) throw new NativeWorkExecutionError('invalid');
@@ -325,8 +325,8 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
           : publication.receiptDigest !== nativeSettlementDigest(record.receipt)) throw new NativeWorkExecutionError('conflict');
         assertCurrent();
         const oldKey = publication.version === 2 ? undefined : oldSettlementKey(record);
-        const reportRequestId = publication.version === 2 ? `native-report-v2:${opaqueUuid()}` : `native-report:${oldKey}`;
-        const evidenceRequestId = publication.version === 2 ? `native-evidence-v2:${opaqueUuid()}` : `native-evidence:${oldKey}`;
+        const reportRequestId = publication.version === 2 ? `native-report-v2:${crypto.randomUUID()}` : `native-report:${oldKey}`;
+        const evidenceRequestId = publication.version === 2 ? `native-evidence-v2:${crypto.randomUUID()}` : `native-evidence:${oldKey}`;
         const evidenceId = publication.version === 2 ? evidenceRequestId : `native-evidence-${oldKey}`;
         const at = Math.max(Date.now(), current.ledger.history.at(-1)?.at ?? 0);
         const reduced = reduceWorkLedgerSettlement(current.ledger, { target: record.target, report: publication.report, attestation: publication.attestation,

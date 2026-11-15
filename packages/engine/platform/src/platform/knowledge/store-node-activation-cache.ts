@@ -65,7 +65,7 @@ export function validateKnowledgeNodeActivationCache(db: Pick<SqlDatabase, 'exec
 }
 
 function object(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-const opaqueReference = (value: unknown): value is string => typeof value === 'string' && /^[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/.test(value);
+const opaqueReference = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}$/.test(value);
 const generation = (value: unknown, prefix: 'kr' | 'kc'): value is string => typeof value === 'string' && (prefix === 'kr' ? /^kr-[0-9a-f]{32}$/ : /^kc-[0-9a-f]{32}$/).test(value);
 const nullableGeneration = (value: unknown, prefix: 'kr' | 'kc'): value is string | null => value === null || generation(value, prefix);
 const nullableText = (value: unknown): value is string | null => value === null || typeof value === 'string';

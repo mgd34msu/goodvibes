@@ -520,7 +520,7 @@ test('saved first history labels remain readable while newly appended labels are
   expect(reopened.getNodeHistorySnapshot(node.id).firstId).toBe(oldId);
   await seedHomeAssistantObservation(reopened,{ ...reopened.getNode(node.id)!, summary: 'New actual history evidence.' });
   const current = reopened.getNodeHistorySnapshot(node.id);
-  expect(current.firstId).toBe(oldId); expect(current.latestId).toMatch(/^noderev-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+  expect(current.firstId).toBe(oldId); expect(current.latestId).toMatch(/^noderev-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   expect(current.latestId).not.toContain(node.id);
 });
 

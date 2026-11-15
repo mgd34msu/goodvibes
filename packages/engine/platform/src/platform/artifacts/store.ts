@@ -1,7 +1,7 @@
 import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { freezeArtifactRecord, parseArtifactRecord } from './record-snapshot.js';
 import { createHash } from 'node:crypto';
-import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile as writeFileDescriptor } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from './storage-ownership.js';
@@ -569,7 +569,7 @@ export class ArtifactStore {
   async #createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership, retainLease?: (lease: ArtifactPublicationLease) => void): Promise<ArtifactDescriptor> {
     const check = () => { ownership.signal?.throwIfAborted(); assertArtifactWriteCurrent(ownership); this.storageOwner.assertCurrent(); };
     check();
-    const id = `artifact-${opaqueUuid()}`;
+    const id = `artifact-${crypto.randomUUID()}`;
     const filename = sanitizeArtifactFilename(input.filename, 'artifact');
     const contentPath = assertWithinArtifactRoot(this.rootDir, join(this.rootDir, `${id}.data`), 'Artifact content path');
     const metadataPath = assertWithinArtifactRoot(this.rootDir, join(this.rootDir, `${id}.json`), 'Artifact metadata path');

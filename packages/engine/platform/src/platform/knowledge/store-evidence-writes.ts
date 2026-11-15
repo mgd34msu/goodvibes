@@ -1,7 +1,6 @@
 import { assertHomeGraphSourceIdentityWrite } from './store-homegraph-source-selector.js';
 import { generatedProjectionIdentitySql, KnowledgeProjectionIdentityHeldError } from './store-generated-projection-selector.js';
 import { knowledgeRawRepresentation, knowledgeSourceMetadataView, prepareKnowledgeOwnedClocks, retainKnowledgePreparedRecord, retainKnowledgeRepresentation } from './store-record-representation.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput, KnowledgeExtractionRecord, KnowledgeExtractionUpsertInput } from './types.js';
 import { nowMs, stableText, uniq } from './store-schema.js';
@@ -35,7 +34,7 @@ export function prepareKnowledgeSourceRecord(input: KnowledgeSourceUpsertInput, 
       ...(input.metadata ?? {}),
     });
     const record: KnowledgeSourceRecord = {
-      id: existing?.id ?? input.id ?? `source-${opaqueUuid()}`,
+      id: existing?.id ?? input.id ?? `source-${crypto.randomUUID()}`,
       connectorId: input.connectorId,
       sourceType: input.sourceType,
       ...opt('title', _title, existing?.title),
@@ -141,7 +140,7 @@ export function prepareKnowledgeExtractionRecord(input: KnowledgeExtractionUpser
       ?? (source ? getKnowledgeSpaceId(source) : getExplicitKnowledgeSpaceId(existing));
     const extractionMetadata = ensureKnowledgeSpaceMetadata(inputMetadata, spaceId ?? undefined);
     const record: KnowledgeExtractionRecord = {
-      id: existing?.id ?? input.id ?? `extract-${opaqueUuid()}`,
+      id: existing?.id ?? input.id ?? `extract-${crypto.randomUUID()}`,
       sourceId: input.sourceId,
       ...(_artifactId !== null ? { artifactId: _artifactId } : {}),
       extractorId: input.extractorId,

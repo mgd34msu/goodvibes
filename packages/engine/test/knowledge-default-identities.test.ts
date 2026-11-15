@@ -28,7 +28,7 @@ test('separate sources, extractions, edges and job runs retain their full genera
     const jobB = await store.upsertJobRun({ jobId: 'second', mode: 'inline', status: 'completed' });
     for (const [a, b] of [[sourceA, sourceB], [extractionA, extractionB], [edgeA, edgeB], [jobA, jobB]]) {
       expect(a!.id).not.toBe(b!.id);
-      expect(a!.id).toMatch(/-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+      expect(a!.id).toMatch(/-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     }
     await store.close(); store = new KnowledgeStore({ dbPath }); await store.init();
     expect(store.getSource(sourceA.id)?.title).toBe('first'); expect(store.getSource(sourceB.id)?.title).toBe('second');

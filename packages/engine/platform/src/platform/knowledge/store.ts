@@ -6,7 +6,7 @@ import { createSemanticFactIdentityIndex, SemanticIdentityHeldError, type Semant
 import { savedGeneratedProjectionIdentity, projectionIdentityParams, KnowledgeProjectionIdentityHeldError, type GeneratedProjectionIdentity } from './store-generated-projection-selector.js';
 import { createKnowledgeRowRevisions, knowledgeRawRowForAdmission } from './store-row-revisions.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -1257,7 +1257,7 @@ export class KnowledgeStore {
     // Existing confidence normalization is independent of operator authority.
     const confidence = clampConfidence(input.confidence ?? existing?.confidence ?? 0);
     const candidate: KnowledgeNodeRecord = {
-      id: existing?.id ?? input.id ?? `node-${opaqueUuid()}`,
+      id: existing?.id ?? input.id ?? `node-${crypto.randomUUID()}`,
       kind: input.kind,
       slug: input.slug,
       title: input.title.trim(),
@@ -1732,7 +1732,7 @@ export class KnowledgeStore {
     const now = nowMs();
     const _error = stableText(input.error);
     const record: KnowledgeJobRunRecord = {
-      id: existing?.id ?? input.id ?? `kjr-${opaqueUuid()}`,
+      id: existing?.id ?? input.id ?? `kjr-${crypto.randomUUID()}`,
       jobId: input.jobId,
       status: input.status,
       mode: input.mode,
@@ -1800,7 +1800,7 @@ export class KnowledgeStore {
 
   async upsertRefinementTask(input: KnowledgeRefinementTaskUpsertInput): Promise<KnowledgeRefinementTaskRecord> {
     await this.init();
-    return this.persisting(() => upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${opaqueUuid()}`));
+    return this.persisting(() => upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${crypto.randomUUID()}`));
   }
 
   async upsertUsageRecord(input: KnowledgeUsageUpsertInput, assertCurrent?: () => void): Promise<KnowledgeUsageRecord> {
@@ -1809,7 +1809,7 @@ export class KnowledgeStore {
     const _task = stableText(input.task);
     const _sessionId = stableText(input.sessionId);
     const record: KnowledgeUsageRecord = {
-      id: input.id ?? `kuse-${opaqueUuid()}`,
+      id: input.id ?? `kuse-${crypto.randomUUID()}`,
       targetKind: input.targetKind,
       targetId: input.targetId,
       usageKind: input.usageKind,
@@ -1867,7 +1867,7 @@ export class KnowledgeStore {
     const _suggestedScope = stableText(input.suggestedScope);
     const _decidedBy = stableText(input.decidedBy);
     const record: KnowledgeConsolidationCandidateRecord = {
-      id: existing?.id ?? input.id ?? `kcand-${opaqueUuid()}`,
+      id: existing?.id ?? input.id ?? `kcand-${crypto.randomUUID()}`,
       candidateType: input.candidateType,
       status: input.status ?? existing?.status ?? 'open',
       subjectKind: input.subjectKind,
@@ -1922,7 +1922,7 @@ export class KnowledgeStore {
     const existing = input.id ? this.consolidationReports.get(input.id) : null;
     const now = nowMs();
     const record: KnowledgeConsolidationReportRecord = {
-      id: existing?.id ?? input.id ?? `krep-${opaqueUuid()}`,
+      id: existing?.id ?? input.id ?? `krep-${crypto.randomUUID()}`,
       kind: input.kind,
       title: input.title.trim(),
       summary: input.summary.trim(),
@@ -1960,7 +1960,7 @@ export class KnowledgeStore {
 
   async upsertSchedule(input: KnowledgeScheduleUpsertInput): Promise<KnowledgeScheduleRecord> {
     await this.init();
-    return this.keepingImageIdentity(() => this.persisting(() => upsertKnowledgeSchedule(this.sqlite, this.schedules, input, () => `ksched-${opaqueUuid()}`)));
+    return this.keepingImageIdentity(() => this.persisting(() => upsertKnowledgeSchedule(this.sqlite, this.schedules, input, () => `ksched-${crypto.randomUUID()}`)));
   }
 
   async deleteSchedule(id: string): Promise<boolean> {

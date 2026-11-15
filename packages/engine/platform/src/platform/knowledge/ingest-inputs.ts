@@ -4,7 +4,6 @@ import { knowledgeRawRepresentation } from './store-record-representation.js';
 import { knowledgeClockIso } from './store-record-representation.js';
 import { createKnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import { KnowledgeUriCanonicalizationHeldError } from './uri-canonicalization/reader.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 import { KnowledgeNodeMutationHeldError } from './store-node-authority.js';
@@ -592,7 +591,7 @@ function eventSafeUri(uri: string | undefined): string | undefined {
 /** Reserve identity without publishing pending or overwriting an existing source. */
 function reserveSourceId(context: KnowledgeIngestContext, canonicalUri: string | undefined): string {
   return (canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined)
-    ?? `source-${opaqueUuid()}`;
+    ?? `source-${crypto.randomUUID()}`;
 }
 
 type ExtractionPreparation =

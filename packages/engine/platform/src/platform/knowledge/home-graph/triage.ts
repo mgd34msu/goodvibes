@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from 'node:util';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { drainOwned, matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
@@ -164,7 +163,7 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
         && isDeepStrictEqual(remembered.input, snapshot)) { assertCurrent(); skipped++; continue; }
       const originalIssue = structuredClone(issue);
       let reference: string | undefined;
-      const cacheReference = () => reference ??= opaqueUuid();
+      const cacheReference = () => reference ??= crypto.randomUUID();
       if (selected.length < limit) selected.push({ issue: originalIssue, input: projected, cacheReference, snapshot });
     }
     if (!selected.length) return empty(true, skipped ? 'no-untriaged-open-issues' : 'no-open-issues', skipped);

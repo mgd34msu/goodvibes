@@ -1,4 +1,3 @@
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import type { KnowledgeEdgeRecord, KnowledgeEdgeUpsertInput } from './types.js';
 import { nowMs } from './store-schema.js';
@@ -24,7 +23,7 @@ export function prepareKnowledgeEdgeRecord(input: KnowledgeEdgeUpsertInput, exis
     guardedEdgeInputs.get(input)?.();
     const now = nowMs();
     const record: KnowledgeEdgeRecord = {
-      id: existing?.id ?? `edge-${opaqueUuid()}`,
+      id: existing?.id ?? `edge-${crypto.randomUUID()}`,
       fromKind: input.fromKind,
       fromId: input.fromId,
       toKind: input.toKind,

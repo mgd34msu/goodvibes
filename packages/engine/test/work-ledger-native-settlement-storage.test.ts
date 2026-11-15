@@ -161,7 +161,7 @@ test('settlement2 stores the exact bounded runner receipt and adjacent publicati
   expect<unknown>(receipt.receipt).toEqual(f.record.receipt);
   expect(receipt.publicationDigest).toBe(nativeSettlementPublicationCommitment(captureNativeSettlementPublication(publication)));
   expect(receipt).not.toHaveProperty('receiptDigest'); expect(receipt).not.toHaveProperty('contractDigest'); expect(receipt).not.toHaveProperty('keyHash');
-  expect(receipt.reportRequestId).toMatch(/^native-report-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(receipt.reportRequestId).toMatch(/^native-report-v2:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
   expect(receipt.evidenceId).toBe(receipt.evidenceRequestId);
   await inspectImage(f.file, db => expect(db.exec('SELECT key_hash,format_version FROM native_work_execution_settlements')[0]?.values).toEqual([[`v2:${durableKeyIdentity(f.key)}`, 2]]));
   await inspectImage(f.file, db => {

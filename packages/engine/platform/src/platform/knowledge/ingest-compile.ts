@@ -5,7 +5,7 @@ import { createKnowledgeIngestUriCanonicalizer, assertKnowledgeIngestUriOperatio
 import type { KnowledgeUriCanonicalizer } from './uri-canonicalization/reader.js';
 import { knowledgeSourceCrawledNow } from './store-record-representation.js';
 import { prepareKnowledgeSourceRecord, prepareKnowledgeExtractionRecord } from './store-evidence-writes.js';
-import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { snapshotNodeInput } from './activation/projection.js';
 import { knowledgeIngestGuard } from './ingest-preparation.js';
 import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
@@ -87,7 +87,7 @@ export async function finalizeKnowledgeIngestedSource(
       title: stableText(extracted.title) ?? previousExtraction?.title,
       summary: stableText(extracted.summary) ?? previousExtraction?.summary,
     };
-    const extractionId = previousExtraction?.id ?? `extract-${opaqueUuid()}`;
+    const extractionId = previousExtraction?.id ?? `extract-${crypto.randomUUID()}`;
     let compiled = { nodeCount: 0, edgeCount: 0 };
     let assertAliasesCurrent = () => {};
     const assertPrepared = () => {
@@ -284,7 +284,7 @@ function stagedCompileWriter(context: KnowledgeIngestContext, assertCurrent: () 
   function stageNode(input: KnowledgeNodeUpsertInput, observed?: { evidence: unknown; readEvidence: () => unknown; origin?: KnowledgeObservationOrigin | undefined }) {
     const key = JSON.stringify([input.kind, input.slug]);
     const prior = nodes.get(key);
-    const id = prior?.id ?? context.store.getNodeByKindAndSlug(input.kind, input.slug)?.id ?? `node-${opaqueUuid()}`;
+    const id = prior?.id ?? context.store.getNodeByKindAndSlug(input.kind, input.slug)?.id ?? `node-${crypto.randomUUID()}`;
     const candidate = { ...prior, ...input, id, metadata: { ...prior?.metadata, ...input.metadata } };
     nodes.set(key, observed ? prepareStagedObservedKnowledgeNodeInput(context.store, candidate,
       observed.evidence, observed.readEvidence, assertCurrent, observed.origin) : snapshotNodeInput(candidate));

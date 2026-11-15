@@ -368,12 +368,13 @@ export class DaemonSurfaceDeliveryHelper {
   }
 
   /**
-   * The surface's owner: the first user its channel policy admits, the same
-   * user surface control commands accept. Undefined when the surface names
-   * no user.
+   * The surface's owner: the policy's accepted owner, else the first user it
+   * admits (a policy written before owners were recorded). Undefined when the
+   * surface names no user.
    */
   channelOwner(surface: string): string | undefined {
-    return this.context.channelPolicy?.getPolicy(surface as ChannelSurface).allowlistUserIds[0];
+    const policy = this.context.channelPolicy?.getPolicy(surface as ChannelSurface);
+    return policy?.ownerId ?? policy?.allowlistUserIds[0];
   }
 
   /** Keeps an owner alert that reached no conversation, for the next attached terminal or web UI to show. */

@@ -104,6 +104,7 @@ import {
   ExecutionPlanManager,
   SessionLineageTracker,
   SessionMemoryStore,
+  startReplayRecording,
 } from '@goodvibes-jev/engine/platform/platform/core';
 import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createChannelComposition } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -525,6 +526,14 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   const focusTracker = new FocusTracker();
   const replayEngine = new DeterministicReplayEngine(workingDirectory);
+  // Every turn is recorded as a run /replay can load (one line per turn, tool and task event).
+  const replayRecording = startReplayRecording({
+    runtimeBus: options.runtimeBus,
+    replayEngine,
+    directory: shellPaths.resolveProjectPath('tui', 'replay'),
+    readConfig: (key) => configManager.get(key as Parameters<typeof configManager.get>[0]),
+  });
+  disposalScope.registry.add('replay recording', () => replayRecording.stop());
   const providerOptimizer = client.providerOptimizer;
   bindProviderOptimizerFeatureFlag(featureFlags, providerOptimizer);
   applyProviderOptimizerConfigMode(configManager, providerOptimizer);
